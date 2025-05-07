@@ -3,6 +3,8 @@ import FirebaseAuth
 import PhotosUI
 import Combine
 import Foundation
+import FirebaseStorage
+import FirebaseFirestore
 
 // Add print statements for key lifecycle events
 extension View {
@@ -31,12 +33,14 @@ extension View {
 
 struct GroupChatView: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(\.presentationMode) var presentationMode
     private let groupService = GroupService()
     private let homeGameService = HomeGameService()
     @EnvironmentObject private var handStore: HandStore
     @EnvironmentObject private var postService: PostService
     @EnvironmentObject private var userService: UserService
     @EnvironmentObject private var sessionStore: SessionStore
+    @EnvironmentObject private var tabBarVisibility: TabBarVisibilityManager
     
     // State for messages that we manually update from the subscription
     @State private var messages: [GroupMessage] = []
@@ -53,6 +57,9 @@ struct GroupChatView: View {
     @State private var error: String?
     @State private var showError = false
     @State private var viewState: ViewState = .loading
+    
+    // Add FocusState for the text field
+    @FocusState private var isTextFieldFocused: Bool
     
     // For scrolling to bottom
     @State private var scrollToBottom = false
@@ -71,7 +78,6 @@ struct GroupChatView: View {
     // Add pinnedHomeGame state
     @State private var pinnedHomeGame: HomeGame?
     @State private var isPinnedGameLoading = false
-    @State private var showingPinnedGameDetail = false
     
     // Enum to track view state
     enum ViewState {
@@ -82,111 +88,113 @@ struct GroupChatView: View {
     
     var body: some View {
         // Debug - capture render start time
-        let _ = { renderStartTime = Date(); print("RENDER START: \(renderStartTime.formatted())") }()
+
         
-        GeometryReader { geometry in
+        ZStack {
+            // Immediate solid background
+            Color.black
+            
+            // Main content
             ZStack {
-                // Immediate solid background
-                Color.black
-                    .ignoresSafeArea()
-                    .onViewLifecycle(appeared: "Black background")
-                
-                // Main content
-                ZStack {
-                    // Content based on view state
-                    switch viewState {
-                    case .loading:
-                        VStack(spacing: 20) {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(1.5)
-                            
-                            Text("Loading chat...")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.white)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onViewLifecycle(appeared: "Loading state")
+                // Content based on view state
+                switch viewState {
+                case .loading:
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(1.5)
                         
-                    case .ready:
-                        VStack(spacing: 0) {
-                            // Custom navigation bar
-                            HStack {
-                                Button(action: { dismiss() }) {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 20, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .padding(12)
-                                }
-                                
-                                Spacer()
-                                
-                                Text(group.name)
-                                    .font(.system(size: 20, weight: .bold))
+                        Text("Loading chat...")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onViewLifecycle(appeared: "Loading state")
+                    
+                case .ready:
+                    VStack(spacing: 0) {
+                        // Custom navigation bar - updated for regular navigation
+                        HStack {
+                            Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 16, weight: .semibold, design: .default))
                                     .foregroundColor(.white)
-                                
-                                Spacer()
-                                
+                                    .padding(8)
+                                    .background(Circle().fill(Color(red: 30/255, green: 33/255, blue: 36/255)))
+                            }
+                            
+                            Spacer()
+                            
+                            Text(group.name)
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.white)
+                            
+                            Spacer()
+                            
+                            NavigationLink(
+                                destination: GroupDetailView(group: group)
+                                    .navigationBarHidden(true),
+                                isActive: $showingGroupInfo
+                            ) {
                                 Button(action: { showingGroupInfo = true }) {
                                     Image(systemName: "info.circle")
-                                        .font(.system(size: 20, weight: .bold))
+                                        .font(.system(size: 16, weight: .semibold))
                                         .foregroundColor(.white)
-                                        .padding(12)
+                                        .padding(8)
+                                        .background(Circle().fill(Color(red: 30/255, green: 33/255, blue: 36/255)))
                                 }
                             }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 8)
+                        .background(Color.black.opacity(0.5))
+                        
+                        // Pinned home game (if any)
+                        if isPinnedGameLoading {
+                            HStack {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                
+                                Text("Loading active game...")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
+                                    .padding(.leading, 8)
+                                
+                                Spacer()
+                            }
                             .padding(.horizontal, 16)
-                            .padding(.top, 16)
-                            .padding(.bottom, 8)
-                            .background(Color.black.opacity(0.5))
-                            
-                            // Pinned home game (if any)
-                            if isPinnedGameLoading {
+                            .padding(.vertical, 12)
+                            .background(Color(UIColor(red: 25/255, green: 27/255, blue: 32/255, alpha: 1.0)))
+                        } else if let pinnedGame = pinnedHomeGame {
+                            NavigationLink(destination: HomeGameDetailView(game: pinnedGame)) {
                                 HStack {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    // Game icon
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color(UIColor(red: 40/255, green: 60/255, blue: 40/255, alpha: 1.0)))
+                                            .frame(width: 32, height: 32)
+                                        
+                                        Image(systemName: "house.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                    }
                                     
-                                    Text("Loading active game...")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray)
-                                        .padding(.leading, 8)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(pinnedGame.title)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.white)
+                                        
+                                        Text("\(pinnedGame.players.filter { $0.status == .active }.count) active players")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.gray)
+                                    }
+                                    .padding(.leading, 8)
                                     
                                     Spacer()
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                                .background(Color(UIColor(red: 25/255, green: 27/255, blue: 32/255, alpha: 1.0)))
-                            } else if let pinnedGame = pinnedHomeGame {
-                                Button(action: {
-                                    // Action to show game detail sheet
-                                    showingPinnedGameDetail = true
-                                }) {
-                                    HStack {
-                                        // Game icon
-                                        ZStack {
-                                            Circle()
-                                                .fill(Color(UIColor(red: 40/255, green: 60/255, blue: 40/255, alpha: 1.0)))
-                                                .frame(width: 32, height: 32)
-                                            
-                                            Image(systemName: "house.fill")
-                                                .font(.system(size: 16))
-                                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                        }
-                                        
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(pinnedGame.title)
-                                                .font(.system(size: 14, weight: .semibold))
-                                                .foregroundColor(.white)
-                                            
-                                            Text("\(pinnedGame.players.filter { $0.status == .active }.count) active players")
-                                                .font(.system(size: 12))
-                                                .foregroundColor(.gray)
-                                        }
-                                        .padding(.leading, 8)
-                                        
-                                        Spacer()
-                                        
-                                        Text("ACTIVE")
-                                            .font(.system(size: 11, weight: .semibold))
+                                    
+                                    Text("ACTIVE")
+                                        .font(.system(size: 11, weight: .semibold))
                                             .foregroundColor(.black)
                                             .padding(.horizontal, 8)
                                             .padding(.vertical, 2)
@@ -194,203 +202,208 @@ struct GroupChatView: View {
                                                 Capsule()
                                                     .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
                                             )
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-                                    .background(Color(UIColor(red: 25/255, green: 27/255, blue: 32/255, alpha: 1.0)))
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                            
-                            // Chat messages
-                            ScrollViewReader { scrollView in
-                                ScrollView {
-                                    LazyVStack(spacing: 8) {
-                                        if isLoadingMessages && messages.isEmpty {
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                .scaleEffect(1.5)
-                                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                                .padding(.vertical, 100)
-                                        } else if messages.isEmpty {
-                                            VStack(spacing: 16) {
-                                                Image(systemName: "bubble.left.and.bubble.right")
-                                                    .font(.system(size: 60))
-                                                    .foregroundColor(.gray)
-                                                
-                                                Text("No messages yet")
-                                                    .font(.system(size: 18, weight: .semibold))
-                                                    .foregroundColor(.white)
-                                                
-                                                Text("Start the conversation by sending a message")
-                                                    .font(.system(size: 15))
-                                                    .foregroundColor(.gray)
-                                                    .multilineTextAlignment(.center)
-                                            }
-                                            .padding(.vertical, 100)
-                                        } else {
-                                            ForEach(messages) { message in
-                                                MessageRow(message: message)
-                                                    .id(message.id)
-                                            }
-                                            .padding(.horizontal, 16)
-                                        }
-                                        
-                                        // Spacer at the bottom to ensure scrolling works properly
-                                        Color.clear.frame(height: 1)
-                                            .id("bottomAnchor")
-                                    }
-                                    .padding(.top, 8)
-                                }
-                                .onChange(of: messages.count) { _ in
-                                    withAnimation {
-                                        scrollView.scrollTo("bottomAnchor", anchor: .bottom)
-                                    }
-                                }
-                                .onChange(of: scrollToBottom) { newValue in
-                                    if newValue {
-                                        withAnimation {
-                                            scrollView.scrollTo("bottomAnchor", anchor: .bottom)
-                                            scrollToBottom = false
-                                        }
-                                    }
-                                }
-                                .onAppear {
-                                    withAnimation {
-                                        scrollView.scrollTo("bottomAnchor", anchor: .bottom)
-                                    }
-                                }
-                            }
-                            
-                            // Message input
-                            VStack(spacing: 8) {
-                                Divider()
-                                    .background(Color.gray.opacity(0.3))
-                                
-                                HStack(spacing: 12) {
-                                    // + Button with menu
-                                    Menu {
-                                        Button(action: {
-                                            // Show photo picker
-                                            imagePickerItem = nil // Reset any previous selection
-                                            showingImagePicker = true
-                                        }) {
-                                            Label("Photo", systemImage: "photo")
-                                        }
-                                        
-                                        Button(action: {
-                                            // Show hand history picker
-                                            showingHandPicker = true
-                                        }) {
-                                            Label("Hands", systemImage: "doc.text")
-                                        }
-                                        
-                                        Button(action: {
-                                            // Show home game view
-                                            showingHomeGameView = true
-                                        }) {
-                                            Label("Home Game", systemImage: "house")
-                                        }
-                                    } label: {
-                                        Image(systemName: "plus.circle.fill")
-                                            .font(.system(size: 24))
-                                            .foregroundColor(.white)
-                                    }
-                                    
-                                    // Text input
-                                    ZStack(alignment: .trailing) {
-                                        TextField("Message", text: $messageText)
-                                            .padding(12)
-                                            .background(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                                            .cornerRadius(20)
-                                            .foregroundColor(.white)
-                                        
-                                        // Send button
-                                        if !messageText.isEmpty {
-                                            Button(action: sendTextMessage) {
-                                                Image(systemName: isSendingMessage ? "circle" : "arrow.up.circle.fill")
-                                                    .font(.system(size: 24))
-                                                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                                    .padding(.trailing, 8)
-                                                    .overlay(
-                                                        Group {
-                                                            if isSendingMessage {
-                                                                ProgressView()
-                                                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
-                                                                    .padding(.trailing, 8)
-                                                            }
-                                                        }
-                                                    )
-                                            }
-                                        }
-                                    }
                                 }
                                 .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
+                                .padding(.vertical, 12)
+                                .background(Color(UIColor(red: 25/255, green: 27/255, blue: 32/255, alpha: 1.0)))
                             }
-                            .background(Color(UIColor(red: 25/255, green: 25/255, blue: 30/255, alpha: 0.95)))
+                            .buttonStyle(PlainButtonStyle())
                         }
-                        .safeAreaInset(edge: .bottom) {
-                            Color.clear.frame(height: 0)
+                        
+                        // Chat messages
+                        ScrollViewReader { scrollView in
+                            ScrollView {
+                                LazyVStack(spacing: 8) {
+                                    if isLoadingMessages && messages.isEmpty {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(1.5)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                            .padding(.vertical, 100)
+                                    } else if messages.isEmpty {
+                                        VStack(spacing: 16) {
+                                            Image(systemName: "bubble.left.and.bubble.right")
+                                                .font(.system(size: 60))
+                                                .foregroundColor(.gray)
+                                            
+                                            Text("No messages yet")
+                                                .font(.system(size: 18, weight: .semibold))
+                                                .foregroundColor(.white)
+                                            
+                                            Text("Start the conversation by sending a message")
+                                                .font(.system(size: 15))
+                                                .foregroundColor(.gray)
+                                                .multilineTextAlignment(.center)
+                                        }
+                                        .padding(.vertical, 100)
+                                    } else {
+                                        ForEach(messages) { message in
+                                            MessageRow(message: message)
+                                                .id(message.id)
+                                        }
+                                        .padding(.horizontal, 16)
+                                    }
+                                    
+                                    // Spacer at the bottom to ensure scrolling works properly
+                                    Color.clear.frame(height: 1)
+                                        .id("bottomAnchor")
+                                }
+                                .padding(.top, 8)
+                            }
+                            .onChange(of: messages.count) { _ in
+                                withAnimation {
+                                    scrollView.scrollTo("bottomAnchor", anchor: .bottom)
+                                }
+                            }
+                            .onChange(of: scrollToBottom) { newValue in
+                                if newValue {
+                                    withAnimation {
+                                        scrollView.scrollTo("bottomAnchor", anchor: .bottom)
+                                        scrollToBottom = false
+                                    }
+                                }
+                            }
+                            .onAppear {
+                                withAnimation {
+                                    scrollView.scrollTo("bottomAnchor", anchor: .bottom)
+                                }
+                            }
                         }
-                        .ignoresSafeArea(.keyboard, edges: .bottom)
-                        .onAppear {
-                            // Add keyboard observer
-                            NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
+                        
+                        // Message input
+                        VStack(spacing: 8) {
+                            Divider()
+                                .background(Color.gray.opacity(0.3))
+                            
+                            HStack(spacing: 12) {
+                                // + Button with menu
+                                Menu {
+                                    Button(action: {
+                                        // Show photo picker
+                                        imagePickerItem = nil // Reset any previous selection
+                                        showingImagePicker = true
+                                    }) {
+                                        Label("Photo", systemImage: "photo")
+                                    }
+                                    
+                                    Button(action: {
+                                        // Show hand history picker
+                                        showingHandPicker = true
+                                    }) {
+                                        Label("Hands", systemImage: "doc.text")
+                                    }
+                                    
+                                    Button(action: {
+                                        // Show home game view
+                                        showingHomeGameView = true
+                                    }) {
+                                        Label("Home Game", systemImage: "house")
+                                    }
+                                } label: {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.white)
+                                }
+                                
+                                // Text input
+                                ZStack(alignment: .trailing) {
+                                    TextField("Message", text: $messageText)
+                                        .focused($isTextFieldFocused)
+                                        .padding(12)
+                                        .background(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                                        .cornerRadius(20)
+                                        .foregroundColor(.white)
+                                        .submitLabel(.send)
+                                        .onSubmit {
+                                            if !messageText.isEmpty {
+                                                sendTextMessage()
+                                            }
+                                        }
+                                        .gesture(
+                                            DragGesture(minimumDistance: 20)
+                                                .onEnded { gesture in
+                                                    if gesture.translation.height > 0 {
+                                                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                                    }
+                                                }
+                                        )
+                                    
+                                    // Send button
+                                    if !messageText.isEmpty {
+                                        Button(action: sendTextMessage) {
+                                            Image(systemName: isSendingMessage ? "circle" : "arrow.up.circle.fill")
+                                                .font(.system(size: 24))
+                                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                                .padding(.trailing, 8)
+                                                .overlay(
+                                                    Group {
+                                                        if isSendingMessage {
+                                                            ProgressView()
+                                                                .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+                                                                .padding(.trailing, 8)
+                                                        }
+                                                    }
+                                                )
+                                        }
+                                    }
+                                }.ignoresSafeArea(.keyboard, edges: .bottom)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                        }
+                        .background(Color(UIColor(red: 25/255, green: 25/255, blue: 30/255, alpha: 0.95)))
+                    }
+                    .onChange(of: isTextFieldFocused) { isFocused in
+                        if isFocused {
+                            // Scroll to bottom when text field gets focus with a slight delay
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                                 withAnimation {
                                     scrollToBottom = true
                                 }
                             }
                         }
-                        .onViewLifecycle(appeared: "Ready state")
-                        
-                    case .error(let message):
-                        VStack(spacing: 20) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 40))
-                                .foregroundColor(.yellow)
-                            
-                            Text("Error Loading Chat")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(.white)
-                            
-                            Text(message)
-                                .font(.system(size: 16))
-                                .foregroundColor(.white.opacity(0.8))
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 40)
-                            
-                            Button("Try Again") {
-                                viewState = .loading
-                                loadMessages()
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
-                            .padding(.top, 10)
-                            
-                            Button("Go Back") {
-                                dismiss()
-                            }
-                            .padding(.top, 10)
-                            .foregroundColor(.white.opacity(0.8))
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onViewLifecycle(appeared: "Error state")
                     }
+                    .onViewLifecycle(appeared: "Ready state")
+                    
+                case .error(let message):
+                    VStack(spacing: 20) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 40))
+                            .foregroundColor(.yellow)
+                        
+                        Text("Error Loading Chat")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text(message)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                        
+                        Button("Try Again") {
+                            viewState = .loading
+                            loadMessages()
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .padding(.top, 10)
+                        
+                        Button("Go Back") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                        .padding(.top, 10)
+                        .foregroundColor(.white.opacity(0.8))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onViewLifecycle(appeared: "Error state")
                 }
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
         }
-        .onAppear {
-            // Track view appearance
-            print("ONAPPEAR: GroupChatView appeared at \(Date().formatted()) - \(Date().timeIntervalSince(viewCreatedTime)) seconds after init")
-            
-            // Set up Combine subscription to groupService
-            setupSubscription()
-        }
+        .navigationBarHidden(true)
         .task {
             // View was created
             viewCreatedTime = Date()
@@ -399,25 +412,30 @@ struct GroupChatView: View {
             // Don't wait for onAppear - preload messages immediately when task starts
             await preloadMessages()
         }
+        .onAppear {
+            // Hide navigation bar appearance itself, not just visibility
+            UINavigationBar.appearance().setBackgroundImage(UIImage(), for: .default)
+            UINavigationBar.appearance().shadowImage = UIImage()
+            UINavigationBar.appearance().isTranslucent = true
+            UINavigationBar.appearance().backgroundColor = .clear
+            
+            tabBarVisibility.isVisible = false
+            
+            // Set up Combine subscription to groupService
+            setupSubscription()
+        }
         .onDisappear {
+            // Restore navigation bar appearance
+            UINavigationBar.appearance().setBackgroundImage(nil, for: .default)
+            UINavigationBar.appearance().shadowImage = nil
+            
+            tabBarVisibility.isVisible = true
+            
             print("ONDISAPPEAR: GroupChatView disappeared at \(Date().formatted())")
             
             // Clean up subscriptions
             cancellables.forEach { $0.cancel() }
             cancellables.removeAll()
-            
-            // Clean up keyboard observers
-            NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
-        }
-        .sheet(isPresented: $showingGroupInfo) {
-            GroupDetailView(group: group)
-        }
-        .sheet(isPresented: $showingPinnedGameDetail) {
-            if let gameToView = pinnedHomeGame {
-                HomeGameDetailView(game: gameToView)
-            } else {
-                Text("Unable to load game details.")
-            }
         }
         .sheet(isPresented: $showingHandPicker) {
             HandHistorySelectionView { handId in
@@ -490,10 +508,8 @@ struct GroupChatView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
-        .edgesIgnoringSafeArea(.all)
         .background(Color.black)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
+        // Remove sheet-specific presentation settings
         .onPreferenceChange(ViewRenderTimeKey.self) { _ in
             // Debug - capture render end time
             renderEndTime = Date()
@@ -942,4 +958,5 @@ struct ViewRenderTimeKey: PreferenceKey {
     static func reduce(value: inout Date, nextValue: () -> Date) {
         value = nextValue()
     }
-} 
+}
+

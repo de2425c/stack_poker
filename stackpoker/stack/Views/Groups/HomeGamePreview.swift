@@ -238,13 +238,22 @@ struct HomeGamePreview: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
-        .sheet(isPresented: $showingGameDetail) {
-            if let game = game {
-                HomeGameDetailView(game: game, onGameUpdated: {
-                    // This will be handled by the listener now
-                })
+        .background(
+            NavigationLink(
+                destination: Group {
+                    if let game = game {
+                        HomeGameDetailView(game: game, onGameUpdated: {
+                            // This callback will be triggered after game updates
+                            setupLiveUpdates()  // Refresh the current preview when returning
+                        })
+                        .navigationBarBackButtonHidden(true)  // Hide default back button
+                    }
+                },
+                isActive: $showingGameDetail
+            ) {
+                EmptyView()
             }
-        }
+        )
         .sheet(isPresented: $showingBuyInSheet) {
             BuyInView(gameId: gameId, onComplete: {
                 // This will be handled by the listener now
@@ -462,7 +471,7 @@ struct BuyInView: View {
 // Update HomeGameDetailView to include functionality for the owner
 struct HomeGameDetailView: View {
     @Environment(\.presentationMode) var presentationMode
-    @EnvironmentObject var sessionStore: SessionStore // Inject SessionStore
+    @EnvironmentObject var sessionStore: SessionStore
     @StateObject private var homeGameService = HomeGameService()
     
     let game: HomeGame
@@ -479,11 +488,11 @@ struct HomeGameDetailView: View {
     @State private var showingEndGameSheet = false
     @State private var selectedPlayer: HomeGame.Player?
     @State private var liveGame: HomeGame?
-    @State private var showCopiedMessage = false // Keep this for confirmation
+    @State private var showCopiedMessage = false
     
     // State for Save Session feature
-    @State private var previousGame: HomeGame? // To detect status change
-    @State private var justCashedOutPlayer: HomeGame.Player? // To hold data for saving
+    @State private var previousGame: HomeGame?
+    @State private var justCashedOutPlayer: HomeGame.Player?
     @State private var showingSaveSessionAlert = false
     @State private var showingSaveSessionSheet = false
     
@@ -494,20 +503,17 @@ struct HomeGameDetailView: View {
     
     // Helper to determine if current user is a player
     private var isCurrentPlayerActive: Bool {
-        return game.players.contains(where: {
+        return (liveGame ?? game).players.contains(where: {
             $0.userId == Auth.auth().currentUser?.uid && $0.status == .active
         })
     }
     
     // Helper to determine if current user has a pending buy-in request
     private var hasPendingBuyInRequest: Bool {
-        guard let liveGame = liveGame else { return false }
-        return liveGame.buyInRequests.contains(where: {
+        return (liveGame ?? game).buyInRequests.contains(where: {
             $0.userId == Auth.auth().currentUser?.uid && $0.status == .pending
         })
     }
-    
-
     
     // Add this property to store the activity items
     @State private var activityItems: [Any] = []
@@ -520,214 +526,239 @@ struct HomeGameDetailView: View {
         
         // Show confirmation message briefly
         Task {
-            await MainActor.run { // Explicitly run on main thread
+            await MainActor.run {
                 showCopiedMessage = true
             }
-            // Hide after 2 seconds
-            try? await Task.sleep(nanoseconds: 2 * 1_000_000_000) 
-            await MainActor.run { // Explicitly run on main thread
+            try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
+            await MainActor.run {
                 showCopiedMessage = false
             }
         }
     }
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                AppBackgroundView()
-                    .ignoresSafeArea()
-                
-                ScrollView {
-                        if game.status == .completed {
-                            // Show game summary for completed games
-                            gameSummaryView
-                        } else if isGameCreator {
-                            // Show owner management view for active games
-                            ownerView
-                        } else {
-                            // Show player view for active games
-                            playerView
-                        }
-                    }
-                    .refreshable {
-                        refreshGame()
-                    }
-                }
-                .navigationBarTitle(
-                    game.status == .completed ? "Game Summary" :
-                        (isGameCreator ? "Game Management" : "Game Details"),
-                    displayMode: .inline
-                )
-                .navigationBarItems(
-                    leading: Button(action: {
-                        presentationMode.wrappedValue.dismiss()
-                    }) {
-                        Text("Close")
-                            .foregroundColor(.white)
-                    },
-                    trailing: isGameCreator && game.status == .active ? 
-                        Button(action: copyGameLink) { // Changed action here
-                            Image(systemName: "link") // Changed icon to 'link'
-                                .foregroundColor(.white)
-                        }
-                        .help("Copy game link")
-                        .accessibilityLabel("Copy game link") : nil
-                )
-                .alert(isPresented: $showError) {
-                    Alert(
-                        title: Text("Error"),
-                        message: Text(error ?? "An unknown error occurred"),
-                        dismissButton: .default(Text("OK"))
-                    )
-                }
-                .alert("End Game?", isPresented: $showingEndGameConfirmation) {
-                    Button("Cancel", role: .cancel) { }
-                    Button("End Game", role: .destructive) {
-                        endGame()
-                    }
-                } message: {
-                    Text("This will end the current game for all players. Any players who haven't cashed out will need to be handled manually. This action cannot be undone.")
-                }
-                .sheet(isPresented: $showingRebuySheet) {
-                    RebuyView(gameId: (liveGame ?? game).id, onComplete: {
-                        refreshGame()
-                    })
-                }
-                .sheet(isPresented: $showingBuyInSheet) {
-                    BuyInView(gameId: (liveGame ?? game).id, onComplete: {
-                        refreshGame()
-                    })
-                }
-                .sheet(isPresented: $showingCashOutSheet) {
-                    CashOutView(gameId: (liveGame ?? game).id, currentStack: (liveGame ?? game).players.first(where: { $0.userId == Auth.auth().currentUser?.uid })?.currentStack ?? 0, onComplete: {
-                        refreshGame()
-                    })
-                }
-                .sheet(isPresented: $showingHostRebuySheet) {
-                    HostRebuyView(gameId: (liveGame ?? game).id, onComplete: {
-                        refreshGame()
-                    })
-                }
-                .sheet(isPresented: $showingEndGameSheet) {
-                    GameEndView(gameId: (liveGame ?? game).id, onComplete: {
-                        refreshGame()
-                    })
-                }
-                .onAppear {
-                    setupLiveUpdates()
-                }
-                .onDisappear {
-                    // Clean up listeners when view disappears
-                    homeGameService.stopListeningForGameUpdates()
-                }
-                // ADD Alert modifier HERE
-                .alert("Session Complete", isPresented: $showingSaveSessionAlert, presenting: justCashedOutPlayer) { player in
-                     Button("Save Session") {
-                         showingSaveSessionAlert = false
-                         showingSaveSessionSheet = true 
-                     }
-                     Button("Dismiss", role: .cancel) { 
-                         justCashedOutPlayer = nil
-                         showingSaveSessionAlert = false
-                     }
-                } message: { player in
-                     let pnl = player.currentStack - player.totalBuyIn
-                     let duration = player.cashedOutAt?.timeIntervalSince(player.joinedAt) ?? 0
-                     let formattedPNL = formatMoney(pnl)
-                     let formattedDuration = formatDuration(duration)
-                     
-                     Text("You cashed out!\nDuration: \(formattedDuration)\nProfit/Loss: \(formattedPNL)\n\nWould you like to save this session?")
-                }
-                // ADD Sheet modifier HERE
-                .sheet(isPresented: $showingSaveSessionSheet) {
-                    if let player = justCashedOutPlayer,
-                       let cashoutTime = player.cashedOutAt {
-                        let pnl = player.currentStack - player.totalBuyIn
-                        let duration = cashoutTime.timeIntervalSince(player.joinedAt)
-                        
-                        // Pass data to the saving view, including buyIn and cashOut separately
-                        SaveHomeGameSessionView(
-                            pnl: pnl,
-                            buyIn: player.totalBuyIn,
-                            cashOut: player.currentStack,
-                            duration: duration,
-                            date: cashoutTime
-                        )
-                        .environmentObject(sessionStore)
-                    } else {
-                        // Fallback view if data is missing
-                        Text("Error: Missing session data to save.")
-                    }
-                }
-            } // End NavigationView
-        }
-        
-        private func setupLiveUpdates() {
-            // Initialize previousGame state on setup
-            self.previousGame = liveGame ?? game
+        ZStack {
+            AppBackgroundView()
+                .ignoresSafeArea()
             
-            // Start listening for updates to the game
-            homeGameService.listenForGameUpdates(gameId: game.id) { updatedGame in
-                DispatchQueue.main.async {
-                    self.liveGame = updatedGame
-                    // Call the completion handler to update parent views if needed
-                    self.onGameUpdated?()
-                    
-                    // Check if the current user just cashed out
-                    guard let userId = Auth.auth().currentUser?.uid else { return }
-                    
-                    let previousStatus = previousGame?.players.first { $0.userId == userId }?.status
-                    let currentStatus = updatedGame.players.first { $0.userId == userId }?.status
-                    
-                    if previousStatus == .active && currentStatus == .cashedOut {
-                        if let player = updatedGame.players.first(where: { $0.userId == userId }) {
-                            self.justCashedOutPlayer = player
-                            self.showingSaveSessionAlert = true
-                        }
+            if showCopiedMessage {
+                VStack {
+                    Spacer().frame(height: 4)
+                    Text("Link copied!")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
+                        )
+                }
+                .zIndex(2)
+                .transition(.opacity)
+                .animation(.easeInOut, value: showCopiedMessage)
+            }
+            
+            ScrollView {
+                if let liveGame = liveGame, liveGame.status == .completed {
+                    // Show game summary for completed games
+                    gameSummaryView
+                } else if isGameCreator {
+                    // Show owner management view for active games
+                    ownerView
+                } else {
+                    // Show player view for active games
+                    playerView
+                }
+            }
+            .refreshable {
+                refreshGame()
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text(liveGame?.status == .completed ? "Game Summary" :
+                        (isGameCreator ? "Game Management" : "Game Details"))
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: {
+                    presentationMode.wrappedValue.dismiss()
+                }) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left")
+                        Text("Back")
                     }
-                    
-                    // Update previousGame state for the next comparison
-                    self.previousGame = updatedGame
+                    .foregroundColor(.white)
+                }
+            }
+            
+            if isGameCreator && (liveGame?.status ?? game.status) == .active {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: copyGameLink) {
+                        Image(systemName: "link")
+                            .foregroundColor(.white)
+                    }
+                    .help("Copy game link")
+                    .accessibilityLabel("Copy game link")
                 }
             }
         }
+        .alert(isPresented: $showError) {
+            Alert(
+                title: Text("Error"),
+                message: Text(error ?? "An unknown error occurred"),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+        .alert("End Game?", isPresented: $showingEndGameConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("End Game", role: .destructive) {
+                endGame()
+            }
+        } message: {
+            Text("This will end the current game for all players. Any players who haven't cashed out will need to be handled manually. This action cannot be undone.")
+        }
+        .sheet(isPresented: $showingRebuySheet) {
+            RebuyView(gameId: (liveGame ?? game).id, onComplete: {
+                refreshGame()
+            })
+        }
+        .sheet(isPresented: $showingBuyInSheet) {
+            BuyInView(gameId: (liveGame ?? game).id, onComplete: {
+                refreshGame()
+            })
+        }
+        .sheet(isPresented: $showingCashOutSheet) {
+            CashOutView(gameId: (liveGame ?? game).id, currentStack: (liveGame ?? game).players.first(where: { $0.userId == Auth.auth().currentUser?.uid })?.currentStack ?? 0, onComplete: {
+                refreshGame()
+            })
+        }
+        .sheet(isPresented: $showingHostRebuySheet) {
+            HostRebuyView(gameId: (liveGame ?? game).id, onComplete: {
+                refreshGame()
+            })
+        }
+        .sheet(isPresented: $showingEndGameSheet) {
+            GameEndView(gameId: (liveGame ?? game).id, onComplete: {
+                refreshGame()
+            })
+        }
+        .onAppear {
+            setupLiveUpdates()
+        }
+        .onDisappear {
+            homeGameService.stopListeningForGameUpdates()
+            // Let parent view know this view is disappearing
+            onGameUpdated?()
+        }
+        .alert("Session Complete", isPresented: $showingSaveSessionAlert, presenting: justCashedOutPlayer) { player in
+             Button("Save Session") {
+                 showingSaveSessionAlert = false
+                 showingSaveSessionSheet = true 
+             }
+             Button("Dismiss", role: .cancel) { 
+                 justCashedOutPlayer = nil
+                 showingSaveSessionAlert = false
+             }
+        } message: { player in
+             let pnl = player.currentStack - player.totalBuyIn
+             let duration = player.cashedOutAt?.timeIntervalSince(player.joinedAt) ?? 0
+             let formattedPNL = formatMoney(pnl)
+             let formattedDuration = formatDuration(duration)
+             
+             Text("You cashed out!\nDuration: \(formattedDuration)\nProfit/Loss: \(formattedPNL)\n\nWould you like to save this session?")
+        }
+        .sheet(isPresented: $showingSaveSessionSheet) {
+            if let player = justCashedOutPlayer,
+               let cashoutTime = player.cashedOutAt {
+                let pnl = player.currentStack - player.totalBuyIn
+                let duration = cashoutTime.timeIntervalSince(player.joinedAt)
+                
+                SaveHomeGameSessionView(
+                    pnl: pnl,
+                    buyIn: player.totalBuyIn,
+                    cashOut: player.currentStack,
+                    duration: duration,
+                    date: cashoutTime
+                )
+                .environmentObject(sessionStore)
+            } else {
+                Text("Error: Missing session data to save.")
+            }
+        }
+    }
         
-        private func refreshGame() {
-            Task {
-                do {
-                    if let refreshedGame = try await homeGameService.fetchHomeGame(gameId: game.id) {
-                        await MainActor.run {
-                            liveGame = refreshedGame
-                            onGameUpdated?()
-                        }
+    private func setupLiveUpdates() {
+        // Initialize previousGame state on setup
+        self.previousGame = liveGame ?? game
+        
+        // Start listening for updates to the game
+        homeGameService.listenForGameUpdates(gameId: game.id) { updatedGame in
+            DispatchQueue.main.async {
+                self.liveGame = updatedGame
+                
+                // Call the completion handler to update parent views if needed
+                self.onGameUpdated?()
+                
+                // Check if the current user just cashed out
+                guard let userId = Auth.auth().currentUser?.uid else { return }
+                
+                let previousStatus = self.previousGame?.players.first { $0.userId == userId }?.status
+                let currentStatus = updatedGame.players.first { $0.userId == userId }?.status
+                
+                if previousStatus == .active && currentStatus == .cashedOut {
+                    if let player = updatedGame.players.first(where: { $0.userId == userId }) {
+                        self.justCashedOutPlayer = player
+                        self.showingSaveSessionAlert = true
                     }
-                } catch {
+                }
+                
+                // Update previousGame state for the next comparison
+                self.previousGame = updatedGame
+            }
+        }
+    }
+    
+    private func refreshGame() {
+        Task {
+            do {
+                if let refreshedGame = try await homeGameService.fetchHomeGame(gameId: game.id) {
                     await MainActor.run {
-                        self.error = error.localizedDescription
-                        showError = true
+                        liveGame = refreshedGame
+                        onGameUpdated?()
                     }
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = error.localizedDescription
+                    showError = true
                 }
             }
         }
-        
-        // OWNER VIEW - Game management interface
-        private var ownerView: some View {
-            VStack(spacing: 25) {
-                // Game header with management controls
-                VStack(spacing: 16) {
-                    // Game status header
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(game.title)
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.white)
+    }
+    
+    // OWNER VIEW - Game management interface
+    private var ownerView: some View {
+        VStack(spacing: 25) {
+            // Game header with management controls
+            VStack(spacing: 16) {
+                // Game status header
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(game.title)
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text("Created \(formatDate(game.createdAt))")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
                             
-                            Text("Created \(formatDate(game.createdAt))")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                        }
-                            
-                        Spacer()
+                    Spacer()
                         
                                 // Status badge
                                 Text(game.status == .active ? "ACTIVE" : "FINISHED")

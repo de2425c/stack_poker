@@ -5,6 +5,11 @@ import FirebaseStorage
 import PhotosUI
 import UIKit
 
+// TabBar visibility manager to control tab bar visibility across the app
+class TabBarVisibilityManager: ObservableObject {
+    @Published var isVisible: Bool = true
+}
+
 struct HomePage: View {
     @State private var selectedTab: Tab = .dashboard
     let userId: String
@@ -17,6 +22,7 @@ struct HomePage: View {
     @StateObject private var sessionStore: SessionStore
     @StateObject private var handStore: HandStore
     @StateObject private var postService = PostService()
+    @StateObject private var tabBarVisibility = TabBarVisibilityManager()
     @EnvironmentObject private var userService: UserService
     
     init(userId: String) {
@@ -95,6 +101,7 @@ struct HomePage: View {
                         .environmentObject(handStore)
                         .environmentObject(sessionStore)
                         .environmentObject(postService)
+                        .environmentObject(tabBarVisibility)
                         .tag(Tab.groups)
                     
                     ProfileScreen(userId: userId)
@@ -104,19 +111,23 @@ struct HomePage: View {
                 .toolbar(.hidden, for: .tabBar)
             }
 
-            CustomTabBar(
-                selectedTab: $selectedTab,
-                userId: userId,
-                showingMenu: $showingMenu
-            )
-            .frame(maxHeight: .infinity, alignment: .bottom)
-            .opacity(showingReplay ? 0 : 1)
+            // Show custom tab bar only when it should be visible
+            if tabBarVisibility.isVisible {
+                CustomTabBar(
+                    selectedTab: $selectedTab,
+                    userId: userId,
+                    showingMenu: $showingMenu
+                )
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .opacity(showingReplay ? 0 : 1)
+            }
             
             if showingMenu {
                 AddMenuOverlay(
                     showingMenu: $showingMenu,
                     userId: userId,
-                    showSessionForm: $showingSessionForm
+                    showSessionForm: $showingSessionForm,
+                    showingLiveSession: $showingLiveSession
                 )
                 .zIndex(1)
             }
@@ -131,10 +142,14 @@ struct HomePage: View {
         .sheet(isPresented: $showingSessionForm) {
             SessionFormView(userId: userId)
         }
+        .fullScreenCover(isPresented: $showingLiveSession) {
+            LiveSessionView(userId: userId, sessionStore: sessionStore)
+        }
         .onDisappear {
             // Remove observer when view disappears
             NotificationCenter.default.removeObserver(self)
         }
+        .environmentObject(tabBarVisibility)
     }
 }
 
@@ -1364,45 +1379,55 @@ struct AddMenuOverlay: View {
     let userId: String
     @State private var showHandInput = false
     @Binding var showSessionForm: Bool
+    @Binding var showingLiveSession: Bool
+    
+    // Create staggered animation delays for each menu item
+    private let staggerDelay1 = 0.05
+    private let staggerDelay2 = 0.1
+    private let staggerDelay3 = 0.15
 
     var body: some View {
         ZStack {
-            // Background that excludes the tab bar central button
-            ZStack {
-                // Full screen material blur
-                Color.black.opacity(0.5)
-                    .background(.thinMaterial)
+            // Semi-transparent background with blur
+            if showingMenu {
+                Color.black.opacity(0.3)
                     .ignoresSafeArea()
-                
-                // Cutout for the + button - positioned at center bottom
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Circle()
-                            .fill(Color.black.opacity(0.01)) // Nearly transparent
-                            .blendMode(.destinationOut) // This creates the "hole" effect
-                            .frame(width: 70, height: 70)
-                        Spacer()
+                    .onTapGesture {
+                        closeMenu()
                     }
-                    .padding(.bottom, 20)
-                }
+                    .transition(.opacity)
             }
-            .compositingGroup() // Ensures the blendMode works properly
             
-            // Dim overlay to darken screen outside the menu
-            Color.black.opacity(0.3)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    withAnimation { showingMenu = false }
-                }
-            
-            // Actual menu content
-            GeometryReader { geo in
-                VStack {
-                    Spacer()
-                    VStack(spacing: 32) {
-                        SleekMenuButton(
+            // Menu items positioned to emerge from the + button
+            VStack {
+                Spacer()
+                
+                if showingMenu {
+                    // Floating menu items
+                    VStack(spacing: 22) { // Increased spacing between buttons
+                        // Hand menu item - appears third
+                        FloatingMenuButton(
+                            icon: "doc.text",
+                            title: "Add Hand",
+                            action: { showHandInput = true },
+                            delay: staggerDelay3
+                        )
+                        
+                        // Live Session menu item - appears second
+                        FloatingMenuButton(
+                            icon: "clock",
+                            title: "Live Session",
+                            action: {
+                                withAnimation(nil) {
+                                    showingLiveSession = true
+                                    showingMenu = false
+                                }
+                            },
+                            delay: staggerDelay2
+                        )
+                        
+                        // Past Session menu item - appears first
+                        FloatingMenuButton(
                             icon: "clock.arrow.circlepath",
                             title: "Past Session",
                             action: {
@@ -1410,33 +1435,85 @@ struct AddMenuOverlay: View {
                                     showSessionForm = true
                                     showingMenu = false
                                 }
-                            }
+                            },
+                            delay: staggerDelay1
                         )
-                        SleekMenuButton(
-                            icon: "clock",
-                            title: "Live Session",
-                            action: { showingMenu = false }
-                        )
-                        SleekMenuButton(
-                            icon: "doc.text",
-                            title: "Add Hand",
-                            action: { showHandInput = true }
-                        )
-                        
-                        // Spacer to push content up
-                        Spacer()
-                            .frame(height: geo.size.height * 0.15)
                     }
+                    .padding(.bottom, 120) // Increased bottom padding to position menu higher
+                    .transition(.identity) // Controlled by each button's internal animation
                 }
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
             }
-            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
         .sheet(isPresented: $showHandInput) {
             HandInputViewSleek(userId: userId) {
                 showHandInput = false
                 showingMenu = false
             }
+        }
+    }
+    
+    private func closeMenu() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            showingMenu = false
+        }
+    }
+}
+
+// New animated floating menu button
+struct FloatingMenuButton: View {
+    let icon: String
+    let title: String
+    let action: () -> Void
+    let delay: Double
+    
+    @State private var appeared = false
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                // Icon container
+                ZStack {
+                    Circle()
+                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 0.95)))
+                        .frame(width: 54, height: 54)
+                        .shadow(color: Color.green.opacity(0.25), radius: 8, y: 4)
+                        .overlay(
+                            Circle()
+                                .stroke(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)), lineWidth: 2)
+                        )
+                    
+                    Image(systemName: icon)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                }
+                
+                // Text label
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 0.95))) // Increased opacity
+                    .shadow(color: Color.black.opacity(0.25), radius: 8, y: 4) // Enhanced shadow
+            )
+            .scaleEffect(appeared ? 1.0 : 0.7)
+            .opacity(appeared ? 1.0 : 0)
+            .offset(y: appeared ? 0 : 20)
+        }
+        .frame(width: 220)
+        .buttonStyle(PressableButtonStyle())
+        .onAppear {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7).delay(delay)) {
+                appeared = true
+            }
+        }
+        .onDisappear {
+            appeared = false
         }
     }
 }
@@ -1451,9 +1528,7 @@ struct HandInputViewSleek: View {
     @State private var isLoading = false
     @State private var showingError = false
     @State private var errorMessage = ""
-    @State private var parsedHand: ParsedHandHistory?
-    @State private var showingSuccess = false
-    @FocusState private var isFocused: Bool
+    @State private var showingHandEntryWizard = false
 
     init(userId: String, onDismiss: @escaping () -> Void) {
         self.userId = userId
@@ -1465,80 +1540,68 @@ struct HandInputViewSleek: View {
         ZStack {
             Color(UIColor(red: 10/255, green: 10/255, blue: 15/255, alpha: 1.0)).ignoresSafeArea()
             VStack(spacing: 24) {
-                Text("Add Poker Hand")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundColor(Color(white: 0.92))
-                    .padding(.top, 12)
-                VStack(spacing: 0) {
-                    TextEditor(text: $handText)
-                        .focused($isFocused)
-                        .foregroundColor(Color(white: 0.85))
-                        .font(.system(size: 16, design: .monospaced))
-                        .frame(minHeight: 140, maxHeight: 180)
-                        .padding(14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color(UIColor(red: 22/255, green: 23/255, blue: 26/255, alpha: 1.0)))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(isFocused ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.9)) : Color.clear, lineWidth: 1.5)
-                        )
-                        .animation(.easeInOut(duration: 0.2), value: isFocused)
-                        .padding(.bottom, 10)
-                    Button(action: parseHand) {
-                        if isLoading {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
-                        } else {
-                            Text("Parse Hand")
-                                .font(.system(size: 17, weight: .bold, design: .rounded))
-                                .foregroundColor(.black)
-                        }
+                HStack {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(Color.white.opacity(0.7))
+                            .padding(10)
+                            .background(Color.black.opacity(0.3))
+                            .clipShape(Circle())
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(
-                        Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: handText.isEmpty || isLoading ? 0.5 : 1))
-                    )
-                    .cornerRadius(12)
-                    .shadow(color: Color.green.opacity(0.10), radius: 6, y: 1)
-                    .disabled(handText.isEmpty || isLoading)
+                    .padding(.leading, 16)
+                    
+                    Spacer()
+                    
+                    Text("Add Poker Hand")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(Color(white: 0.92))
+                    
+                    Spacer()
+                    
+                    // Placeholder for symmetry
+                    Color.clear
+                        .frame(width: 36, height: 36)
+                        .padding(.trailing, 16)
+                }
+                .padding(.top, 12)
+                
+                VStack(spacing: 20) {
+                    Button(action: {
+                        showingHandEntryWizard = true
+                    }) {
+                        HStack {
+                            Image(systemName: "plus.square.fill")
+                                .font(.system(size: 20))
+                            Text("Create New Hand")
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .foregroundColor(.black)
+                        .background(
+                            Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+                        )
+                        .cornerRadius(12)
+                        .shadow(color: Color.green.opacity(0.10), radius: 6, y: 1)
+                    }
                 }
                 .padding(16)
                 .background(
                     RoundedRectangle(cornerRadius: 20)
                         .fill(Color(UIColor(red: 18/255, green: 19/255, blue: 22/255, alpha: 0.98)))
                 )
-                .padding(.horizontal, 8)
-                if let parsedHand = parsedHand {
-                    ScrollView {
-                        Text(String(describing: parsedHand))
-                            .foregroundColor(Color(white: 0.85))
-                            .font(.system(.body, design: .monospaced))
-                            .padding()
-                    }
-                    .background(Color.black.opacity(0.18))
-                    .cornerRadius(10)
-                    .padding(.horizontal, 8)
-                }
+                .padding(.horizontal, 16)
+                
                 Spacer()
-                HStack {
-                    Spacer()
-                    Button(action: {
-                        withAnimation { showingMenu = false }
-                    }) {
-                        Color.clear
-                            .frame(width: 70, height: 70)
-                    }
-                    Spacer()
-                }
-                .padding(.bottom, 20)
             }
         }
-        .transition(.opacity)
-        .sheet(isPresented: $showHandInput) {
-            AddHandView(userId: userId, onDismiss: { showHandInput = false; showingMenu = false })
+        .fullScreenCover(isPresented: $showingHandEntryWizard) {
+            ManualHandEntryWizardView()
+        }
+        .onDisappear {
+            // Call dismiss callback when view disappears
+            onDismiss()
         }
     }
 } 

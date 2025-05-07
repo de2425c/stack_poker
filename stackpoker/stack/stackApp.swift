@@ -13,7 +13,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         FirebaseApp.configure()
-        
+        UITabBar.appearance().isHidden = true
+        UINavigationBar.appearance().titleTextAttributes = [.foregroundColor: UIColor.white]
+
         // Delay until the window is created on first run
         DispatchQueue.main.async {
             if let tbc = UIApplication.shared

@@ -61,7 +61,7 @@ struct ManualHandEntryWizardView: View {
         NavigationView { 
             ZStack {
                 // Background
-                AppBackgroundView().ignoresSafeArea(.all)
+                AppBackgroundView(edges: .all)
                 
                 // Content
                 VStack(spacing: 0) {
@@ -567,7 +567,7 @@ struct ManualHandEntryWizardView: View {
         }
         
         // Track player contributions for accurate PnL
-        var playerContributions = calculatePlayerContributions()
+        _ = calculatePlayerContributions()
         
         // Single player wins automatically (everyone else folded)
         if activePlayers.count == 1 {
@@ -697,7 +697,7 @@ struct ManualHandEntryWizardView: View {
         
         for action in allActions {
                 let playerPos = action.playerName
-            let currentContribution = playerContributions[playerPos] ?? 0
+            let _ = playerContributions[playerPos] ?? 0
 
                 switch action.action {
             case "bets", "raises":

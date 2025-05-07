@@ -8,115 +8,119 @@ struct PostView: View {
     @State private var isLiked = false
     
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AppBackgroundView()
-            Group {
-                if let profileImage = post.profileImage {
-                    AsyncImage(url: URL(string: profileImage)) { image in
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    } placeholder: {
+        ZStack {
+            // Use the AppBackgroundView as a background
+            AppBackgroundView(edges: .none)
+            
+            HStack(alignment: .top, spacing: 12) {
+                Group {
+                    if let profileImage = post.profileImage {
+                        AsyncImage(url: URL(string: profileImage)) { image in
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        } placeholder: {
+                            Circle()
+                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                        }
+                    } else {
                         Circle()
                             .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
                     }
-                } else {
-                    Circle()
-                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
                 }
-            }
-            .frame(width: 48, height: 48)
-            .clipShape(Circle())
-            
-            // Content
-            VStack(alignment: .leading, spacing: 8) {
-                // Header
-                HStack(spacing: 6) {
-                    Text(post.username)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    Text("·")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray.opacity(0.7))
-                    
-                    Text(post.createdAt.timeAgo())
-                        .font(.system(size: 15))
-                        .foregroundColor(.gray.opacity(0.7))
-                    
-                    Spacer(minLength: 0)
-                }
+                .frame(width: 48, height: 48)
+                .clipShape(Circle())
                 
-                // Post content
-                if !post.content.isEmpty {
-                    Text(post.content)
-                        .font(.system(size: 16))
-                        .foregroundColor(.white.opacity(0.9))
-                        .lineSpacing(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                
-                // Hand post content
-                if post.postType == .hand, let hand = post.handHistory {
-                    HandSummaryView(hand: hand)
-                }
-                
-                // Images
-                if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(imageURLs, id: \.self) { url in
-                                AsyncImage(url: URL(string: url)) { image in
-                                    image
-                                        .resizable()
-                                        .scaledToFill()
-                                } placeholder: {
-                                    Rectangle()
-                                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                // Content
+                VStack(alignment: .leading, spacing: 8) {
+                    // Header
+                    HStack(spacing: 6) {
+                        Text(post.username)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text("·")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.7))
+                        
+                        Text(post.createdAt.timeAgo())
+                            .font(.system(size: 15))
+                            .foregroundColor(.gray.opacity(0.7))
+                        
+                        Spacer(minLength: 0)
+                    }
+                    
+                    // Post content
+                    if !post.content.isEmpty {
+                        Text(post.content)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.9))
+                            .lineSpacing(4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    
+                    // Hand post content
+                    if post.postType == .hand, let hand = post.handHistory {
+                        HandSummaryView(hand: hand)
+                    }
+                    
+                    // Images
+                    if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(imageURLs, id: \.self) { url in
+                                    AsyncImage(url: URL(string: url)) { image in
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    } placeholder: {
+                                        Rectangle()
+                                            .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                    }
+                                    .frame(width: 200, height: 200)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
                                 }
-                                .frame(width: 200, height: 200)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
                         }
                     }
-                }
-                
-                // Actions
-                HStack(spacing: 32) {
-                    Button(action: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            isLiked.toggle()
-                            onLike()
-                        }
-                    }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: isLiked ? "heart.fill" : "heart")
-                                .font(.system(size: 16))
-                                .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
-                            Text("\(post.likes)")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(.gray.opacity(0.7))
-                        }
-                    }
                     
-                    Button(action: onComment) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "message")
-                                .font(.system(size: 16))
-                                .foregroundColor(.gray.opacity(0.7))
-                            Text("\(post.comments)")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(.gray.opacity(0.7))
+                    // Actions
+                    HStack(spacing: 32) {
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                isLiked.toggle()
+                                onLike()
+                            }
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: isLiked ? "heart.fill" : "heart")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
+                                Text("\(post.likes)")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.gray.opacity(0.7))
+                            }
                         }
+                        
+                        Button(action: onComment) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "message")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.gray.opacity(0.7))
+                                Text("\(post.comments)")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.gray.opacity(0.7))
+                            }
+                        }
+                        
+                        Spacer()
                     }
-                    
-                    Spacer()
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
             }
+            .padding(16)
+            .background(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
         }
-        .padding(16)
-        .background(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
         .sheet(isPresented: $showingReplay) {
             if let hand = post.handHistory {
                 HandReplayView(hand: hand)
@@ -142,7 +146,7 @@ struct HandSummaryView: View {
         if heroPnl >= 0 {
             return "$\(Int(heroPnl))"
         } else {
-            return "$\(abs(Int(heroPnl)))"
+            return "-$\(abs(Int(heroPnl)))"
         }
     }
     

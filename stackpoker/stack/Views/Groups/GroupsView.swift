@@ -9,14 +9,13 @@ struct GroupsView: View {
     @EnvironmentObject private var handStore: HandStore
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var postService: PostService
+    @EnvironmentObject private var tabBarVisibility: TabBarVisibilityManager
     @State private var showingCreateGroup = false
     @State private var showingInvites = false
     @State private var selectedGroup: UserGroup?
-    @State private var showingGroupDetails = false
     @State private var groupActionSheet: UserGroup?
     @State private var error: String?
     @State private var showError = false
-    @State private var showingGroupChat = false
     @State private var isRefreshing = false
     
     var body: some View {
@@ -85,11 +84,14 @@ struct GroupsView: View {
                         }
                     }
                     .padding(.horizontal, 24)
-                    .padding(.top, 16)
+                    .padding(.top, 16) // Add extra padding at top for status bar
                     .padding(.bottom, 16)
                     
                     // Content
                     ScrollView {
+                        // Add extra padding at the top for safe area
+                        Color.clear.frame(height: 1)
+                        
                         // Pull to refresh
                         RefreshControls(isRefreshing: $isRefreshing) {
                             Task {
@@ -117,15 +119,26 @@ struct GroupsView: View {
                             // Groups list with staggered animation
                             LazyVStack(spacing: 16) {
                                 ForEach(Array(groupService.userGroups.enumerated()), id: \.element.id) { index, group in
-                                    GroupCard(group: group, onTap: {
-                                        selectedGroup = group
-                                        showingGroupChat = true
-                                    }, onDetailsTap: {
-                                        selectedGroup = group
-                                        showingGroupDetails = true
-                                    }, onOptionsTap: {
-                                        groupActionSheet = group
-                                    })
+                                    NavigationLink(
+                                        destination: GroupChatView(group: group)
+                                            .environmentObject(userService)
+                                            .environmentObject(handStore)
+                                            .environmentObject(sessionStore)
+                                            .environmentObject(postService)
+                                            .environmentObject(tabBarVisibility)
+                                            .navigationBarHidden(true)
+                                    ) {
+                                        GroupCard(group: group, onTap: {
+                                            // No longer needed since NavigationLink handles navigation
+                                        }, onDetailsTap: {
+                                            // Stop the navigation and navigate to group details instead
+                                            selectedGroup = group
+                                        }, onOptionsTap: {
+                                            groupActionSheet = group
+                                        })
+                                        .contentShape(Rectangle()) // Make the entire card tappable
+                                    }
+                                    .buttonStyle(PlainButtonStyle()) // Prevent navigation link styling
                                 }
                             }
                             .padding(.horizontal, 24)
@@ -135,93 +148,94 @@ struct GroupsView: View {
                     }
                 }
             }
-            .alert(isPresented: $showError, content: {
-                Alert(
-                    title: Text("Error"),
-                    message: Text(error ?? "An unknown error occurred"),
-                    dismissButton: .default(Text("OK"))
-                )
-            })
-            .sheet(isPresented: $showingCreateGroup) {
-                CreateGroupView { success in
-                    if success {
-                        Task {
-                            await refreshGroups()
-                        }
-                    }
-                }
-            }
-            .sheet(isPresented: $showingInvites) {
-                GroupInvitesView {
+        }
+        .navigationViewStyle(StackNavigationViewStyle())
+        .alert(isPresented: $showError, content: {
+            Alert(
+                title: Text("Error"),
+                message: Text(error ?? "An unknown error occurred"),
+                dismissButton: .default(Text("OK"))
+            )
+        })
+        .sheet(isPresented: $showingCreateGroup) {
+            CreateGroupView { success in
+                if success {
                     Task {
                         await refreshGroups()
                     }
                 }
             }
-            .sheet(isPresented: $showingGroupDetails) {
-                if let group = selectedGroup {
-                    GroupDetailView(group: group)
-                }
-            }
-            .onChange(of: showingGroupDetails) { isShowing in
-                if !isShowing {
-                    // Refresh groups when the detail view is dismissed
-                    Task {
-                        await refreshGroups()
-                    }
-                }
-            }
-            .sheet(isPresented: $showingGroupChat) {
-                if let group = selectedGroup {
-                    GroupChatView(group: group)
-                        .environmentObject(userService)
-                        .environmentObject(handStore)
-                        .environmentObject(sessionStore)
-                        .environmentObject(postService)
-                }
-            }
-            .confirmationDialog("Group Options", isPresented: .init(
-                get: { groupActionSheet != nil },
-                set: { if !$0 { groupActionSheet = nil } }
-            ), titleVisibility: .visible) {
-                if let group = groupActionSheet {
-                    Button("View Details") {
-                        selectedGroup = group
-                        showingGroupDetails = true
-                    }
-                    
-                    Button("Invite Members") {
-                        selectedGroup = group
-                        showingGroupDetails = true
-                    }
-                    
-                    if group.ownerId != Auth.auth().currentUser?.uid {
-                        Button("Leave Group", role: .destructive) {
-                            Task {
-                                await leaveGroup(group: group)
-                            }
-                        }
-                    }
-                    
-                    Button("Cancel", role: .cancel) {
-                        groupActionSheet = nil
-                    }
-                }
-            }
-            .onAppear {
-                // Set up notification observer
-                setupNotificationObserver()
-                
+        }
+        .sheet(isPresented: $showingInvites) {
+            GroupInvitesView {
                 Task {
                     await refreshGroups()
                 }
             }
-            .onDisappear {
-                // Clean up notification observer
-                NotificationCenter.default.removeObserver(self)
-            }
-            .navigationBarHidden(true)
         }
+        // Navigate to details in a standard way through NavigationLink
+        .background(
+            NavigationLink(
+                destination: selectedGroup.map { group in
+                    GroupDetailView(group: group)
+                        .navigationBarHidden(true)
+                        .onDisappear {
+                            // Refresh groups when the detail view is dismissed
+                            Task {
+                                await refreshGroups()
+                            }
+                        }
+                },
+                isActive: Binding(
+                    get: { selectedGroup != nil },
+                    set: { if !$0 { selectedGroup = nil } }
+                )
+            ) {
+                EmptyView()
+            }
+        )
+        .confirmationDialog("Group Options", isPresented: .init(
+            get: { groupActionSheet != nil },
+            set: { if !$0 { groupActionSheet = nil } }
+        ), titleVisibility: .visible) {
+            if let group = groupActionSheet {
+                Button("View Details") {
+                    selectedGroup = group
+                    // Detail navigation handled through NavigationLink
+                }
+                
+                Button("Invite Members") {
+                    selectedGroup = group
+                    // Detail navigation handled through NavigationLink
+                }
+                
+                if group.ownerId != Auth.auth().currentUser?.uid {
+                    Button("Leave Group", role: .destructive) {
+                        Task {
+                            await leaveGroup(group: group)
+                        }
+                    }
+                }
+                
+                Button("Cancel", role: .cancel) {
+                    groupActionSheet = nil
+                }
+            }
+        }
+        .onAppear {
+            // Set up notification observer
+            setupNotificationObserver()
+            
+            Task {
+                await refreshGroups()
+            }
+        }
+        .onDisappear {
+            // Clean up notification observer
+            NotificationCenter.default.removeObserver(self)
+        }
+        .navigationBarHidden(true) // Hide the navigation bar
+        .edgesIgnoringSafeArea(.top) // Ignore safe area at the top
     }
     
     // Set up notification observer for group data changes
@@ -329,143 +343,140 @@ struct GroupCard: View {
     @State private var cardOpacity: Double = 0
     
     var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 0) {
-                HStack(alignment: .center, spacing: 16) {
-                    // Group avatar with gradient border
-                    ZStack {
-                        // Highlight gradient border
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [
-                                        Color(red: 123/255, green: 255/255, blue: 99/255),
-                                        Color(red: 50/255, green: 120/255, blue: 80/255)
-                                    ]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 64, height: 64)
-                        
-                        // Background for avatar
-                        Circle()
-                            .fill(Color(red: 35/255, green: 35/255, blue: 40/255))
-                            .frame(width: 60, height: 60)
-                        
-                        if let avatarURL = group.avatarURL, let url = URL(string: avatarURL) {
-                            AsyncImage(url: url) { phase in
-                                if let image = phase.image {
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .frame(width: 60, height: 60)
-                                        .clipShape(Circle())
-                                } else if phase.error != nil {
-                                    Image(systemName: "person.3.fill")
-                                        .font(.system(size: 26, design: .default))
-                                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                        .frame(width: 60, height: 60)
-                                } else {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
-                                        .frame(width: 60, height: 60)
-                                }
-                            }
-                        } else {
-                            Image(systemName: "person.3.fill")
-                                .font(.system(size: 26, design: .default))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                        }
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Group {
-                            Text(group.name)
-                                .foregroundColor(.white)
-                        }
-                        .font(.system(size: 18, weight: .bold))
-                        
-                        if let description = group.description, !description.isEmpty {
-                            Text(description)
-                                .font(.system(size: 14, design: .default))
-                                .foregroundColor(.gray)
-                                .lineLimit(1)
-                        }
-                        
-                        HStack(spacing: 12) {
-                            // Members count
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.fill")
-                                    .font(.system(size: 12, design: .default))
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                
-                                Text("\(group.memberCount)")
-                                    .font(.system(size: 13, weight: .medium, design: .default))
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        .padding(.top, 4)
-                    }
-                    
-                    Spacer()
-                    
-                    // Action buttons column
-                    VStack(spacing: 16) {
-                        Button(action: onDetailsTap) {
-                            Image(systemName: "info.circle.fill")
-                                .font(.system(size: 18, design: .default))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                .frame(width: 32, height: 32)
-                                .background(Color(red: 35/255, green: 50/255, blue: 40/255))
-                                .clipShape(Circle())
-                        }
-                    }
-                }
-                .padding(.vertical, 16)
-                .padding(.horizontal, 16)
-            }
-            .background(
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 16) {
+                // Group avatar with gradient border
                 ZStack {
-                    RoundedRectangle(cornerRadius: 16)
+                    // Highlight gradient border
+                    Circle()
                         .fill(
                             LinearGradient(
                                 gradient: Gradient(colors: [
-                                    Color(red: 30/255, green: 32/255, blue: 36/255),
-                                    Color(red: 25/255, green: 27/255, blue: 32/255)
+                                    Color(red: 123/255, green: 255/255, blue: 99/255),
+                                    Color(red: 50/255, green: 120/255, blue: 80/255)
                                 ]),
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
                         )
+                        .frame(width: 64, height: 64)
+                    
+                    // Background for avatar
+                    Circle()
+                        .fill(Color(red: 35/255, green: 35/255, blue: 40/255))
+                        .frame(width: 60, height: 60)
+                    
+                    if let avatarURL = group.avatarURL, let url = URL(string: avatarURL) {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image {
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 60, height: 60)
+                                    .clipShape(Circle())
+                            } else if phase.error != nil {
+                                Image(systemName: "person.3.fill")
+                                    .font(.system(size: 26, design: .default))
+                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                    .frame(width: 60, height: 60)
+                            } else {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
+                                    .frame(width: 60, height: 60)
+                            }
+                        }
+                    } else {
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 26, design: .default))
+                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                    }
                 }
-                .shadow(color: Color.black.opacity(0.2), radius: 6, x: 0, y: 2)
-            )
-            .overlay(
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Group {
+                        Text(group.name)
+                            .foregroundColor(.white)
+                    }
+                    .font(.system(size: 18, weight: .bold))
+                    
+                    if let description = group.description, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 14, design: .default))
+                            .foregroundColor(.gray)
+                            .lineLimit(1)
+                    }
+                    
+                    HStack(spacing: 12) {
+                        // Members count
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 12, design: .default))
+                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                            
+                            Text("\(group.memberCount)")
+                                .font(.system(size: 13, weight: .medium, design: .default))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                
+                Spacer()
+                
+                // Action buttons column
+                VStack(spacing: 16) {
+                    Button(action: onDetailsTap) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 18, design: .default))
+                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                            .frame(width: 32, height: 32)
+                            .background(Color(red: 35/255, green: 50/255, blue: 40/255))
+                            .clipShape(Circle())
+                    }
+                }
+            }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+        }
+        .background(
+            ZStack {
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(
+                    .fill(
                         LinearGradient(
                             gradient: Gradient(colors: [
-                                Color.white.opacity(0.1),
-                                Color.clear,
-                                Color.clear
+                                Color(red: 30/255, green: 32/255, blue: 36/255),
+                                Color(red: 25/255, green: 27/255, blue: 32/255)
                             ]),
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
+                        )
                     )
-            )
-            .offset(y: cardOffset)
-            .opacity(cardOpacity)
-            .onAppear {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                    cardOffset = 0
-                    cardOpacity = 1
-                }
+            }
+            .shadow(color: Color.black.opacity(0.2), radius: 6, x: 0, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.white.opacity(0.1),
+                            Color.clear,
+                            Color.clear
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .offset(y: cardOffset)
+        .opacity(cardOpacity)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                cardOffset = 0
+                cardOpacity = 1
             }
         }
-        .buttonStyle(ScaleButtonStyles())
     }
     
     private func formattedDate(_ date: Date) -> String {
@@ -1156,8 +1167,6 @@ struct InviteCard: View {
     }
 }
 
-
-
 // LottieView placeholder - you would need to add the Lottie package
 // This is a simplified version until you add the real implementation
 struct LottieView: View {
@@ -1217,198 +1226,215 @@ struct GroupDetailView: View {
     }
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                // Background
-                AppBackgroundView()
-                
-                VStack(spacing: 0) {
-                    // Group info header
-                    VStack(spacing: 16) {
-                        // Group avatar with edit capability
-                        ZStack {
-                            Circle()
-                                .fill(Color(red: 40/255, green: 40/255, blue: 50/255))
+        // Remove the NavigationView since we're now using regular navigation
+        ZStack {
+            // Background
+            AppBackgroundView()
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Custom navigation header with back button
+                HStack {
+                    Button(action: {
+                        presentationMode.wrappedValue.dismiss()
+                    }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold, design: .default))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Circle().fill(Color(red: 30/255, green: 33/255, blue: 36/255)))
+                    }
+                    
+                    Spacer()
+                    
+                    Text(group.name)
+                        .font(.system(size: 18, weight: .bold, design: .default))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    // Add a spacer of equal width to balance the header
+                    Circle()
+                        .fill(Color.clear)
+                        .frame(width: 32, height: 32)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16) // Add extra padding at top for status bar
+                .padding(.bottom, 12)
+            
+                // Group info header
+                VStack(spacing: 16) {
+                    // Group avatar with edit capability
+                    ZStack {
+                        Circle()
+                            .fill(Color(red: 40/255, green: 40/255, blue: 50/255))
+                            .frame(width: 100, height: 100)
+                        
+                        if let selectedImage = selectedImage {
+                            Image(uiImage: selectedImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
                                 .frame(width: 100, height: 100)
-                            
-                            if let selectedImage = selectedImage {
-                                Image(uiImage: selectedImage)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 100, height: 100)
-                                    .clipShape(Circle())
-                            } else if let avatarURL = group.avatarURL, let url = URL(string: avatarURL) {
-                                AsyncImage(url: url) { phase in
-                                    if let image = phase.image {
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .frame(width: 100, height: 100)
-                                            .clipShape(Circle())
-                                    } else if phase.error != nil {
-                                        Image(systemName: "person.3.fill")
-                                            .font(.system(size: 40, design: .default))
-                                            .foregroundColor(.gray)
-                                    } else {
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
-                                            .frame(width: 100, height: 100)
-                                    }
-                                }
-                            } else {
-                                Image(systemName: "person.3.fill")
-                                    .font(.system(size: 40, design: .default))
-                                    .foregroundColor(.gray)
-                            }
-                            
-                            // Show camera icon for uploading if owner
-                            if isOwner {
-                                PhotosPicker(selection: $imagePickerItem, matching: .images) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color(red: 40/255, green: 40/255, blue: 45/255))
-                                            .frame(width: 32, height: 32)
-                                        
-                                        Image(systemName: "camera.fill")
-                                            .font(.system(size: 14, design: .default))
-                                            .foregroundColor(.white)
-                                    }
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color(red: 123/255, green: 255/255, blue: 99/255), lineWidth: 2)
-                                    )
-                                }
-                                .onChange(of: imagePickerItem) { newItem in
-                                    loadTransferableImage(from: newItem)
-                                }
-                                .position(x: 75, y: 75)
-                            }
-                            
-                            // Show loading indicator when uploading
-                            if isUploadingImage {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.black.opacity(0.5))
+                                .clipShape(Circle())
+                        } else if let avatarURL = group.avatarURL, let url = URL(string: avatarURL) {
+                            AsyncImage(url: url) { phase in
+                                if let image = phase.image {
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
                                         .frame(width: 100, height: 100)
-                                    
+                                        .clipShape(Circle())
+                                } else if phase.error != nil {
+                                    Image(systemName: "person.3.fill")
+                                        .font(.system(size: 40, design: .default))
+                                        .foregroundColor(.gray)
+                                } else {
                                     ProgressView()
                                         .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
-                                        .scaleEffect(1.5)
+                                        .frame(width: 100, height: 100)
                                 }
                             }
-                        }
-                        
-                        Group {
-                            Text(group.name)
-                                .foregroundColor(.white)
-                        }
-                        .font(.system(size: 24, weight: .bold))
-                        
-                        if let description = group.description, !description.isEmpty {
-                            Text(description)
-                                .font(.system(size: 16, design: .default))
-                                .foregroundColor(.white)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 24)
-                        }
-                        
-                        HStack {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 14, design: .default))
-                                .foregroundColor(.gray)
-                            
-                            Text("\(group.memberCount) member\(group.memberCount != 1 ? "s" : "")")
-                                .font(.system(size: 14, design: .default))
-                                .foregroundColor(.gray)
-                        }
-                    }
-                    .padding(.top, 24)
-                    .padding(.bottom, 16)
-                    
-                    // Tab selector
-                    HStack(spacing: 0) {
-                        GroupTabButton(text: "Info", isSelected: selectedTab == 0) {
-                            selectedTab = 0
-                        }
-                        
-                        GroupTabButton(text: "Members", isSelected: selectedTab == 1) {
-                            selectedTab = 1
-                            loadGroupMembers()
-                        }
-                        
-                        GroupTabButton(text: "Invite", isSelected: selectedTab == 2) {
-                            selectedTab = 2
-                            loadUsers()
-                        }
-                    }
-                    .background(Color(red: 30/255, green: 30/255, blue: 35/255))
-                    .cornerRadius(10)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
-                    
-                    // Content based on selected tab
-                    ScrollView {
-                        if selectedTab == 0 {
-                            // Group Info Tab
-                            GroupInfoView(group: group)
-                        } else if selectedTab == 1 {
-                            // Members Tab
-                            MembersView(
-                                groupService: groupService,
-                                isLoadingMembers: isLoadingMembers
-                            )
                         } else {
-                            // Invite Tab
-                            InviteView(
-                                groupService: groupService,
-                                groupId: group.id,
-                                selectedUser: $selectedUser,
-                                searchText: $searchText,
-                                isInviting: $isInviting,
-                                inviteSuccess: $inviteSuccess,
-                                isDropdownVisible: $isDropdownVisible,
-                                isLoadingUsers: isLoadingUsers,
-                                filteredUsers: filteredUsers,
-                                inviteUser: inviteUser
-                            )
+                            Image(systemName: "person.3.fill")
+                                .font(.system(size: 40, design: .default))
+                                .foregroundColor(.gray)
+                        }
+                        
+                        // Show camera icon for uploading if owner
+                        if isOwner {
+                            PhotosPicker(selection: $imagePickerItem, matching: .images) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color(red: 40/255, green: 40/255, blue: 45/255))
+                                        .frame(width: 32, height: 32)
+                                    
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 14, design: .default))
+                                        .foregroundColor(.white)
+                                }
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color(red: 123/255, green: 255/255, blue: 99/255), lineWidth: 2)
+                                )
+                            }
+                            .onChange(of: imagePickerItem) { newItem in
+                                loadTransferableImage(from: newItem)
+                            }
+                            .position(x: 75, y: 75)
+                        }
+                        
+                        // Show loading indicator when uploading
+                        if isUploadingImage {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.black.opacity(0.5))
+                                    .frame(width: 100, height: 100)
+                                
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
+                                    .scaleEffect(1.5)
+                            }
                         }
                     }
-                    .padding(.bottom, 16)
+                    
+                    Group {
+                        Text(group.name)
+                            .foregroundColor(.white)
+                    }
+                    .font(.system(size: 24, weight: .bold))
+                    
+                    if let description = group.description, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 16, design: .default))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 14, design: .default))
+                            .foregroundColor(.gray)
+                        
+                        Text("\(group.memberCount) member\(group.memberCount != 1 ? "s" : "")")
+                            .font(.system(size: 14, design: .default))
+                            .foregroundColor(.gray)
+                    }
                 }
-                .alert(isPresented: $showError, content: {
-                    Alert(
-                        title: Text("Error"),
-                        message: Text(error ?? "An unknown error occurred"),
-                        dismissButton: .default(Text("OK"))
-                    )
-                })
-            }
-            .navigationBarItems(
-                leading: Button(action: {
-                    presentationMode.wrappedValue.dismiss()
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold, design: .default))
-                        .foregroundColor(.white)
-                        .padding(8)
-                        .background(Circle().fill(Color(red: 30/255, green: 33/255, blue: 36/255)))
-                },
-                trailing: Text(group.name)
-                    .font(.system(size: 18, weight: .bold, design: .default))
-                    .foregroundColor(.white)
-            )
-            .onAppear {
-                if selectedTab == 1 {
-                    loadGroupMembers()
-                } else if selectedTab == 2 {
-                    loadUsers()
+                .padding(.top, 12)
+                .padding(.bottom, 16)
+                
+                // Tab selector
+                HStack(spacing: 0) {
+                    GroupTabButton(text: "Info", isSelected: selectedTab == 0) {
+                        selectedTab = 0
+                    }
+                    
+                    GroupTabButton(text: "Members", isSelected: selectedTab == 1) {
+                        selectedTab = 1
+                        loadGroupMembers()
+                    }
+                    
+                    GroupTabButton(text: "Invite", isSelected: selectedTab == 2) {
+                        selectedTab = 2
+                        loadUsers()
+                    }
                 }
+                .background(Color(red: 30/255, green: 30/255, blue: 35/255))
+                .cornerRadius(10)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+                
+                // Content based on selected tab
+                ScrollView {
+                    if selectedTab == 0 {
+                        // Group Info Tab
+                        GroupInfoView(group: group)
+                    } else if selectedTab == 1 {
+                        // Members Tab
+                        MembersView(
+                            groupService: groupService,
+                            isLoadingMembers: isLoadingMembers
+                        )
+                    } else {
+                        // Invite Tab
+                        InviteView(
+                            groupService: groupService,
+                            groupId: group.id,
+                            selectedUser: $selectedUser,
+                            searchText: $searchText,
+                            isInviting: $isInviting,
+                            inviteSuccess: $inviteSuccess,
+                            isDropdownVisible: $isDropdownVisible,
+                            isLoadingUsers: isLoadingUsers,
+                            filteredUsers: filteredUsers,
+                            inviteUser: inviteUser
+                        )
+                    }
+                }
+                .padding(.bottom, 16)
             }
-            .onTapGesture {
-                // Hide dropdown when tapping outside
-                isDropdownVisible = false
+            .alert(isPresented: $showError, content: {
+                Alert(
+                    title: Text("Error"),
+                    message: Text(error ?? "An unknown error occurred"),
+                    dismissButton: .default(Text("OK"))
+                )
+            })
+        }
+        .onAppear {
+            if selectedTab == 1 {
+                loadGroupMembers()
+            } else if selectedTab == 2 {
+                loadUsers()
             }
         }
+        .onTapGesture {
+            // Hide dropdown when tapping outside
+            isDropdownVisible = false
+        }
+        .navigationBarHidden(true) // Hide the navigation bar
+        .edgesIgnoringSafeArea(.all) // Use .all instead of just .top for full screen
     }
     
     private func loadTransferableImage(from imageSelection: PhotosPickerItem?) {
