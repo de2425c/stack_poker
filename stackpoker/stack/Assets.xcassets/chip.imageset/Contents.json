@@ -1,0 +1,23 @@
+{
+  "images" : [
+    {
+      "filename" : "chip-Picsart-BackgroundRemover.png",
+      "idiom" : "universal",
+      "scale" : "1x"
+    },
+    {
+      "filename" : "chip-Picsart-BackgroundRemover 1.png",
+      "idiom" : "universal",
+      "scale" : "2x"
+    },
+    {
+      "filename" : "chip-Picsart-BackgroundRemover 2.png",
+      "idiom" : "universal",
+      "scale" : "3x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
