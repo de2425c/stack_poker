@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import FirebaseAuth
 
 struct Card: Identifiable {
     let id = UUID()
@@ -19,6 +20,7 @@ struct Card: Identifiable {
 
 struct HandReplayView: View {
     let hand: ParsedHandHistory
+    let userId: String
     @Environment(\.dismiss) var dismiss
     @State private var currentStreetIndex = 0
     @State private var currentActionIndex = 0
@@ -249,7 +251,7 @@ struct HandReplayView: View {
             Text("Would you like to share this hand to your feed?")
         }
         .sheet(isPresented: $showingShareSheet) {
-            ShareHandView(hand: hand, showingReplay: $showingShareSheet)
+            PostEditorView(userId: userId, hand: hand)
                 .environmentObject(postService)
                 .environmentObject(userService)
         }
@@ -1341,216 +1343,5 @@ extension View {
         self
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal)
-    }
-}
-
-struct ShareHandView: View {
-    let hand: ParsedHandHistory
-    @Environment(\.dismiss) var dismiss
-    @EnvironmentObject var postService: PostService
-    @EnvironmentObject var userService: UserService
-    @State private var postText = ""
-    @State private var isLoading = false
-    @FocusState private var isTextEditorFocused: Bool
-    @Binding var showingReplay: Bool
-    @State private var isSharing = false
-    
-    private var heroName: String? {
-        hand.raw.players.first(where: { $0.isHero })?.name
-    }
-    
-    private var heroPnl: Double {
-        hand.raw.pot.heroPnl ?? 0
-    }
-    
-    private var formattedPnl: String {
-        if heroPnl >= 0 {
-            return "+$\(Int(heroPnl))"
-        } else {
-            return "-$\(abs(Int(heroPnl)))"
-        }
-    }
-    
-    private var handResult: String {
-        // Determine the outcome of the hand for a concise description
-        if let showdown = hand.raw.showdown, showdown {
-            if let distribution = hand.raw.pot.distribution, !distribution.isEmpty {
-                // Find if hero won the showdown
-                let heroWon = distribution.contains(where: { 
-                    $0.amount > 0 && $0.playerName == heroName
-                })
-                
-                if heroWon {
-                    if let heroWinner = distribution.first(where: { $0.playerName == heroName }) {
-                        return "Won at showdown with \(heroWinner.hand)"
-                    } else {
-                        return "Won at showdown"
-                    }
-                } else {
-                    return "Lost at showdown"
-                }
-            } else {
-                // No distribution data - use PnL to determine
-                return heroPnl > 0 ? "Won at showdown" : "Lost at showdown"
-            }
-        } else {
-            // No showdown
-            return heroPnl > 0 ? "Won, all opponents folded" : "Folded"
-        }
-    }
-    
-    private var gameDetails: String {
-        let stakes = "\(Int(hand.raw.gameInfo.smallBlind))/\(Int(hand.raw.gameInfo.bigBlind))"
-        let tableSize = "\(hand.raw.gameInfo.tableSize)-max"
-        return "$\(stakes) \(tableSize)"
-    }
-    
-    var body: some View {
-        NavigationView {
-            ZStack {
-                Color(UIColor(red: 10/255, green: 10/255, blue: 15/255, alpha: 1.0)).ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Header
-                    HStack(spacing: 12) {
-                        if let profileImage = userService.currentUserProfile?.avatarURL {
-                            AsyncImage(url: URL(string: profileImage)) { image in
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            } placeholder: {
-                                Circle()
-                                    .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                    .overlay(
-                                        Image(systemName: "person.fill")
-                                            .foregroundColor(.gray)
-                                    )
-                            }
-                            .frame(width: 48, height: 48)
-                            .clipShape(Circle())
-                        } else {
-                            Circle()
-                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                .frame(width: 48, height: 48)
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .foregroundColor(.gray)
-                                )
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let displayName = userService.currentUserProfile?.displayName,
-                               !displayName.isEmpty {
-                                Text(displayName)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                            } else if let username = userService.currentUserProfile?.username {
-                                Text(username)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                            Text("Share your hand")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                        }
-                        
-                        Spacer()
-                    }
-                    .padding()
-                    
-                    // Hand Summary
-                    HandSummaryView(hand: hand)
-                        .padding(.horizontal)
-                    
-                    // Text Editor
-                    TextEditor(text: $postText)
-                        .focused($isTextEditorFocused)
-                        .foregroundColor(.white)
-                        .font(.system(size: 16))
-                        .frame(maxHeight: .infinity)
-                        .padding()
-                        .background(Color.clear)
-                        .scrollContentBackground(.hidden)
-                    
-                    // Default post text suggestion
-
-                    
-                    
-                    // Bottom toolbar
-                    HStack {
-                        Spacer()
-                        Text("\(280 - postText.count)")
-                            .foregroundColor(postText.count > 280 ? .red : .gray)
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .padding()
-                    .background(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 0.95)))
-                }
-            }
-            .navigationTitle("Share Hand")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .foregroundColor(.white)
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: shareHand) {
-                        if isLoading {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        } else {
-                            Text("Share")
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .disabled(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading || postText.count > 280)
-                    .foregroundColor(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || postText.count > 280 ? .gray : .white)
-                }
-            }
-        }
-        .onAppear {
-            isTextEditorFocused = true
-        }
-    }
-    
-    // Generate a default post text based on the hand outcome
-
-    
-    private func shareHand() {
-        guard !postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let userId = userService.currentUserProfile?.id,
-              let username = userService.currentUserProfile?.username,
-              let profileImage = userService.currentUserProfile?.avatarURL else { return }
-        
-        let displayName = userService.currentUserProfile?.displayName
-        
-        isLoading = true
-        
-        Task {
-            do {
-                try await postService.createHandPost(
-                    content: postText,
-                    userId: userId,
-                    username: username,
-                    displayName: displayName,
-                    profileImage: profileImage,
-                    hand: hand
-                )
-                try await postService.fetchPosts()
-                DispatchQueue.main.async {
-                    isLoading = false
-                    dismiss()
-                }
-            } catch {
-                print("Error sharing hand: \(error)")
-                DispatchQueue.main.async {
-                    isLoading = false
-                }
-            }
-        }
     }
 } 

@@ -854,7 +854,9 @@ struct ChatHandPreview: View {
     @EnvironmentObject private var handStore: HandStore
     @EnvironmentObject private var postService: PostService
     @EnvironmentObject private var userService: UserService
-    
+    private var userId: String {
+        Auth.auth().currentUser?.uid ?? ""
+    }
     var body: some View {
         Button(action: {
             if savedHand != nil {
@@ -898,7 +900,7 @@ struct ChatHandPreview: View {
         .buttonStyle(PlainButtonStyle())
         .sheet(isPresented: $showingDetail) {
             if let hand = savedHand {
-                HandReplayView(hand: hand.hand)
+                HandReplayView(hand: hand.hand, userId: userId)
                     .environmentObject(postService)
                     .environmentObject(userService)
             }

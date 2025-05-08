@@ -14,7 +14,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         FirebaseApp.configure()
         UITabBar.appearance().isHidden = true
-        UINavigationBar.appearance().titleTextAttributes = [.foregroundColor: UIColor.white]
 
         // Delay until the window is created on first run
         DispatchQueue.main.async {
@@ -39,8 +38,16 @@ struct stackApp: App {
 
     var body: some Scene {
         WindowGroup {
-            MainCoordinator()
-                .environmentObject(authViewModel)
+            ZStack {
+                // 1) fill the entire screen (including under the status bar)
+                Color(.systemBackground)
+                  .ignoresSafeArea()
+
+                // 2) your existing coordinator
+                MainCoordinator()
+                  .environmentObject(authViewModel)
+                  .statusBar(hidden: true)
+            }
         }
     }
 }

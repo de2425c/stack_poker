@@ -2,6 +2,7 @@ import SwiftUI
 import FirebaseFirestore
 import Charts
 import UIKit
+import FirebaseAuth
 
 struct DashboardView: View {
     @StateObject private var handStore: HandStore
@@ -510,7 +511,7 @@ struct EnhancedStatCard: View {
                     VStack(spacing: 2) {
                         Text("\(prefix)\(formattedValue)")
                             .font(.system(size: 30, weight: .bold))
-                            .foregroundColor(color)
+                            .foregroundColor(.white) // Changed from color to white
                             .minimumScaleFactor(0.6)
                             .lineLimit(1)
                             .shadow(color: Color.black.opacity(0.1), radius: 2, y: 1)
@@ -871,7 +872,7 @@ struct HandListSection: View {
             HStack(alignment: .center) {
                 Text(title)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.9)))
+                    .foregroundColor(Color.gray.opacity(0.85)) // Changed to greyish color
                 
                 Spacer()
                 
@@ -928,6 +929,9 @@ struct HandSummaryRow: View {
     // Hero P&L for this hand
     private var heroPnl: Double {
         return hand.raw.pot.heroPnl
+    }
+    private var userId: String {
+        Auth.auth().currentUser?.uid ?? ""
     }
     
     var body: some View {
@@ -1054,7 +1058,7 @@ struct HandSummaryRow: View {
             )
         }
         .fullScreenCover(isPresented: $showingReplay) {
-            HandReplayView(hand: hand)
+            HandReplayView(hand: hand, userId: userId)
         }
     }
 }
@@ -1142,7 +1146,7 @@ struct SessionsTab: View {
                 }) {
                     HStack(spacing: 8) {
                         Image(systemName: "calendar")
-                            .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 16, weight: .medium))
                             .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                         
                         Text(showCalendarView ? "Hide Calendar" : "Show Calendar")
@@ -1420,7 +1424,7 @@ struct SessionsTab: View {
 // Beautiful animated empty state
 struct EmptySessionsView: View {
     @State private var isAnimating = false
-    
+
     var body: some View {
         VStack(spacing: 22) {
             Image(systemName: "calendar.badge.clock")
@@ -1465,7 +1469,7 @@ struct EnhancedSessionsSection: View {
             HStack(alignment: .center) {
                 Text(title)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.9)))
+                    .foregroundColor(Color.gray.opacity(0.85)) // Changed to greyish color
                 
                 Spacer()
                 
@@ -1691,7 +1695,7 @@ struct LuxuryCalendarView: View {
                 .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 1.0)))
                 .shadow(color: Color.black.opacity(0.15), radius: 10, y: 5)
         )
-        .onAppear {
+            .onAppear {
             // Initialize animation state
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 withAnimation(.easeOut(duration: 0.5)) {
@@ -1859,42 +1863,28 @@ struct EnhancedSessionSummaryRow: View {
     @State private var showingActions = false
     
     private func formatMoney(_ amount: Double) -> String {
-        return "$\(Int(amount))"
-    }
+            return "$\(abs(Int(amount)))"
+        }
     
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d"  // Shorter date format
         return formatter.string(from: date)
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header with game info and profit
             HStack(alignment: .center) {
-                // Game info with icon
-                HStack(spacing: 12) {
-                    // Game type icon
-                    ZStack {
-                        Circle()
-                            .fill(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)))
-                            .frame(width: 32, height: 32)
-                        
-                        Image(systemName: "suit.club.fill")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
-                    }
+                // Game info with icon removed
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.gameName)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
                     
-                    // Game name and stakes
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(session.gameName)
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                        
-                        Text(session.stakes)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundColor(Color.gray.opacity(0.8))
-                    }
+                    Text(session.stakes)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(Color.gray.opacity(0.8))
                 }
                 
                 Spacer()

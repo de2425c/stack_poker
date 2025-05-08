@@ -136,7 +136,7 @@ struct HomePage: View {
         .ignoresSafeArea(.keyboard)
         .fullScreenCover(isPresented: $showingReplay) {
             if let hand = replayHand {
-                HandReplayView(hand: hand)
+                HandReplayView(hand: hand, userId: userId)
             }
         }
         .sheet(isPresented: $showingSessionForm) {
@@ -225,11 +225,13 @@ struct TabBarButton: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 28, height: 28)
                     .padding(.top, 2) // Move icon up a bit
+                    .colorMultiply(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.85))
+                
                 Text(title)
                     .font(.system(size: 12, weight: .medium))
                     .padding(.top, -2) // Move text up a bit
+                    .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.85))
             }
-            .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .gray)
             .frame(maxWidth: .infinity)
         }
     }
@@ -910,26 +912,7 @@ struct ProfileEditView: View {
                                                     favoriteGame = game
                                                 }
                                             }) {
-                                                Text(game)
-                                                    .font(.system(size: 15, weight: favoriteGame == game ? .semibold : .medium, design: .default))
-                                                    .foregroundColor(favoriteGame == game ? .black : .white)
-                                                    .padding(.horizontal, 20)
-                                                    .padding(.vertical, 12)
-                                                    .background(
-                                                        RoundedRectangle(cornerRadius: 12)
-                                                            .fill(favoriteGame == game ?
-                                                                  Color(red: 123/255, green: 255/255, blue: 99/255) :
-                                                                  Color(red: 32/255, green: 35/255, blue: 40/255))
-                                                    )
-                                                    .overlay(
-                                                        RoundedRectangle(cornerRadius: 12)
-                                                            .stroke(
-                                                                favoriteGame == game ?
-                                                                Color.clear :
-                                                                Color.white.opacity(0.1),
-                                                                lineWidth: 1
-                                                            )
-                                                    )
+                                                gameSelectionView(for: game)
                                             }
                                             .buttonStyle(ScaleButtonStyle())
                                         }
@@ -1183,6 +1166,30 @@ struct ProfileEditView: View {
             print("Profile image deletion failed: \(error.localizedDescription). Continuing with account deletion.")
         }
     }
+    
+    // Helper method to create the game selection view
+    private func gameSelectionView(for game: String) -> some View {
+        let isSelected = favoriteGame == game
+        let textColor = isSelected ? Color.black : Color.white
+        let backgroundColor = isSelected ? 
+            Color(red: 123/255, green: 255/255, blue: 99/255) :
+            Color(red: 32/255, green: 35/255, blue: 40/255)
+        let borderColor = isSelected ? Color.clear : Color.white.opacity(0.1)
+        
+        return Text(game)
+            .font(.system(size: 15, weight: isSelected ? .semibold : .medium, design: .default))
+            .foregroundColor(textColor)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(backgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+    }
 }
 
 // MARK: - Supporting Views
@@ -1299,21 +1306,6 @@ struct ProfileTextEditor: View {
             .frame(height: 120)
             .animation(.easeOut(duration: 0.2), value: isActive)
         }
-    }
-}
-
-// Scale animation button style
-struct ScaleButtonStyle: ButtonStyle {
-    let scaleAmount: CGFloat
-    
-    init(scaleAmount: CGFloat = 0.97) {
-        self.scaleAmount = scaleAmount
-    }
-    
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? scaleAmount : 1)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 

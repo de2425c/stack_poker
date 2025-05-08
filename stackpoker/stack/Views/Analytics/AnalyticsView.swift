@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 
 struct AnalyticsCard: View {
     let title: String
@@ -10,6 +11,10 @@ struct AnalyticsCard: View {
     @State private var showingReplay = false
     @EnvironmentObject var postService: PostService
     @EnvironmentObject var userService: UserService
+    
+    private var userId: String {
+        Auth.auth().currentUser?.uid ?? ""
+    }
     
     private var hand: ParsedHandHistory {
         savedHand.hand
@@ -126,7 +131,7 @@ struct AnalyticsCard: View {
         }
         .buttonStyle(PlainButtonStyle())
         .sheet(isPresented: $showingReplay) {
-            HandReplayView(hand: hand)
+            HandReplayView(hand: hand, userId: userId)
                 .environmentObject(postService)
                 .environmentObject(userService)
         }

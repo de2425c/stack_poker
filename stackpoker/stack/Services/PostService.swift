@@ -362,4 +362,61 @@ class PostService: ObservableObject {
         
         return posts
     }
+    
+    // Get comments for a post
+    func getComments(for postId: String) async throws -> [Comment] {
+        let commentsRef = db.collection("posts").document(postId).collection("comments")
+        let snapshot = try await commentsRef.order(by: "createdAt", descending: false).getDocuments()
+        
+        return try snapshot.documents.compactMap { document in
+            var comment = try document.data(as: Comment.self)
+            comment.id = document.documentID
+            return comment
+        }
+    }
+    
+    // Add a comment to a post
+    func addComment(to postId: String, userId: String, username: String, profileImage: String?, content: String) async throws {
+        let postRef = db.collection("posts").document(postId)
+        let commentRef = postRef.collection("comments").document()
+        
+        let comment = Comment(
+            id: commentRef.documentID,
+            postId: postId,
+            userId: userId,
+            username: username,
+            profileImage: profileImage,
+            content: content
+        )
+        
+        try await commentRef.setData(from: comment)
+        
+        // Update comment count on the post
+        try await postRef.updateData(["comments": FieldValue.increment(Int64(1))])
+        
+        // Update local post object
+        await MainActor.run {
+            if let index = posts.firstIndex(where: { $0.id == postId }) {
+                posts[index].comments += 1
+            }
+        }
+    }
+    
+    // Delete a comment
+    func deleteComment(postId: String, commentId: String) async throws {
+        let postRef = db.collection("posts").document(postId)
+        let commentRef = postRef.collection("comments").document(commentId)
+        
+        try await commentRef.delete()
+        
+        // Update comment count on the post
+        try await postRef.updateData(["comments": FieldValue.increment(Int64(-1))])
+        
+        // Update local post object
+        await MainActor.run {
+            if let index = posts.firstIndex(where: { $0.id == postId }) {
+                posts[index].comments -= 1
+            }
+        }
+    }
 } 
