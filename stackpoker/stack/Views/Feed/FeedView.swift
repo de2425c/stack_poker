@@ -47,160 +47,105 @@ struct FeedView: View {
     
     var body: some View {
         let feedContent = ZStack {
-            // Use AppBackgroundView for the main background
-            AppBackgroundView(edges: .all)
+            // Use the AppBackgroundView for a rich background
+            AppBackgroundView()
+                .ignoresSafeArea()
             
             VStack(spacing: 0) {
                 // Feed content
                 if postService.isLoading && postService.posts.isEmpty {
-            VStack {
-                Spacer()
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .tint(.white)
-                            .padding(.bottom, 16)
+                    // Loading state - enhanced with animation
+                    VStack {
+                        Spacer()
+                        ZStack {
+                            Circle()
+                                .fill(Color.black.opacity(0.1))
+                                .frame(width: 80, height: 80)
+                            
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+                                .scaleEffect(1.5)
+                        }
+                        .shadow(color: Color.black.opacity(0.2), radius: 5)
                         
-                        Text("Loading posts...")
-                            .font(.headline)
+                        Text("Loading Feed")
+                            .font(.system(size: 18, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.8))
+                            .padding(.top, 16)
                         Spacer()
                     }
                 } else if postService.posts.isEmpty {
-                    VStack {
-                        Spacer()
-                        Image(systemName: "doc.text.image")
-                            .font(.system(size: 60))
-                            .foregroundColor(.gray.opacity(0.6))
-                            .padding(.bottom, 16)
-                        
-                        Text("No posts yet")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                            .padding(.bottom, 8)
-                        
-                        Text("Create a post or follow more players to see content in your feed")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                        Spacer()
-                    }
+                    // Empty feed state
+                    EmptyFeedView(showDiscoverUsers: {
+                        showingDiscoverUsers = true
+                    })
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 20) { // Increased spacing between posts
+                    // Twitter-like feed with posts
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(spacing: 0) { // Twitter has no spacing between posts
                             ForEach(postService.posts) { post in
-                                // Enhanced post card
-                                PostCardView(post: post)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 6) // Added vertical padding
-                                    .background(
-                                        // Glass effect background
-                                        RoundedRectangle(cornerRadius: 0)
-                                            .fill(Color.black.opacity(0.2))
-                                            .background(
-                                                // Subtle gradient overlay
-                                                LinearGradient(
-                                                    colors: [
-                                                        Color(red: 30/255, green: 30/255, blue: 40/255).opacity(0.35),
-                                                        Color(red: 15/255, green: 15/255, blue: 25/255).opacity(0.25)
-                                                    ],
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                )
-                                                .blendMode(.overlay)
-                                            )
-                                            .overlay(
-                                                // Subtle border
-                                                RoundedRectangle(cornerRadius: 0)
-                                                    .stroke(
-                                                        LinearGradient(
-                                                            colors: [
-                                                                Color.white.opacity(0.09),
-                                                                Color.white.opacity(0.05),
-                                                                Color.clear,
-                                                                Color.clear
-                                                            ],
-                                                            startPoint: .topLeading,
-                                                            endPoint: .bottomTrailing
-                                                        ),
-                                                        lineWidth: 1
-                                                    )
-                                            )
-                                    )
-                                    .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
-                                    .onTapGesture {
-                                        selectedPost = post
+                                Group {
+                                    if post.postType == .hand {
+                                        // Use the full card view with replay for hand posts
+                                        PostCardView(
+                                            post: post,
+                                            onLike: { likePost(post) },
+                                            onComment: { selectedPost = post },
+                                            onDelete: { deletePost(post) },
+                                            isCurrentUser: post.userId == userId,
+                                            userId: userId
+                                        )
+                                    } else {
+                                        // Use the basic card view without replay for regular posts
+                                        BasicPostCardView(
+                                            post: post,
+                                            onLike: { likePost(post) },
+                                            onComment: { selectedPost = post },
+                                            onDelete: { deletePost(post) },
+                                            isCurrentUser: post.userId == userId
+                                        )
                                     }
+                                }
+                                .contentShape(Rectangle()) // Make entire post tappable
+                                .onTapGesture {
+                                    selectedPost = post
+                                }
+                                .onAppear {
+                                    // Load more posts when reaching the end
+                                    if post.id == postService.posts.last?.id {
+                                        Task {
+                                            try? await postService.fetchMorePosts()
+                                        }
+                                    }
+                                }
+                                
+                                // Twitter-like divider between posts
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.06))
+                                    .frame(height: 0.5)
                             }
                             
-                            // Load more indicator
-                            if postService.hasMorePosts && !postService.posts.isEmpty {
-                                ProgressView()
-                                    .tint(.white.opacity(0.7))
-                                    .padding(.vertical, 20)
-                                    .onAppear {
-                                        postService.loadMorePosts()
-                                    }
+                            // Loading indicator at bottom when fetching more
+                            if postService.isLoading {
+                                HStack {
+                                    Spacer()
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.6))))
+                                        .scaleEffect(1.2)
+                                    Spacer()
+                                }
+                                .padding()
                             }
                             
-                            // Spacer at bottom
-                            Rectangle()
-                                .foregroundColor(.clear)
-                                .frame(height: 80) // Space for floating action button
+                            // Bottom padding for better scrolling experience
+                            Color.clear.frame(height: 100)
                         }
-                        .padding(.top, 16)
+                        .padding(.top, 1) // Minimal top padding
                     }
                     .refreshable {
-                        Task {
-                            await postService.refreshPosts()
-                        }
+                        // Pull to refresh
+                        await refreshFeed()
                     }
-                }
-            }
-            
-            // Floating action button for new post
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
-                            showingNewPost = true
-                        }
-                    }) {
-                        Image(systemName: "square.and.pencil")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundColor(.black)
-                            .frame(width: 60, height: 60)
-                            .background(
-                                ZStack {
-                                    Circle()
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [
-                                                    Color(red: 123/255, green: 255/255, blue: 99/255),
-                                                    Color(red: 150/255, green: 255/255, blue: 120/255)
-                                                ],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                    
-                                    Circle()
-                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                }
-                            )
-                            .shadow(
-                                color: Color(red: 123/255, green: 255/255, blue: 99/255, opacity: 0.4),
-                                radius: 10,
-                                x: 0,
-                                y: 4
-                            )
-                    }
-                    .buttonStyle(ScaleButtonStyle(scale: 0.9))
-                    .padding(.trailing, 24)
-                    .padding(.bottom, 24)
                 }
             }
         }
@@ -209,83 +154,44 @@ struct FeedView: View {
             feedContent
                 .navigationBarTitleDisplayMode(NavigationBarItem.TitleDisplayMode.inline)
                 .toolbar {
-                    // Leading: Feed title with animated gradient
+                    // Leading: Feed title with enhanced styling
                     ToolbarItem(placement: .navigationBarLeading) {
                         Text("FEED")
-                            .font(.system(size: 22, weight: .black, design: .rounded))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 123/255, green: 255/255, blue: 99/255),
-                                        Color(red: 140/255, green: 255/255, blue: 120/255),
-                                        Color(red: 160/255, green: 255/255, blue: 140/255)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .shadow(color: Color(red: 123/255, green: 255/255, blue: 99/255, opacity: 0.5), radius: 3, x: 0, y: 0)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundColor(Color.white)
                             .tracking(1.5)
+                            .shadow(color: Color.black.opacity(0.3), radius: 2, y: 1)
                             .padding(.leading, 4)
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
+                    }
+                    
+                    // Add post button in top right
+                    ToolbarItem(placement: .navigationBarTrailing) {
                         Button(action: {
-                            showingDiscoverUsers = true
+                            showingNewPost = true
                         }) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.9))
-                                .padding(10)
-                                .background(
-                                    Circle()
-                                        .fill(Color.black.opacity(0.3))
-                                        .overlay(
-                                            Circle()
-                                                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
-                                        )
-                                )
+                            Image(systemName: "plus")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
                         }
                     }
                 }
-                .toolbarBackground(
-                    // Custom toolbar background with glass effect
-                    ZStack {
-                        Color.black.opacity(0.75)
-                        
-                        // Subtle texture
-                        Rectangle()
-                            .fill(
-                                Color.white.opacity(0.03)
-                            )
-                            .blendMode(.overlay)
-                        
-                        // Bottom highlight
-                        VStack {
-                            Spacer()
-                            Rectangle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color.white.opacity(0.07),
-                                            Color.clear
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .frame(height: 1)
-                        }
-                    },
-                    for: .navigationBar
-                )
-                .toolbarBackground(.visible, for: .navigationBar)
+                .navigationBarBackground {
+                    Color(red: 14/255, green: 14/255, blue: 18/255).opacity(0.4)
+                        .blur(radius: 3)
+                        .ignoresSafeArea(edges: .top)
+                }
                 .onAppear {
+                    // Load posts when the view appears
                     if postService.posts.isEmpty {
                         Task {
-                            await postService.fetchPosts()
+                            try? await postService.fetchPosts()
                         }
                     }
+                }
+                .sheet(isPresented: $showingNewPost) {
+                    PostEditorView(userId: userId)
+                        .environmentObject(postService)
+                        .environmentObject(userService)
                 }
                 .sheet(isPresented: $showingDiscoverUsers) {
                     DiscoverUsersView(userId: userId)
@@ -303,139 +209,43 @@ struct FeedView: View {
         }
     }
     
-    // Enhance PostCardView
-    struct PostCardView: View {
-        let post: Post
-        @EnvironmentObject var postService: PostService
-        @EnvironmentObject var userService: UserService
-        
-        var body: some View {
-            VStack(alignment: .leading, spacing: 12) {
-                // User profile section
-                HStack(spacing: 12) {
-                    // Enhanced profile image
-                    AsyncImage(url: URL(string: post.authorProfileImage)) { phase in
-                        if let image = phase.image {
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } else if phase.error != nil {
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .foregroundColor(.gray)
-                        } else {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        }
-                    }
-                    .frame(width: 42, height: 42)
-                    .clipShape(Circle())
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.3),
-                                        Color.white.opacity(0.1)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1.5
-                            )
-                    )
-                    .shadow(color: Color.white.opacity(0.1), radius: 3, x: 0, y: 0)
-                    
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(post.authorUsername)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                        
-                        Text(post.createdAt.timeAgo())
-                            .font(.system(size: 13))
-                            .foregroundColor(.gray)
-                    }
-                    
-                    Spacer()
+    // Refresh the feed
+    private func refreshFeed() async {
+        isRefreshing = true
+        try? await postService.fetchPosts()
+        isRefreshing = false
+    }
+    
+    // Handle like action
+    private func likePost(_ post: Post) {
+        Task {
+            do {
+                if let postId = post.id {
+                    try await postService.toggleLike(postId: postId, userId: userId)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-                
-                // Post content - text with better styling
-                if !post.text.isEmpty {
-                    Text(post.text)
-                        .font(.system(size: 16))
-                        .foregroundColor(.white.opacity(0.9))
-                        .lineSpacing(5) // Better line spacing
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 16)
+            } catch {
+                print("Error liking post: \(error)")
+            }
+        }
+    }
+    
+    // Add deletePost function
+    private func deletePost(_ post: Post) {
+        Task {
+            do {
+                if let postId = post.id {
+                    try await postService.deletePost(postId: postId)
+                    // Refresh feed after deletion
+                    try await postService.fetchPosts()
                 }
-                
-                // Hand summary if exists
-                if post.hand != nil {
-                    HandSummaryView(hand: post.hand!, isHovered: false)
-                        .padding(.horizontal, 16)
-                }
-                
-                // Images if any
-                if !post.images.isEmpty {
-                    ImagesGalleryView(urls: post.images)
-                        .frame(maxHeight: 300)
-                        .cornerRadius(0)
-                }
-                
-                // Action buttons
-                HStack(spacing: 20) {
-                    // Like button
-                    Button(action: {
-                        if post.isLiked {
-                            Task {
-                                await postService.unlikePost(post)
-                            }
-                        } else {
-                            Task {
-                                await postService.likePost(post)
-                            }
-                        }
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: post.isLiked ? "heart.fill" : "heart")
-                                .font(.system(size: 18))
-                                .foregroundColor(post.isLiked ? Color(red: 255/255, green: 100/255, blue: 100/255) : .white.opacity(0.85))
-                            
-                            Text("\(post.likeCount)")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(.white.opacity(0.85))
-                        }
-                    }
-                    
-                    // Comment button
-                    Button(action: {
-                        // TBD for comment action
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "bubble.right")
-                                .font(.system(size: 18))
-                                .foregroundColor(.white.opacity(0.85))
-                            
-                            Text("\(post.commentCount)")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(.white.opacity(0.85))
-                        }
-                    }
-                    
-                    Spacer()
-                }
-                    .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
+            } catch {
+                print("Error deleting post: \(error)")
             }
         }
     }
 }
 
-// Basic Post Card View - For regular posts (without replay button)
+// Update BasicPostCardView to be more Twitter-like
 struct BasicPostCardView: View {
     let post: Post
     let onLike: () -> Void
@@ -457,10 +267,10 @@ struct BasicPostCardView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // User info header with delete button for user's own posts
-            HStack(spacing: 10) {
-                // Profile image with glow effect
+        VStack(alignment: .leading, spacing: 0) {
+            // Twitter-like header layout
+            HStack(alignment: .top, spacing: 12) {
+                // Profile image with Twitter-like styling
                 Group {
                     if let profileImage = post.profileImage {
                         KFImage(URL(string: profileImage))
@@ -469,226 +279,143 @@ struct BasicPostCardView: View {
                             }
                             .resizable()
                             .scaledToFill()
-                            .frame(width: 42, height: 42)
+                            .frame(width: 48, height: 48)
                             .clipShape(Circle())
-                            .overlay(
-                                Circle()
-                                    .stroke(
-                                        LinearGradient(
-                                            colors: [
-                                                Color.white.opacity(0.3),
-                                                Color.white.opacity(0.1)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1.5
-                                    )
-                            )
-                            .shadow(color: Color.black.opacity(0.2), radius: 2)
                     } else {
                         Circle()
                             .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                            .frame(width: 42, height: 42)
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                            )
+                            .frame(width: 48, height: 48)
                     }
                 }
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(post.username)
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    Text(post.createdAt.timeAgo())
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray.opacity(0.8))
-                }
-                
-                Spacer()
-                
-                // Delete button (only for user's own posts)
-                if isCurrentUser {
-                    Button(action: { showDeleteConfirm = true }) {
-                        Image(systemName: "trash")
+                    // Display name and username in Twitter-like format
+                    HStack(alignment: .center, spacing: 4) {
+                        Text(post.displayName ?? post.username)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            
+                        Text("@\(post.username)")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray.opacity(0.8))
+                        
+                        Text("·")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray.opacity(0.8))
+                            
+                        Text(post.createdAt.timeAgo())
                             .font(.system(size: 14))
                             .foregroundColor(.gray.opacity(0.7))
-                            .padding(8)
                     }
-                    .confirmationDialog(
-                        "Delete this post?",
-                        isPresented: $showDeleteConfirm,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Delete", role: .destructive) {
-                            onDelete()
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("This action cannot be undone.")
+                    
+                    // Post content directly under the username (Twitter-style)
+                    if !post.content.isEmpty {
+                        Text(post.content)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.95))
+                            .lineSpacing(5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
                     }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            
-            // Post content
-            VStack(alignment: .leading, spacing: 12) {
-                if !post.content.isEmpty {
-                    Text(post.content)
-                        .font(.system(size: 16))
-                        .foregroundColor(.white.opacity(0.95))
-                        .lineSpacing(5)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 4)
-                }
-                
-                // Images
-                if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(imageURLs, id: \.self) { url in
-                                if let imageUrl = URL(string: url) {
-                                    KFImage(imageUrl)
-                                        .placeholder {
-                                            Rectangle()
-                                                .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                                .overlay(
-                                                    ProgressView()
-                                                        .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                                )
-                                        }
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 200, height: 200)
-                                        .clipShape(Rectangle())
-                                        .overlay(
-                                            Rectangle()
-                                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                                        )
+                    
+                    // Images - Twitter-like layout
+                    if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(imageURLs, id: \.self) { url in
+                                    if let imageUrl = URL(string: url) {
+                                        KFImage(imageUrl)
+                                            .placeholder {
+                                                Rectangle()
+                                                    .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                                    .overlay(
+                                                        ProgressView()
+                                                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                                    )
+                                            }
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 200, height: 200)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10)) // Twitter has slightly rounded images
+                                    }
                                 }
                             }
                         }
-                        .padding(.top, 4)
+                        .padding(.top, 8)
                     }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            
-            // Light separator
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.0),
-                            Color.white.opacity(0.08),
-                            Color.white.opacity(0.0)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(height: 1)
-                .padding(.horizontal, 8)
-            
-            // Actions - No replay button
-            HStack(spacing: 24) {
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        animateLike = true
-                        isLiked.toggle()
-                        onLike()
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            animateLike = false
+                    
+                    // Twitter-like actions bar
+                    HStack(spacing: 48) {
+                        Button(action: onComment) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "bubble.left")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.gray.opacity(0.7))
+                                
+                                Text("\(post.comments)")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.gray.opacity(0.7))
+                            }
                         }
-                    }
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: isLiked ? "heart.fill" : "heart")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(isLiked ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .gray.opacity(0.7))
-                            .scaleEffect(animateLike ? 1.3 : 1.0)
                         
-                        Text("\(post.likes)")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.gray.opacity(0.8))
-                    }
-                }
-                
-                Button(action: onComment) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "bubble.left")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.gray.opacity(0.7))
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                animateLike = true
+                                isLiked.toggle()
+                                onLike()
+                                
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    animateLike = false
+                                }
+                            }
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: isLiked ? "heart.fill" : "heart")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
+                                    .scaleEffect(animateLike ? 1.3 : 1.0)
+                                
+                                Text("\(post.likes)")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.gray.opacity(0.7))
+                            }
+                        }
                         
-                        Text("\(post.comments)")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.gray.opacity(0.8))
+                        // Delete option (only for user's own posts) - more subtle
+                        if isCurrentUser {
+                            Button(action: { showDeleteConfirm = true }) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.gray.opacity(0.7))
+                            }
+                            .confirmationDialog(
+                                "Delete this post?",
+                                isPresented: $showDeleteConfirm,
+                                titleVisibility: .visible
+                            ) {
+                                Button("Delete", role: .destructive) {
+                                    onDelete()
+                                }
+                                Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("This action cannot be undone.")
+                            }
+                        }
+                        
+                        Spacer()
                     }
+                    .padding(.top, 12)
                 }
-                
-                Spacer()
+                .padding(.trailing, 2)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
-                    .background(
-            // Refined card background with enhanced gradient and glass effect
-            ZStack {
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color(red: 22/255, green: 22/255, blue: 28/255),
-                                Color(red: 25/255, green: 25/255, blue: 32/255)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                
-                // Top highlight
-                VStack {
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.07),
-                                    Color.white.opacity(0.0)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(height: 1.5)
-                    Spacer()
-                }
-                
-                // Subtle edge highlights
-                Rectangle()
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.12),
-                                Color.white.opacity(0.06),
-                                Color.white.opacity(0.02),
-                                Color.white.opacity(0.0)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            }
-        )
+        .background(Color(red: 18/255, green: 18/255, blue: 24/255)) // More neutral Twitter-like background
     }
 }
 
-// Post Card View - Enhanced version with replay button for hand posts
+// Update PostCardView to match the Twitter-like layout of BasicPostCardView
 struct PostCardView: View {
     let post: Post
     let onLike: () -> Void
@@ -713,10 +440,10 @@ struct PostCardView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // User info header with delete button
-            HStack(spacing: 10) {
-                // Profile image with glow effect
+        VStack(alignment: .leading, spacing: 0) {
+            // Twitter-like header layout
+            HStack(alignment: .top, spacing: 12) {
+                // Profile image with Twitter-like styling
                 Group {
                     if let profileImage = post.profileImage {
                         KFImage(URL(string: profileImage))
@@ -725,249 +452,157 @@ struct PostCardView: View {
                             }
                             .resizable()
                             .scaledToFill()
-                            .frame(width: 42, height: 42)
+                            .frame(width: 48, height: 48)
                             .clipShape(Circle())
-                            .overlay(
-                                Circle()
-                                    .stroke(
-                                        LinearGradient(
-                                            colors: [
-                                                Color.white.opacity(0.3),
-                                                Color.white.opacity(0.1)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1.5
-                                    )
-                            )
-                            .shadow(color: Color.black.opacity(0.2), radius: 2)
                     } else {
                         Circle()
                             .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                            .frame(width: 42, height: 42)
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                            )
+                            .frame(width: 48, height: 48)
                     }
                 }
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(post.username)
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    Text(post.createdAt.timeAgo())
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray.opacity(0.8))
-                }
-                
-                Spacer()
-                
-                // Delete button (only for user's own posts)
-                if isCurrentUser {
-                    Button(action: { showDeleteConfirm = true }) {
-                        Image(systemName: "trash")
+                    // Display name and username in Twitter-like format
+                    HStack(alignment: .center, spacing: 4) {
+                        Text(post.displayName ?? post.username)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            
+                        Text("@\(post.username)")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray.opacity(0.8))
+                        
+                        Text("·")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray.opacity(0.8))
+                            
+                        Text(post.createdAt.timeAgo())
                             .font(.system(size: 14))
                             .foregroundColor(.gray.opacity(0.7))
-                            .padding(8)
                     }
-                    .confirmationDialog(
-                        "Delete this post?",
-                        isPresented: $showDeleteConfirm,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Delete", role: .destructive) {
-                            onDelete()
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("This action cannot be undone.")
+                    
+                    // Post content directly under the username (Twitter-style)
+                    if !post.content.isEmpty {
+                        Text(post.content)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.95))
+                            .lineSpacing(5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
                     }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            
-            // Post content
-            VStack(alignment: .leading, spacing: 12) {
-                if !post.content.isEmpty {
-                    Text(post.content)
-                        .font(.system(size: 16))
-                        .foregroundColor(.white.opacity(0.95))
-                        .lineSpacing(5)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 4)
-                }
-                
-                // Hand post content with enhanced styling
-                if post.postType == .hand, let hand = post.handHistory {
-                    HandSummaryView(hand: hand, showReplayButton: false)
-                        .padding(.top, 4)
-                }
-                
-                // Images
-                if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(imageURLs, id: \.self) { url in
-                                if let imageUrl = URL(string: url) {
-                                    KFImage(imageUrl)
-                                        .placeholder {
-                                            Rectangle()
-                                                .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                                .overlay(
-                                                    ProgressView()
-                                                        .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                                )
-                                        }
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 200, height: 200)
-                                        .clipShape(Rectangle())
-                                        .overlay(
-                                            Rectangle()
-                                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                                        )
+                    
+                    // Hand post content
+                    if post.postType == .hand, let hand = post.handHistory {
+                        HandSummaryView(hand: hand, showReplayButton: false)
+                            .padding(.top, 8)
+                    }
+                    
+                    // Images - Twitter-like layout
+                    if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(imageURLs, id: \.self) { url in
+                                    if let imageUrl = URL(string: url) {
+                                        KFImage(imageUrl)
+                                            .placeholder {
+                                                Rectangle()
+                                                    .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                                    .overlay(
+                                                        ProgressView()
+                                                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                                    )
+                                            }
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 200, height: 200)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10)) // Twitter has slightly rounded images
+                                    }
                                 }
                             }
                         }
-                        .padding(.top, 4)
+                        .padding(.top, 8)
                     }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            
-            // Light separator
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.0),
-                            Color.white.opacity(0.08),
-                            Color.white.opacity(0.0)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(height: 1)
-                .padding(.horizontal, 8)
-            
-            // Actions
-            HStack(spacing: 24) {
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        animateLike = true
-                        isLiked.toggle()
-                        onLike()
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            animateLike = false
+                    
+                    // Twitter-like actions bar
+                    HStack(spacing: 36) {
+                        Button(action: onComment) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "bubble.left")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.gray.opacity(0.7))
+                                
+                                Text("\(post.comments)")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.gray.opacity(0.7))
+                            }
                         }
-                    }
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: isLiked ? "heart.fill" : "heart")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(isLiked ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .gray.opacity(0.7))
-                            .scaleEffect(animateLike ? 1.3 : 1.0)
                         
-                        Text("\(post.likes)")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.gray.opacity(0.8))
-                    }
-                }
-                
-                Button(action: onComment) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "bubble.left")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.gray.opacity(0.7))
-                        
-                        Text("\(post.comments)")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.gray.opacity(0.8))
-                    }
-                }
-                
-                if post.postType == .hand {
-                    Button(action: { showingReplay = true }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "play.circle")
-                                .font(.system(size: 16, weight: .semibold))
-                            Text("Replay")
-                                .font(.system(size: 14, weight: .medium))
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                animateLike = true
+                                isLiked.toggle()
+                                onLike()
+                                
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    animateLike = false
+                                }
+                            }
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: isLiked ? "heart.fill" : "heart")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
+                                    .scaleEffect(animateLike ? 1.3 : 1.0)
+                                
+                                Text("\(post.likes)")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.gray.opacity(0.7))
+                            }
                         }
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [
-                                    Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.9)),
-                                    Color(UIColor(red: 123/255, green: 230/255, blue: 99/255, alpha: 0.9))
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        
+                        if post.postType == .hand {
+                            Button(action: { showingReplay = true }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.circle")
+                                        .font(.system(size: 16))
+                                    Text("Replay")
+                                        .font(.system(size: 14, weight: .medium))
+                                }
+                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+                            }
+                        }
+                        
+                        // Delete option (only for user's own posts)
+                        if isCurrentUser {
+                            Button(action: { showDeleteConfirm = true }) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.gray.opacity(0.7))
+                            }
+                            .confirmationDialog(
+                                "Delete this post?",
+                                isPresented: $showDeleteConfirm,
+                                titleVisibility: .visible
+                            ) {
+                                Button("Delete", role: .destructive) {
+                                    onDelete()
+                                }
+                                Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("This action cannot be undone.")
+                            }
+                        }
+                        
+                        Spacer()
                     }
+                    .padding(.top, 12)
                 }
-                
-                Spacer()
+                .padding(.trailing, 2)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
-        .background(
-            // Refined card background with enhanced gradient and glass effect
-            ZStack {
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color(red: 22/255, green: 22/255, blue: 28/255),
-                                Color(red: 25/255, green: 25/255, blue: 32/255)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                
-                // Top highlight
-                VStack {
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.07),
-                                    Color.white.opacity(0.0)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(height: 1.5)
-                    Spacer()
-                }
-                
-                // Subtle edge highlights
-                Rectangle()
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.12),
-                                Color.white.opacity(0.06),
-                                Color.white.opacity(0.02),
-                                Color.white.opacity(0.0)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            }
-        )
+        .background(Color(red: 18/255, green: 18/255, blue: 24/255)) // More neutral Twitter-like background
         .sheet(isPresented: $showingReplay) {
             if let hand = post.handHistory {
                 HandReplayView(hand: hand, userId: userId)
@@ -979,104 +614,94 @@ struct PostCardView: View {
 // Empty Feed View
 struct EmptyFeedView: View {
     let showDiscoverUsers: () -> Void
-    @State private var animateBackground = false
+    @State private var animateGlow = false
     
     var body: some View {
         ZStack {
-            // Animated circular gradient in background
-            Circle()
-                .fill(
-                    RadialGradient(
-                        gradient: Gradient(colors: [
-                            Color(red: 123/255, green: 255/255, blue: 99/255, opacity: 0.03),
-                            Color(red: 0/255, green: 0/255, blue: 0/255, opacity: 0.0)
-                        ]),
-                        center: .center,
-                        startRadius: 5,
-                        endRadius: 300
-                    )
-                )
-                .scaleEffect(animateBackground ? 1.1 : 0.9)
-                .opacity(animateBackground ? 0.7 : 0.3)
-                .blur(radius: 20)
-        .onAppear {
-                    withAnimation(.easeInOut(duration: 5).repeatForever(autoreverses: true)) {
-                        animateBackground.toggle()
+            // Additional background elements
+            VStack {
+                Spacer()
+                HStack {
+                    // Floating cards in the background
+                    ForEach(0..<3) { index in
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.white.opacity(0.03))
+                            .frame(width: 120, height: 180)
+                            .rotationEffect(.degrees(Double(index * 15 - 15)))
+                            .offset(x: CGFloat(index * 40 - 40), y: CGFloat(index * 10))
+                            .blur(radius: 2)
                     }
                 }
+                .offset(y: 120)
+                Spacer()
+            }
             
-            VStack(spacing: 36) {
+            VStack(spacing: 40) {
                 Spacer()
                 
-                // Icon with animation
+                // Enhanced empty state icon with animation
                 ZStack {
+                    // Glow effect
                     Circle()
-                        .fill(Color(red: 22/255, green: 22/255, blue: 30/255))
-                        .frame(width: 120, height: 120)
-                        .shadow(color: Color.black.opacity(0.3), radius: 20)
+                        .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.2)))
+                        .frame(width: 160, height: 160)
+                        .scaleEffect(animateGlow ? 1.1 : 0.9)
+                        .opacity(animateGlow ? 0.6 : 0.3)
+                        .blur(radius: 30)
+                    
+                    Circle()
+                        .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.1)))
+                        .frame(width: 140, height: 140)
                     
                     Image(systemName: "newspaper")
-                        .font(.system(size: 50))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 123/255, green: 255/255, blue: 99/255, opacity: 0.7),
-                                    Color(red: 123/255, green: 255/255, blue: 99/255, opacity: 0.4)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        .font(.system(size: 70))
+                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.3)))
                 }
-                .shadow(color: Color(red: 123/255, green: 255/255, blue: 99/255, opacity: 0.2), radius: 15)
+                .shadow(color: Color.black.opacity(0.2), radius: 10)
+                .onAppear {
+                    withAnimation(Animation.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
+                        animateGlow = true
+                    }
+                }
                 
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
                     Text("Your feed is empty")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [
-                                    Color.white,
-                                    Color.white.opacity(0.7)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
                     
                     Text("Follow other players or create a post to\nstart seeing content here")
                         .font(.system(size: 17, weight: .medium, design: .rounded))
-                        .foregroundColor(.gray.opacity(0.8))
+                        .foregroundColor(.gray)
                         .multilineTextAlignment(.center)
-                        .lineSpacing(4)
-                        .padding(.horizontal, 20)
+                        .lineSpacing(6)
                 }
                 
                 Button(action: showDiscoverUsers) {
-                    Text("Find Players")
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
-                        .foregroundColor(.black)
-                        .padding(.vertical, 16)
-                        .padding(.horizontal, 40)
-                        .background(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 123/255, green: 255/255, blue: 99/255),
-                                    Color(red: 150/255, green: 255/255, blue: 120/255)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+                    HStack(spacing: 10) {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 18))
+                        
+                        Text("Find Players")
+                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundColor(.black)
+                    .padding(.vertical, 16)
+                    .padding(.horizontal, 40)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)),
+                                Color(UIColor(red: 100/255, green: 230/255, blue: 85/255, alpha: 1.0))
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-                        .clipShape(Capsule())
-                        .shadow(
-                            color: Color(red: 123/255, green: 255/255, blue: 99/255, opacity: 0.4),
-                            radius: 10,
-                            x: 0,
-                            y: 5
-                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                        .shadow(color: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.4)), radius: 8, y: 3)
+                    )
                 }
-                .buttonStyle(ScaleButtonStyle(scale: 0.96))
+                .buttonStyle(ScaleButtonStyle())
+                .padding(.top, 16)
                 
                 Spacer()
             }
@@ -1112,11 +737,12 @@ struct PostDetailView: View {
     
     var body: some View {
         ZStack {
-            // Use AppBackgroundView instead of plain color
-            AppBackgroundView(edges: .all)
+            // Use AppBackgroundView for consistent design
+            AppBackgroundView()
+                .ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Top header bar
+                // Top header bar with enhanced styling
                 HStack {
                     Button(action: { dismiss() }) {
                         Image(systemName: "xmark")
@@ -1125,7 +751,8 @@ struct PostDetailView: View {
                             .padding(12)
                             .background(
                                 Circle()
-                                    .fill(Color.black.opacity(0.3))
+                                    .fill(Color.black.opacity(0.25))
+                                    .shadow(color: .black.opacity(0.2), radius: 2)
                             )
                     }
                     
@@ -1139,44 +766,25 @@ struct PostDetailView: View {
                                 .padding(12)
                                 .background(
                                     Circle()
-                                        .fill(Color.black.opacity(0.3))
+                                        .fill(Color.black.opacity(0.25))
+                                        .shadow(color: .black.opacity(0.2), radius: 2)
                                 )
                         }
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
                 .background(
-                    // Enhanced glass effect header
-                    ZStack {
-                        Rectangle()
-                            .fill(Color(red: 16/255, green: 16/255, blue: 20/255, opacity: 0.92))
-                            .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
-                            
-                        // Subtle highlight at bottom edge
-                        VStack {
-                            Spacer()
-                            Rectangle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color.white.opacity(0.08),
-                                            Color.white.opacity(0.0)
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .frame(height: 1)
-                        }
-                    }
+                    Rectangle()
+                        .fill(Color(red: 16/255, green: 16/255, blue: 20/255).opacity(0.8))
+                        .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
                 )
                 
-                // Content area
+                // Content area with enhanced styling
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 20) {
-                        // Post header
+                        // Post header with enhanced profile image
                         HStack(spacing: 12) {
                             // Profile image
                             Group {
@@ -1187,60 +795,103 @@ struct PostDetailView: View {
                                         }
                                         .resizable()
                                         .scaledToFill()
-                                        .frame(width: 46, height: 46)
+                                        .frame(width: 50, height: 50)
                                         .clipShape(Circle())
+                                        .overlay(
+                                            Circle()
+                                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                        )
+                                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
                                 } else {
                                     Circle()
                                         .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                        .frame(width: 46, height: 46)
+                                        .frame(width: 50, height: 50)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                        )
+                                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
                                 }
                             }
                             
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(post.username)
-                                    .font(.system(size: 17, weight: .bold))
-                                    .foregroundColor(.white)
+                            VStack(alignment: .leading, spacing: 3) {
+                                // Display name and username in format: "DisplayName @username"
+                                HStack(spacing: 4) {
+                                    Text(post.displayName ?? post.username)
+                                        .font(.system(size: 18, weight: .bold))
+                                        .foregroundColor(.white)
+                                        
+                                    Text("@\(post.username)")
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.gray.opacity(0.8))
+                                }
                                 
                                 Text(post.createdAt.timeAgo())
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.gray.opacity(0.8))
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.gray.opacity(0.6))
                             }
                             
                             Spacer()
                         }
                         .padding(.horizontal, 16)
-                        .padding(.top, 16)
+                        .padding(.top, 20)
                         
-                        // Post content
-                        VStack(alignment: .leading, spacing: 16) {
+                        // Post content with enhanced styling
+                        VStack(alignment: .leading, spacing: 18) {
                             if !post.content.isEmpty {
                                 Text(post.content)
                                     .font(.system(size: 17))
                                     .foregroundColor(.white.opacity(0.95))
                                     .lineSpacing(6)
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 16)
                             }
                             
-                            // Hand post content
+                            // Hand post content - with showReplayButton set to false
                             if post.postType == .hand, let hand = post.handHistory {
-                                HandSummaryView(hand: hand, onReplayTap: { showingReplay = true })
+                                HandSummaryView(hand: hand, showReplayButton: false)
                                     .padding(.top, 4)
+                                    .padding(.horizontal, 16)
                             }
                             
-                            // Images
+                            // Images with enhanced styling
                             if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                                ImagesGalleryView(
-                                    imageURLs: imageURLs,
-                                    onImageTap: { url in
-                                        selectedImageURL = url
-                                        showingFullScreenImage = true
+                                VStack(alignment: .leading) {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 12) {
+                                            ForEach(imageURLs, id: \.self) { url in
+                                                if let imageUrl = URL(string: url) {
+                                                    KFImage(imageUrl)
+                                                        .placeholder {
+                                                            ZStack {
+                                                                Rectangle()
+                                                                    .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                            }
+                                                        }
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                        .frame(width: 250, height: 220)
+                                                        .clipShape(Rectangle())
+                                                        .shadow(color: .black.opacity(0.2), radius: 5, y: 2)
+                                                        .contentShape(Rectangle())
+                                                        .onTapGesture {
+                                                            selectedImageURL = url
+                                                            showingFullScreenImage = true
+                                                        }
+                                                }
+                                            }
+                                        }
+                                        .padding(.leading, 16)
+                                        .padding(.trailing, 8)
                                     }
-                                )
-                                .padding(.top, 4)
+                                }
+                                .padding(.top, 8)
                             }
                             
-                            // Actions
-                            HStack(spacing: 30) {
+                            // Actions with enhanced styling - but no replay button
+                            HStack(spacing: 32) {
                                 Button(action: {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                         animateLike = true
@@ -1252,91 +903,123 @@ struct PostDetailView: View {
                                         }
                                     }
                                 }) {
-                                    HStack(spacing: 8) {
+                                    HStack(spacing: 10) {
                                         Image(systemName: isLiked ? "heart.fill" : "heart")
-                                            .font(.system(size: 18))
-                                            .foregroundColor(isLiked ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .gray.opacity(0.7))
+                                            .font(.system(size: 20))
+                                            .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
                                             .scaleEffect(animateLike ? 1.3 : 1.0)
                                         
                                         Text("\(post.likes)")
-                                            .font(.system(size: 15, weight: .medium))
-                                            .foregroundColor(.gray.opacity(0.8))
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.gray.opacity(0.9))
                                     }
                                 }
                                 
-                                HStack(spacing: 8) {
+                                HStack(spacing: 10) {
                                     Image(systemName: "bubble.left")
-                                        .font(.system(size: 18))
+                                        .font(.system(size: 20))
                                         .foregroundColor(.gray.opacity(0.7))
                                     
                                     Text("\(post.comments)")
-                                        .font(.system(size: 15, weight: .medium))
-                                        .foregroundColor(.gray.opacity(0.8))
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.gray.opacity(0.9))
                                 }
+                                
+                                // Removed the Replay button here
                                 
                                 Spacer()
                             }
-                            .padding(.top, 8)
+                            .padding(.top, 12)
+                            .padding(.horizontal, 16)
                         }
-                        .padding(.horizontal, 16)
                         
                         Divider()
                             .background(Color.white.opacity(0.1))
                             .padding(.vertical, 16)
                         
-                        // Comments section
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Comments")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 16)
+                        // Comments section with enhanced styling
+                        VStack(alignment: .leading, spacing: 20) {
+                            HStack {
+                                Text("Comments")
+                                    .font(.system(size: 20, weight: .bold))
+                                    .foregroundColor(.white)
+                                
+                                Spacer()
+                                
+                                Text("\(comments.count)")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.1)))
+                                    )
+                            }
+                            .padding(.horizontal, 16)
                             
                             if isLoadingComments {
-                                // Loading state
+                                // Loading state with enhanced styling
                                 HStack {
                                     Spacer()
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.6))))
-                                        .scaleEffect(1.2)
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.black.opacity(0.1))
+                                            .frame(width: 50, height: 50)
+                                        
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8))))
+                                            .scaleEffect(1.2)
+                                    }
                                     Spacer()
                                 }
-                                .padding()
+                                .padding(.vertical, 30)
                             } else if comments.isEmpty {
-                                // No comments state
+                                // No comments state with enhanced styling
                                 HStack {
                                     Spacer()
-                                    VStack(spacing: 12) {
-                                        Image(systemName: "bubble.left")
-                                            .font(.system(size: 36))
-                                            .foregroundColor(.gray.opacity(0.3))
+                                    VStack(spacing: 16) {
+                                        ZStack {
+                                            Circle()
+                                                .fill(Color.black.opacity(0.1))
+                                                .frame(width: 70, height: 70)
+                                            
+                                            Image(systemName: "bubble.left")
+                                                .font(.system(size: 36))
+                                                .foregroundColor(.gray.opacity(0.3))
+                                        }
                                         
-                                        Text("No comments yet")
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(.gray.opacity(0.7))
-                                        
-                                        Text("Be the first to comment")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.gray.opacity(0.5))
+                                        VStack(spacing: 8) {
+                                            Text("No comments yet")
+                                                .font(.system(size: 18, weight: .medium))
+                                                .foregroundColor(.white.opacity(0.8))
+                                            
+                                            Text("Be the first to comment")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.gray.opacity(0.6))
+                                        }
                                     }
-                                    .padding(.vertical, 30)
+                                    .padding(.vertical, 40)
                                     Spacer()
                                 }
                             } else {
-                                // Comments list
-                                ForEach(comments) { comment in
-                                    CommentRow(
-                                        comment: comment,
-                                        isCurrentUser: comment.userId == userId,
-                                        onDelete: {
-                                            deleteComment(comment.id ?? "")
+                                // Comments list with enhanced styling
+                                VStack(spacing: 18) {
+                                    ForEach(comments) { comment in
+                                        CommentRow(
+                                            comment: comment,
+                                            isCurrentUser: comment.userId == userId,
+                                            onDelete: {
+                                                deleteComment(comment.id ?? "")
+                                            }
+                                        )
+                                        .padding(.horizontal, 16)
+                                        
+                                        if comment.id != comments.last?.id {
+                                            Divider()
+                                                .background(Color.white.opacity(0.06))
+                                                .padding(.horizontal, 16)
                                         }
-                                    )
-                                    .padding(.horizontal, 16)
-                                    
-                                    if comment.id != comments.last?.id {
-                                        Divider()
-                                            .background(Color.white.opacity(0.06))
-                                            .padding(.horizontal, 16)
                                     }
                                 }
                                 .padding(.bottom, 16)
@@ -1349,30 +1032,60 @@ struct PostDetailView: View {
                     }
                 }
                 
-                // Comment input field
+                // Comment input field with enhanced styling
                 VStack(spacing: 0) {
                     Divider()
                         .background(Color.white.opacity(0.1))
                     
-                    HStack(spacing: 12) {
-                        TextField("Add a comment...", text: $newCommentText)
-                            .font(.system(size: 16))
-                            .padding(12)
-                            .background(Color(red: 25/255, green: 25/255, blue: 30/255))
-                            .cornerRadius(20)
-                            .foregroundColor(.white)
-                            .focused($isCommentFieldFocused)
-                        
-                        Button(action: addComment) {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 30))
-                                .foregroundColor(newCommentText.isEmpty ? Color.gray.opacity(0.5) : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    HStack(spacing: 14) {
+                        // User avatar for comment input
+                        if let profileImageURL = userService.currentUserProfile?.avatarURL {
+                            KFImage(URL(string: profileImageURL))
+                                .placeholder {
+                                    Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                }
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 32, height: 32)
+                                .clipShape(Circle())
+                        } else {
+                            Circle()
+                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                .frame(width: 32, height: 32)
                         }
-                        .disabled(newCommentText.isEmpty)
+                        
+                        ZStack(alignment: .trailing) {
+                            TextField("Add a comment...", text: $newCommentText)
+                                .font(.system(size: 16))
+                                .padding(12)
+                                .background(Color(red: 25/255, green: 25/255, blue: 30/255))
+                                .cornerRadius(20)
+                                .foregroundColor(.white)
+                                .focused($isCommentFieldFocused)
+                            
+                            if !newCommentText.isEmpty {
+                                Button(action: addComment) {
+                                    Image(systemName: "arrow.up.circle.fill")
+                                        .font(.system(size: 26))
+                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                        .padding(.trailing, 8)
+                                }
+                            }
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
-                    .background(Color(red: 18/255, green: 18/255, blue: 22/255))
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(red: 20/255, green: 20/255, blue: 24/255),
+                                Color(red: 18/255, green: 18/255, blue: 22/255)
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .shadow(color: .black.opacity(0.3), radius: 5, y: -2)
+                    )
                 }
                 .offset(y: -keyboardHeight > 0 ? -keyboardHeight + (UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0) : 0)
                 .animation(.easeOut(duration: 0.16), value: keyboardHeight)
@@ -1523,7 +1236,7 @@ struct PostDetailView: View {
     }
 }
 
-// CommentRow
+// CommentRow with enhanced styling
 struct CommentRow: View {
     let comment: Comment
     let isCurrentUser: Bool
@@ -1531,8 +1244,8 @@ struct CommentRow: View {
     @State private var showDeleteConfirm = false
     
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Profile image
+        HStack(alignment: .top, spacing: 14) {
+            // Profile image with enhanced styling
             Group {
                 if let profileImage = comment.profileImage {
                     KFImage(URL(string: profileImage))
@@ -1541,20 +1254,34 @@ struct CommentRow: View {
                         }
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 34, height: 34)
+                        .frame(width: 36, height: 36)
                         .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
                 } else {
                     Circle()
                         .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                        .frame(width: 34, height: 34)
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
                 }
             }
             
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .center) {
                     Text(comment.username)
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
+                    
+                    if isCurrentUser {
+                        Text("(You)")
+                            .font(.system(size: 13))
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.7)))
+                    }
                     
                     Spacer()
                     
@@ -1597,12 +1324,11 @@ struct CommentRow: View {
 
 // Scale Button Style - Enhanced with smoother animation
 struct ScaleButtonStyle: ButtonStyle {
-    let scale: CGFloat
-    
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -1729,5 +1455,28 @@ struct FullScreenImageView: View {
                     onDismiss()
                 }
         )
+    }
+}
+
+// Add this extension at the end of the file
+extension View {
+    func navigationBarBackground<Background: View>(@ViewBuilder _ background: () -> Background) -> some View {
+        self.modifier(NavigationBarBackground(background: background()))
+    }
+}
+
+struct NavigationBarBackground<Background>: ViewModifier where Background: View {
+    let background: Background
+    
+    func body(content: Content) -> some View {
+        ZStack {
+            content
+            VStack {
+                background
+                    .edgesIgnoringSafeArea([.horizontal, .top])
+                    .frame(height: 0)
+                Spacer()
+            }
+        }
     }
 } 

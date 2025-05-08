@@ -912,7 +912,26 @@ struct ProfileEditView: View {
                                                     favoriteGame = game
                                                 }
                                             }) {
-                                                gameSelectionView(for: game)
+                                                Text(game)
+                                                    .font(.system(size: 15, weight: favoriteGame == game ? .semibold : .medium, design: .default))
+                                                    .foregroundColor(favoriteGame == game ? .black : .white)
+                                                    .padding(.horizontal, 20)
+                                                    .padding(.vertical, 12)
+                                                    .background(
+                                                        RoundedRectangle(cornerRadius: 12)
+                                                            .fill(favoriteGame == game ?
+                                                                  Color(red: 123/255, green: 255/255, blue: 99/255) :
+                                                                  Color(red: 32/255, green: 35/255, blue: 40/255))
+                                                    )
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 12)
+                                                            .stroke(
+                                                                favoriteGame == game ?
+                                                                Color.clear :
+                                                                Color.white.opacity(0.1),
+                                                                lineWidth: 1
+                                                            )
+                                                    )
                                             }
                                             .buttonStyle(ScaleButtonStyle())
                                         }
@@ -1166,30 +1185,6 @@ struct ProfileEditView: View {
             print("Profile image deletion failed: \(error.localizedDescription). Continuing with account deletion.")
         }
     }
-    
-    // Helper method to create the game selection view
-    private func gameSelectionView(for game: String) -> some View {
-        let isSelected = favoriteGame == game
-        let textColor = isSelected ? Color.black : Color.white
-        let backgroundColor = isSelected ? 
-            Color(red: 123/255, green: 255/255, blue: 99/255) :
-            Color(red: 32/255, green: 35/255, blue: 40/255)
-        let borderColor = isSelected ? Color.clear : Color.white.opacity(0.1)
-        
-        return Text(game)
-            .font(.system(size: 15, weight: isSelected ? .semibold : .medium, design: .default))
-            .foregroundColor(textColor)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(backgroundColor)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(borderColor, lineWidth: 1)
-            )
-    }
 }
 
 // MARK: - Supporting Views
@@ -1308,6 +1303,8 @@ struct ProfileTextEditor: View {
         }
     }
 }
+
+
 
 struct ProfileImageView: View {
     let url: URL
