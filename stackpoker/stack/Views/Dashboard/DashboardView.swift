@@ -84,7 +84,7 @@ struct DashboardView: View {
     var body: some View {
             ZStack {
             // Background color
-            Color(UIColor(red: 18/255, green: 18/255, blue: 23/255, alpha: 1.0))
+            AppBackgroundView()
                     .ignoresSafeArea()
                 
             ScrollView {

@@ -9,6 +9,8 @@ struct UserGroup: Identifiable, Codable, Hashable {
     let ownerId: String
     var avatarURL: String?
     var memberCount: Int
+    var lastMessage: String?
+    var lastMessageTime: Date?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -18,9 +20,11 @@ struct UserGroup: Identifiable, Codable, Hashable {
         case ownerId
         case avatarURL
         case memberCount
+        case lastMessage
+        case lastMessageTime
     }
     
-    init(id: String, name: String, description: String?, createdAt: Date, ownerId: String, avatarURL: String? = nil, memberCount: Int = 1) {
+    init(id: String, name: String, description: String?, createdAt: Date, ownerId: String, avatarURL: String? = nil, memberCount: Int = 1, lastMessage: String? = nil, lastMessageTime: Date? = nil) {
         self.id = id
         self.name = name
         self.description = description
@@ -28,6 +32,8 @@ struct UserGroup: Identifiable, Codable, Hashable {
         self.ownerId = ownerId
         self.avatarURL = avatarURL
         self.memberCount = memberCount
+        self.lastMessage = lastMessage
+        self.lastMessageTime = lastMessageTime
     }
     
     init(dictionary: [String: Any], id: String) throws {
@@ -44,6 +50,8 @@ struct UserGroup: Identifiable, Codable, Hashable {
         self.ownerId = ownerId
         self.avatarURL = dictionary["avatarURL"] as? String
         self.memberCount = dictionary["memberCount"] as? Int ?? 1
+        self.lastMessage = dictionary["lastMessage"] as? String
+        self.lastMessageTime = (dictionary["lastMessageTime"] as? Timestamp)?.dateValue()
     }
     
     // MARK: - Hashable

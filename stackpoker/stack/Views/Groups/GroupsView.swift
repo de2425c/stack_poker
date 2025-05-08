@@ -17,6 +17,7 @@ struct GroupsView: View {
     @State private var error: String?
     @State private var showError = false
     @State private var isRefreshing = false
+    @State private var searchText = ""
     
     var body: some View {
         NavigationView {
@@ -26,73 +27,71 @@ struct GroupsView: View {
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    // Modern header with animated notification badge
+                    // Clean, modern header
                     HStack {
-                        Group {
-                            Text("GROUPS")
-                                .foregroundColor(.white)
-                                .padding(.leading, 4)
-                        }
-                        .font(.system(size: 24, weight: .black))
+                        Text("Chats")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(.white)
                         
                         Spacer()
                         
-                        // Notification bell with animated badge
-                        Button(action: {
-                            showingInvites = true
-                        }) {
-                            ZStack {
-                                Image(systemName: !groupService.pendingInvites.isEmpty ? "bell.fill" : "bell")
-                                    .foregroundColor(.white)
-                                    .font(.system(size: 18))
-                                
-                                if !groupService.pendingInvites.isEmpty {
-                                    // Animated notification badge
+                        // Notification bell with badge
+                        if !groupService.pendingInvites.isEmpty {
+                            Button(action: {
+                                showingInvites = true
+                            }) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(systemName: "bell")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(.white)
+                                        .padding(8)
+                                    
+                                    // Badge
                                     Circle()
                                         .fill(Color.red)
-                                        .frame(width: 10, height: 10)
-                                        .offset(x: 8, y: -8)
-                                        .transition(.scale.combined(with: .opacity))
+                                        .frame(width: 8, height: 8)
+                                        .offset(x: 2, y: -2)
                                 }
                             }
-                            .padding(10)
-                            .background(
-                                Capsule()
-                                    .fill(Color(red: 35/255, green: 35/255, blue: 40/255))
-                            )
+                            .padding(.trailing, 12)
                         }
-                        .padding(.trailing, 8)
                         
-                        // Create group button
+                        // New group button (simplified)
                         Button(action: {
                             showingCreateGroup = true
                         }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 14, weight: .semibold, design: .default))
-                                
-                                Text("New")
-                                    .font(.system(size: 14, weight: .semibold, design: .default))
-                            }
-                            .foregroundColor(.black)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 14)
-                            .background(
-                                Capsule()
-                                    .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
-                            )
+                            Image(systemName: "plus")
+                                .font(.system(size: 18))
+                                .foregroundColor(.white)
+                                .padding(8)
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 16) // Add extra padding at top for status bar
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 16)
+                    
+                    // Optional search bar
+                    HStack {
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                                .padding(.leading, 8)
+                            
+                            TextField("Search", text: $searchText)
+                                .font(.system(size: 15))
+                                .foregroundColor(.white)
+                                .padding(.vertical, 10)
+                        }
+                        .padding(.trailing, 8)
+                        .background(Color(red: 32/255, green: 34/255, blue: 38/255))
+                        .cornerRadius(10)
+                    }
+                    .padding(.horizontal, 20)
                     .padding(.bottom, 16)
                     
                     // Content
                     ScrollView {
-                        // Add extra padding at the top for safe area
-                        Color.clear.frame(height: 1)
-                        
-                        // Pull to refresh
                         RefreshControls(isRefreshing: $isRefreshing) {
                             Task {
                                 await refreshGroups()
@@ -107,18 +106,21 @@ struct GroupsView: View {
                                     .frame(height: 180)
                                 
                                 ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
+                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.8)))
                                     .scaleEffect(1.5)
                             }
                         } else if groupService.userGroups.isEmpty {
-                            // Empty state with animation
+                            // Empty state (updated to be more minimalistic)
                             EmptyGroupsView(onCreateTapped: {
                                 showingCreateGroup = true
                             })
                         } else {
-                            // Groups list with staggered animation
-                            LazyVStack(spacing: 16) {
-                                ForEach(Array(groupService.userGroups.enumerated()), id: \.element.id) { index, group in
+                            // Filtered groups list
+                            let filteredGroups = searchText.isEmpty ? groupService.userGroups : 
+                                groupService.userGroups.filter { $0.name.lowercased().contains(searchText.lowercased()) }
+                            
+                            LazyVStack(spacing: 12) {
+                                ForEach(Array(filteredGroups.enumerated()), id: \.element.id) { index, group in
                                     NavigationLink(
                                         destination: GroupChatView(group: group)
                                             .environmentObject(userService)
@@ -128,22 +130,17 @@ struct GroupsView: View {
                                             .environmentObject(tabBarVisibility)
                                             .navigationBarHidden(true)
                                     ) {
-                                        GroupCard(group: group, onTap: {
-                                            // No longer needed since NavigationLink handles navigation
-                                        }, onDetailsTap: {
-                                            // Stop the navigation and navigate to group details instead
+                                        GroupCard(group: group, onTap: {}, onDetailsTap: {
                                             selectedGroup = group
                                         }, onOptionsTap: {
                                             groupActionSheet = group
                                         })
-                                        .contentShape(Rectangle()) // Make the entire card tappable
                                     }
-                                    .buttonStyle(PlainButtonStyle()) // Prevent navigation link styling
+                                    .buttonStyle(PlainButtonStyle())
                                 }
                             }
-                            .padding(.horizontal, 24)
-                            .padding(.top, 8)
-                            .padding(.bottom, 100) // Add padding at bottom for tab bar
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 100)
                         }
                     }
                 }
@@ -173,14 +170,12 @@ struct GroupsView: View {
                 }
             }
         }
-        // Navigate to details in a standard way through NavigationLink
         .background(
             NavigationLink(
                 destination: selectedGroup.map { group in
                     GroupDetailView(group: group)
                         .navigationBarHidden(true)
                         .onDisappear {
-                            // Refresh groups when the detail view is dismissed
                             Task {
                                 await refreshGroups()
                             }
@@ -201,12 +196,10 @@ struct GroupsView: View {
             if let group = groupActionSheet {
                 Button("View Details") {
                     selectedGroup = group
-                    // Detail navigation handled through NavigationLink
                 }
                 
                 Button("Invite Members") {
                     selectedGroup = group
-                    // Detail navigation handled through NavigationLink
                 }
                 
                 if group.ownerId != Auth.auth().currentUser?.uid {
@@ -223,7 +216,6 @@ struct GroupsView: View {
             }
         }
         .onAppear {
-            // Set up notification observer
             setupNotificationObserver()
             
             Task {
@@ -231,11 +223,10 @@ struct GroupsView: View {
             }
         }
         .onDisappear {
-            // Clean up notification observer
             NotificationCenter.default.removeObserver(self)
         }
-        .navigationBarHidden(true) // Hide the navigation bar
-        .edgesIgnoringSafeArea(.top) // Ignore safe area at the top
+        .navigationBarHidden(true)
+        .edgesIgnoringSafeArea(.top)
     }
     
     // Set up notification observer for group data changes
@@ -271,7 +262,7 @@ struct GroupsView: View {
     }
 }
 
-// Beautiful empty state view with animations
+// Update the EmptyGroupsView to be more minimalistic
 struct EmptyGroupsView: View {
     let onCreateTapped: () -> Void
     @State private var animateIcon = false
@@ -281,59 +272,48 @@ struct EmptyGroupsView: View {
             Spacer()
                 .frame(height: 60)
             
-            Image(systemName: "person.3.sequence.fill")
-                .font(.system(size: 70, design: .default))
-                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                .rotationEffect(.degrees(animateIcon ? 8 : -8))
-                .animation(
-                    Animation.easeInOut(duration: 2)
-                        .repeatForever(autoreverses: true),
-                    value: animateIcon
-                )
-                .onAppear {
-                    animateIcon = true
-                }
+            // Modern flat icon
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 64))
+                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.7))
+                .padding(.bottom, 16)
             
-            Text("No Groups Yet")
-                .font(.system(size: 26, weight: .bold, design: .default))
+            Text("No Conversations Yet")
+                .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.white)
             
-            Text("Create your first group or wait for invites to connect with other players")
-                .font(.system(size: 16, design: .default))
+            Text("Create your first group or accept invites\nto chat with other players")
+                .font(.system(size: 16))
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-                .lineSpacing(4)
+                .lineSpacing(5)
             
             Button(action: onCreateTapped) {
                 HStack(spacing: 8) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 18, design: .default))
+                    Image(systemName: "plus")
+                        .font(.system(size: 16))
                     
-                    Text("Create Group")
-                        .font(.system(size: 17, weight: .semibold, design: .default))
+                    Text("New Group")
+                        .font(.system(size: 16, weight: .medium))
                 }
                 .foregroundColor(.black)
                 .padding(.vertical, 12)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 20)
                 .background(
                     Capsule()
-                        .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
-                        .shadow(
-                            color: Color(red: 123/255, green: 255/255, blue: 99/255),
-                            radius: 8, x: 0, y: 4
-                        )
+                        .fill(Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.9))
                 )
             }
-            .padding(.top, 16)
+            .padding(.top, 20)
             
             Spacer()
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
+        .padding(.horizontal, 30)
     }
 }
 
+// Update the GroupCard to use real last message instead of description
 struct GroupCard: View {
     let group: UserGroup
     let onTap: () -> Void
@@ -342,132 +322,92 @@ struct GroupCard: View {
     @State private var cardOffset: CGFloat = 30
     @State private var cardOpacity: Double = 0
     
+    // Last message preview
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 16) {
-                // Group avatar with gradient border
-                ZStack {
-                    // Highlight gradient border
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color(red: 123/255, green: 255/255, blue: 99/255),
-                                    Color(red: 50/255, green: 120/255, blue: 80/255)
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 64, height: 64)
-                    
-                    // Background for avatar
-                    Circle()
-                        .fill(Color(red: 35/255, green: 35/255, blue: 40/255))
-                        .frame(width: 60, height: 60)
-                    
-                    if let avatarURL = group.avatarURL, let url = URL(string: avatarURL) {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 60, height: 60)
-                                    .clipShape(Circle())
-                            } else if phase.error != nil {
-                                Image(systemName: "person.3.fill")
-                                    .font(.system(size: 26, design: .default))
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                    .frame(width: 60, height: 60)
-                            } else {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
-                                    .frame(width: 60, height: 60)
-                            }
-                        }
-                    } else {
-                        Image(systemName: "person.3.fill")
-                            .font(.system(size: 26, design: .default))
-                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                    }
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Group {
-                        Text(group.name)
-                            .foregroundColor(.white)
-                    }
-                    .font(.system(size: 18, weight: .bold))
-                    
-                    if let description = group.description, !description.isEmpty {
-                        Text(description)
-                            .font(.system(size: 14, design: .default))
-                            .foregroundColor(.gray)
-                            .lineLimit(1)
-                    }
-                    
-                    HStack(spacing: 12) {
-                        // Members count
-                        HStack(spacing: 6) {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 12, design: .default))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                            
-                            Text("\(group.memberCount)")
-                                .font(.system(size: 13, weight: .medium, design: .default))
-                                .foregroundColor(.gray)
-                        }
-                    }
-                    .padding(.top, 4)
-                }
-                
-                Spacer()
-                
-                // Action buttons column
-                VStack(spacing: 16) {
-                    Button(action: onDetailsTap) {
-                        Image(systemName: "info.circle.fill")
-                            .font(.system(size: 18, design: .default))
-                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                            .frame(width: 32, height: 32)
-                            .background(Color(red: 35/255, green: 50/255, blue: 40/255))
-                            .clipShape(Circle())
-                    }
-                }
-            }
-            .padding(.vertical, 16)
-            .padding(.horizontal, 16)
-        }
-        .background(
+        HStack(alignment: .center, spacing: 16) {
+            // Group avatar with subtle accent
             ZStack {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color(red: 30/255, green: 32/255, blue: 36/255),
-                                Color(red: 25/255, green: 27/255, blue: 32/255)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                Circle()
+                    .fill(Color(red: 32/255, green: 34/255, blue: 38/255))
+                    .frame(width: 56, height: 56)
+                
+                if let avatarURL = group.avatarURL, let url = URL(string: avatarURL) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 56, height: 56)
+                                .clipShape(Circle())
+                        } else if phase.error != nil {
+                            Image(systemName: "person.3.fill")
+                                .font(.system(size: 22, design: .default))
+                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.8))
+                        } else {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.8)))
+                        }
+                    }
+                } else {
+                    Image(systemName: "person.3.fill")
+                        .font(.system(size: 22, design: .default))
+                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.8))
+                }
             }
-            .shadow(color: Color.black.opacity(0.2), radius: 6, x: 0, y: 2)
+            .overlay(
+                Circle()
+                    .stroke(Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.3), lineWidth: 2)
+            )
+            
+            // Group info and preview text
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(group.name)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    // Time of last message
+                    if let lastMessageTime = group.lastMessageTime {
+                        Text(timeAgoString(from: lastMessageTime))
+                            .font(.system(size: 13))
+                            .foregroundColor(.gray)
+                    }
+                }
+                
+                // Last message preview
+                if let lastMessage = group.lastMessage {
+                    Text(lastMessage)
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    Text("No messages yet")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                }
+            }
+            
+            // Info button (more subtle)
+            Button(action: onDetailsTap) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+            }
+            .padding(.leading, 4)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color.white.opacity(0.1),
-                            Color.clear,
-                            Color.clear
-                        ]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.06), lineWidth: 1)
         )
         .offset(y: cardOffset)
         .opacity(cardOpacity)
@@ -479,10 +419,10 @@ struct GroupCard: View {
         }
     }
     
-    private func formattedDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: date)
+    private func timeAgoString(from date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
@@ -1548,7 +1488,7 @@ struct GroupDetailView: View {
     }
 }
 
-// Sub-views for GroupDetailView
+// Add padding to the GroupInfoView
 struct GroupInfoView: View {
     let group: UserGroup
     
@@ -1608,7 +1548,7 @@ struct GroupInfoView: View {
             
             Spacer()
         }
-        .padding(.top, 8)
+        .padding(.top, 16) // Add padding from the top
     }
     
     private func formattedDate(_ date: Date) -> String {
@@ -1744,6 +1684,9 @@ struct InviteView: View {
     let isLoadingUsers: Bool
     let filteredUsers: [UserListItem]
     let inviteUser: () -> Void
+    
+    // Add keyboard handling
+    @State private var keyboardHeight: CGFloat = 0
     
     var body: some View {
         VStack(spacing: 16) {
@@ -1893,7 +1836,27 @@ struct InviteView: View {
                     .font(.system(size: 14, design: .default))
                     .foregroundColor(.green)
             }
+            
+            Spacer() // Push content to the top when keyboard appears
         }
+        .padding(.bottom, keyboardHeight) // Add padding equal to keyboard height
+        .onAppear {
+            // Set up keyboard observers
+            NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
+                if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                    keyboardHeight = keyboardFrame.height
+                }
+            }
+            
+            NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+                keyboardHeight = 0
+            }
+        }
+        .onDisappear {
+            // Clean up observers
+            NotificationCenter.default.removeObserver(self)
+        }
+        .animation(.easeOut(duration: 0.25), value: keyboardHeight)
     }
 }
 

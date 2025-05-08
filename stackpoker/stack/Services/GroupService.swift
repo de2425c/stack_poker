@@ -758,6 +758,12 @@ class GroupService: ObservableObject {
         
         // Save the message
         try await messageRef.setData(messageData)
+        
+        // Update the group's last message information
+        try await db.collection("groups").document(groupId).updateData([
+            "lastMessage": text,
+            "lastMessageTime": timestamp
+        ])
     }
     
     // Send an image message
@@ -884,6 +890,12 @@ class GroupService: ObservableObject {
             try await messageRef.setData(messageData)
             print("GROUP SERVICE: Message document created")
             
+            // Update the group's last message information
+            try await db.collection("groups").document(groupId).updateData([
+                "lastMessage": "📷 Photo",
+                "lastMessageTime": timestamp
+            ])
+            
             return
         } catch {
             print("GROUP SERVICE ERROR: \(error.localizedDescription)")
@@ -929,6 +941,12 @@ class GroupService: ObservableObject {
         
         // Save the message
         try await messageRef.setData(messageData)
+        
+        // Update the group's last message information
+        try await db.collection("groups").document(groupId).updateData([
+            "lastMessage": "🃏 Poker Hand",
+            "lastMessageTime": timestamp
+        ])
     }
     
     // Add sendHomeGameMessage function
@@ -1027,6 +1045,8 @@ class GroupService: ObservableObject {
         
         // Update the group's last message information
         try await db.collection("groups").document(groupId).updateData([
+            "lastMessage": "🏠 Home Game: \(homeGame.title)",
+            "lastMessageTime": timestamp,
             "lastMessageAt": FieldValue.serverTimestamp(),
             "lastMessageType": GroupMessage.MessageType.homeGame.rawValue
         ])

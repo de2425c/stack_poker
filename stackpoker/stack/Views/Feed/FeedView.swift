@@ -14,6 +14,7 @@ struct FeedView: View {
     @State private var selectedPost: Post? = nil
     @State private var showingFullScreenImage = false
     @State private var selectedImageURL: String? = nil
+    @State private var scrollOffset: CGFloat = 0
     
     let userId: String
     
@@ -46,139 +47,117 @@ struct FeedView: View {
     }
     
     var body: some View {
-        let feedContent = ZStack {
-            // Use the AppBackgroundView for a rich background
-            AppBackgroundView()
-                .ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                // Feed content
-                if postService.isLoading && postService.posts.isEmpty {
-                    // Loading state - enhanced with animation
-                    VStack {
-                        Spacer()
-                        ZStack {
-                            Circle()
-                                .fill(Color.black.opacity(0.1))
-                                .frame(width: 80, height: 80)
-                            
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
-                                .scaleEffect(1.5)
-                        }
-                        .shadow(color: Color.black.opacity(0.2), radius: 5)
-                        
-                        Text("Loading Feed")
-                            .font(.system(size: 18, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.8))
-                            .padding(.top, 16)
-                        Spacer()
-                    }
-                } else if postService.posts.isEmpty {
-                    // Empty feed state
-                    EmptyFeedView(showDiscoverUsers: {
-                        showingDiscoverUsers = true
-                    })
-                } else {
-                    // Twitter-like feed with posts
-                    ScrollView(showsIndicators: false) {
-                        LazyVStack(spacing: 0) { // Twitter has no spacing between posts
-                            ForEach(postService.posts) { post in
-                                Group {
-                                    if post.postType == .hand {
-                                        // Use the full card view with replay for hand posts
-                                        PostCardView(
-                                            post: post,
-                                            onLike: { likePost(post) },
-                                            onComment: { selectedPost = post },
-                                            onDelete: { deletePost(post) },
-                                            isCurrentUser: post.userId == userId,
-                                            userId: userId
-                                        )
-                                    } else {
-                                        // Use the basic card view without replay for regular posts
-                                        BasicPostCardView(
-                                            post: post,
-                                            onLike: { likePost(post) },
-                                            onComment: { selectedPost = post },
-                                            onDelete: { deletePost(post) },
-                                            isCurrentUser: post.userId == userId
-                                        )
-                                    }
-                                }
-                                .contentShape(Rectangle()) // Make entire post tappable
-                                .onTapGesture {
-                                    selectedPost = post
-                                }
-                                .onAppear {
-                                    // Load more posts when reaching the end
-                                    if post.id == postService.posts.last?.id {
-                                        Task {
-                                            try? await postService.fetchMorePosts()
-                                        }
-                                    }
-                                }
+        NavigationView {
+            ZStack(alignment: .top) {
+                // Use the AppBackgroundView for a rich background
+                AppBackgroundView()
+                    .ignoresSafeArea()
+                
+                // Content area (all content except header)
+                VStack(spacing: 0) {
+                    // Feed content
+                    if postService.isLoading && postService.posts.isEmpty {
+                        // Loading state - enhanced with animation
+                        VStack {
+                            Spacer()
+                            ZStack {
+                                Circle()
+                                    .fill(Color.black.opacity(0.1))
+                                    .frame(width: 80, height: 80)
                                 
-                                // Twitter-like divider between posts
-                                Rectangle()
-                                    .fill(Color.white.opacity(0.06))
-                                    .frame(height: 0.5)
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+                                    .scaleEffect(1.5)
                             }
+                            .shadow(color: Color.black.opacity(0.2), radius: 5)
                             
-                            // Loading indicator at bottom when fetching more
-                            if postService.isLoading {
-                                HStack {
-                                    Spacer()
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.6))))
-                                        .scaleEffect(1.2)
-                                    Spacer()
+                            Text("Loading Feed")
+                                .font(.system(size: 18, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.8))
+                                .padding(.top, 16)
+                            Spacer()
+                        }
+                        .padding(.top, 70) // Add space for fixed header
+                    } else if postService.posts.isEmpty {
+                        // Empty feed state
+                        EmptyFeedView(showDiscoverUsers: {
+                            showingDiscoverUsers = true
+                        })
+                        .padding(.top, 70) // Add space for fixed header
+                    } else {
+                        // Twitter-like feed with posts
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 0) {
+                                // Add top padding for fixed header
+                                Spacer()
+                                    .frame(height: 70)
+                                
+                                LazyVStack(spacing: 0) { // Twitter has no spacing between posts
+                                    ForEach(postService.posts) { post in
+                                        Group {
+                                            if post.postType == .hand {
+                                                // Use the full card view with replay for hand posts
+                                                PostCardView(
+                                                    post: post,
+                                                    onLike: { likePost(post) },
+                                                    onComment: { selectedPost = post },
+                                                    onDelete: { deletePost(post) },
+                                                    isCurrentUser: post.userId == userId,
+                                                    userId: userId
+                                                )
+                                            } else {
+                                                // Use the basic card view without replay for regular posts
+                                                BasicPostCardView(
+                                                    post: post,
+                                                    onLike: { likePost(post) },
+                                                    onComment: { selectedPost = post },
+                                                    onDelete: { deletePost(post) },
+                                                    isCurrentUser: post.userId == userId
+                                                )
+                                            }
+                                        }
+                                        .contentShape(Rectangle()) // Make entire post tappable
+                                        .onTapGesture {
+                                            selectedPost = post
+                                        }
+                                        .onAppear {
+                                            // Load more posts when reaching the end
+                                            if post.id == postService.posts.last?.id {
+                                                Task {
+                                                    try? await postService.fetchMorePosts()
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Twitter-like divider between posts
+                                        Rectangle()
+                                            .fill(Color.white.opacity(0.06))
+                                            .frame(height: 0.5)
+                                    }
+                                    
+                                    // Loading indicator at bottom when fetching more
+                                    if postService.isLoading {
+                                        HStack {
+                                            Spacer()
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.6))))
+                                                .scaleEffect(1.2)
+                                            Spacer()
+                                        }
+                                        .padding()
+                                    }
+                                    
+                                    // Bottom padding for better scrolling experience
+                                    Color.clear.frame(height: 100)
                                 }
-                                .padding()
+                                .padding(.top, 1) // Minimal top padding
                             }
-                            
-                            // Bottom padding for better scrolling experience
-                            Color.clear.frame(height: 100)
                         }
-                        .padding(.top, 1) // Minimal top padding
-                    }
-                    .refreshable {
-                        // Pull to refresh
-                        await refreshFeed()
-                    }
-                }
-            }
-        }
-        
-        return NavigationView {
-            feedContent
-                .navigationBarTitleDisplayMode(NavigationBarItem.TitleDisplayMode.inline)
-                .toolbar {
-                    // Leading: Feed title with enhanced styling
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Text("FEED")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundColor(Color.white)
-                            .tracking(1.5)
-                            .shadow(color: Color.black.opacity(0.3), radius: 2, y: 1)
-                            .padding(.leading, 4)
-                    }
-                    
-                    // Add post button in top right
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: {
-                            showingNewPost = true
-                        }) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.white)
+                        .refreshable {
+                            // Pull to refresh
+                            await refreshFeed()
                         }
                     }
-                }
-                .navigationBarBackground {
-                    Color(red: 14/255, green: 14/255, blue: 18/255).opacity(0.4)
-                        .blur(radius: 3)
-                        .ignoresSafeArea(edges: .top)
                 }
                 .onAppear {
                     // Load posts when the view appears
@@ -188,24 +167,60 @@ struct FeedView: View {
                         }
                     }
                 }
-                .sheet(isPresented: $showingNewPost) {
-                    PostEditorView(userId: userId)
-                        .environmentObject(postService)
-                        .environmentObject(userService)
-                }
-                .sheet(isPresented: $showingDiscoverUsers) {
-                    DiscoverUsersView(userId: userId)
-                }
-                .sheet(item: $selectedPost) { post in
-                    PostDetailView(post: post, userId: userId)
-                        .environmentObject(postService)
-                        .environmentObject(userService)
-                }
-                .fullScreenCover(isPresented: $showingFullScreenImage) {
-                    if let imageUrl = selectedImageURL {
-                        FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
+                
+                // Fixed header - stays at top and doesn't move with scroll
+                VStack {
+                    // Clean, modern header - similar to GroupsView
+                    HStack {
+                        Text("Feed")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        // Add post button in top right
+                        Button(action: {
+                            showingNewPost = true
+                        }) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(8)
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 16)
+                    .background(
+                        // Add translucent background to header
+                        Rectangle()
+                            .fill(Color(red: 18/255, green: 18/255, blue: 24/255).opacity(0.98))
+                            .ignoresSafeArea(edges: .top)
+                    )
+                    
+                    Spacer()
                 }
+                .frame(height: 70) // Fixed height for header
+            }
+            .sheet(isPresented: $showingNewPost) {
+                PostEditorView(userId: userId)
+                    .environmentObject(postService)
+                    .environmentObject(userService)
+            }
+            .sheet(isPresented: $showingDiscoverUsers) {
+                DiscoverUsersView(userId: userId)
+            }
+            .sheet(item: $selectedPost) { post in
+                PostDetailView(post: post, userId: userId)
+                    .environmentObject(postService)
+                    .environmentObject(userService)
+            }
+            .fullScreenCover(isPresented: $showingFullScreenImage) {
+                if let imageUrl = selectedImageURL {
+                    FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
+                }
+            }
+            .navigationBarHidden(true)
         }
     }
     
