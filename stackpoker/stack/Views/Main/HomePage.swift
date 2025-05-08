@@ -36,7 +36,7 @@ struct HomePage: View {
         case feed
         case add
         case groups
-        case profile
+        case tools
     }
     
     var body: some View {
@@ -104,8 +104,8 @@ struct HomePage: View {
                         .environmentObject(tabBarVisibility)
                         .tag(Tab.groups)
                     
-                    ProfileScreen(userId: userId)
-                        .tag(Tab.profile)
+                    ToolsScreen(userId: userId)
+                        .tag(Tab.tools)
                 }
                 .background(Color.clear)
                 .toolbar(.hidden, for: .tabBar)
@@ -195,10 +195,10 @@ struct CustomTabBar: View {
                                 isSelected: selectedTab == .groups
                             ) { selectedTab = .groups }
                             TabBarButton(
-                                icon: "Profile",
-                                title: "Profile",
-                                isSelected: selectedTab == .profile
-                            ) { selectedTab = .profile }
+                                icon: "Tools",
+                                title: "Tools",
+                                isSelected: selectedTab == .tools
+                            ) { selectedTab = .tools }
                         }
                         .padding(.horizontal, 0)
                         .padding(.top, 8)
@@ -221,11 +221,12 @@ struct TabBarButton: View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(icon)
+                    .renderingMode(.template)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 28, height: 28)
                     .padding(.top, 2) // Move icon up a bit
-                    .colorMultiply(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.85))
+                    .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.85))
                 
                 Text(title)
                     .font(.system(size: 12, weight: .medium))
@@ -496,32 +497,42 @@ struct ProfileScreen: View {
     @EnvironmentObject var authViewModel: AuthViewModel
     let userId: String
     @State private var showEdit = false
+    @Environment(\.dismiss) var dismiss
     
     var body: some View {
         NavigationView {
             ZStack {
                 Color(UIColor(red: 10/255, green: 10/255, blue: 15/255, alpha: 1.0)).ignoresSafeArea()
                 VStack(spacing: 0) {
-                    // STACK logo at the top
+                    // STACK logo at the top with back button
                     HStack {
-                        Spacer()
-                        Text("STACK")
-                            .font(.system(size: 48, weight: .black, design: .rounded))
-                            .foregroundColor(.white)
-                        Spacer()
-                        
-                        // Add sign out button to top right
-                        Button(action: signOut) {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                .font(.system(size: 18))
-                                .foregroundColor(.gray)
-                                .padding(8)
+                        // Back button
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(10)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 10)
+                                    Circle()
                                         .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 0.7)))
                                 )
                         }
-                        .padding(.trailing, 16)
+                        .padding(.leading, 16)
+                        
+                        Spacer()
+                        
+                        // Centered STACK logo
+                        Text("STACK")
+                            .font(.system(size: 48, weight: .black, design: .rounded))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        // Empty space to balance layout
+                        Circle()
+                            .fill(Color.clear)
+                            .frame(width: 38, height: 38)
+                            .padding(.trailing, 16)
                     }
                     .padding(.top, 32)
                     .padding(.bottom, 0)
@@ -638,7 +649,31 @@ struct ProfileScreen: View {
                             Task { try? await userService.fetchUserProfile() }
                         }
                     }
+                    
                     Spacer()
+                    
+                    // Sign out button at the bottom right
+                    HStack {
+                        Spacer()
+                        
+                        Button(action: signOut) {
+                            HStack(spacing: 6) {
+                                Text("Sign Out")
+                                    .font(.system(size: 14, weight: .medium))
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                    .font(.system(size: 14))
+                            }
+                            .foregroundColor(.white.opacity(0.8))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 0.7)))
+                            )
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 16)
+                    }
                 }
             }
             .sheet(isPresented: $showEdit) {
@@ -1303,8 +1338,6 @@ struct ProfileTextEditor: View {
         }
     }
 }
-
-
 
 struct ProfileImageView: View {
     let url: URL
