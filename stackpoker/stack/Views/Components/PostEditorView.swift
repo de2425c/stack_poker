@@ -20,6 +20,8 @@ struct PostEditorView: View {
     var hand: ParsedHandHistory?
     var sessionId: String? = nil
     var isSessionPost: Bool = false
+    var isNote: Bool = false  // New property to identify note posts
+    var showFullSessionCard: Bool = false // New property to control session card display
     
     // View state
     @State private var postText = ""
@@ -31,6 +33,111 @@ struct PostEditorView: View {
     // Determines if this is a hand post
     private var isHandPost: Bool {
         hand != nil
+    }
+    
+    // Create a SessionCard component to display full session details
+    private struct SessionCard: View {
+        let text: String
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                // Parse the session text
+                if let parsed = parseSessionText(from: text) {
+                    // Session header
+                    HStack {
+                        Image(systemName: "gamecontroller.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                        
+                        Text("Live Session")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                    }
+                    
+                    // Divider
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(height: 1)
+                    
+                    // Game and stakes
+                    Text(parsed.gameName + " (\(parsed.stakes))")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    // Stack and profit
+                    HStack {
+                        Text("Stack: $\(parsed.stack)")
+                            .font(.system(size: 15))
+                            .foregroundColor(.white.opacity(0.9))
+                        
+                        Spacer()
+                        
+                        Text(parsed.profit)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(parsed.profit.contains("+") ? Color(red: 123/255, green: 255/255, blue: 99/255) : .red)
+                    }
+                    
+                    // Session duration
+                    Text("Duration: \(parsed.time)")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.8))
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(red: 123/255, green: 255/255, blue: 99/255), lineWidth: 1)
+            )
+        }
+        
+        // Helper method to parse session text
+        private func parseSessionText(from text: String) -> (gameName: String, stakes: String, stack: String, profit: String, time: String)? {
+            let lines = text.components(separatedBy: "\n")
+            guard lines.count >= 3 else { return nil }
+            
+            var gameName = "Cash Game"
+            var stakes = "$1/$2"
+            var stack = "0"
+            var profit = "+$0"
+            var time = "0h 0m"
+            
+            for line in lines {
+                if line.hasPrefix("Session at ") {
+                    // Parse "Session at Wynn ($2/$5/$10)"
+                    if let range = line.range(of: "Session at "),
+                       let stakeRange = line.range(of: "(", range: range.upperBound..<line.endIndex),
+                       let endStakeRange = line.range(of: ")", range: stakeRange.upperBound..<line.endIndex) {
+                        
+                        let gameNameRange = range.upperBound..<stakeRange.lowerBound
+                        let stakesRange = stakeRange.upperBound..<endStakeRange.lowerBound
+                        
+                        gameName = String(line[gameNameRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        stakes = String(line[stakesRange])
+                    }
+                } else if line.hasPrefix("Stack: $") {
+                    // Parse "Stack: $1200 (+$200)"
+                    let components = line.components(separatedBy: " ")
+                    if components.count >= 2 {
+                        stack = components[1].replacingOccurrences(of: "$", with: "")
+                        
+                        if components.count >= 3 {
+                            profit = components[2].replacingOccurrences(of: "(", with: "").replacingOccurrences(of: ")", with: "")
+                        }
+                    }
+                } else if line.hasPrefix("Time: ") {
+                    // Parse "Time: 2h 30m"
+                    time = line.replacingOccurrences(of: "Time: ", with: "")
+                }
+            }
+            
+            return (gameName, stakes, stack, profit, time)
+        }
     }
     
     var body: some View {
@@ -85,7 +192,7 @@ struct PostEditorView: View {
                                     .font(.system(size: 14))
                                     .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                             } else {
-                                Text(isHandPost ? "Share your hand" : "Create a post")
+                                Text(isHandPost ? "Share your hand" : (isNote ? "Share your note" : "Create a post"))
                                     .font(.system(size: 14))
                                     .foregroundColor(.gray)
                             }
@@ -95,20 +202,41 @@ struct PostEditorView: View {
                     }
                     .padding()
                     
-                    // Session indicator (only for session posts)
+                    // Session display section
                     if isSessionPost && sessionId != nil {
-                        HStack {
-                            Image(systemName: "gamecontroller.fill")
-                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
-                            
-                            Text("Live Poker Session")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
-                            
-                            Spacer()
+                        // Choose the right session display based on content type
+                        if showFullSessionCard {
+                            // For notes/hands: full session card
+                            SessionCard(text: extractSessionDetails())
+                                .padding(.horizontal)
+                                .padding(.bottom, 16)
+                        } else {
+                            // For stack updates: compact session badge
+                            if let (gameName, stakes) = parseSessionInfo() {
+                                SessionBadgeView(gameName: gameName, stakes: stakes)
+                                    .padding(.horizontal)
+                                    .padding(.bottom, 8)
+                            } else {
+                                HStack {
+                                    Image(systemName: "gamecontroller.fill")
+                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+                                    
+                                    Text("Live Poker Session")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+                                    
+                                    Spacer()
+                                }
+                                .padding(.horizontal)
+                                .padding(.bottom, 8)
+                            }
                         }
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
+                    }
+                    
+                    // Note view (only for note posts)
+                    if isNote {
+                        SharedNoteView(note: initialText)
+                            .padding(.horizontal)
                     }
                     
                     // Hand Summary (only for hand posts)
@@ -117,7 +245,7 @@ struct PostEditorView: View {
                             .padding(.horizontal)
                     }
                     
-                    // Text Editor
+                    // Text Editor (hide initial text for notes since it's displayed above)
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $postText)
                             .focused($isTextEditorFocused)
@@ -138,7 +266,7 @@ struct PostEditorView: View {
                     .frame(maxHeight: .infinity)
                     
                     // Image picker and preview (only for regular posts)
-                    if !isHandPost {
+                    if !isHandPost && !isNote {
                         VStack(spacing: 12) {
                             // Image picker button
                             PhotosPicker(selection: $imageSelection, maxSelectionCount: 4, matching: .images) {
@@ -225,8 +353,8 @@ struct PostEditorView: View {
                                 .fontWeight(.semibold)
                         }
                     }
-                    .disabled(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading || postText.count > 280 || userService.currentUserProfile == nil)
-                    .foregroundColor(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || postText.count > 280 || userService.currentUserProfile == nil ? .gray : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    .disabled((postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isNote && !showFullSessionCard) || isLoading || postText.count > 280 || userService.currentUserProfile == nil)
+                    .foregroundColor((postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isNote && !showFullSessionCard) || postText.count > 280 || userService.currentUserProfile == nil ? .gray : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                 }
             }
             .onChange(of: imageSelection) { _, newValue in
@@ -242,7 +370,10 @@ struct PostEditorView: View {
             }
             .onAppear {
                 if !initialText.isEmpty {
-                    postText = initialText
+                    // For notes, we keep the initial text in the note view but clear it from the editor
+                    if !isNote && !showFullSessionCard {
+                        postText = initialText
+                    }
                 }
                 isTextEditorFocused = true
                 // Fetch user profile if not loaded
@@ -261,6 +392,8 @@ struct PostEditorView: View {
             return "Share Session Update"
         } else if isHandPost {
             return "Share Hand"
+        } else if isNote {
+            return "Share Note"
         } else {
             return "Create Post"
         }
@@ -271,25 +404,118 @@ struct PostEditorView: View {
             return "Share your session update..."
         } else if isHandPost {
             return "Add a comment about your hand..."
+        } else if isNote {
+            return "Add a comment about your note..."
         } else {
             return "What's on your mind?"
         }
     }
     
-    // Create a regular text/image post
+    // Helper to find and extract session details from text
+    private func extractSessionDetails() -> String {
+        // Check if there are session details in the initialText
+        if initialText.contains("Session at ") {
+            // Extract the session details section
+            let lines = initialText.components(separatedBy: "\n")
+            var sessionLines: [String] = []
+            var foundSessionLine = false
+            
+            for line in lines {
+                if line.hasPrefix("Session at ") {
+                    foundSessionLine = true
+                }
+                
+                if foundSessionLine && (line.hasPrefix("Session at ") || line.hasPrefix("Stack:") || line.hasPrefix("Time:")) {
+                    sessionLines.append(line)
+                }
+            }
+            
+            if !sessionLines.isEmpty {
+                return sessionLines.joined(separator: "\n")
+            }
+        }
+        
+        // If specific session details aren't found, but we have a session ID,
+        // create some default session info using the parsed session info
+        if let (gameName, stakes) = parseSessionInfo(), sessionId != nil {
+            // Build simplified session details
+            return """
+            Session at \(gameName) (\(stakes))
+            Stack: $0 (+$0)
+            Time: 0h 0m
+            """
+        }
+        
+        // Fallback to the initialText if no session details found
+        return initialText
+    }
+    
+    // First, add new function to parse session info from the session details
+    private func parseSessionInfo() -> (gameName: String, stakes: String)? {
+        guard let sessionId = sessionId,
+              isSessionPost else {
+            return nil
+        }
+        
+        // Try to extract from initialText first
+        if initialText.contains("Session at ") {
+            if let range = initialText.range(of: "Session at "),
+               let stakeRange = initialText.range(of: "(", range: range.upperBound..<initialText.endIndex),
+               let endStakeRange = initialText.range(of: ")", range: stakeRange.upperBound..<initialText.endIndex) {
+                
+                let gameNameRange = range.upperBound..<stakeRange.lowerBound
+                let stakesRange = stakeRange.upperBound..<endStakeRange.lowerBound
+                
+                let gameName = String(initialText[gameNameRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let stakes = String(initialText[stakesRange])
+                
+                return (gameName, stakes)
+            }
+        }
+        
+        return nil
+    }
+    
+    // Update the post creation logic to work with different content types
     private func createPost() {
-        guard !postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        guard (postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (isNote || showFullSessionCard)) || !postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let username = userService.currentUserProfile?.username else { return }
         
         let displayName = userService.currentUserProfile?.displayName
         let profileImage = userService.currentUserProfile?.avatarURL
+        
+        // Handle different content types:
+        let content: String
+        
+        // For note posts with no additional comment
+        if isNote && postText.isEmpty {
+            content = initialText
+        }
+        // For note posts with a comment
+        else if isNote && !postText.isEmpty {
+            content = "\(postText)\n\nNote: \(initialText)"
+        }
+        // For chip updates (showing full session card)
+        else if showFullSessionCard {
+            if postText.isEmpty {
+                // Just use the session details plus the content
+                content = initialText
+            } else {
+                // Use the session details plus user comment
+                content = initialText
+            }
+        }
+        // Default case - regular post
+        else {
+            content = postText
+        }
         
         isLoading = true
         
         Task {
             do {
                 try await postService.createPost(
-                    content: postText,
+                    content: content,
                     userId: userId,
                     username: username,
                     displayName: displayName,

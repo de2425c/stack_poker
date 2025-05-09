@@ -88,39 +88,27 @@ struct LiveSessionStatusView: View {
                 
                 // Stack and PnL section
                 HStack(alignment: .top) {
-                    // Stack with visual chip icon
+                    // Stack without chip icon
                     VStack(alignment: .leading, spacing: 4) {
                         Text("STACK")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(subtleText)
                         
-                        HStack(alignment: .center, spacing: 4) {
-                            Image(systemName: "circle.fill")
-                                .foregroundColor(accentColor)
-                                .font(.system(size: 12))
-                            
-                            Text("$\(Int(chipAmount))")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(lightText)
-                        }
+                        Text("$\(Int(chipAmount))")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(lightText)
                     }
                     .frame(minWidth: 100, alignment: .leading)
                     
-                    // Profit/Loss with visual indicator
+                    // Profit/Loss with visual indicator but no icon
                     VStack(alignment: .leading, spacing: 4) {
                         Text("PROFIT/LOSS")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(subtleText)
                         
-                        HStack(alignment: .center, spacing: 6) {
-                            Image(systemName: isProfitable ? "arrow.up.right" : "arrow.down.right")
-                                .foregroundColor(isProfitable ? accentColor : .red)
-                                .font(.system(size: 12))
-                            
-                            Text(formattedProfit)
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(isProfitable ? accentColor : .red)
-                        }
+                        Text(formattedProfit)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(isProfitable ? accentColor : .red)
                     }
                     .frame(minWidth: 100, alignment: .leading)
                     
@@ -156,27 +144,15 @@ struct LiveSessionStatusView: View {
             } else {
                 // Compact view for session stats
                 HStack(spacing: 24) {
-                    // Stack
-                    HStack(spacing: 6) {
-                        Image(systemName: "circle.fill")
-                            .foregroundColor(accentColor)
-                            .font(.system(size: 10))
-                        
-                        Text("$\(Int(chipAmount))")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(lightText)
-                    }
+                    // Stack without circle
+                    Text("$\(Int(chipAmount))")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(lightText)
                     
-                    // P/L
-                    HStack(spacing: 4) {
-                        Image(systemName: isProfitable ? "arrow.up.right" : "arrow.down.right")
-                            .foregroundColor(isProfitable ? accentColor : .red)
-                            .font(.system(size: 10))
-                        
-                        Text(formattedProfit)
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(isProfitable ? accentColor : .red)
-                    }
+                    // P/L without arrow icon
+                    Text(formattedProfit)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(isProfitable ? accentColor : .red)
                     
                     // Time
                     Text(formattedTime)

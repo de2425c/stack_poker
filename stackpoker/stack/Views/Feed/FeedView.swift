@@ -14,6 +14,7 @@ struct FeedView: View {
     @State private var selectedPost: Post? = nil
     @State private var showingFullScreenImage = false
     @State private var selectedImageURL: String? = nil
+    @State private var showingComments = false
     
     let userId: String
     
@@ -28,16 +29,21 @@ struct FeedView: View {
         cache.memoryStorage.config.totalCostLimit = memoryCacheMB * 1024 * 1024
         
         // Set disk cache limit (breaking into simpler expressions)
-        let diskCacheMB = UInt(1000)
-        let diskCacheBytes = diskCacheMB
-        let kilobytes = diskCacheBytes * 1024
-        let bytes = kilobytes * 1024
-        cache.diskStorage.config.sizeLimit = bytes
+        let diskCacheMB: UInt = 1000
+        let diskCacheBytes = diskCacheMB * 1024 * 1024
+        cache.diskStorage.config.sizeLimit = diskCacheBytes
         
         // Configure navigation bar appearance to prevent white bar when scrolling
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
-        appearance.backgroundColor = UIColor(red: 12/255, green: 12/255, blue: 16/255, alpha: 1.0)
+        
+        // Break the color creation into separate steps
+        let bgRed: CGFloat = 12/255
+        let bgGreen: CGFloat = 12/255
+        let bgBlue: CGFloat = 16/255
+        let backgroundColor = UIColor(red: bgRed, green: bgGreen, blue: bgBlue, alpha: 1.0)
+        
+        appearance.backgroundColor = backgroundColor
         appearance.shadowColor = .clear
         
         UINavigationBar.appearance().standardAppearance = appearance
@@ -66,7 +72,6 @@ struct FeedView: View {
                             }
                         )
                     }
-                    .background(Color(red: 18/255, green: 18/255, blue: 24/255))
                     .edgesIgnoringSafeArea(.top)
                     
                     // Feed content
@@ -810,12 +815,40 @@ struct PostDetailView: View {
                         // Post content with enhanced styling
                         VStack(alignment: .leading, spacing: 18) {
                             if !post.content.isEmpty {
-                                Text(post.content)
-                                    .font(.system(size: 17))
-                                    .foregroundColor(.white.opacity(0.95))
-                                    .lineSpacing(6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 16)
+                                if post.sessionId != nil {
+                                    // Use same session content parsing as in PostView
+                                    if let parsed = parseSessionContent(from: post.content) {
+                                        LiveSessionStatusView(
+                                            gameName: parsed.gameName,
+                                            stakes: parsed.stakes,
+                                            chipAmount: parsed.chipAmount,
+                                            buyIn: parsed.buyIn,
+                                            elapsedTime: parsed.elapsedTime,
+                                            isLive: true
+                                        )
+                                        .padding(.bottom, 12)
+                                        
+                                        if !parsed.actualContent.isEmpty {
+                                            Text(parsed.actualContent)
+                                                .font(.system(size: 17))
+                                                .foregroundColor(.white.opacity(0.95))
+                                                .lineSpacing(6)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                    } else {
+                                        Text(post.content)
+                                            .font(.system(size: 17))
+                                            .foregroundColor(.white.opacity(0.95))
+                                            .lineSpacing(6)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                } else {
+                                    Text(post.content)
+                                        .font(.system(size: 17))
+                                        .foregroundColor(.white.opacity(0.95))
+                                        .lineSpacing(6)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
                             }
                             
                             // Hand post content - with showReplayButton set to false
@@ -1293,8 +1326,6 @@ struct CommentRow: View {
     }
 }
 
-
-
 // Image Gallery View with caching
 struct ImagesGalleryView: View {
     let imageURLs: [String]
@@ -1442,4 +1473,96 @@ struct NavigationBarBackground<Background>: ViewModifier where Background: View 
             }
         }
     }
+}
+
+// Add this helper struct and functions at the end of the PostDetailView struct
+private struct ParsedSessionContent {
+    let gameName: String
+    let stakes: String
+    let chipAmount: Double
+    let buyIn: Double
+    let elapsedTime: TimeInterval
+    let actualContent: String
+}
+
+private func parseSessionContent(from content: String) -> ParsedSessionContent? {
+    // Split by lines and trim whitespace
+    let rawLines = content.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+    guard rawLines.count >= 3 else { return nil }
+    
+    // Attempt to identify summary lines
+    var gameLine: String?
+    var stackLine: String?
+    var timeLine: String?
+    var remainingLines: [String] = []
+    
+    for line in rawLines {
+        if line.hasPrefix("Session at ") { gameLine = line; continue }
+        if line.hasPrefix("Stack:") { stackLine = line; continue }
+        if line.hasPrefix("Time:") { timeLine = line; continue }
+        remainingLines.append(line)
+    }
+    guard let gLine = gameLine, let sLine = stackLine, let tLine = timeLine else { return nil }
+    
+    let (gameName, stakes) = parseGameAndStakes(from: gLine)
+    let (chipAmount, buyIn) = parseStackInfo(from: sLine)
+    let elapsedTime = parseSessionTime(from: tLine)
+    let actualContent = remainingLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    
+    return ParsedSessionContent(gameName: gameName, stakes: stakes, chipAmount: chipAmount, buyIn: buyIn, elapsedTime: elapsedTime, actualContent: actualContent)
+}
+
+private func parseGameAndStakes(from line: String) -> (String, String) {
+    var gameName = "Cash Game"
+    var stakes = "$1/$2"
+    
+    if line.hasPrefix("Session at ") {
+        let parts = line.dropFirst("Session at ".count).split(separator: "(")
+        if parts.count >= 2 {
+            gameName = String(parts[0]).trimmingCharacters(in: .whitespaces)
+            stakes = String(parts[1]).replacingOccurrences(of: ")", with: "").trimmingCharacters(in: .whitespaces)
+        }
+    }
+    
+    return (gameName, stakes)
+}
+
+private func parseStackInfo(from line: String) -> (Double, Double) {
+    var chipAmount: Double = 0
+    var buyIn: Double = 0
+    
+    if let stackMatch = line.range(of: "Stack: \\$([0-9]+)", options: .regularExpression) {
+        let stackStr = String(line[stackMatch]).replacingOccurrences(of: "Stack: $", with: "")
+        chipAmount = Double(stackStr) ?? 0
+    }
+    
+    // Calculate buy-in based on profit
+    if let profitMatch = line.range(of: "\\(([+-]\\$[0-9]+)\\)", options: .regularExpression) {
+        let profitStr = String(line[profitMatch])
+            .replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+            .replacingOccurrences(of: "$", with: "")
+        
+        if let profit = Double(profitStr.replacingOccurrences(of: "+", with: "")) {
+            buyIn = chipAmount - profit
+        }
+    }
+    
+    return (chipAmount, buyIn)
+}
+
+private func parseSessionTime(from line: String) -> TimeInterval {
+    var elapsedTime: TimeInterval = 0
+    
+    if let timeMatch = line.range(of: "Time: ([0-9]+)h ([0-9]+)m", options: .regularExpression) {
+        let timeStr = String(line[timeMatch]).replacingOccurrences(of: "Time: ", with: "")
+        let timeParts = timeStr.split(separator: "h ")
+        if timeParts.count >= 2 {
+            let hours = Int(String(timeParts[0])) ?? 0
+            let minutes = Int(String(timeParts[1]).replacingOccurrences(of: "m", with: "")) ?? 0
+            elapsedTime = TimeInterval(hours * 3600 + minutes * 60)
+        }
+    }
+    
+    return elapsedTime
 } 

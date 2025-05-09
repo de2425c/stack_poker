@@ -1,4 +1,5 @@
 import SwiftUI
+import Kingfisher
 
 struct PostView: View {
     let post: Post
@@ -6,149 +7,137 @@ struct PostView: View {
     let onComment: () -> Void
     let userId: String
     @State private var showingReplay = false
-    @State private var isLiked = false
+    @State private var isLiked: Bool
+    
+    init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, userId: String) {
+        self.post = post
+        self.onLike = onLike
+        self.onComment = onComment
+        self.userId = userId
+        // Initialize isLiked from the post's state
+        _isLiked = State(initialValue: post.isLiked)
+    }
     
     var body: some View {
-        ZStack {
-            // Use the AppBackgroundView as a background
-            AppBackgroundView(edges: .none)
-            
-            HStack(alignment: .top, spacing: 12) {
-                Group {
-                    if let profileImage = post.profileImage {
-                        AsyncImage(url: URL(string: profileImage)) { image in
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        } placeholder: {
-                            Circle()
-                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+        HStack(alignment: .top, spacing: 12) {
+            // Use KFImage instead of AsyncImage for better caching
+            Group {
+                if let profileImage = post.profileImage {
+                    KFImage(URL(string: profileImage))
+                        .placeholder {
+                            Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
                         }
-                    } else {
-                        Circle()
-                            .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                    }
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 48, height: 48)
+                        .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                        .frame(width: 48, height: 48)
                 }
-                .frame(width: 48, height: 48)
-                .clipShape(Circle())
+            }
+            
+            // Content
+            VStack(alignment: .leading, spacing: 8) {
+                // Header - removed the session badge next to name
+                HStack(spacing: 6) {
+                    // Display the displayName if available, otherwise show username
+                    Text(post.displayName ?? post.username)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    // Add username for context when displayName is used
+                    if post.displayName != nil {
+                        Text("@\(post.username)")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray.opacity(0.8))
+                    }
+                    
+                    Text("·")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.gray.opacity(0.7))
+                    
+                    Text(post.createdAt.timeAgo())
+                        .font(.system(size: 15))
+                        .foregroundColor(.gray.opacity(0.7))
+                    
+                    Spacer(minLength: 0)
+                }
                 
-                // Content
-                VStack(alignment: .leading, spacing: 8) {
-                    // Header
-                    HStack(spacing: 6) {
-                        Text(post.username)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                        
-                        // Session badge for posts from sessions
-                        if post.sessionId != nil {
-                            sessionBadge
-                        }
-                        
-                        Text("·")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.gray.opacity(0.7))
-                        
-                        Text(post.createdAt.timeAgo())
-                            .font(.system(size: 15))
-                            .foregroundColor(.gray.opacity(0.7))
-                        
-                        Spacer(minLength: 0)
-                    }
-                    
-                    // Post content
-                    if !post.content.isEmpty {
-                        postContentView
-                    }
-                    
-                    // Hand post content
-                    if post.postType == .hand, let hand = post.handHistory {
+                // Post content
+                if !post.content.isEmpty {
+                    postContentView
+                }
+                
+                // Hand post content
+                if post.postType == .hand, let hand = post.handHistory {
+                    Button(action: {
+                        showingReplay = true
+                    }) {
                         HandSummaryView(hand: hand)
                     }
-                    
-                    // Images
-                    if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(imageURLs, id: \.self) { url in
-                                    AsyncImage(url: URL(string: url)) { image in
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    } placeholder: {
+                }
+                
+                // Images - also upgrade to KFImage
+                if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(imageURLs, id: \.self) { url in
+                                KFImage(URL(string: url))
+                                    .placeholder {
                                         Rectangle()
                                             .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
                                     }
+                                    .resizable()
+                                    .scaledToFill()
                                     .frame(width: 200, height: 200)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                                }
                             }
+                        }
+                    }
+                }
+                
+                // Actions
+                HStack(spacing: 32) {
+                    Button(action: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            isLiked.toggle()
+                            onLike()
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: isLiked ? "heart.fill" : "heart")
+                                .font(.system(size: 16))
+                                .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
+                            Text("\(post.likes)")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.gray.opacity(0.7))
                         }
                     }
                     
-                    // Actions
-                    HStack(spacing: 32) {
-                        Button(action: {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                isLiked.toggle()
-                                onLike()
-                            }
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: isLiked ? "heart.fill" : "heart")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
-                                Text("\(post.likes)")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundColor(.gray.opacity(0.7))
-                            }
+                    Button(action: onComment) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "message")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray.opacity(0.7))
+                            Text("\(post.comments)")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.gray.opacity(0.7))
                         }
-                        
-                        Button(action: onComment) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "message")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.gray.opacity(0.7))
-                                Text("\(post.comments)")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundColor(.gray.opacity(0.7))
-                            }
-                        }
-                        
-                        Spacer()
                     }
-                    .padding(.top, 4)
+                    
+                    Spacer()
                 }
+                .padding(.top, 4)
             }
-            .padding(16)
-            .background(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
         }
+        .padding(16)
         .sheet(isPresented: $showingReplay) {
             if let hand = post.handHistory {
                 HandReplayView(hand: hand, userId: userId)
             }
         }
-    }
-    
-    // MARK: - Session Badge
-    private var sessionBadge: some View {
-        HStack(spacing: 2) {
-            Image(systemName: "gamecontroller.fill")
-                .font(.system(size: 10))
-            Text("Session")
-                .font(.system(size: 10, weight: .medium))
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(
-            Capsule()
-                .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
-                .overlay(
-                    Capsule()
-                        .stroke(Color(red: 123/255, green: 255/255, blue: 99/255), lineWidth: 1)
-                )
-        )
-        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
     }
     
     // MARK: - Computed Properties
@@ -157,7 +146,62 @@ struct PostView: View {
     private var postContentView: some View {
         Group {
             if post.sessionId != nil {
-                sessionPostContent
+                if isNote {
+                    // Note post from a session - Display session card and note
+                    VStack(alignment: .leading, spacing: 10) {
+                        // Session badge at the top
+                        if let parsed = parseSessionContent() {
+                            SessionBadgeView(
+                                gameName: parsed.gameName,
+                                stakes: parsed.stakes
+                            )
+                        }
+                        
+                        // Note content using SharedNoteView
+                        VStack(alignment: .leading, spacing: 12) {
+                            if !commentContent.isEmpty && commentContent != noteContent {
+                                Text(commentContent)
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white.opacity(0.9))
+                                    .lineSpacing(4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.bottom, 2)
+                            }
+                            
+                            SharedNoteView(note: noteContent)
+                        }
+                    }
+                } else if post.postType == .hand {
+                    // Hand post from a session - Display session badge and hand
+                    VStack(alignment: .leading, spacing: 10) {
+                        // Session badge at the top
+                        if let parsed = parseSessionContent() {
+                            SessionBadgeView(
+                                gameName: parsed.gameName,
+                                stakes: parsed.stakes
+                            )
+                        }
+                        
+                        // Hand content is already displayed separately
+                    }
+                } else {
+                    // Regular session update (chips) - full session content
+                    sessionPostContent
+                }
+            } else if isNote {
+                // Note post (not from session)
+                VStack(alignment: .leading, spacing: 12) {
+                    if !commentContent.isEmpty && commentContent != noteContent {
+                        Text(commentContent)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.9))
+                            .lineSpacing(4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.bottom, 2)
+                    }
+                    
+                    SharedNoteView(note: noteContent)
+                }
             } else {
                 // Regular post content
                 Text(post.content)
@@ -305,6 +349,29 @@ struct PostView: View {
         }
         
         return elapsedTime
+    }
+    
+    // Add a computed property to determine if this is a note post
+    private var isNote: Bool {
+        post.content.contains("Note:")
+    }
+    
+    // Add a computed property to extract note content
+    private var noteContent: String {
+        if let range = post.content.range(of: "Note: ") {
+            return String(post.content[range.upperBound...])
+        }
+        return ""
+    }
+    
+    // Add a computed property to extract comment content
+    private var commentContent: String {
+        if post.content.contains("Note: ") {
+            if let range = post.content.range(of: "\n\nNote:") {
+                return String(post.content[..<range.lowerBound])
+            }
+        }
+        return post.content
     }
 }
 

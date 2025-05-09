@@ -308,56 +308,20 @@ class SessionStore: ObservableObject {
             "createdAt": FieldValue.serverTimestamp()
         ]
         
-        // Save enhanced data with the session - if available
-        var enhancedData: [String: Any] = [:]
-        if !enhancedLiveSession.chipUpdates.isEmpty {
-            enhancedData["chipUpdates"] = enhancedLiveSession.chipUpdates.map { $0.dictionary }
-        }
-        if !enhancedLiveSession.handHistories.isEmpty {
-            enhancedData["handHistories"] = enhancedLiveSession.handHistories.map { $0.dictionary }
-        }
-        if !enhancedLiveSession.notes.isEmpty {
-            enhancedData["notes"] = enhancedLiveSession.notes
-        }
-        
-        // If we have enhanced data, add it to the session
-        if !enhancedData.isEmpty {
-            var sessionWithEnhancedData = sessionData
-            sessionWithEnhancedData["enhancedData"] = enhancedData
+        do {
+            // Create a new document reference
+            let docRef = db.collection("sessions").document()
             
-            // Use async/await pattern with the enhanced data
-            do {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    addSession(sessionWithEnhancedData) { error in
-                        if let error = error {
-                            continuation.resume(throwing: error)
-                        } else {
-                            self.clearLiveSession()
-                            continuation.resume()
-                        }
-                    }
-                }
-                return nil
-            } catch {
-                return error
-            }
-        } else {
-            // Use async/await pattern with the basic data
-            do {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    addSession(sessionData) { error in
-                        if let error = error {
-                            continuation.resume(throwing: error)
-                        } else {
-                            self.clearLiveSession()
-                            continuation.resume()
-                        }
-                    }
-                }
-                return nil
-            } catch {
-                return error
-            }
+            // Save the session data
+            try await docRef.setData(sessionData)
+            
+            // IMPORTANT: Explicitly clear the session state after saving
+            clearLiveSession()
+            
+            return nil
+        } catch let error {
+            print("Error saving session: \(error.localizedDescription)")
+            return error
         }
     }
     
