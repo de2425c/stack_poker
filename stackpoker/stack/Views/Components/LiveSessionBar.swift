@@ -24,92 +24,100 @@ struct LiveSessionBar: View {
         Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
     }
     
+    private var statusColor: Color {
+        sessionStore.liveSession.isActive ? accentColor : Color.orange
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
-            // Expand/collapse handle
-            Capsule()
-                .fill(Color.white.opacity(0.18))
-                .frame(width: 40, height: 5)
+            // Pull handle - always visible
+            Rectangle()
+                .fill(Color.white.opacity(0.3))
+                .frame(width: 36, height: 4)
+                .cornerRadius(2)
                 .padding(.vertical, 6)
                 .onTapGesture {
-                    withAnimation(.spring(response: 0.3)) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                         isExpanded.toggle()
                     }
                 }
             
             if isExpanded {
-                // Expanded session details
-                VStack(spacing: 16) {
+                // Expanded view with detailed session information
+                VStack(spacing: 22) {
+                    // Game Info Row
                     HStack(alignment: .center) {
+                        // Status dot and game info
                         HStack(spacing: 10) {
+                            // Animated pulsing dot
                             ZStack {
                                 Circle()
-                                    .fill(sessionStore.liveSession.isActive ? accentColor : Color.orange)
-                                    .frame(width: 14, height: 14)
-                                    .shadow(color: (sessionStore.liveSession.isActive ? accentColor : Color.orange).opacity(0.5), radius: 6, y: 0)
+                                    .fill(statusColor)
+                                    .frame(width: 10, height: 10)
+                                
                                 Circle()
-                                    .stroke(Color.white.opacity(0.18), lineWidth: 2)
-                                    .frame(width: 20, height: 20)
+                                    .fill(statusColor.opacity(0.5))
+                                    .frame(width: 10, height: 10)
+                                    .scaleEffect(sessionStore.liveSession.isActive ? 2 : 1)
+                                    .opacity(sessionStore.liveSession.isActive ? 0 : 0.5)
+                                    .animation(
+                                        sessionStore.liveSession.isActive ? 
+                                            Animation.easeInOut(duration: 1.2).repeatForever(autoreverses: true) : 
+                                            .default,
+                                        value: sessionStore.liveSession.isActive
+                                    )
                             }
+                            
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Live Session")
-                                    .font(.system(size: 16, weight: .bold))
+                                Text(sessionStore.liveSession.gameName)
+                                    .font(.system(size: 18, weight: .bold))
                                     .foregroundColor(.white)
-                                Text("\(sessionStore.liveSession.gameName) (\(sessionStore.liveSession.stakes))")
+                                Text(sessionStore.liveSession.stakes)
                                     .font(.system(size: 14))
-                                    .foregroundColor(.gray)
+                                    .foregroundColor(accentColor)
                             }
                         }
+                        
                         Spacer()
-                        Button(action: onTap) {
-                            Text("Open")
-                                .font(.system(size: 14, weight: .semibold))
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 8)
-                                .background(accentColor)
-                                .foregroundColor(.black)
-                                .cornerRadius(16)
-                        }
+                        
+                        // Status badge
+                        Text(sessionStore.liveSession.isActive ? "ACTIVE" : "PAUSED")
+                            .font(.system(size: 12, weight: .bold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(statusColor.opacity(0.2))
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(statusColor, lineWidth: 1)
+                                    )
+                            )
+                            .foregroundColor(statusColor)
                     }
-                    .padding(.top, 2)
                     
-                    HStack(spacing: 18) {
-                        // Timer
-                        VStack(alignment: .center, spacing: 4) {
-                            Text(formattedElapsedTime)
-                                .font(.system(size: 26, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
-                            Text("Duration")
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
-                        }
-                        .frame(maxWidth: .infinity)
-                        // Start time
-                        VStack(alignment: .center, spacing: 4) {
-                            Text(formattedSessionStart)
-                                .font(.system(size: 22, weight: .bold))
-                                .foregroundColor(.white)
-                            Text("Start Time")
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
-                        }
-                        .frame(maxWidth: .infinity)
-                        // Buy-in
-                        VStack(alignment: .center, spacing: 4) {
-                            Text("$\(Int(sessionStore.liveSession.buyIn))")
-                                .font(.system(size: 22, weight: .bold))
-                                .foregroundColor(accentColor)
-                            Text("Buy-in")
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
-                        }
-                        .frame(maxWidth: .infinity)
+                    // Session metrics row with elegant cards
+                    HStack(spacing: 12) {
+                        // Timer card
+                        MetricCard(
+                            value: formattedElapsedTime,
+                            label: "TIME",
+                            icon: "clock.fill",
+                            color: .white
+                        )
+                        
+                        // Buy-in card
+                        MetricCard(
+                            value: "$\(Int(sessionStore.liveSession.buyIn))",
+                            label: "BUY-IN",
+                            icon: "dollarsign.circle.fill",
+                            color: accentColor
+                        )
                     }
-                    .padding(.top, 2)
                     
-                    // Pause/Resume button
-                    HStack {
-                        Spacer()
+                    // Action buttons row
+                    HStack(spacing: 12) {
+                        // Pause/Resume button
                         Button(action: {
                             if sessionStore.liveSession.isActive {
                                 sessionStore.pauseLiveSession()
@@ -118,83 +126,250 @@ struct LiveSessionBar: View {
                             }
                         }) {
                             HStack(spacing: 8) {
-                                Image(systemName: sessionStore.liveSession.isActive ? "pause.circle.fill" : "play.circle.fill")
-                                    .font(.system(size: 22, weight: .bold))
+                                Image(systemName: sessionStore.liveSession.isActive ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 12, weight: .semibold))
                                 Text(sessionStore.liveSession.isActive ? "Pause" : "Resume")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: 14, weight: .semibold))
                             }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .foregroundColor(sessionStore.liveSession.isActive ? .black : .white)
                             .background(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [accentColor.opacity(0.7), Color.white.opacity(0.12)]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
+                                sessionStore.liveSession.isActive ?
+                                    Color.white :
+                                    Color.white.opacity(0.2)
                             )
-                            .cornerRadius(18)
-                            .shadow(color: accentColor.opacity(0.18), radius: 6, y: 2)
+                            .cornerRadius(12)
                         }
-                        Spacer()
+                        
+                        // Open full view button
+                        Button(action: onTap) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.up.forward.square.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Open")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .foregroundColor(.black)
+                            .background(accentColor)
+                            .cornerRadius(12)
+                        }
                     }
                 }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 18)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+                .padding(.top, 6)
             } else {
-                // Collapsed mini bar
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(sessionStore.liveSession.isActive ? accentColor : Color.orange)
-                            .frame(width: 10, height: 10)
-                            .shadow(color: (sessionStore.liveSession.isActive ? accentColor : Color.orange).opacity(0.5), radius: 4, y: 0)
-                        Circle()
-                            .stroke(Color.white.opacity(0.18), lineWidth: 1)
-                            .frame(width: 16, height: 16)
-                    }
-                    Text(sessionStore.liveSession.isActive ? "Live Session" : "Session Paused")
-                        .font(.system(size: 14, weight: .medium))
+                // Collapsed bar with essential info
+                HStack(alignment: .center, spacing: 12) {
+                    // Animated status indicator
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 8, height: 8)
+                        .overlay(
+                            Circle()
+                                .fill(statusColor.opacity(0.5))
+                                .frame(width: 8, height: 8)
+                                .scaleEffect(sessionStore.liveSession.isActive ? 2 : 1)
+                                .opacity(sessionStore.liveSession.isActive ? 0 : 0.5)
+                                .animation(
+                                    sessionStore.liveSession.isActive ? 
+                                        Animation.easeInOut(duration: 1.2).repeatForever(autoreverses: true) : 
+                                        .default,
+                                    value: sessionStore.liveSession.isActive
+                                )
+                        )
+                    
+                    // Game name and status
+                    Text("\(sessionStore.liveSession.isActive ? "LIVE" : "PAUSED"): \(sessionStore.liveSession.gameName)")
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
+                    
                     Spacer()
+                    
+                    // Timer with subtle pulsing animation
                     Text(formattedElapsedTime)
-                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
+                        .opacity(sessionStore.liveSession.isActive ? 1.0 : 0.7)
+                        .scaleEffect(sessionStore.liveSession.isActive ? 1.0 : 0.98)
+                        .animation(
+                            sessionStore.liveSession.isActive ? 
+                                Animation.easeInOut(duration: 1).repeatForever(autoreverses: true) : 
+                                .default,
+                            value: sessionStore.liveSession.isActive
+                        )
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+                .padding(.bottom, 2)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    print("Collapsed bar tapped - launching session")
+                    onTap()
+                }
             }
         }
         .background(
-            BlurView(style: .systemUltraThinMaterialDark)
-                .background(
+            ZStack {
+                // Gradient background
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 30/255, green: 32/255, blue: 40/255),
+                        Color(red: 22/255, green: 24/255, blue: 30/255)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                
+                // Subtle pattern overlay
+                DiamondPatternView()
+                    .opacity(0.05)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            // Glowing border that pulses when active
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(
                     LinearGradient(
-                        gradient: Gradient(colors: [Color(red: 0.08, green: 0.09, blue: 0.12), Color(red: 0.13, green: 0.15, blue: 0.18)]),
+                        gradient: Gradient(colors: [
+                            sessionStore.liveSession.isActive ? accentColor.opacity(0.7) : Color.white.opacity(0.1),
+                            sessionStore.liveSession.isActive ? accentColor.opacity(0.3) : Color.white.opacity(0.05)
+                        ]),
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
-                    )
+                    ),
+                    lineWidth: 1.5
+                )
+                .opacity(sessionStore.liveSession.isActive ? 1.0 : 0.6)
+                .animation(
+                    sessionStore.liveSession.isActive ? 
+                        Animation.easeInOut(duration: 2).repeatForever(autoreverses: true) : 
+                        .default,
+                    value: sessionStore.liveSession.isActive
                 )
         )
-        .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 24 : 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: isExpanded ? 24 : 18, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        .shadow(color: statusColor.opacity(sessionStore.liveSession.isActive ? 0.15 : 0.05), radius: 16, y: 8)
+        .padding(.horizontal, 12)
+    }
+}
+
+// Elegant metric card for displaying session statistics
+struct MetricCard: View {
+    let value: String
+    let label: String
+    let icon: String
+    let color: Color
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(color.opacity(0.7))
+                
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(color.opacity(0.7))
+                    .textCase(.uppercase)
+            }
+            
+            Text(value)
+                .font(.system(size: 24, weight: .bold, design: value.contains(":") ? .monospaced : .default))
+                .foregroundColor(color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(0.07))
         )
-        .shadow(color: Color.black.opacity(0.18), radius: 12, y: 2)
-        .padding(.horizontal, 8)
-        .onTapGesture {
-            if !isExpanded {
-                onTap()
+    }
+}
+
+// Subtle pattern overlay to add depth
+struct DiamondPatternView: View {
+    var body: some View {
+        Canvas { context, size in
+            let diamondSize: CGFloat = 12
+            let spacing: CGFloat = 24
+            
+            for row in stride(from: 0, to: size.height + diamondSize, by: spacing) {
+                for col in stride(from: 0, to: size.width + diamondSize, by: spacing) {
+                    let offset = row.truncatingRemainder(dividingBy: 2*spacing) == 0 ? 0 : spacing/2
+                    let x = col + offset
+                    
+                    let path = Path { p in
+                        p.move(to: CGPoint(x: x, y: row))
+                        p.addLine(to: CGPoint(x: x + diamondSize/2, y: row + diamondSize/2))
+                        p.addLine(to: CGPoint(x: x, y: row + diamondSize))
+                        p.addLine(to: CGPoint(x: x - diamondSize/2, y: row + diamondSize/2))
+                        p.closeSubpath()
+                    }
+                    
+                    context.stroke(
+                        path,
+                        with: .color(Color.white),
+                        lineWidth: 0.5
+                    )
+                }
             }
         }
     }
 }
 
-// Helper for glassy blur background
-struct BlurView: UIViewRepresentable {
-    var style: UIBlurEffect.Style
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        return UIVisualEffectView(effect: UIBlurEffect(style: style))
+#Preview {
+    ZStack {
+        Color.black
+            .ignoresSafeArea()
+        
+        VStack {
+            Spacer()
+            
+            LiveSessionBar(
+                sessionStore: {
+                    let store = SessionStore(userId: "preview")
+                    store.liveSession = LiveSessionData(
+                        isActive: true,
+                        startTime: Date(),
+                        elapsedTime: 3723,
+                        gameName: "MGM Grand",
+                        stakes: "$2/$5",
+                        buyIn: 500,
+                        lastActiveAt: Date()
+                    )
+                    return store
+                }(),
+                isExpanded: .constant(true),
+                onTap: {}
+            )
+            
+            Spacer()
+            
+            LiveSessionBar(
+                sessionStore: {
+                    let store = SessionStore(userId: "preview")
+                    store.liveSession = LiveSessionData(
+                        isActive: false,
+                        startTime: Date(),
+                        elapsedTime: 1840,
+                        gameName: "Lucky Star Casino",
+                        stakes: "$1/$3",
+                        buyIn: 300,
+                        lastPausedAt: Date()
+                    )
+                    return store
+                }(),
+                isExpanded: .constant(false),
+                onTap: {}
+            )
+            
+            Spacer()
+        }
     }
-    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
 } 
+

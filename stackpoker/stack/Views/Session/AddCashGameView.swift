@@ -1,0 +1,240 @@
+import SwiftUI
+import FirebaseAuth
+
+struct AddCashGameView: View {
+    @Environment(\.dismiss) var dismiss
+    @ObservedObject var cashGameService: CashGameService
+    
+    @State private var gameName = ""
+    @State private var smallBlind = ""
+    @State private var bigBlind = ""
+    @State private var straddle = ""
+    @State private var isLoading = false
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color(red: 18/255, green: 20/255, blue: 24/255).ignoresSafeArea()
+                
+                VStack(spacing: 24) {
+                    // Game Name Field
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("GAME NAME")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        
+                        TextField("", text: $gameName)
+                            .placeholderss(when: gameName.isEmpty) {
+                                Text("Bellagio, Venetian, Wynn, etc.")
+                                    .foregroundColor(.gray.opacity(0.7))
+                            }
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(red: 25/255, green: 28/255, blue: 32/255))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                    }
+                    
+                    // Stakes Fields
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("STAKES")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        
+                        HStack(spacing: 12) {
+                            // Small Blind
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Small Blind")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.gray)
+                                
+                                HStack {
+                                    Text("$")
+                                        .foregroundColor(.gray)
+                                    TextField("", text: $smallBlind)
+                                        .keyboardType(.decimalPad)
+                                        .placeholderss(when: smallBlind.isEmpty) {
+                                            Text("1")
+                                                .foregroundColor(.gray.opacity(0.7))
+                                        }
+                                }
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(red: 25/255, green: 28/255, blue: 32/255))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                            
+                            // Big Blind
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Big Blind")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.gray)
+                                
+                                HStack {
+                                    Text("$")
+                                        .foregroundColor(.gray)
+                                    TextField("", text: $bigBlind)
+                                        .keyboardType(.decimalPad)
+                                        .placeholderss(when: bigBlind.isEmpty) {
+                                            Text("2")
+                                                .foregroundColor(.gray.opacity(0.7))
+                                        }
+                                }
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(red: 25/255, green: 28/255, blue: 32/255))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                        }
+                        
+                        // Optional Straddle
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Straddle (Optional)")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            
+                            HStack {
+                                Text("$")
+                                    .foregroundColor(.gray)
+                                TextField("", text: $straddle)
+                                    .keyboardType(.decimalPad)
+                                    .placeholderss(when: straddle.isEmpty) {
+                                        Text("5")
+                                            .foregroundColor(.gray.opacity(0.7))
+                                    }
+                            }
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(red: 25/255, green: 28/255, blue: 32/255))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    // Save Button
+                    Button(action: saveGame) {
+                        if isLoading {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color.black))
+                        } else {
+                            Text("Add Game")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundColor(Color(red: 25/255, green: 28/255, blue: 32/255))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background(
+                        RoundedRectangle(cornerRadius: 27)
+                            .fill(isFormValid ? Color.white : Color.white.opacity(0.5))
+                    )
+                    .disabled(!isFormValid || isLoading)
+                }
+                .padding(24)
+            }
+            .navigationTitle("Add New Game")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .foregroundColor(.white)
+                    }
+                }
+            }
+        }
+    }
+    
+    private var isFormValid: Bool {
+        guard !gameName.isEmpty,
+              !smallBlind.isEmpty,
+              !bigBlind.isEmpty,
+              let sb = Double(smallBlind),
+              let bb = Double(bigBlind),
+              sb > 0,
+              bb > 0,
+              bb >= sb else {
+            return false
+        }
+        
+        if !straddle.isEmpty {
+            guard let str = Double(straddle),
+                  str > bb else {
+                return false
+            }
+        }
+        
+        return true
+    }
+    
+    private func saveGame() {
+        isLoading = true
+        
+        Task {
+            do {
+                let sb = Double(smallBlind) ?? 0
+                let bb = Double(bigBlind) ?? 0
+                let str = straddle.isEmpty ? nil : Double(straddle)
+                
+                try await cashGameService.addCashGame(
+                    name: gameName,
+                    smallBlind: sb,
+                    bigBlind: bb,
+                    straddle: str
+                )
+                
+                await MainActor.run {
+                    isLoading = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    print("Error adding cash game: \(error.localizedDescription)")
+                    // Could show an alert here
+                }
+            }
+        }
+    }
+}
+
+extension View {
+    func placeholderss<Content: View>(
+        when shouldShow: Bool,
+        alignment: Alignment = .leading,
+        @ViewBuilder placeholderss: () -> Content
+    ) -> some View {
+        ZStack(alignment: alignment) {
+            placeholderss().opacity(shouldShow ? 1 : 0)
+            self
+        }
+    }
+}
+
+#Preview {
+    AddCashGameView(cashGameService: CashGameService(userId: "preview"))
+} 

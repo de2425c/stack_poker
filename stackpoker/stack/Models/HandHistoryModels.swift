@@ -3,6 +3,11 @@ import Foundation
 // MARK: - Main Models
 struct ParsedHandHistory: Codable {
     let raw: RawHandHistory
+    
+    /// Calculates the accurate hero PnL regardless of the stored value
+    var accurateHeroPnL: Double {
+        return PokerCalculator.calculateHandHistoryPnL(hand: raw)
+    }
 }
 
 struct RawHandHistory: Codable {
@@ -80,9 +85,16 @@ struct Pot: Codable {
     let amount: Double
     let distribution: [PotDistribution]?
     let heroPnl: Double
+    
     enum CodingKeys: String, CodingKey {
         case amount, distribution
         case heroPnl = "hero_pnl"
+    }
+    
+    /// Gets the accurate hero PnL from the parent hand if needed
+    /// This requires the parent hand context to calculate properly
+    func getAccurateHeroPnL(in hand: RawHandHistory) -> Double {
+        return PokerCalculator.calculateHandHistoryPnL(hand: hand)
     }
 }
 
@@ -103,4 +115,10 @@ struct SavedHand: Identifiable {
     let id: String  // Firestore document ID
     let hand: ParsedHandHistory
     let timestamp: Date
+    var sessionId: String? = nil  // Optional session ID to tag hands to sessions
+    
+    /// Convenient access to the accurate hero PnL
+    var heroPnL: Double {
+        return hand.accurateHeroPnL
+    }
 } 

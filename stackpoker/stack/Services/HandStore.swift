@@ -12,17 +12,24 @@ class HandStore: ObservableObject {
         loadSavedHands()
     }
     
-    func saveHand(_ hand: ParsedHandHistory) async throws {
+    func saveHand(_ hand: ParsedHandHistory, sessionId: String? = nil) async throws {
         let data = try JSONEncoder().encode(hand)
         let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        
+        var docData: [String: Any] = [
+            "hand": dict,
+            "timestamp": FieldValue.serverTimestamp()
+        ]
+        
+        // Add sessionId if provided
+        if let sessionId = sessionId {
+            docData["sessionId"] = sessionId
+        }
         
         try await db.collection("users")
             .document(userId)
             .collection("hands")
-            .addDocument(data: [
-                "hand": dict,
-                "timestamp": FieldValue.serverTimestamp()
-            ])
+            .addDocument(data: docData)
     }
     
     func loadSavedHands() {
@@ -45,11 +52,19 @@ class HandStore: ObservableObject {
                         print("Error decoding hand from document: \(document.documentID)")
                         return nil
                     }
-                    return SavedHand(
+                    
+                    let sessionId = document.data()["sessionId"] as? String
+                    
+                    var savedHand = SavedHand(
                         id: document.documentID,
                         hand: hand,
                         timestamp: timestamp.dateValue()
                     )
+                    
+                    // Set the sessionId if available
+                    savedHand.sessionId = sessionId
+                    
+                    return savedHand
                 }
                 
                 print("Loaded \(self?.savedHands.count ?? 0) hands")

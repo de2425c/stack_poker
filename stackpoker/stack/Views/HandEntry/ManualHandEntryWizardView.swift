@@ -56,6 +56,9 @@ struct ManualHandEntryWizardView: View {
     @State private var showingCancelAlert = false
     @State private var errorMessage: String? = nil
     @State private var isCompleting = false
+    var sessionId: String? = nil  // Optional parameter to tag hands to a specific session
+    var stakes: String? = nil     // Optional stakes string to prefill blinds (e.g. "$2/$5")
+    var onComplete: (() -> Void)? = nil // Callback when hand successfully saved
     
     var body: some View {
         NavigationView { 
@@ -134,6 +137,23 @@ struct ManualHandEntryWizardView: View {
                     },
                     secondaryButton: .cancel()
                 )
+            }
+            // Prefill blinds when the view appears
+            .onAppear {
+                guard let stakes = stakes, !stakes.isEmpty else { return }
+                // Remove dollar signs and whitespace, split by '/'
+                let tokens = stakes
+                    .replacingOccurrences(of: " ", with: "")
+                    .replacingOccurrences(of: "$", with: "")
+                    .split(separator: "/")
+                if tokens.count >= 2 {
+                    if let sb = Double(String(tokens[0])) {
+                        viewModel.smallBlind = sb
+                    }
+                    if let bb = Double(String(tokens[1])) {
+                        viewModel.bigBlind = bb
+                    }
+                }
             }
         }
     }
@@ -428,12 +448,13 @@ struct ManualHandEntryWizardView: View {
                     return
                 }
                 
-                // Save to database using HandStore
-                try await handStore.saveHand(handHistory)
+                // Save to database using HandStore, passing sessionId if available
+                try await handStore.saveHand(handHistory, sessionId: sessionId)
                 
-                // Success - return to main thread and dismiss
+                // Success - return to main thread, notify and dismiss
                 await MainActor.run { 
                     isCompleting = false
+                    onComplete?()
                     presentationMode.wrappedValue.dismiss()
                 }
             } catch {
@@ -691,24 +712,91 @@ struct ManualHandEntryWizardView: View {
             playerContributions[bbPlayer.position!] = viewModel.bigBlind
         }
         
-        // Process all streets
-        let allActions = viewModel.preflopActions + viewModel.flopActions + 
-                         viewModel.turnActions + viewModel.riverActions
+        // Track per-street highest bets (needed for proper call amount calculation)
+        var streetHighestBets: [String: Double] = [
+            "preflop": viewModel.bigBlind,
+            "flop": 0,
+            "turn": 0,
+            "river": 0
+        ]
         
-        for action in allActions {
+        // Track per-street contributions for each player
+        var streetContributions: [String: [String: Double]] = [
+            "preflop": [:],
+            "flop": [:],
+            "turn": [:],
+            "river": [:]
+        ]
+        
+        // Initialize preflop contributions with blinds
+        for (position, amount) in playerContributions {
+            streetContributions["preflop"]?[position] = amount
+        }
+        
+        // Helper to process actions for a street
+        func processActions(actions: [ActionEntry], streetName: String) {
+            var highestBet = streetHighestBets[streetName] ?? 0
+            
+            // First pass: identify the highest bet for the street
+            for action in actions {
                 let playerPos = action.playerName
-            let _ = playerContributions[playerPos] ?? 0
-
+                
                 switch action.action {
-            case "bets", "raises":
-                playerContributions[playerPos] = action.amount
+                case "bets", "raises":
+                    highestBet = max(highestBet, action.amount)
+                default:
+                    break
+                }
+            }
+            
+            // Update the highest bet for this street
+            streetHighestBets[streetName] = highestBet
+            
+            // Second pass: process all actions correctly
+            for action in actions {
+                let playerPos = action.playerName
+                let currentContribution = streetContributions[streetName]?[playerPos] ?? 0
+                
+                switch action.action {
+                case "bets":
+                    // A bet means putting in the amount
+                    streetContributions[streetName]?[playerPos] = action.amount
+                    
+                case "raises":
+                    // A raise means putting in the raise amount (total, not additional)
+                    streetContributions[streetName]?[playerPos] = action.amount
+                    
                 case "calls":
-                playerContributions[playerPos] = action.amount
-            case "posts":
-                // Posts override any existing contribution
-                playerContributions[playerPos] = action.amount
-                default: 
-                break // Fold and check don't change contribution
+                    // A call means matching the highest bet minus what's already in
+                    let callAmount = highestBet - currentContribution
+                    if callAmount > 0 {
+                        streetContributions[streetName]?[playerPos] = highestBet
+                    }
+                    
+                case "posts":
+                    // Posting is like a forced bet
+                    streetContributions[streetName]?[playerPos] = action.amount
+                    
+                case "folds", "checks":
+                    // No additional money is contributed
+                    break
+                    
+                default:
+                    break
+                }
+            }
+        }
+        
+        // Process actions for each street in order
+        processActions(actions: viewModel.preflopActions, streetName: "preflop")
+        processActions(actions: viewModel.flopActions, streetName: "flop")
+        processActions(actions: viewModel.turnActions, streetName: "turn")
+        processActions(actions: viewModel.riverActions, streetName: "river")
+        
+        // Combine all street contributions for the final result
+        for (_, streetContributionDict) in streetContributions {
+            for (position, amount) in streetContributionDict {
+                playerContributions[position, default: 0] += amount
             }
         }
         
@@ -752,7 +840,11 @@ struct ManualHandEntryWizardView: View {
         
         // Hero is the only player left, so won the pot
         if activePlayers.count == 1 && activePlayers.first?.isHero == true {
-            return potAmount - heroContribution
+            return PokerCalculator.calculateHeroPnL(
+                potAmount: potAmount,
+                heroContribution: heroContribution,
+                isWinner: true
+            )
         }
         
         // If showdown, compare hands
@@ -769,7 +861,11 @@ struct ManualHandEntryWizardView: View {
             if playersWithCards.count > 1 {
                 // Hero must have cards to win at showdown
                 if hero.card1 == nil || hero.card2 == nil {
-                    return -heroContribution
+                    return PokerCalculator.calculateHeroPnL(
+                        potAmount: potAmount,
+                        heroContribution: heroContribution,
+                        isWinner: false
+                    )
                 }
                 
                 // Get hero's cards and hand rank
@@ -795,29 +891,43 @@ struct ManualHandEntryWizardView: View {
                 
                 // Hero wins or ties for the win
                 if heroRank == maxRank {
-                    if bestHandCount > 1 {
-                        // Split pot - hero gets their share
-                        let heroShare = potAmount / Double(bestHandCount)
-                        return heroShare - heroContribution
-                    } else {
-                        // Hero wins the whole pot
-                        return potAmount - heroContribution
-                    }
+                    return PokerCalculator.calculateHeroPnL(
+                        potAmount: potAmount,
+                        heroContribution: heroContribution,
+                        isWinner: true,
+                        winningPlayers: bestHandCount
+                    )
                 } else {
                     // Hero lost at showdown
-                    return -heroContribution
+                    return PokerCalculator.calculateHeroPnL(
+                        potAmount: potAmount,
+                        heroContribution: heroContribution,
+                        isWinner: false
+                    )
                 }
             } else if playersWithCards.count == 1 && playersWithCards.first?.isHero == true {
                 // Only hero has cards, so they win
-                return potAmount - heroContribution
+                return PokerCalculator.calculateHeroPnL(
+                    potAmount: potAmount,
+                    heroContribution: heroContribution,
+                    isWinner: true
+                )
             } else {
                 // No players with cards, can't determine (should not happen)
-                return -heroContribution
+                return PokerCalculator.calculateHeroPnL(
+                    potAmount: potAmount,
+                    heroContribution: heroContribution,
+                    isWinner: false
+                )
             }
         }
         
         // Default: hero lost (no showdown, not the only player left)
-        return -heroContribution
+        return PokerCalculator.calculateHeroPnL(
+            potAmount: potAmount,
+            heroContribution: heroContribution,
+            isWinner: false
+        )
     }
     
     // Helper to calculate hand rank (higher number = better hand)

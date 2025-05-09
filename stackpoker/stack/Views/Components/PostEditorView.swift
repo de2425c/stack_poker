@@ -15,8 +15,11 @@ struct PostEditorView: View {
     // Required properties
     let userId: String
     
-    // Optional hand data (only for hand posts)
+    // Optional properties
+    var initialText: String = ""
     var hand: ParsedHandHistory?
+    var sessionId: String? = nil
+    var isSessionPost: Bool = false
     
     // View state
     @State private var postText = ""
@@ -75,14 +78,38 @@ struct PostEditorView: View {
                                     .font(.system(size: 16, weight: .bold))
                                     .foregroundColor(.white)
                             }
-                            Text(isHandPost ? "Share your hand" : "Create a post")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
+                            
+                            // Show session indicator for session posts
+                            if isSessionPost {
+                                Text("Session Post")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                            } else {
+                                Text(isHandPost ? "Share your hand" : "Create a post")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
+                            }
                         }
                         
                         Spacer()
                     }
                     .padding()
+                    
+                    // Session indicator (only for session posts)
+                    if isSessionPost && sessionId != nil {
+                        HStack {
+                            Image(systemName: "gamecontroller.fill")
+                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+                            
+                            Text("Live Poker Session")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+                            
+                            Spacer()
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                    }
                     
                     // Hand Summary (only for hand posts)
                     if isHandPost, let handData = hand {
@@ -101,7 +128,7 @@ struct PostEditorView: View {
                             .background(Color.clear)
                         
                         if postText.isEmpty && !isTextEditorFocused {
-                            Text(isHandPost ? "Add a comment about your hand..." : "What's on your mind?")
+                            Text(placeholderText)
                                 .foregroundColor(Color.gray)
                                 .font(.system(size: 16))
                                 .padding(.horizontal, 20)
@@ -178,7 +205,7 @@ struct PostEditorView: View {
                     .padding(.bottom, 16)
                 }
             }
-            .navigationTitle(isHandPost ? "Share Hand" : "Create Post")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -198,8 +225,8 @@ struct PostEditorView: View {
                                 .fontWeight(.semibold)
                         }
                     }
-                    .disabled(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading || postText.count > 280)
-                    .foregroundColor(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || postText.count > 280 ? .gray : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    .disabled(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading || postText.count > 280 || userService.currentUserProfile == nil)
+                    .foregroundColor(postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || postText.count > 280 || userService.currentUserProfile == nil ? .gray : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                 }
             }
             .onChange(of: imageSelection) { _, newValue in
@@ -214,8 +241,38 @@ struct PostEditorView: View {
                 }
             }
             .onAppear {
+                if !initialText.isEmpty {
+                    postText = initialText
+                }
                 isTextEditorFocused = true
+                // Fetch user profile if not loaded
+                if userService.currentUserProfile == nil {
+                    Task {
+                        try? await userService.fetchUserProfile()
+                    }
+                }
             }
+        }
+    }
+    
+    // Computed properties for UI customization
+    private var navigationTitle: String {
+        if isSessionPost {
+            return "Share Session Update"
+        } else if isHandPost {
+            return "Share Hand"
+        } else {
+            return "Create Post"
+        }
+    }
+    
+    private var placeholderText: String {
+        if isSessionPost {
+            return "Share your session update..."
+        } else if isHandPost {
+            return "Add a comment about your hand..."
+        } else {
+            return "What's on your mind?"
         }
     }
     
@@ -237,7 +294,8 @@ struct PostEditorView: View {
                     username: username,
                     displayName: displayName,
                     profileImage: profileImage,
-                    images: selectedImages.isEmpty ? nil : selectedImages
+                    images: selectedImages.isEmpty ? nil : selectedImages,
+                    sessionId: sessionId
                 )
                 try await postService.fetchPosts()
                 DispatchQueue.main.async {
@@ -257,9 +315,9 @@ struct PostEditorView: View {
     private func shareHand() {
         guard !postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let hand = hand,
-              let username = userService.currentUserProfile?.username,
-              let profileImage = userService.currentUserProfile?.avatarURL else { return }
+              let username = userService.currentUserProfile?.username else { return }
         
+        let profileImage = userService.currentUserProfile?.avatarURL
         let displayName = userService.currentUserProfile?.displayName
         
         isLoading = true
@@ -272,7 +330,8 @@ struct PostEditorView: View {
                     username: username,
                     displayName: displayName,
                     profileImage: profileImage,
-                    hand: hand
+                    hand: hand,
+                    sessionId: sessionId
                 )
                 try await postService.fetchPosts()
                 DispatchQueue.main.async {

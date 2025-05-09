@@ -77,12 +77,28 @@ struct HomePage: View {
             // Main view structure
             VStack(spacing: 0) {
                 // Live session bar (if active)
-                if sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded {
-                    LiveSessionBar(
-                        sessionStore: sessionStore,
-                        isExpanded: $liveSessionBarExpanded,
-                        onTap: { showingLiveSession = true }
-                    )
+                ZStack(alignment: .top) {
+                    Color.clear.frame(height: 0) // Zero-height placeholder that doesn't affect layout
+                    
+                    if sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && 
+                       (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive) {
+                        LiveSessionBar(
+                            sessionStore: sessionStore,
+                            isExpanded: $liveSessionBarExpanded,
+                            onTap: { 
+                                // Make sure the session is shown when tapped
+                                print("LiveSessionBar tapped - opening session")
+                                showingLiveSession = true 
+                            }
+                        )
+                        .onTapGesture {
+                            // Additional tap gesture to ensure it works
+                            if !liveSessionBarExpanded {
+                                print("LiveSessionBar tapped via gesture - opening session")
+                                showingLiveSession = true
+                            }
+                        }
+                    }
                 }
                 
                 // Main content
@@ -143,7 +159,7 @@ struct HomePage: View {
             SessionFormView(userId: userId)
         }
         .fullScreenCover(isPresented: $showingLiveSession) {
-            LiveSessionView(userId: userId, sessionStore: sessionStore)
+            EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
         }
         .onDisappear {
             // Remove observer when view disappears

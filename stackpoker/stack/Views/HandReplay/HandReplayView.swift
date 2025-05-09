@@ -45,9 +45,6 @@ struct HandReplayView: View {
     @EnvironmentObject var postService: PostService
     @EnvironmentObject var userService: UserService
     
-    private let tableColor = Color(red: 45/255, green: 120/255, blue: 65/255)
-    private let tableBorderColor = Color(red: 74/255, green: 54/255, blue: 38/255)
-    
     // Use standard card size for all cards with proper aspect ratio
     private let cardAspectRatio: CGFloat = 0.69 // Standard playing card ratio (width to height)
     let cardWidth: CGFloat = 36
@@ -82,8 +79,7 @@ struct HandReplayView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                Color(UIColor(red: 10/255, green: 10/255, blue: 15/255, alpha: 1.0))
-                    .ignoresSafeArea()
+                AppBackgroundView(edges: .all)
                 
                 VStack(spacing: 0) {
                     // Back and share buttons at the top
@@ -118,21 +114,28 @@ struct HandReplayView: View {
                     ZStack {
                         // Table background
                         Ellipse()
-                            .fill(tableColor)
+                            .fill(Color(red: 53/255, green: 128/255, blue: 73/255))
                             .overlay(
                                 Ellipse()
-                                    .stroke(tableBorderColor, lineWidth: 8)
+                                    .stroke(Color(red: 91/255, green: 70/255, blue: 43/255), lineWidth: 10)
                             )
                             .frame(width: geometry.size.width * 0.93, height: geometry.size.height * 0.78)
                             .position(x: geometry.size.width / 2, y: geometry.size.height * 0.4)
-                            .shadow(color: .black.opacity(0.5), radius: 10)
+                            .shadow(color: .black.opacity(0.6), radius: 15)
+                        
+                        // Inner table accent 
+                        Ellipse()
+                            .stroke(Color.black.opacity(0.2), lineWidth: 2)
+                            .frame(width: geometry.size.width * 0.80, height: geometry.size.height * 0.65)
+                            .position(x: geometry.size.width / 2, y: geometry.size.height * 0.4)
                         
                         // Stack Logo - positioned above pot
                         Text("STACK")
-                            .font(.system(size: 24, weight: .bold))
+                            .font(.system(size: 28, weight: .bold))
                             .foregroundColor(.white)
                             .opacity(0.3)
                             .offset(y: -geometry.size.height * 0.14)
+                            .shadow(color: .black.opacity(0.5), radius: 2)
 
                         // Pot display - centered at middle of table
                         if potAmount > 0 {
@@ -140,12 +143,12 @@ struct HandReplayView: View {
                                 .scaleEffect(1.2) // Scale up for better visibility
                                 .transition(.scale.combined(with: .opacity))
                                 .animation(.spring(response: 0.4), value: potAmount)
-                                .offset(y: geometry.size.height * 0.0)
+                                .offset(y: geometry.size.height * -0.08)
                         }
 
                         // Community Cards - positioned closer to hero
                         CommunityCardsView(cards: allCommunityCards)
-                            .offset(y: geometry.size.height * 0.08)
+                            .offset(y: geometry.size.height * 0.0)
                             .scaleEffect(1.15) // Make it slightly larger overall
 
                         // Player Seats
@@ -480,20 +483,14 @@ struct HandReplayView: View {
             let heroPlayer = hand.raw.players.first { $0.isHero }
             
             if let hero = heroPlayer {
-                let heroPnl = hand.raw.pot.heroPnl ?? 0
+                let heroPnl = hand.accurateHeroPnL
                 if heroPnl > 0 {
                     winnerName = hero.name
                     winningHand = hero.finalHand ?? "winning hand"
                 } else {
-                    // Find a non-folded villain
-                    let activeVillains = hand.raw.players.filter { !$0.isHero && !foldedPlayers.contains($0.name) }
-                    if let villain = activeVillains.first {
-                        winnerName = villain.name
-                        winningHand = villain.finalHand ?? "winning hand"
-                    } else {
-                        winnerName = "Unknown Player"
-                        winningHand = ""
-                    }
+                    // Villain(s) won - make all non-hero active players winners
+                    winningPlayers = Set(activePlayers.filter { !$0.isHero }.map { $0.name })
+                    print("DEBUG - Villains won based on negative hero PnL: $\(heroPnl)")
                 }
                 showWinnerPopup = true
                 
@@ -670,7 +667,7 @@ struct HandReplayView: View {
                 let heroPlayer = hand.raw.players.first { $0.isHero }
                 
                 if let hero = heroPlayer {
-                    let heroPnl = hand.raw.pot.heroPnl ?? 0
+                    let heroPnl = hand.accurateHeroPnL
                     if heroPnl > 0 {
                         // Hero won
                         winningPlayers = [hero.name]
@@ -899,131 +896,175 @@ struct PlayerSeatView: View {
     private func getPosition() -> CGPoint {
         let width = geometry.size.width
         let height = geometry.size.height
-        let tableCenterX = width * 0.5
-        let tableCenterY = height * 0.4 // Center of the ellipse
-        let tableWidthRadius = width * 0.93 * 0.5 * 0.9 // Condense horizontally
-        let tableHeightRadius = height * 0.75 * 0.5 * 0.9 // Condense vertically
+        let centerX = width * 0.5
+        let centerY = height * 0.4  // Table center
 
-        // Determine position order based on table size
-        let tableSize = allPlayers.count
+        // 1. Find the hero and their position
+        guard let heroPlayer = allPlayers.first(where: { $0.isHero }) else {
+            // Fallback position if no hero is found
+            return CGPoint(x: centerX, y: centerY)
+        }
+        
+        guard let heroPosition = heroPlayer.position else {
+            // Fallback if hero has no position
+            return CGPoint(x: centerX, y: centerY)
+        }
+        
+        // 2. Set up position orders for different table sizes
+        let positionOrder2Max = ["SB", "BB"]
+        let positionOrder6Max = ["SB", "BB", "UTG", "MP", "CO", "BTN"]
+        let positionOrder9Max = ["SB", "BB", "UTG", "UTG+1", "MP", "MP+1", "HJ", "CO", "BTN"]
+        
+        // 3. Determine the appropriate order based on table size
         let positionOrder: [String]
+        let tableSize = allPlayers.count
+        
         switch tableSize {
-            case 2: positionOrder = positionOrder2Max
-            case 3...6: positionOrder = positionOrder6Max // Assume 6max layout for intermediate sizes too
-            case 7...9: positionOrder = positionOrder9Max
-            default: positionOrder = positionOrder6Max // Default fallback
+        case 2:
+            positionOrder = positionOrder2Max
+        case 3...6:
+            positionOrder = positionOrder6Max
+        case 7...9:
+            positionOrder = positionOrder9Max
+        default:
+            positionOrder = positionOrder6Max // Default to 6-max
         }
         
-        let numSeats = positionOrder.count // Use the count from the relevant order
-
-        let hero = allPlayers.first(where: { $0.isHero })
-        guard let hero = hero else {
-            print("Error: Hero player not found in allPlayers for HandReplayView layout.")
-            fatalError("Hero player required for layout but not found.") // Or handle more gracefully
+        // 4. Find the index of the hero's position in the order
+        guard let heroIndex = positionOrder.firstIndex(of: heroPosition) else {
+            // Fallback if hero's position isn't in the standard order
+            return CGPoint(x: centerX, y: centerY)
         }
-        let heroPos = hero.position // Now accessing the unwrapped hero
-        let heroSeatIndex = hero.seat - 1 // Now accessing the unwrapped hero
-
         
-        let playerSeatIndex = player.seat - 1 // Use seat index (0-based)
-
-        // --- Angle Calculation --- 
-        // Calculate the angle step between seats
-        let angleStep = 360.0 / Double(numSeats)
+        // 5. Define seat positions around the table (clockwise from bottom)
+        // These are the fixed seat locations regardless of who sits where
+        let seatPositions: [(CGFloat, CGFloat)]
         
-        // Calculate the "natural" angle for the hero based on their seat index
-        // Assuming seat 1 (index 0) is roughly SB position (e.g., ~225 degrees from top)
-        // And seats increase clockwise.
-        // Let's refine: Assume seat 1 starts just left of bottom (Hero's spot)
-        let baseAngleOffset = -100.0 // Degrees offset from positive X-axis for seat 1
-        let heroNaturalAngle = baseAngleOffset + Double(heroSeatIndex) * angleStep
+        if tableSize == 2 {
+            // For heads-up (2 players), just use bottom and top
+            seatPositions = [
+                (0.5, 0.7),  // bottom (hero)
+                (0.5, 0.1)   // top (opponent)
+            ]
+        } else if tableSize <= 6 {
+            // 6-max table positions (clockwise from bottom)
+            seatPositions = [
+                (0.5, 0.75),   // bottom
+                (0.15, 0.55), // bottom left
+                (0.15, 0.3), // middle left
+                (0.5, 0.05),  // top left
+                (0.85, 0.3), // middle right
+                (0.85, 0.55)  // bottom right
+            ]
+        } else {
+            // 9-max table positions (clockwise from bottom)
+            seatPositions = [
+                (0.5, 0.75),    // bottom
+                (0.15, 0.66),  // bottom left
+                (0.11, 0.48),  // lower left
+                (0.11, 0.25),  // middle left
+                (0.35, 0.08),  // upper left
+                (0.65, 0.08),  // upper right
+                (0.89, 0.25),  // middle right
+                (0.89, 0.48),  // lower right
+                (0.85, 0.66)   // bottom right
+            ]
+        }
         
-        // Calculate the desired angle for the hero (bottom center)
-        let heroTargetAngle = 80.0 // Moved hero slightly more up (smaller angle)
-        
-        // Calculate the rotation needed to move hero to the target angle
-        let rotationOffset = heroTargetAngle - heroNaturalAngle
-        
-        // Calculate the natural angle for the current player
-        let playerNaturalAngle = baseAngleOffset + Double(playerSeatIndex) * angleStep
-        
-        // Apply the rotation offset to the current player's angle
-        let playerFinalAngleDegrees = playerNaturalAngle + rotationOffset
-        let playerFinalAngleRadians = playerFinalAngleDegrees * .pi / 180.0
-        
-        // Calculate position on the ellipse using the final angle
-        let x = tableCenterX + tableWidthRadius * cos(playerFinalAngleRadians)
-        
-        // Calculate base y position
-        var y = tableCenterY + tableHeightRadius * sin(playerFinalAngleRadians)
-        
-        // Move hero up a bit more if this is the hero player
+        // 6. If this is the hero, always place at the bottom position
         if isHero {
-            y -= 15  // Move hero up by 15 points
+            let (xPercent, yPercent) = seatPositions[0] // Hero always at bottom
+            return CGPoint(x: width * xPercent, y: height * yPercent)
         }
         
-        return CGPoint(x: x, y: y)
+        // 7. For other players, calculate their position relative to hero
+        guard let playerPosition = player.position,
+              let playerIndex = positionOrder.firstIndex(of: playerPosition) else {
+            // Fallback if player's position isn't found
+            return CGPoint(x: centerX, y: centerY)
+        }
+        
+        // Calculate relative position (how many seats away from hero, clockwise)
+        let relativePosition = (playerIndex - heroIndex + positionOrder.count) % positionOrder.count
+        
+        // 8. Map to the appropriate seat position
+        // Seat 0 is always hero at bottom, so we start at seat 1
+        let seatIndex = relativePosition == 0 ? 0 : relativePosition
+        
+        // Ensure we don't go out of bounds
+        let safeSeatIndex = min(seatIndex, seatPositions.count - 1)
+        let (xPercent, yPercent) = seatPositions[safeSeatIndex]
+        
+        return CGPoint(x: width * xPercent, y: height * yPercent)
     }
     
     private func getBetPosition() -> CGPoint {
+        let playerPos = getPosition()
         let width = geometry.size.width
         let height = geometry.size.height
-
-        // Calculate vector from center to player position
-        let pos = getPosition()
-        let tableCenterY = height * 0.4
-        let vectorX = pos.x - (width * 0.5)
-        let vectorY = pos.y - tableCenterY
+        let centerX = width * 0.5
+        let centerY = height * 0.4
         
-        // Only normalize if the vector has length
-        let length = sqrt(vectorX * vectorX + vectorY * vectorY)
-        let normalizedVectorX = length > 0 ? vectorX / length : 0
-        let normalizedVectorY = length > 0 ? vectorY / length : -1 // Default point up if zero vector
-
-        // Use different scaling factors for different players to avoid overlap
-        let scaleFactor: CGFloat = isHero ? 50 : 70
-        var offsetX = normalizedVectorX * -scaleFactor
-        var offsetY = normalizedVectorY * -scaleFactor
-
-        // For hero, place bet to the right (screen right)
+        // Calculate vector from center to player
+        let vectorX = playerPos.x - centerX
+        let vectorY = playerPos.y - centerY
+        
+        // Special handling for hero
         if isHero {
-            offsetX = 60 // Move bet chip to the hero's right (screen right)
-            offsetY = 0
+            // Place bet up and to the right of hero
+            return CGPoint(x: playerPos.x + 60, y: playerPos.y - 25)
         }
-
-        // Add a small random offset to avoid exact overlaps when bets are the same
-        let jitter = CGFloat(player.seat % 3) * 5.0 // Small offset based on seat number
-        let jitterX = jitter * normalizedVectorY // Perpendicular to the vector
-        let jitterY = -jitter * normalizedVectorX
-
-        return CGPoint(x: pos.x + offsetX + jitterX, y: pos.y + offsetY + jitterY)
-    }
-    
-    // Position for the dealer button - needs adjustment based on new getPosition
-    private func getDealerButtonPosition() -> CGPoint {
-        let position = getPosition()
-        let width = geometry.size.width
-        let height = geometry.size.height
-        let tableCenterY = height * 0.4
         
-        // Calculate vector from center to player position
-        let vectorX = position.x - (width * 0.5)
-        let vectorY = position.y - tableCenterY
+        // For other players, calculate bet position based on their location
+        // Normalize the vector for direction calculation
         let length = sqrt(vectorX * vectorX + vectorY * vectorY)
-        
-        // Only use normalized vector if length is non-zero
         let normalizedVectorX = length > 0 ? vectorX / length : 0
         let normalizedVectorY = length > 0 ? vectorY / length : -1
         
-        let perpendicularOffsetX = (normalizedVectorY) * 25
-        let perpendicularOffsetY = (-normalizedVectorX) * 25
+        // Scale determines how far toward center the bet appears
+        let scaleFactor: CGFloat = 0.4
         
-        // Further offset based on general location (e.g., push slightly out)
-        let outwardOffsetX = normalizedVectorX * 10
-        let outwardOffsetY = normalizedVectorY * 10
-
-        return CGPoint(x: position.x + perpendicularOffsetX + outwardOffsetX, 
-                       y: position.y + perpendicularOffsetY + outwardOffsetY)
+        // Calculate bet position (toward center of table)
+        let betX = playerPos.x - (normalizedVectorX * width * 0.15)
+        let betY = playerPos.y - (normalizedVectorY * height * 0.1)
+        
+        // Add small random variation to prevent exact overlaps
+        let seatOffset = CGFloat(player.seat % 3) * 5.0
+        let seatOffsetX = seatOffset * normalizedVectorY  // Perpendicular to vector
+        let seatOffsetY = -seatOffset * normalizedVectorX // Perpendicular to vector
+        
+        return CGPoint(x: betX + seatOffsetX, y: betY + seatOffsetY)
+    }
+    
+    // Position for the dealer button
+    private func getDealerButtonPosition() -> CGPoint {
+        let position = getPosition()
+        
+        // For the dealer button, we'll place it on a fixed side of the player box
+        // based on where they are in relation to the table center
+        let width = geometry.size.width
+        let height = geometry.size.height
+        let centerX = width * 0.5
+        let centerY = height * 0.4
+        
+        // Calculate vector from center to player
+        let vectorX = position.x - centerX
+        let vectorY = position.y - centerY
+        
+        // Determine which quadrant the player is in
+        if vectorY < 0 { // Player is in top half
+            if vectorX < 0 { // Top left
+                return CGPoint(x: position.x + 25, y: position.y + 20)
+            } else { // Top right
+                return CGPoint(x: position.x - 25, y: position.y + 20)
+            }
+        } else { // Player is in bottom half
+            if vectorX < 0 { // Bottom left
+                return CGPoint(x: position.x + 25, y: position.y - 20)
+            } else { // Bottom right
+                return CGPoint(x: position.x - 25, y: position.y - 20)
+            }
+        }
     }
     
     private var shouldShowCards: Bool {

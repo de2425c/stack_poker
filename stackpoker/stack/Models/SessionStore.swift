@@ -3,6 +3,9 @@ import FirebaseFirestore
 import SwiftUI
 import UserNotifications
 
+// Provide an alias so existing references remain valid within the module
+typealias LiveSessionData_Enhanced = LiveSessionData.Enhanced
+
 struct Session: Identifiable, Equatable {
     let id: String
     let userId: String
@@ -79,22 +82,14 @@ struct Session: Identifiable, Equatable {
 }
 
 // Model to track active live session
-struct LiveSessionData: Codable {
-    var isActive: Bool = false
-    var startTime: Date = Date()
-    var elapsedTime: TimeInterval = 0
-    var gameName: String = ""
-    var stakes: String = ""
-    var buyIn: Double = 0
-    var lastPausedAt: Date? = nil
-    var lastActiveAt: Date? = nil
-    var isEnded: Bool = false // Explicit flag to mark sessions that have been ended
-}
 
 class SessionStore: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var liveSession = LiveSessionData()
     @Published var showLiveSessionBar = false
+    
+    // Enhanced live session data
+    @Published var enhancedLiveSession = LiveSessionData_Enhanced(basicSession: LiveSessionData())
     
     private let db = Firestore.firestore()
     private let userId: String
@@ -105,6 +100,60 @@ class SessionStore: ObservableObject {
         self.userId = userId
         fetchSessions()
         loadLiveSessionState()
+    }
+    
+    // MARK: - Enhanced Session Methods
+    
+    // Update chip stack and add optional note
+    func updateChipStack(amount: Double, note: String? = nil) {
+        enhancedLiveSession.chipUpdates.append(
+            ChipStackUpdate(amount: amount, note: note)
+        )
+        
+        // Save the enhanced state
+        saveEnhancedLiveSessionState()
+    }
+    
+    // Add hand history entry
+    func addHandHistory(content: String) {
+        enhancedLiveSession.handHistories.append(
+            HandHistoryEntry(content: content)
+        )
+        
+        // Save the enhanced state
+        saveEnhancedLiveSessionState()
+    }
+    
+    // Add a simple note
+    func addNote(note: String) {
+        enhancedLiveSession.notes.append(note)
+        
+        // Save the enhanced state
+        saveEnhancedLiveSessionState()
+    }
+    
+    // Mark update as posted to feed
+    func markUpdateAsPosted(id: String) {
+        if let index = enhancedLiveSession.chipUpdates.firstIndex(where: { $0.id == id }) {
+            var updatedChipUpdates = enhancedLiveSession.chipUpdates
+            
+            // Create a new update with isPostedToFeed = true
+            let update = updatedChipUpdates[index]
+            let newUpdate = ChipStackUpdate(
+                id: update.id,
+                amount: update.amount,
+                note: update.note,
+                timestamp: update.timestamp,
+                isPostedToFeed: true
+            )
+            
+            // Replace the old update with the new one
+            updatedChipUpdates[index] = newUpdate
+            enhancedLiveSession.chipUpdates = updatedChipUpdates
+        }
+        
+        // Save the enhanced state
+        saveEnhancedLiveSessionState()
     }
     
     // MARK: - Session Database Operations
@@ -169,9 +218,14 @@ class SessionStore: ObservableObject {
             lastPausedAt: nil,
             lastActiveAt: Date()
         )
+        
+        // Initialize enhanced session data
+        enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
+        
         startLiveSessionTimer()
         showLiveSessionBar = true
         saveLiveSessionState()
+        saveEnhancedLiveSessionState()
         requestNotificationPermission()
         scheduleLiveSessionNotification()
     }
@@ -209,12 +263,7 @@ class SessionStore: ObservableObject {
         stopLiveSessionTimer()
         removeLiveSessionNotification()
         
-        // Mark session as explicitly ended to prevent it from being loaded on next launch
-        var session = liveSession
-        session.isEnded = true
-        session.isActive = false
-        liveSession = session
-        
+        // Create a copy of the current session data for saving
         let sessionData: [String: Any] = [
             "userId": userId,
             "gameType": "CASH GAME",
@@ -230,33 +279,102 @@ class SessionStore: ObservableObject {
             "createdAt": FieldValue.serverTimestamp()
         ]
         
-        // Save ended state to UserDefaults immediately
-        saveLiveSessionState()
-        
         addSession(sessionData) { error in
             if error == nil {
+                // Important: Only clear session AFTER successful save
                 self.clearLiveSession()
-                self.removeLiveSessionState()
             }
             completion(error)
+        }
+    }
+    
+    func endLiveSessionAsync(cashout: Double) async -> Error? {
+        stopLiveSessionTimer()
+        removeLiveSessionNotification()
+        
+        // Create a copy of the current session data for saving
+        let sessionData: [String: Any] = [
+            "userId": userId,
+            "gameType": "CASH GAME",
+            "gameName": liveSession.gameName,
+            "stakes": liveSession.stakes,
+            "startDate": Timestamp(date: liveSession.startTime),
+            "startTime": Timestamp(date: liveSession.startTime),
+            "endTime": Timestamp(date: Date()),
+            "hoursPlayed": liveSession.elapsedTime / 3600, // Convert to hours
+            "buyIn": liveSession.buyIn,
+            "cashout": cashout,
+            "profit": cashout - liveSession.buyIn,
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+        
+        // Save enhanced data with the session - if available
+        var enhancedData: [String: Any] = [:]
+        if !enhancedLiveSession.chipUpdates.isEmpty {
+            enhancedData["chipUpdates"] = enhancedLiveSession.chipUpdates.map { $0.dictionary }
+        }
+        if !enhancedLiveSession.handHistories.isEmpty {
+            enhancedData["handHistories"] = enhancedLiveSession.handHistories.map { $0.dictionary }
+        }
+        if !enhancedLiveSession.notes.isEmpty {
+            enhancedData["notes"] = enhancedLiveSession.notes
+        }
+        
+        // If we have enhanced data, add it to the session
+        if !enhancedData.isEmpty {
+            var sessionWithEnhancedData = sessionData
+            sessionWithEnhancedData["enhancedData"] = enhancedData
+            
+            // Use async/await pattern with the enhanced data
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    addSession(sessionWithEnhancedData) { error in
+                        if let error = error {
+                            continuation.resume(throwing: error)
+                        } else {
+                            self.clearLiveSession()
+                            continuation.resume()
+                        }
+                    }
+                }
+                return nil
+            } catch {
+                return error
+            }
+        } else {
+            // Use async/await pattern with the basic data
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    addSession(sessionData) { error in
+                        if let error = error {
+                            continuation.resume(throwing: error)
+                        } else {
+                            self.clearLiveSession()
+                            continuation.resume()
+                        }
+                    }
+                }
+                return nil
+            } catch {
+                return error
+            }
         }
     }
     
     func clearLiveSession() {
         stopLiveSessionTimer()
         
-        // Mark as explicitly ended before resetting
-        var session = liveSession
-        session.isEnded = true
-        liveSession = session
-        
-        // Save the ended state first
-        saveLiveSessionState()
-        
-        // Now reset completely
+        // Reset everything immediately
         liveSession = LiveSessionData()
+        enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
         showLiveSessionBar = false
+        
+        // Remove from UserDefaults
         removeLiveSessionState()
+        removeEnhancedLiveSessionState()
+        
+        // Make sure any notifications are removed
+        removeLiveSessionNotification()
     }
     
     // MARK: - Timer Management
@@ -287,6 +405,28 @@ class SessionStore: ObservableObject {
         timer = nil
     }
     
+    // MARK: - State Persistence for Enhanced Session
+    
+    private func saveEnhancedLiveSessionState() {
+        if let encoded = try? JSONEncoder().encode(enhancedLiveSession) {
+            UserDefaults.standard.set(encoded, forKey: "EnhancedLiveSession_\(userId)")
+        }
+    }
+    
+    private func loadEnhancedLiveSessionState() {
+        if let savedData = UserDefaults.standard.data(forKey: "EnhancedLiveSession_\(userId)"),
+           let loadedSession = try? JSONDecoder().decode(LiveSessionData_Enhanced.self, from: savedData) {
+            enhancedLiveSession = loadedSession
+        } else {
+            // If no enhanced data, initialize with current basic session
+            enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
+        }
+    }
+    
+    private func removeEnhancedLiveSessionState() {
+        UserDefaults.standard.removeObject(forKey: "EnhancedLiveSession_\(userId)")
+    }
+    
     // MARK: - State Persistence
     
     private func saveLiveSessionState() {
@@ -297,26 +437,27 @@ class SessionStore: ObservableObject {
     
     private func loadLiveSessionState() {
         if let savedData = UserDefaults.standard.data(forKey: "LiveSession_\(userId)"),
-           var loadedSession = try? JSONDecoder().decode(LiveSessionData.self, from: savedData) {
-            
-            // Never restore a session that was explicitly ended
-            if loadedSession.isEnded {
-                clearLiveSession()
-                return
-            }
+           let loadedSession = try? JSONDecoder().decode(LiveSessionData.self, from: savedData) {
             
             // Only restore if session is actually in progress (active or paused, not ended)
             if loadedSession.isActive || loadedSession.lastPausedAt != nil {
                 if loadedSession.isActive, let lastActive = loadedSession.lastActiveAt {
                     let additionalTime = Date().timeIntervalSince(lastActive)
-                    loadedSession.elapsedTime += additionalTime
-                    loadedSession.lastActiveAt = Date()
+                    var updatedSession = loadedSession
+                    updatedSession.elapsedTime += additionalTime
+                    updatedSession.lastActiveAt = Date()
+                    liveSession = updatedSession
+                } else {
+                    liveSession = loadedSession
                 }
-                liveSession = loadedSession
+                
                 if loadedSession.isActive {
                     startLiveSessionTimer()
                 }
                 showLiveSessionBar = true
+                
+                // Load enhanced state if available
+                loadEnhancedLiveSessionState()
             } else {
                 // If not active or paused, clear any lingering state
                 clearLiveSession()

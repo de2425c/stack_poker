@@ -15,6 +15,7 @@ struct Post: Identifiable, Codable {
     let imageURLs: [String]?
     let postType: PostType
     let handHistory: ParsedHandHistory?
+    let sessionId: String?
     
     enum PostType: String, Codable {
         case text
@@ -34,9 +35,10 @@ struct Post: Identifiable, Codable {
         case imageURLs
         case postType
         case handHistory
+        case sessionId
     }
     
-    init(id: String, userId: String, content: String, createdAt: Date, username: String, displayName: String? = nil, profileImage: String? = nil, imageURLs: [String]? = nil, likes: Int = 0, comments: Int = 0, postType: PostType = .text, handHistory: ParsedHandHistory? = nil) {
+    init(id: String, userId: String, content: String, createdAt: Date, username: String, displayName: String? = nil, profileImage: String? = nil, imageURLs: [String]? = nil, likes: Int = 0, comments: Int = 0, postType: PostType = .text, handHistory: ParsedHandHistory? = nil, sessionId: String? = nil) {
         self.id = id
         self.userId = userId
         self.content = content
@@ -49,6 +51,7 @@ struct Post: Identifiable, Codable {
         self.comments = comments
         self.postType = postType
         self.handHistory = handHistory
+        self.sessionId = sessionId
     }
     
     init(from decoder: Decoder) throws {
@@ -72,6 +75,9 @@ struct Post: Identifiable, Codable {
         } else {
             self.postType = .text
         }
+        
+        // Handle sessionId
+        sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
         
         // Handle handHistory - try to decode as ParsedHandHistory directly
         self.handHistory = try? container.decodeIfPresent(ParsedHandHistory.self, forKey: .handHistory)
@@ -106,6 +112,9 @@ struct Post: Identifiable, Codable {
             self.postType = .text
         }
         
+        // Decode sessionId
+        sessionId = data["sessionId"] as? String
+        
         // Decode hand history if present
         if let handDict = data["handHistory"] as? [String: Any],
            let handData = try? JSONSerialization.data(withJSONObject: handDict),
@@ -139,6 +148,11 @@ struct Post: Identifiable, Codable {
            let handData = try? JSONEncoder().encode(hand),
            let handDict = try? JSONSerialization.jsonObject(with: handData) as? [String: Any] {
             dict["handHistory"] = handDict
+        }
+        
+        // Add sessionId if present
+        if let sessionId = sessionId {
+            dict["sessionId"] = sessionId
         }
         
         return dict

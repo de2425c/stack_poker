@@ -28,67 +28,20 @@ struct GroupsView: View {
                 
                 VStack(spacing: 0) {
                     // Clean, modern header
-                    HStack {
-                        Text("Chats")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(.white)
-                        
-                        Spacer()
-                        
-                        // Notification bell with badge
-                        if !groupService.pendingInvites.isEmpty {
-                            Button(action: {
-                                showingInvites = true
-                            }) {
-                                ZStack(alignment: .topTrailing) {
-                                    Image(systemName: "bell")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.white)
-                                        .padding(8)
-                                    
-                                    // Badge
-                                    Circle()
-                                        .fill(Color.red)
-                                        .frame(width: 8, height: 8)
-                                        .offset(x: 2, y: -2)
-                                }
-                            }
-                            .padding(.trailing, 12)
-                        }
-                        
-                        // New group button (simplified)
-                        Button(action: {
+                    AppHeaderView(
+                        title: "Groups",
+                        showNotificationBadge: !groupService.pendingInvites.isEmpty,
+                        actionButtonIcon: "plus",
+                        notificationAction: {
+                            showingInvites = true
+                        },
+                        actionButtonAction: {
                             showingCreateGroup = true
-                        }) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 18))
-                                .foregroundColor(.white)
-                                .padding(8)
                         }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    .padding(.bottom, 16)
+                    )
                     
                     // Optional search bar
-                    HStack {
-                        HStack {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                                .padding(.leading, 8)
-                            
-                            TextField("Search", text: $searchText)
-                                .font(.system(size: 15))
-                                .foregroundColor(.white)
-                                .padding(.vertical, 10)
-                        }
-                        .padding(.trailing, 8)
-                        .background(Color(red: 32/255, green: 34/255, blue: 38/255))
-                        .cornerRadius(10)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                    AppSearchBarView(searchText: $searchText)
                     
                     // Content
                     ScrollView {

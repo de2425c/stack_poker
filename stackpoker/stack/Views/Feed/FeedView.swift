@@ -56,27 +56,15 @@ struct FeedView: View {
                     // Fixed header with stable layout
                     VStack(spacing: 0) {
                         // Clean, modern header - similar to GroupsView
-                        HStack {
-                            Text("Feed")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                            
-                            Spacer()
-                            
-                            // Add post button in top right
-                            Button(action: {
+                        AppHeaderView(
+                            title: "Feed",
+                            showNotificationBadge: false,
+                            actionButtonIcon: "plus",
+                            paddingTop: 45,
+                            actionButtonAction: {
                                 showingNewPost = true
-                            }) {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .padding(8)
                             }
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 45)
-                        .padding(.bottom, 16)
-                        .background(Color(red: 18/255, green: 18/255, blue: 24/255).opacity(0.01)) // Invisible background to maintain layout
+                        )
                     }
                     .background(Color(red: 18/255, green: 18/255, blue: 24/255))
                     .edgesIgnoringSafeArea(.top)
@@ -113,29 +101,31 @@ struct FeedView: View {
                         ScrollView(showsIndicators: false) {
                             LazyVStack(spacing: 0) { // Twitter has no spacing between posts
                                 ForEach(postService.posts) { post in
-                                    Group {
-                                        if post.postType == .hand {
-                                            // Use the full card view with replay for hand posts
-                                            PostCardView(
-                                                post: post,
-                                                onLike: { likePost(post) },
-                                                onComment: { selectedPost = post },
-                                                onDelete: { deletePost(post) },
-                                                isCurrentUser: post.userId == userId,
-                                                userId: userId
-                                            )
-                                        } else {
-                                            // Use the basic card view without replay for regular posts
-                                            BasicPostCardView(
-                                                post: post,
-                                                onLike: { likePost(post) },
-                                                onComment: { selectedPost = post },
-                                                onDelete: { deletePost(post) },
-                                                isCurrentUser: post.userId == userId
-                                            )
-                                        }
+                                    VStack(spacing: 0) {
+                                        PostView(
+                                            post: post,
+                                            onLike: {
+                                                Task {
+                                                    do {
+                                                        try await postService.toggleLike(postId: post.id ?? "", userId: userId)
+                                                    } catch {
+                                                        print("Error toggling like: \(error)")
+                                                    }
+                                                }
+                                            },
+                                            onComment: {
+                                                selectedPost = post
+                                                showingComments = true
+                                            },
+                                            userId: userId
+                                        )
+                                        
+                                        // Twitter-like divider between posts
+                                        Rectangle()
+                                            .fill(Color.white.opacity(0.06))
+                                            .frame(height: 0.5)
                                     }
-                                    .contentShape(Rectangle()) // Make entire post tappable
+                                    .contentShape(Rectangle())
                                     .onTapGesture {
                                         selectedPost = post
                                     }
@@ -147,29 +137,8 @@ struct FeedView: View {
                                             }
                                         }
                                     }
-                                    
-                                    // Twitter-like divider between posts
-                                    Rectangle()
-                                        .fill(Color.white.opacity(0.06))
-                                        .frame(height: 0.5)
                                 }
-                                
-                                // Loading indicator at bottom when fetching more
-                                if postService.isLoading {
-                                    HStack {
-                                        Spacer()
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.6))))
-                                            .scaleEffect(1.2)
-                                        Spacer()
-                                    }
-                                    .padding()
-                                }
-                                
-                                // Bottom padding for better scrolling experience
-                                Color.clear.frame(height: 100)
                             }
-                            .padding(.top, 1) // Minimal top padding
                         }
                         .refreshable {
                             // Pull to refresh

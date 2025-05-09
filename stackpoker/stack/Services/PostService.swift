@@ -240,7 +240,7 @@ class PostService: ObservableObject {
         return downloadURL.absoluteString
     }
     
-    func createPost(content: String, userId: String, username: String, displayName: String? = nil, profileImage: String?, images: [UIImage]? = nil) async throws {
+    func createPost(content: String, userId: String, username: String, displayName: String? = nil, profileImage: String?, images: [UIImage]? = nil, sessionId: String? = nil) async throws {
         let documentRef = db.collection("posts").document()
         
         var imageURLs: [String]? = nil
@@ -266,7 +266,9 @@ class PostService: ObservableObject {
             imageURLs: imageURLs,
             likes: 0,
             comments: 0,
-            postType: .text
+            postType: .text,
+            handHistory: nil,
+            sessionId: sessionId
         )
         
         try await documentRef.setData(from: post)
@@ -276,7 +278,7 @@ class PostService: ObservableObject {
         }
     }
     
-    func createHandPost(content: String, userId: String, username: String, displayName: String? = nil, profileImage: String?, hand: ParsedHandHistory) async throws {
+    func createHandPost(content: String, userId: String, username: String, displayName: String? = nil, profileImage: String?, hand: ParsedHandHistory, sessionId: String? = nil) async throws {
         let documentRef = db.collection("posts").document()
         
         let post = Post(
@@ -291,7 +293,8 @@ class PostService: ObservableObject {
             likes: 0,
             comments: 0,
             postType: .hand,
-            handHistory: hand
+            handHistory: hand,
+            sessionId: sessionId
         )
         
         try await documentRef.setData(from: post)
@@ -417,6 +420,23 @@ class PostService: ObservableObject {
             if let index = posts.firstIndex(where: { $0.id == postId }) {
                 posts[index].comments -= 1
             }
+        }
+    }
+    
+    // Add a method to get posts for a specific session
+    func getSessionPosts(sessionId: String) async -> [Post] {
+        do {
+            let query = db.collection("posts")
+                .whereField("sessionId", isEqualTo: sessionId)
+                .order(by: "createdAt", descending: true)
+                .limit(to: 20)
+            
+            let snapshot = try await query.getDocuments()
+            
+            return try await processPosts(from: snapshot)
+        } catch {
+            print("Error fetching session posts: \(error)")
+            return []
         }
     }
 } 
