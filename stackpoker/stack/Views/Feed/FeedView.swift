@@ -815,47 +815,132 @@ struct PostDetailView: View {
                         // Post content with enhanced styling
                         VStack(alignment: .leading, spacing: 18) {
                             if !post.content.isEmpty {
-                                if post.sessionId != nil {
-                                    // Use same session content parsing as in PostView
-                                    if let parsed = parseSessionContent(from: post.content) {
-                                        LiveSessionStatusView(
-                                            gameName: parsed.gameName,
-                                            stakes: parsed.stakes,
-                                            chipAmount: parsed.chipAmount,
-                                            buyIn: parsed.buyIn,
-                                            elapsedTime: parsed.elapsedTime,
-                                            isLive: true
-                                        )
-                                        .padding(.bottom, 12)
-                                        
-                                        if !parsed.actualContent.isEmpty {
-                                            Text(parsed.actualContent)
-                                                .font(.system(size: 17))
-                                                .foregroundColor(.white.opacity(0.95))
-                                                .lineSpacing(6)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                // Check for session posts
+                                if post.sessionId != nil || post.content.starts(with: "SESSION_INFO:") {
+                                    // Check if this is a note
+                                    if isNote(content: post.content) {
+                                        // Note post with session badge
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            // Session badge at the top
+                                            if let (gameName, stakes) = extractSessionInfo(from: post.content) {
+                                                SessionBadgeView(
+                                                    gameName: gameName,
+                                                    stakes: stakes
+                                                )
+                                                .padding(.bottom, 8)
+                                            }
+                                            
+                                            // Show comment if present
+                                            if let commentText = extractCommentContent(from: post.content), !commentText.isEmpty {
+                                                Text(commentText)
+                                                    .font(.system(size: 17))
+                                                    .foregroundColor(.white.opacity(0.95))
+                                                    .lineSpacing(6)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                    .padding(.bottom, 2)
+                                            }
+                                            
+                                            // Note content using SharedNoteView
+                                            SharedNoteView(note: extractNoteContent(from: post.content))
                                         }
-                                    } else {
+                                        .padding(.horizontal, 16)
+                                    } 
+                                    // Hand post with session badge
+                                    else if post.postType == .hand {
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            // Session badge at the top
+                                            if let (gameName, stakes) = extractSessionInfo(from: post.content) {
+                                                SessionBadgeView(
+                                                    gameName: gameName,
+                                                    stakes: stakes
+                                                )
+                                                .padding(.bottom, 8)
+                                            }
+                                            
+                                            // Comment text for the hand (excluding SESSION_INFO)
+                                            if let commentText = extractCommentContent(from: post.content), !commentText.isEmpty {
+                                                Text(commentText)
+                                                    .font(.system(size: 17))
+                                                    .foregroundColor(.white.opacity(0.95))
+                                                    .lineSpacing(6)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                            }
+                                        }
+                                        .padding(.horizontal, 16)
+                                    }
+                                    // Regular session post (chip update)
+                                    else if let parsed = parseSessionContent(from: post.content) {
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            LiveSessionStatusView(
+                                                gameName: parsed.gameName,
+                                                stakes: parsed.stakes,
+                                                chipAmount: parsed.chipAmount,
+                                                buyIn: parsed.buyIn,
+                                                elapsedTime: parsed.elapsedTime,
+                                                isLive: true
+                                            )
+                                            .padding(.bottom, 12)
+                                            
+                                            if !parsed.actualContent.isEmpty {
+                                                Text(parsed.actualContent)
+                                                    .font(.system(size: 17))
+                                                    .foregroundColor(.white.opacity(0.95))
+                                                    .lineSpacing(6)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                            }
+                                        }
+                                        .padding(.horizontal, 16)
+                                    } 
+                                    // Fallback for other session posts
+                                    else {
                                         Text(post.content)
                                             .font(.system(size: 17))
                                             .foregroundColor(.white.opacity(0.95))
                                             .lineSpacing(6)
                                             .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.horizontal, 16)
                                     }
-                                } else {
+                                } 
+                                // Check for non-session notes
+                                else if isNote(content: post.content) {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        // Comment text
+                                        if let commentText = extractCommentContent(from: post.content), !commentText.isEmpty {
+                                            Text(commentText)
+                                                .font(.system(size: 17))
+                                                .foregroundColor(.white.opacity(0.95))
+                                                .lineSpacing(6)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .padding(.bottom, 2)
+                                        }
+                                        
+                                        // Note content
+                                        SharedNoteView(note: extractNoteContent(from: post.content))
+                                    }
+                                    .padding(.horizontal, 16)
+                                }
+                                // Regular post
+                                else {
                                     Text(post.content)
                                         .font(.system(size: 17))
                                         .foregroundColor(.white.opacity(0.95))
                                         .lineSpacing(6)
                                         .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 16)
                                 }
                             }
                             
-                            // Hand post content - with showReplayButton set to false
+                            // Hand post content
                             if post.postType == .hand, let hand = post.handHistory {
-                                HandSummaryView(hand: hand, showReplayButton: false)
-                                    .padding(.top, 4)
-                                    .padding(.horizontal, 16)
+                                Button(action: {
+                                    showingReplay = true
+                                }) {
+                                    HandSummaryView(hand: hand, onReplayTap: {
+                                        showingReplay = true
+                                    })
+                                }
+                                .padding(.top, 4)
+                                .padding(.horizontal, 16)
                             }
                             
                             // Images with enhanced styling
@@ -1486,6 +1571,36 @@ private struct ParsedSessionContent {
 }
 
 private func parseSessionContent(from content: String) -> ParsedSessionContent? {
+    // First check for SESSION_INFO format
+    if content.starts(with: "SESSION_INFO:") {
+        let lines = content.components(separatedBy: "\n")
+        if let firstLine = lines.first, firstLine.starts(with: "SESSION_INFO:") {
+            let parts = firstLine.components(separatedBy: ":")
+            if parts.count >= 3 {
+                let gameName = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                let stakes = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // Use default values for chip amount, buy-in, and elapsed time
+                let chipAmount: Double = 0
+                let buyIn: Double = 0
+                let elapsedTime: TimeInterval = 0
+                
+                // Get the actual content without the SESSION_INFO line
+                let actualContent = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                return ParsedSessionContent(
+                    gameName: gameName,
+                    stakes: stakes,
+                    chipAmount: chipAmount,
+                    buyIn: buyIn,
+                    elapsedTime: elapsedTime,
+                    actualContent: actualContent
+                )
+            }
+        }
+    }
+
+    // Original parsing logic for session details format
     // Split by lines and trim whitespace
     let rawLines = content.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
     guard rawLines.count >= 3 else { return nil }
@@ -1565,4 +1680,89 @@ private func parseSessionTime(from line: String) -> TimeInterval {
     }
     
     return elapsedTime
-} 
+}
+
+private func isNote(content: String) -> Bool {
+    // Check for note in content after SESSION_INFO
+    if content.starts(with: "SESSION_INFO:") {
+        let contentWithoutSessionInfo = content.components(separatedBy: "\n").dropFirst().joined(separator: "\n")
+        if contentWithoutSessionInfo.contains("\n\nNote: ") || contentWithoutSessionInfo.contains("Note: ") {
+            return true
+        }
+    }
+    
+    // Regular note detection
+    if content.contains("\n\nNote: ") || content.starts(with: "Note: ") {
+        return true
+    }
+    
+    return false
+}
+
+private func extractSessionInfo(from content: String) -> (String, String)? {
+    // First check for explicitly formatted session info
+    if content.starts(with: "SESSION_INFO:") {
+        let lines = content.components(separatedBy: "\n")
+        if let firstLine = lines.first, firstLine.starts(with: "SESSION_INFO:") {
+            let parts = firstLine.components(separatedBy: ":")
+            if parts.count >= 3 {
+                let gameName = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                let stakes = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
+                return (gameName, stakes)
+            }
+        }
+    }
+    
+    // Fallback to regular parsing if needed
+    if let parsed = parseSessionContent(from: content) {
+        return (parsed.gameName, parsed.stakes)
+    }
+    
+    return nil
+}
+
+private func extractCommentContent(from content: String) -> String? {
+    // Handle SESSION_INFO format
+    if content.starts(with: "SESSION_INFO:") {
+        let lines = content.components(separatedBy: "\n")
+        if lines.count > 1 {
+            let contentWithoutSessionInfo = lines.dropFirst().joined(separator: "\n")
+            
+            if let range = contentWithoutSessionInfo.range(of: "\n\nNote:") {
+                return String(contentWithoutSessionInfo[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if !contentWithoutSessionInfo.starts(with: "Note: ") {
+                return contentWithoutSessionInfo.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return nil
+        }
+    }
+    
+    // Regular extraction
+    if let range = content.range(of: "\n\nNote:") {
+        return String(content[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    } else if !content.starts(with: "Note: ") {
+        return content
+    }
+    
+    return nil
+}
+
+private func extractNoteContent(from content: String) -> String {
+    // Handle SESSION_INFO format
+    if content.starts(with: "SESSION_INFO:") {
+        let contentWithoutSessionInfo = content.components(separatedBy: "\n").dropFirst().joined(separator: "\n")
+        
+        if let range = contentWithoutSessionInfo.range(of: "Note: ") {
+            return String(contentWithoutSessionInfo[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+    
+    // Regular extraction
+    if let range = content.range(of: "Note: ") {
+        return String(content[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    return ""
+}
+
+

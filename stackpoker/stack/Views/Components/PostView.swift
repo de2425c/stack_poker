@@ -20,7 +20,7 @@ struct PostView: View {
     
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            // Use KFImage instead of AsyncImage for better caching
+            // Profile image
             Group {
                 if let profileImage = post.profileImage {
                     KFImage(URL(string: profileImage))
@@ -40,14 +40,12 @@ struct PostView: View {
             
             // Content
             VStack(alignment: .leading, spacing: 8) {
-                // Header - removed the session badge next to name
+                // Header
                 HStack(spacing: 6) {
-                    // Display the displayName if available, otherwise show username
                     Text(post.displayName ?? post.username)
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.white)
                     
-                    // Add username for context when displayName is used
                     if post.displayName != nil {
                         Text("@\(post.username)")
                             .font(.system(size: 14))
@@ -65,21 +63,23 @@ struct PostView: View {
                     Spacer(minLength: 0)
                 }
                 
-                // Post content
+                // Post content (includes session badge/info/note)
                 if !post.content.isEmpty {
                     postContentView
                 }
                 
-                // Hand post content
+                // Hand post content - only show the visual hand summary component
                 if post.postType == .hand, let hand = post.handHistory {
                     Button(action: {
                         showingReplay = true
                     }) {
-                        HandSummaryView(hand: hand)
+                        HandSummaryView(hand: hand, onReplayTap: {
+                            showingReplay = true
+                        })
                     }
                 }
                 
-                // Images - also upgrade to KFImage
+                // Images
                 if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -145,44 +145,54 @@ struct PostView: View {
     // Extracted post content view to avoid complex control flow in ViewBuilder
     private var postContentView: some View {
         Group {
-            if post.sessionId != nil {
+            // Session content handling
+            if post.sessionId != nil || post.content.starts(with: "SESSION_INFO:") {
                 if isNote {
-                    // Note post from a session - Display session card and note
+                    // Note post from a session - Display badge and note
                     VStack(alignment: .leading, spacing: 10) {
-                        // Session badge at the top
-                        if let parsed = parseSessionContent() {
+                        // Session badge at the top using extracted info
+                        if let (gameName, stakes) = extractSessionInfo() {
                             SessionBadgeView(
-                                gameName: parsed.gameName,
-                                stakes: parsed.stakes
+                                gameName: gameName,
+                                stakes: stakes
                             )
+                            .padding(.bottom, 6)
+                        }
+                        
+                        // Show comment if present
+                        if !commentContent.isEmpty {
+                            Text(commentContent)
+                                .font(.system(size: 16))
+                                .foregroundColor(.white.opacity(0.9))
+                                .lineSpacing(4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.bottom, 2)
                         }
                         
                         // Note content using SharedNoteView
-                        VStack(alignment: .leading, spacing: 12) {
-                            if !commentContent.isEmpty && commentContent != noteContent {
-                                Text(commentContent)
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.white.opacity(0.9))
-                                    .lineSpacing(4)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.bottom, 2)
-                            }
-                            
-                            SharedNoteView(note: noteContent)
-                        }
+                        SharedNoteView(note: noteContent)
                     }
                 } else if post.postType == .hand {
-                    // Hand post from a session - Display session badge and hand
-                    VStack(alignment: .leading, spacing: 10) {
-                        // Session badge at the top
-                        if let parsed = parseSessionContent() {
+                    // Hand post from a session - Just display session badge and comment
+                    // (hand component is shown separately)
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Session badge at the top using extracted info
+                        if let (gameName, stakes) = extractSessionInfo() {
                             SessionBadgeView(
-                                gameName: parsed.gameName,
-                                stakes: parsed.stakes
+                                gameName: gameName,
+                                stakes: stakes
                             )
+                            .padding(.bottom, 6)
                         }
                         
-                        // Hand content is already displayed separately
+                        // Show any comment text, but not the SESSION_INFO line
+                        if !commentContent.isEmpty {
+                            Text(commentContent)
+                                .font(.system(size: 16))
+                                .foregroundColor(.white.opacity(0.9))
+                                .lineSpacing(4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 } else {
                     // Regular session update (chips) - full session content
@@ -191,7 +201,7 @@ struct PostView: View {
             } else if isNote {
                 // Note post (not from session)
                 VStack(alignment: .leading, spacing: 12) {
-                    if !commentContent.isEmpty && commentContent != noteContent {
+                    if !commentContent.isEmpty {
                         Text(commentContent)
                             .font(.system(size: 16))
                             .foregroundColor(.white.opacity(0.9))
@@ -351,27 +361,96 @@ struct PostView: View {
         return elapsedTime
     }
     
-    // Add a computed property to determine if this is a note post
-    private var isNote: Bool {
-        post.content.contains("Note:")
+    // Add a method to extract session info from content
+    private func extractSessionInfo() -> (gameName: String, stakes: String)? {
+        // First check for explicitly formatted session info
+        if post.content.starts(with: "SESSION_INFO:") {
+            let lines = post.content.components(separatedBy: "\n")
+            if let firstLine = lines.first, firstLine.starts(with: "SESSION_INFO:") {
+                let parts = firstLine.components(separatedBy: ":")
+                if parts.count >= 3 {
+                    let gameName = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                    let stakes = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
+                    return (gameName, stakes)
+                }
+            }
+        }
+        
+        // Fallback to regular parsing if needed
+        if let parsed = parseSessionContent() {
+            return (parsed.gameName, parsed.stakes)
+        }
+        
+        // Try directly using sessionId if available
+        if post.sessionId != nil {
+            return ("Live Poker", "$1/$2")  // Fallback values
+        }
+        
+        return nil
     }
     
-    // Add a computed property to extract note content
-    private var noteContent: String {
-        if let range = post.content.range(of: "Note: ") {
-            return String(post.content[range.upperBound...])
+    // Modify isNote to better detect notes, especially when using SESSION_INFO format
+    private var isNote: Bool {
+        // Check for note in content after SESSION_INFO
+        if post.content.starts(with: "SESSION_INFO:") {
+            let contentWithoutSessionInfo = post.content.components(separatedBy: "\n").dropFirst().joined(separator: "\n")
+            if contentWithoutSessionInfo.contains("\n\nNote: ") || contentWithoutSessionInfo.contains("Note: ") {
+                return true
+            }
         }
+        
+        // Regular note detection
+        if post.content.contains("\n\nNote: ") || post.content.starts(with: "Note: ") {
+            return true
+        }
+        
+        return false
+    }
+    
+    // Improve note content extraction
+    private var noteContent: String {
+        // Handle SESSION_INFO format
+        if post.content.starts(with: "SESSION_INFO:") {
+            let contentWithoutSessionInfo = post.content.components(separatedBy: "\n").dropFirst().joined(separator: "\n")
+            
+            if let range = contentWithoutSessionInfo.range(of: "Note: ") {
+                return String(contentWithoutSessionInfo[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        
+        // Regular extraction
+        if let range = post.content.range(of: "Note: ") {
+            return String(post.content[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
         return ""
     }
     
-    // Add a computed property to extract comment content
+    // Improve comment content extraction
     private var commentContent: String {
-        if post.content.contains("Note: ") {
-            if let range = post.content.range(of: "\n\nNote:") {
-                return String(post.content[..<range.lowerBound])
+        // Handle SESSION_INFO format
+        if post.content.starts(with: "SESSION_INFO:") {
+            let lines = post.content.components(separatedBy: "\n")
+            if lines.count > 1 {
+                let contentWithoutSessionInfo = lines.dropFirst().joined(separator: "\n")
+                
+                if let range = contentWithoutSessionInfo.range(of: "\n\nNote:") {
+                    return String(contentWithoutSessionInfo[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if !contentWithoutSessionInfo.starts(with: "Note: ") {
+                    return contentWithoutSessionInfo.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                return ""
             }
         }
-        return post.content
+        
+        // Regular extraction
+        if let range = post.content.range(of: "\n\nNote:") {
+            return String(post.content[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if !post.content.starts(with: "Note: ") {
+            return post.content
+        }
+        
+        return ""
     }
 }
 

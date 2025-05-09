@@ -22,6 +22,8 @@ struct PostEditorView: View {
     var isSessionPost: Bool = false
     var isNote: Bool = false  // New property to identify note posts
     var showFullSessionCard: Bool = false // New property to control session card display
+    var sessionGameName: String = "" // Direct game name for badge
+    var sessionStakes: String = "" // Direct stakes for badge
     
     // View state
     @State private var postText = ""
@@ -148,90 +150,10 @@ struct PostEditorView: View {
                 
                 VStack(spacing: 0) {
                     // Header with user profile
-                    HStack(spacing: 12) {
-                        if let profileImage = userService.currentUserProfile?.avatarURL {
-                            AsyncImage(url: URL(string: profileImage)) { image in
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            } placeholder: {
-                                Circle()
-                                    .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                    .overlay(
-                                        Image(systemName: "person.fill")
-                                            .foregroundColor(.gray)
-                                    )
-                            }
-                            .frame(width: 48, height: 48)
-                            .clipShape(Circle())
-                        } else {
-                            Circle()
-                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                .frame(width: 48, height: 48)
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .foregroundColor(.gray)
-                                )
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let displayName = userService.currentUserProfile?.displayName,
-                               !displayName.isEmpty {
-                                Text(displayName)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                            } else if let username = userService.currentUserProfile?.username {
-                                Text(username)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                            
-                            // Show session indicator for session posts
-                            if isSessionPost {
-                                Text("Session Post")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                            } else {
-                                Text(isHandPost ? "Share your hand" : (isNote ? "Share your note" : "Create a post"))
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        
-                        Spacer()
-                    }
-                    .padding()
+                    profileHeaderView
                     
                     // Session display section
-                    if isSessionPost && sessionId != nil {
-                        // Choose the right session display based on content type
-                        if showFullSessionCard {
-                            // For notes/hands: full session card
-                            SessionCard(text: extractSessionDetails())
-                                .padding(.horizontal)
-                                .padding(.bottom, 16)
-                        } else {
-                            // For stack updates: compact session badge
-                            if let (gameName, stakes) = parseSessionInfo() {
-                                SessionBadgeView(gameName: gameName, stakes: stakes)
-                                    .padding(.horizontal)
-                                    .padding(.bottom, 8)
-                            } else {
-                                HStack {
-                                    Image(systemName: "gamecontroller.fill")
-                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
-                                    
-                                    Text("Live Poker Session")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
-                                    
-                                    Spacer()
-                                }
-                                .padding(.horizontal)
-                                .padding(.bottom, 8)
-                            }
-                        }
-                    }
+                    sessionDisplayView
                     
                     // Note view (only for note posts)
                     if isNote {
@@ -246,104 +168,28 @@ struct PostEditorView: View {
                     }
                     
                     // Text Editor (hide initial text for notes since it's displayed above)
-                    ZStack(alignment: .topLeading) {
-                        TextEditor(text: $postText)
-                            .focused($isTextEditorFocused)
-                            .foregroundColor(.white)
-                            .font(.system(size: 16))
-                            .scrollContentBackground(.hidden)
-                            .padding()
-                            .background(Color.clear)
-                        
-                        if postText.isEmpty && !isTextEditorFocused {
-                            Text(placeholderText)
-                                .foregroundColor(Color.gray)
-                                .font(.system(size: 16))
-                                .padding(.horizontal, 20)
-                                .padding(.top, 24)
-                        }
-                    }
-                    .frame(maxHeight: .infinity)
+                    textEditorView
                     
                     // Image picker and preview (only for regular posts)
                     if !isHandPost && !isNote {
-                        VStack(spacing: 12) {
-                            // Image picker button
-                            PhotosPicker(selection: $imageSelection, maxSelectionCount: 4, matching: .images) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "photo")
-                                        .font(.system(size: 16))
-                                    Text("Add Photos")
-                                        .font(.system(size: 15, weight: .medium))
-                                }
-                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                .padding(.vertical, 10)
-                                .padding(.horizontal, 14)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 1.0)))
-                                )
-                            }
-                            
-                            // Selected images preview
-                            if !selectedImages.isEmpty {
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 12) {
-                                        ForEach(0..<selectedImages.count, id: \.self) { index in
-                                            ZStack(alignment: .topTrailing) {
-                                                Image(uiImage: selectedImages[index])
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 100, height: 100)
-                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                                
-                                                Button(action: {
-                                                    selectedImages.remove(at: index)
-                                                }) {
-                                                    Image(systemName: "xmark.circle.fill")
-                                                        .font(.system(size: 18))
-                                                        .foregroundColor(.white)
-                                                        .background(
-                                                            Circle()
-                                                                .fill(Color.black.opacity(0.6))
-                                                                .frame(width: 20, height: 20)
-                                                        )
-                                                }
-                                                .padding(6)
-                                            }
-                                        }
-                                    }
-                                    .padding(.top, 4)
-                                    .padding(.horizontal, 16)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
+                        imagePickerView
                     }
                     
                     // Character count
-                    HStack {
-                        Spacer()
-                        Text("\(280 - postText.count)")
-                            .foregroundColor(postText.count > 280 ? .red : .gray)
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                    characterCountView
                 }
             }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItemGroup(placement: .navigationBarLeading) {
                     Button("Cancel") {
                         dismiss()
                     }
                     .foregroundColor(.white)
                 }
                 
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Button(action: isHandPost ? shareHand : createPost) {
                         if isLoading {
                             ProgressView()
@@ -353,11 +199,11 @@ struct PostEditorView: View {
                                 .fontWeight(.semibold)
                         }
                     }
-                    .disabled((postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isNote && !showFullSessionCard) || isLoading || postText.count > 280 || userService.currentUserProfile == nil)
-                    .foregroundColor((postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isNote && !showFullSessionCard) || postText.count > 280 || userService.currentUserProfile == nil ? .gray : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    .disabled(isPostDisabled)
+                    .foregroundColor(isPostDisabled ? .gray : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                 }
             }
-            .onChange(of: imageSelection) { _, newValue in
+            .onChange(of: imageSelection) { newValue in
                 Task {
                     selectedImages.removeAll()
                     for item in newValue {
@@ -397,6 +243,13 @@ struct PostEditorView: View {
         } else {
             return "Create Post"
         }
+    }
+    
+    // Add computed property for button disabled state
+    private var isPostDisabled: Bool {
+        let isEmpty = postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let allowEmptyPost = isNote || showFullSessionCard
+        return (isEmpty && !allowEmptyPost) || isLoading || postText.count > 280 || userService.currentUserProfile == nil
     }
     
     private var placeholderText: String {
@@ -485,29 +338,43 @@ struct PostEditorView: View {
         let profileImage = userService.currentUserProfile?.avatarURL
         
         // Handle different content types:
-        let content: String
+        var content: String
         
-        // For note posts with no additional comment
-        if isNote && postText.isEmpty {
-            content = initialText
-        }
-        // For note posts with a comment
-        else if isNote && !postText.isEmpty {
-            content = "\(postText)\n\nNote: \(initialText)"
-        }
-        // For chip updates (showing full session card)
-        else if showFullSessionCard {
-            if postText.isEmpty {
-                // Just use the session details plus the content
-                content = initialText
-            } else {
-                // Use the session details plus user comment
+        // Make sure session info is included at the start of the content for notes and hands
+        if isSessionPost && !sessionGameName.isEmpty && !sessionStakes.isEmpty && (isNote || isHandPost) {
+            // Add session info in a format that can be parsed in the feed
+            let sessionInfo = "SESSION_INFO:\(sessionGameName):\(sessionStakes)\n"
+            
+            // For note posts with no additional comment
+            if isNote && postText.isEmpty {
+                content = sessionInfo + "Note: " + initialText
+            }
+            // For note posts with a comment
+            else if isNote && !postText.isEmpty {
+                content = sessionInfo + postText + "\n\nNote: " + initialText
+            }
+            // For hand posts
+            else if isHandPost {
+                content = sessionInfo + postText
+            }
+            // Default case - should not happen for notes/hands
+            else {
                 content = initialText
             }
         }
-        // Default case - regular post
+        // For chip updates (showing full session card) or non-session posts
         else {
-            content = postText
+            if isNote && postText.isEmpty {
+                content = initialText
+            } else if isNote && !postText.isEmpty {
+                content = postText + "\n\nNote: " + initialText
+            } else if showFullSessionCard && postText.isEmpty {
+                content = initialText
+            } else if showFullSessionCard && !postText.isEmpty {
+                content = initialText + "\n\n" + postText
+            } else {
+                content = postText
+            }
         }
         
         isLoading = true
@@ -546,12 +413,20 @@ struct PostEditorView: View {
         let profileImage = userService.currentUserProfile?.avatarURL
         let displayName = userService.currentUserProfile?.displayName
         
+        // Add session info for hands if available
+        var handPostContent = postText
+        if isSessionPost && !sessionGameName.isEmpty && !sessionStakes.isEmpty {
+            // Add session info in a format that can be parsed in the feed
+            let sessionInfo = "SESSION_INFO:\(sessionGameName):\(sessionStakes)\n"
+            handPostContent = sessionInfo + postText
+        }
+        
         isLoading = true
         
         Task {
             do {
                 try await postService.createHandPost(
-                    content: postText,
+                    content: handPostContent,
                     userId: userId,
                     username: username,
                     displayName: displayName,
@@ -571,5 +446,228 @@ struct PostEditorView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - View Builders
+    
+    @ViewBuilder
+    private var profileHeaderView: some View {
+        HStack(spacing: 12) {
+            profileImageView
+            
+            VStack(alignment: .leading, spacing: 4) {
+                profileNameView
+                profileSubtitleView
+            }
+            
+            Spacer()
+        }
+        .padding()
+    }
+    
+    @ViewBuilder
+    private var profileImageView: some View {
+        if let profileImage = userService.currentUserProfile?.avatarURL {
+            AsyncImage(url: URL(string: profileImage)) { image in
+                image
+                    .resizable()
+                    .scaledToFill()
+            } placeholder: {
+                defaultProfileCircle
+            }
+            .frame(width: 48, height: 48)
+            .clipShape(Circle())
+        } else {
+            defaultProfileCircle
+        }
+    }
+    
+    @ViewBuilder
+    private var defaultProfileCircle: some View {
+        Circle()
+            .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+            .frame(width: 48, height: 48)
+            .overlay(
+                Image(systemName: "person.fill")
+                    .foregroundColor(.gray)
+            )
+    }
+    
+    @ViewBuilder
+    private var profileNameView: some View {
+        if let displayName = userService.currentUserProfile?.displayName,
+           !displayName.isEmpty {
+            Text(displayName)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white)
+        } else if let username = userService.currentUserProfile?.username {
+            Text(username)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white)
+        }
+    }
+    
+    @ViewBuilder
+    private var profileSubtitleView: some View {
+        if isSessionPost {
+            Text("Session Post")
+                .font(.system(size: 14))
+                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+        } else {
+            Text(isHandPost ? "Share your hand" : (isNote ? "Share your note" : "Create a post"))
+                .font(.system(size: 14))
+                .foregroundColor(.gray)
+        }
+    }
+    
+    @ViewBuilder
+    private var sessionDisplayView: some View {
+        if isSessionPost && sessionId != nil {
+            if showFullSessionCard {
+                // For chip updates: full session card
+                SessionCard(text: extractSessionDetails())
+                    .padding(.horizontal)
+                    .padding(.bottom, 16)
+            } else {
+                sessionBadgeView
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var sessionBadgeView: some View {
+        if !sessionGameName.isEmpty && !sessionStakes.isEmpty {
+            SessionBadgeView(gameName: sessionGameName, stakes: sessionStakes)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+        } else if let sessionInfo = parseSessionInfo() {
+            SessionBadgeView(gameName: sessionInfo.gameName, stakes: sessionInfo.stakes)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+        } else {
+            genericSessionBadge
+        }
+    }
+    
+    @ViewBuilder
+    private var genericSessionBadge: some View {
+        HStack {
+            Image(systemName: "gamecontroller.fill")
+                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+            
+            Text("Live Poker Session")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+            
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
+    
+    @ViewBuilder
+    private var textEditorView: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $postText)
+                .focused($isTextEditorFocused)
+                .foregroundColor(.white)
+                .font(.system(size: 16))
+                .scrollContentBackground(.hidden)
+                .padding()
+                .background(Color.clear)
+            
+            if postText.isEmpty && !isTextEditorFocused {
+                Text(placeholderText)
+                    .foregroundColor(Color.gray)
+                    .font(.system(size: 16))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+            }
+        }
+        .frame(maxHeight: .infinity)
+    }
+    
+    @ViewBuilder
+    private var imagePickerView: some View {
+        VStack(spacing: 12) {
+            // Image picker button
+            photoPickerButton
+            
+            // Selected images preview
+            if !selectedImages.isEmpty {
+                selectedImagesPreview
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+    
+    @ViewBuilder
+    private var photoPickerButton: some View {
+        PhotosPicker(selection: $imageSelection, maxSelectionCount: 4, matching: .images) {
+            HStack(spacing: 8) {
+                Image(systemName: "photo")
+                    .font(.system(size: 16))
+                Text("Add Photos")
+                    .font(.system(size: 15, weight: .medium))
+            }
+            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 1.0)))
+            )
+        }
+    }
+    
+    @ViewBuilder
+    private var selectedImagesPreview: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(0..<selectedImages.count, id: \.self) { index in
+                    imagePreviewItem(at: index)
+                }
+            }
+            .padding(.top, 4)
+            .padding(.horizontal, 16)
+        }
+    }
+    
+    @ViewBuilder
+    private func imagePreviewItem(at index: Int) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Image(uiImage: selectedImages[index])
+                .resizable()
+                .scaledToFill()
+                .frame(width: 100, height: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            
+            Button(action: {
+                selectedImages.remove(at: index)
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(.white)
+                    .background(
+                        Circle()
+                            .fill(Color.black.opacity(0.6))
+                            .frame(width: 20, height: 20)
+                    )
+            }
+            .padding(6)
+        }
+    }
+    
+    @ViewBuilder
+    private var characterCountView: some View {
+        HStack {
+            Spacer()
+            Text("\(280 - postText.count)")
+                .foregroundColor(postText.count > 280 ? .red : .gray)
+                .font(.system(size: 14, weight: .medium))
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 16)
     }
 } 

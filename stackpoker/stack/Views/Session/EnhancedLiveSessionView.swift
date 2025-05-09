@@ -34,6 +34,8 @@ struct EnhancedLiveSessionView: View {
     @State private var chipUpdates: [ChipStackUpdate] = []
     @State private var handHistories: [HandHistoryEntry] = []
     @State private var notes: [String] = []
+    @State private var sessionPosts: [Post] = []
+    @State private var isLoadingSessionPosts = false
     
     // Recent updates feed (chip updates, notes, hands)
     @State private var recentUpdates: [UpdateItem] = []
@@ -72,11 +74,15 @@ struct EnhancedLiveSessionView: View {
     @State private var shareToFeedIsNote = false
     @State private var shareToFeedIsChipUpdate = false
     
+    // Add state for tracking selected post
+    @State private var selectedPost: Post? = nil
+    
     // MARK: - Enum Definitions
     enum LiveSessionTab {
         case session
         case notes
         case hands
+        case posts
     }
     
     enum SessionMode {
@@ -227,6 +233,10 @@ struct EnhancedLiveSessionView: View {
                 handsTabView
                     .tag(LiveSessionTab.hands)
                     .contentShape(Rectangle())
+                
+                postsTabView
+                    .tag(LiveSessionTab.posts)
+                    .contentShape(Rectangle())
             }
             .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
             
@@ -239,6 +249,7 @@ struct EnhancedLiveSessionView: View {
             tabButton(title: "Session", icon: "timer", tab: .session)
             tabButton(title: "Notes", icon: "note.text", tab: .notes)
             tabButton(title: "Hands", icon: "suit.spade", tab: .hands)
+            tabButton(title: "Posts", icon: "text.bubble", tab: .posts)
         }
         .padding(.vertical, 12)
         .background(
@@ -323,6 +334,7 @@ struct EnhancedLiveSessionView: View {
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(statusColor)
                     }
+                    .opacity(0.8)
                 }
             }
         }
@@ -365,6 +377,9 @@ struct EnhancedLiveSessionView: View {
             if chipUpdates.isEmpty {
                 handleStackUpdate(amount: String(sessionStore.liveSession.buyIn), note: "Initial buy-in")
             }
+            
+            // Load session posts
+            loadSessionPosts()
             
             // Check for hands associated with this session
             Task {
@@ -806,6 +821,100 @@ struct EnhancedLiveSessionView: View {
         .padding()
     }
     
+    // Posts Tab - For viewing posts related to this session
+    private var postsTabView: some View {
+        VStack(spacing: 0) {
+            if isLoadingSessionPosts && sessionPosts.isEmpty {
+                // Loading state
+                VStack {
+                    Spacer()
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.5)
+                    Text("Loading posts...")
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                        .padding(.top, 16)
+                    Spacer()
+                }
+            } else if sessionPosts.isEmpty {
+                // Empty state
+                VStack(spacing: 16) {
+                    Spacer()
+                    
+                    Image(systemName: "text.bubble")
+                        .font(.system(size: 40))
+                        .foregroundColor(.gray.opacity(0.7))
+                    
+                    Text("No Posts")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                    
+                    Text("Share updates from this session to see them here")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                    
+                    Spacer()
+                }
+                .padding()
+            } else {
+                // Posts list
+                ScrollView {
+                    LazyVStack(spacing: 0) { // No spacing between posts for Twitter-like feel
+                        ForEach(sessionPosts) { post in
+                            VStack(spacing: 0) {
+                                PostView(
+                                    post: post,
+                                    onLike: {
+                                        Task {
+                                            do {
+                                                try await postService.toggleLike(postId: post.id ?? "", userId: userId)
+                                                // Reload posts after liking
+                                                loadSessionPosts()
+                                            } catch {
+                                                print("Error toggling like: \(error)")
+                                            }
+                                        }
+                                    },
+                                    onComment: {
+                                        // Show post detail view for commenting
+                                        showPostDetail(post)
+                                    },
+                                    userId: userId
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    // Open post detail view when tapping anywhere on the post
+                                    showPostDetail(post)
+                                }
+                                
+                                // Divider between posts
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.06))
+                                    .frame(height: 0.5)
+                            }
+                        }
+                    }
+                }
+                .refreshable {
+                    await refreshSessionPosts()
+                }
+            }
+        }
+        .onAppear {
+            // Load posts when tab appears
+            loadSessionPosts()
+        }
+        // Sheet for showing post detail
+        .sheet(item: $selectedPost) { post in
+            PostDetailView(post: post, userId: userId)
+                .environmentObject(postService)
+                .environmentObject(userService)
+        }
+    }
+    
     // MARK: - Component Sections
     
     // Timer and controls
@@ -1057,7 +1166,8 @@ struct EnhancedLiveSessionView: View {
     // Share update to feed
     private func showShareToFeedDialog(content: String, isHand: Bool, handData: ParsedHandHistory? = nil, updateId: String? = nil) {
         // First store what's being shared
-        shareToFeedContent = content
+        // For hand posts, we don't want the text description, just an empty string
+        shareToFeedContent = isHand ? "" : content
         shareToFeedIsHand = isHand
         shareToFeedHandData = handData
         shareToFeedUpdateId = updateId
@@ -1156,8 +1266,16 @@ struct EnhancedLiveSessionView: View {
         .frame(width: 80)
         .contentShape(Rectangle())
         .onTapGesture {
+            let wasPostsTab = selectedTab == .posts
+            let isPostsTab = tab == .posts
+            
             withAnimation {
                 selectedTab = tab
+            }
+            
+            // If we're switching to the posts tab, refresh posts
+            if !wasPostsTab && isPostsTab {
+                loadSessionPosts()
             }
         }
     }
@@ -1411,7 +1529,11 @@ struct EnhancedLiveSessionView: View {
     
     // Update the post editor sheet to use the correct components
     private var postEditorSheet: some View {
-        // For notes or hands, show full session card
+        // Get session info for badge
+        let gameName = sessionStore.liveSession.gameName
+        let stakes = sessionStore.liveSession.stakes
+        
+        // For notes or hands, show BADGE (not full card)
         if shareToFeedIsNote || shareToFeedIsHand {
             return PostEditorView(
                 userId: userId,
@@ -1420,7 +1542,9 @@ struct EnhancedLiveSessionView: View {
                 sessionId: sessionStore.liveSession.id,
                 isSessionPost: true,
                 isNote: shareToFeedIsNote,
-                showFullSessionCard: true  // Use full card for notes/hands
+                showFullSessionCard: false,  // Just show badge for notes/hands
+                sessionGameName: gameName,  // Pass game name directly
+                sessionStakes: stakes  // Pass stakes directly
             )
             .environmentObject(postService)
             .environmentObject(userService)
@@ -1428,7 +1552,7 @@ struct EnhancedLiveSessionView: View {
                 handlePostEditorDisappear()
             }
         } 
-        // For chip updates, show the compact badge
+        // For chip updates, show the FULL session card
         else if shareToFeedIsChipUpdate {
             return PostEditorView(
                 userId: userId,
@@ -1437,7 +1561,9 @@ struct EnhancedLiveSessionView: View {
                 sessionId: sessionStore.liveSession.id,
                 isSessionPost: true,
                 isNote: false,
-                showFullSessionCard: false  // Use badge for chip updates
+                showFullSessionCard: true,  // Show full card for chip updates
+                sessionGameName: gameName,
+                sessionStakes: stakes
             )
             .environmentObject(postService)
             .environmentObject(userService)
@@ -1454,7 +1580,9 @@ struct EnhancedLiveSessionView: View {
                 sessionId: sessionStore.liveSession.id,
                 isSessionPost: true,
                 isNote: false,
-                showFullSessionCard: shareToFeedIsNote || shareToFeedIsHand  // Based on content type
+                showFullSessionCard: !shareToFeedIsNote && !shareToFeedIsHand,
+                sessionGameName: gameName,
+                sessionStakes: stakes
             )
             .environmentObject(postService)
             .environmentObject(userService)
@@ -1466,19 +1594,25 @@ struct EnhancedLiveSessionView: View {
     
     // Add a method to handle post editor disappear
     private func handlePostEditorDisappear() {
-        if shareToFeedIsHand == false, let updateId = shareToFeedUpdateId {
-            Task {
-                // Small delay to ensure the post has time to be created
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        // Always refresh posts when returning from post editor
+        Task {
+            // Small delay to ensure the post has time to be created
+            try? await Task.sleep(nanoseconds: 800_000_000) // 0.8 seconds
+            
+            // Refresh session posts
+            let posts = await postService.getSessionPosts(sessionId: sessionStore.liveSession.id)
+            
+            await MainActor.run {
+                // Update the session posts
+                sessionPosts = posts
                 
-                // Check if the post exists in the feed with this session id
-                let posts = await postService.getSessionPosts(sessionId: sessionStore.liveSession.id)
-                let matchingPosts = posts.filter { $0.content.contains(shareToFeedContent) }
-                
-                if !matchingPosts.isEmpty {
-                    // Mark the update as posted since we found a matching post
-                    sessionStore.markUpdateAsPosted(id: updateId)
-                    await MainActor.run {
+                // If there was a specific update ID to mark as posted
+                if shareToFeedIsHand == false, let updateId = shareToFeedUpdateId {
+                    let matchingPosts = posts.filter { $0.content.contains(shareToFeedContent) }
+                    
+                    if !matchingPosts.isEmpty {
+                        // Mark the update as posted since we found a matching post
+                        sessionStore.markUpdateAsPosted(id: updateId)
                         updateLocalDataFromStore()
                     }
                 }
@@ -1574,6 +1708,51 @@ struct EnhancedLiveSessionView: View {
         
         // Update local data
         updateLocalDataFromStore()
+    }
+    
+    // Function to load posts for the current session
+    private func loadSessionPosts() {
+        guard !sessionStore.liveSession.id.isEmpty else {
+            print("Cannot load posts: Session ID is empty")
+            return
+        }
+        
+        isLoadingSessionPosts = true
+        print("Loading posts for session ID: \(sessionStore.liveSession.id)")
+        
+        Task {
+            let posts = await postService.getSessionPosts(sessionId: sessionStore.liveSession.id)
+            print("Found \(posts.count) posts for this session")
+            
+            await MainActor.run {
+                sessionPosts = posts
+                isLoadingSessionPosts = false
+            }
+        }
+    }
+    
+    // Refresh session posts
+    private func refreshSessionPosts() async {
+        guard !sessionStore.liveSession.id.isEmpty else {
+            print("Cannot refresh posts: Session ID is empty")
+            return
+        }
+        
+        isLoadingSessionPosts = true
+        print("Refreshing posts for session ID: \(sessionStore.liveSession.id)")
+        
+        let posts = await postService.getSessionPosts(sessionId: sessionStore.liveSession.id)
+        print("Found \(posts.count) posts for this session after refresh")
+        
+        await MainActor.run {
+            sessionPosts = posts
+            isLoadingSessionPosts = false
+        }
+    }
+    
+    // Add helper method to show post detail
+    private func showPostDetail(_ post: Post) {
+        selectedPost = post
     }
 }
 
