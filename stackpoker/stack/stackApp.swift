@@ -7,7 +7,21 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         FirebaseApp.configure()
         UITabBar.appearance().isHidden = true
-
+        let appearance = UINavigationBarAppearance()
+                appearance.configureWithOpaqueBackground()              // start from a blank, opaque canvas
+                appearance.backgroundColor = UIColor.systemBlue         // ← your bar color
+                appearance.titleTextAttributes = [
+                    .foregroundColor: UIColor.white                    // inline title
+                ]
+                appearance.largeTitleTextAttributes = [
+                    .foregroundColor: UIColor.white                    // large title
+                ]
+                // 2) Apply to all bar-states
+                UINavigationBar.appearance().standardAppearance   = appearance
+                UINavigationBar.appearance().scrollEdgeAppearance = appearance
+                UINavigationBar.appearance().compactAppearance    = appearance
+                // 3) Tint for back-chevron & any bar button items
+                UINavigationBar.appearance().tintColor            = .white
         // Delay until the window is created on first run
         DispatchQueue.main.async {
             if let tbc = UIApplication.shared

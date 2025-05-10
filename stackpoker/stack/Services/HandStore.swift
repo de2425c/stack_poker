@@ -67,7 +67,7 @@ class HandStore: ObservableObject {
                     return savedHand
                 }
                 
-                print("Loaded \(self?.savedHands.count ?? 0) hands")
+                print("Loaded \(self?.savedHands.count ?? 0) total hands for user")
             }
     }
     
@@ -144,5 +144,91 @@ class HandStore: ObservableObject {
             print("HAND STORE: Hand not found and no owner ID provided")
             return nil
         }
+    }
+    
+    // New function to fetch hands for a specific session ID
+    func fetchHands(forSessionId sessionId: String, completion: @escaping ([SavedHand]) -> Void) {
+        guard !userId.isEmpty else {
+            print("HandStore.fetchHands: User ID is empty, cannot fetch hands.")
+            completion([])
+            return
+        }
+        print("HandStore.fetchHands: Fetching hands for session ID [\(sessionId)] for user ID [\(self.userId)]")
+        
+        db.collection("users")
+            .document(self.userId) // Explicitly use self.userId for clarity
+            .collection("hands")
+            .whereField("sessionId", isEqualTo: sessionId)
+            .order(by: "timestamp", descending: false)
+            .getDocuments { snapshot, error in
+                if let error = error {
+                    print("HandStore.fetchHands: Error fetching hands for session [\(sessionId)]: \(error.localizedDescription)")
+                    // Check for specific Firestore errors like missing index
+                    if let firestoreError = error as NSError? {
+                        if firestoreError.domain == FirestoreErrorDomain && firestoreError.code == FirestoreErrorCode.failedPrecondition.rawValue {
+                            print("HandStore.fetchHands: FIRESTORE PRECONDITION FAILED. This often indicates a missing index. Check the Firestore console for index suggestions for collection 'hands' with fields 'sessionId' and 'timestamp'.")
+                        }
+                    }
+                    completion([])
+                    return
+                }
+                
+                guard let documents = snapshot?.documents else {
+                    print("HandStore.fetchHands: Snapshot was nil, or no documents found for session [\(sessionId)] (even if snapshot wasn't nil).")
+                    completion([])
+                    return
+                }
+                
+                print("HandStore.fetchHands: Query successful. Found \(documents.count) raw documents for session [\(sessionId)]. Processing them...")
+                
+                if documents.isEmpty {
+                    print("HandStore.fetchHands: No hand documents specifically matched sessionId [\(sessionId)] after query.")
+                    completion([])
+                    return
+                }
+
+                let handsForSession = documents.compactMap { document -> SavedHand? in
+                    print("HandStore.fetchHands: Processing document ID [\(document.documentID)]")
+                    let documentData = document.data()
+                    print("HandStore.fetchHands: Document data: \(documentData)")
+
+                    guard let dict = documentData["hand"] as? [String: Any] else {
+                        print("HandStore.fetchHands: Failed to extract 'hand' dictionary from document [\(document.documentID)]. 'hand' field was: \(String(describing: documentData["hand"]))")
+                        return nil
+                    }
+                    
+                    guard let data = try? JSONSerialization.data(withJSONObject: dict) else {
+                        print("HandStore.fetchHands: Failed to serialize 'hand' dictionary to JSON data for document [\(document.documentID)].")
+                        return nil
+                    }
+                    
+                    guard let hand = try? JSONDecoder().decode(ParsedHandHistory.self, from: data) else {
+                        print("HandStore.fetchHands: Failed to decode ParsedHandHistory from JSON data for document [\(document.documentID)].")
+                        return nil
+                    }
+                    
+                    guard let timestamp = documentData["timestamp"] as? Timestamp else {
+                        print("HandStore.fetchHands: Failed to extract 'timestamp' as Timestamp from document [\(document.documentID)]. 'timestamp' field was: \(String(describing: documentData["timestamp"]))")
+                        return nil
+                    }
+                    
+                    // sessionId field is confirmed by the whereField query, but let's log what's in the doc
+                    let docSessionId = documentData["sessionId"] as? String ?? "MISSING/NIL"
+                    print("HandStore.fetchHands: Document [\(document.documentID)] has sessionId in data: [\(docSessionId)]")
+
+                    var savedHand = SavedHand(
+                        id: document.documentID,
+                        hand: hand,
+                        timestamp: timestamp.dateValue()
+                    )
+                    // We are querying for this specific sessionId, so we can confidently assign it.
+                    savedHand.sessionId = sessionId 
+                    print("HandStore.fetchHands: Successfully decoded hand [\(savedHand.id)] for session [\(sessionId)].")
+                    return savedHand
+                }
+                
+                print("HandStore.fetchHands: Finished processing. Decoded \(handsForSession.count) hands for session [\(sessionId)]")
+                completion(handsForSession)
+            }
     }
 } 

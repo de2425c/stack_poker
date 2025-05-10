@@ -16,6 +16,18 @@ struct DashboardView: View {
     init(userId: String) {
         _handStore = StateObject(wrappedValue: HandStore(userId: userId))
         _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId))
+        
+        // Configure navigation bar appearance
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor(red: 18/255, green: 18/255, blue: 23/255, alpha: 1.0)
+        appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        
+        UINavigationBar.appearance().standardAppearance = appearance
+        UINavigationBar.appearance().compactAppearance = appearance
+        UINavigationBar.appearance().scrollEdgeAppearance = appearance
+        UINavigationBar.appearance().tintColor = UIColor.white
     }
     
     private var totalBankroll: Double {
@@ -82,60 +94,64 @@ struct DashboardView: View {
     }
     
     var body: some View {
+        NavigationView {
             ZStack {
-            // Background color
-            AppBackgroundView()
+                // Background color
+                AppBackgroundView()
                     .ignoresSafeArea()
                 
-            ScrollView {
-                VStack(spacing: 4) { // Further reduced spacing
-                    // Refined tab navigation
-                    NavigationTabBar(selectedTab: $selectedTab)
-                        .padding(.top, 8) // Use explicit value instead of .top
-                    
-                    // Content based on selected tab
-                    if selectedTab == 0 {
-                        // DASHBOARD TAB
+                ScrollView {
+                    VStack(spacing: 4) { // Further reduced spacing
+                        // Refined tab navigation
+                        NavigationTabBar(selectedTab: $selectedTab)
+                            .padding(.top, 8) // Use explicit value instead of .top
                         
-                        // Integrated Chart Section with Profit display
-                        IntegratedChartSection(
-                            selectedTimeRange: $selectedTimeRange,
-                            timeRanges: timeRanges,
-                            sessions: sessionStore.sessions,
-                            totalProfit: totalBankroll,
-                            timeRangeProfit: selectedTimeRangeProfit
-                        )
-                        .padding(.top, 6) // Reduced top padding
-                        .padding(.bottom, 2) // Minimal padding to move cards up
-                        
-                        // Stats Cards
-                        EnhancedStatsCardGrid(
-                            winRate: winRate,
-                            averageProfit: averageProfit,
-                            totalSessions: totalSessions,
-                            bestSession: bestSession
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 16)
-                        
-                    } else if selectedTab == 1 {
-                        // HANDS TAB
-                        HandsTab(handStore: handStore)
-                        
-                    } else {
-                        // SESSIONS TAB
-                        SessionsTab(sessionStore: sessionStore)
+                        // Content based on selected tab
+                        if selectedTab == 0 {
+                            // DASHBOARD TAB
+                            
+                            // Integrated Chart Section with Profit display
+                            IntegratedChartSection(
+                                selectedTimeRange: $selectedTimeRange,
+                                timeRanges: timeRanges,
+                                sessions: sessionStore.sessions,
+                                totalProfit: totalBankroll,
+                                timeRangeProfit: selectedTimeRangeProfit
+                            )
+                            .padding(.top, 6) // Reduced top padding
+                            .padding(.bottom, 2) // Minimal padding to move cards up
+                            
+                            // Stats Cards
+                            EnhancedStatsCardGrid(
+                                winRate: winRate,
+                                averageProfit: averageProfit,
+                                totalSessions: totalSessions,
+                                bestSession: bestSession
+                            )
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                            
+                        } else if selectedTab == 1 {
+                            // HANDS TAB
+                            HandsTab(handStore: handStore)
+                            
+                        } else {
+                            // SESSIONS TAB
+                            SessionsTab(sessionStore: sessionStore)
+                        }
                     }
+                    .padding(.bottom, 90) // Added significant bottom padding for better scrolling
                 }
-                .padding(.bottom, 90) // Added significant bottom padding for better scrolling
             }
+            .environmentObject(handStore)
+            .environmentObject(postService)
+            .environmentObject(userService)
+            .onAppear {
+                sessionStore.fetchSessions()
+            }
+            .navigationBarHidden(true) // Hide the top navigation bar
         }
-        .environmentObject(handStore)
-        .environmentObject(postService)
-        .environmentObject(userService)
-        .onAppear {
-            sessionStore.fetchSessions()
-        }
+        .navigationViewStyle(StackNavigationViewStyle()) // Use StackNavigationViewStyle for proper push navigation
     }
 }
 
@@ -1248,18 +1264,17 @@ struct SessionsTab: View {
                             // Sessions for selected date with animation
                             VStack(spacing: 12) {
                                 ForEach(Array(sessionsForDate(selectedDate).enumerated()), id: \.element.id) { index, session in
-                                    EnhancedSessionSummaryRow(session: session, 
-                                                              onSelect: {
-                                        selectedSession = session
-                                        editBuyIn = "\(Int(session.buyIn))"
-                                        editCashout = "\(Int(session.cashout))"
-                                        editHours = String(format: "%.1f", session.hoursPlayed)
-                                        showEditSheet = true
-                                    }, 
-                                                              onDelete: {
-                                        selectedSession = session
-                                        showingDeleteAlert = true
-                                    })
+                                    NavigationLink(destination: SessionDetailView(session: session)) {
+                                        EnhancedSessionSummaryRow(
+                                            session: session, 
+                                            onSelect: { }, 
+                                            onDelete: {
+                                                selectedSession = session
+                                                showingDeleteAlert = true
+                                            }
+                                        )
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
                                     .transition(.asymmetric(
                                         insertion: .scale(scale: 0.95).combined(with: .opacity),
                                         removal: .scale(scale: 0.95).combined(with: .opacity)
@@ -1283,13 +1298,9 @@ struct SessionsTab: View {
                     
                     // Today's sessions
                     if !groupedSessions.today.isEmpty && (selectedDate == nil || !Calendar.current.isDate(selectedDate!, inSameDayAs: Date())) {
-                        EnhancedSessionsSection(title: "Today", sessions: groupedSessions.today, onSelect: { session in
-                            selectedSession = session
-                            editBuyIn = "\(Int(session.buyIn))"
-                            editCashout = "\(Int(session.cashout))"
-                            editHours = String(format: "%.1f", session.hoursPlayed)
-                            showEditSheet = true
-                        }, onDelete: { session in
+                        EnhancedSessionsSection(title: "Today", sessions: groupedSessions.today, 
+                                                onSelect: { _ in }, 
+                                                onDelete: { session in
                             selectedSession = session
                             showingDeleteAlert = true
                         })
@@ -1298,13 +1309,9 @@ struct SessionsTab: View {
                     
                     // Last week's sessions
                     if !groupedSessions.lastWeek.isEmpty {
-                        EnhancedSessionsSection(title: "Last Week", sessions: groupedSessions.lastWeek, onSelect: { session in
-                            selectedSession = session
-                            editBuyIn = "\(Int(session.buyIn))"
-                            editCashout = "\(Int(session.cashout))"
-                            editHours = String(format: "%.1f", session.hoursPlayed)
-                            showEditSheet = true
-                        }, onDelete: { session in
+                        EnhancedSessionsSection(title: "Last Week", sessions: groupedSessions.lastWeek, 
+                                                onSelect: { _ in }, 
+                                                onDelete: { session in
                             selectedSession = session
                             showingDeleteAlert = true
                         })
@@ -1313,13 +1320,9 @@ struct SessionsTab: View {
                     
                     // Older sessions
                     if !groupedSessions.older.isEmpty {
-                        EnhancedSessionsSection(title: "All Time", sessions: groupedSessions.older, onSelect: { session in
-                            selectedSession = session
-                            editBuyIn = "\(Int(session.buyIn))"
-                            editCashout = "\(Int(session.cashout))"
-                            editHours = String(format: "%.1f", session.hoursPlayed)
-                            showEditSheet = true
-                        }, onDelete: { session in
+                        EnhancedSessionsSection(title: "All Time", sessions: groupedSessions.older, 
+                                                onSelect: { _ in }, 
+                                                onDelete: { session in
                             selectedSession = session
                             showingDeleteAlert = true
                         })
@@ -1456,12 +1459,15 @@ struct EmptySessionsView: View {
     }
 }
 
-// Enhanced section header
+// MARK: - Enhanced section header
 struct EnhancedSessionsSection: View {
     let title: String
     let sessions: [Session]
     let onSelect: (Session) -> Void
     let onDelete: (Session) -> Void
+    
+    // Add state to track navigation
+    @State private var selectedSessionId: String? = nil
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1469,7 +1475,7 @@ struct EnhancedSessionsSection: View {
             HStack(alignment: .center) {
                 Text(title)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(Color.gray.opacity(0.85)) // Changed to greyish color
+                    .foregroundColor(Color.gray.opacity(0.85))
                 
                 Spacer()
                 
@@ -1482,11 +1488,23 @@ struct EnhancedSessionsSection: View {
             // Sessions in this section
             VStack(spacing: 12) {
                 ForEach(sessions) { session in
-                    EnhancedSessionSummaryRow(session: session, onSelect: {
-                        onSelect(session)
-                    }, onDelete: {
-                        onDelete(session)
-                    })
+                    // Here's the trick - use NavigationLink as a background
+                    NavigationLink(
+                        destination: SessionDetailView(session: session),
+                        tag: session.id,
+                        selection: $selectedSessionId
+                    ) {
+                        EnhancedSessionSummaryRow(
+                            session: session,
+                            onSelect: {
+                                selectedSessionId = session.id
+                            },
+                            onDelete: {
+                                onDelete(session)
+                            }
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
         }
@@ -1508,7 +1526,15 @@ struct LuxuryCalendarView: View {
     @State private var isGridAnimated = false
     
     private let columns = Array(repeating: GridItem(.flexible()), count: 7)
-    private let weekdaySymbols = ["M", "T", "W", "T", "F", "S", "S"] // Ultra minimal day indicators
+    private let weekdaySymbols = [
+        ("M", "Monday"),
+        ("T", "Tuesday"), 
+        ("W", "Wednesday"), 
+        ("T", "Thursday"),
+        ("F", "Friday"),
+        ("S", "Saturday"),
+        ("S", "Sunday")
+    ] // Ultra minimal day indicators with full names for unique IDs
     
     private var monthHeader: String {
         let formatter = DateFormatter()
@@ -1634,8 +1660,8 @@ struct LuxuryCalendarView: View {
             VStack(spacing: 12) {
                 // Days of the week header
                 HStack(spacing: 0) {
-                    ForEach(weekdaySymbols, id: \.self) { day in
-                        Text(day)
+                    ForEach(weekdaySymbols, id: \.1) { day in
+                        Text(day.0)
                             .font(.system(size: 10, weight: .medium, design: .rounded))
                             .foregroundColor(Color.gray.opacity(0.7))
                             .frame(maxWidth: .infinity)
@@ -1930,10 +1956,6 @@ struct EnhancedSessionSummaryRow: View {
             Button(role: .destructive, action: onDelete) {
                 Label("Delete", systemImage: "trash")
             }
-        }
-        .onTapGesture {
-            hapticFeedback(style: .light)
-            onSelect()
         }
     }
     

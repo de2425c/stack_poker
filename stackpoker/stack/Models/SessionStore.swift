@@ -20,6 +20,8 @@ struct Session: Identifiable, Equatable {
     let cashout: Double
     let profit: Double
     let createdAt: Date
+    let notes: [String]?
+    let liveSessionUUID: String?
     
     init(id: String, data: [String: Any]) {
         self.id = id
@@ -62,6 +64,9 @@ struct Session: Identifiable, Equatable {
         } else {
             self.createdAt = Date()
         }
+        
+        self.notes = data["notes"] as? [String]
+        self.liveSessionUUID = data["liveSessionUUID"] as? String
     }
     
     static func == (lhs: Session, rhs: Session) -> Bool {
@@ -77,7 +82,9 @@ struct Session: Identifiable, Equatable {
                lhs.buyIn == rhs.buyIn &&
                lhs.cashout == rhs.cashout &&
                lhs.profit == rhs.profit &&
-               lhs.createdAt == rhs.createdAt
+               lhs.createdAt == rhs.createdAt &&
+               lhs.notes == rhs.notes &&
+               lhs.liveSessionUUID == rhs.liveSessionUUID
     }
 }
 
@@ -263,8 +270,10 @@ class SessionStore: ObservableObject {
         stopLiveSessionTimer()
         removeLiveSessionNotification()
         
+        let currentLiveSessionId = liveSession.id
+
         // Create a copy of the current session data for saving
-        let sessionData: [String: Any] = [
+        var sessionData: [String: Any] = [
             "userId": userId,
             "gameType": "CASH GAME",
             "gameName": liveSession.gameName,
@@ -276,7 +285,9 @@ class SessionStore: ObservableObject {
             "buyIn": liveSession.buyIn,
             "cashout": cashout,
             "profit": cashout - liveSession.buyIn,
-            "createdAt": FieldValue.serverTimestamp()
+            "createdAt": FieldValue.serverTimestamp(),
+            "notes": enhancedLiveSession.notes,
+            "liveSessionUUID": currentLiveSessionId
         ]
         
         addSession(sessionData) { error in
@@ -292,6 +303,8 @@ class SessionStore: ObservableObject {
         stopLiveSessionTimer()
         removeLiveSessionNotification()
         
+        let currentLiveSessionId = liveSession.id
+
         // Create a copy of the current session data for saving
         let sessionData: [String: Any] = [
             "userId": userId,
@@ -305,7 +318,9 @@ class SessionStore: ObservableObject {
             "buyIn": liveSession.buyIn,
             "cashout": cashout,
             "profit": cashout - liveSession.buyIn,
-            "createdAt": FieldValue.serverTimestamp()
+            "createdAt": FieldValue.serverTimestamp(),
+            "notes": enhancedLiveSession.notes,
+            "liveSessionUUID": currentLiveSessionId
         ]
         
         do {
