@@ -2,10 +2,12 @@ import Foundation
 import FirebaseFirestore
 import FirebaseAuth
 import FirebaseStorage
+import Combine
 
 class UserService: ObservableObject {
     private let db = Firestore.firestore()
     @Published var currentUserProfile: UserProfile?
+    @Published var loadedUsers: [String: UserProfile] = [:]
     
     // Helper method to get follower counts
     private func getFollowerCounts(for userId: String) async throws -> (followers: Int, following: Int) {
@@ -160,6 +162,62 @@ class UserService: ObservableObject {
                     completion(.failure(NSError(domain: "URLError", code: 0, userInfo: [NSLocalizedDescriptionKey: "No URL returned."])) )
                 }
             }
+        }
+    }
+    
+    func fetchUser(id: String) async {
+        // Optional: Prevent re-fetching if data for this user ID is already loaded
+        // and you don't need to refresh it every time.
+        // if loadedUsers[id] != nil {
+        //     print("User \(id) already loaded.")
+        //     return
+        // }
+        print("🔍 Fetching profile for user: \(id) for loadedUsers dictionary")
+
+        do {
+            let document = try await db.collection("users")
+                .document(id)
+                .getDocument()
+
+            if !document.exists {
+                print("⚠️ No profile document found for user ID: \(id)")
+                // You might want to handle this case, e.g., by setting nil or a specific error state
+                // For now, it just won't add to loadedUsers
+                return
+            }
+
+            guard let data = document.data() else {
+                print("⚠️ Document exists for user ID \(id) but no data")
+                return
+            }
+
+            // Get follower counts for the specific user
+            let (followersCount, followingCount) = try await getFollowerCounts(for: id)
+            
+            let avatarURL = data["avatarURL"] as? String
+            let userProfile = UserProfile(
+                id: id,
+                username: data["username"] as? String ?? "",
+                displayName: data["displayName"] as? String,
+                createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                favoriteGames: data["favoriteGames"] as? [String],
+                bio: data["bio"] as? String,
+                avatarURL: avatarURL,
+                location: data["location"] as? String,
+                favoriteGame: data["favoriteGame"] as? String,
+                followersCount: followersCount,
+                followingCount: followingCount
+            )
+            
+            // Update the published dictionary on the main thread
+            DispatchQueue.main.async {
+                self.loadedUsers[id] = userProfile
+                print("✅ Successfully fetched and stored user profile: \(userProfile.username) in loadedUsers")
+            }
+
+        } catch {
+            print("❌ Error fetching profile for user ID \(id): \(error)")
+            // Optionally, handle the error, e.g., by setting nil for this ID in loadedUsers
         }
     }
 }

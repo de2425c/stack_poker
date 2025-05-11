@@ -246,23 +246,26 @@ struct BasicPostCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Twitter-like header layout
             HStack(alignment: .top, spacing: 12) {
-                // Profile image with Twitter-like styling
-                Group {
-                    if let profileImage = post.profileImage {
-                        KFImage(URL(string: profileImage))
-                            .placeholder {
-                                Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                            }
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 48, height: 48)
-                            .clipShape(Circle())
-                    } else {
-                        Circle()
-                            .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                            .frame(width: 48, height: 48)
+                // Profile image with Twitter-like styling, wrapped in NavigationLink
+                NavigationLink(destination: UserProfileView(userId: post.userId)) {
+                    Group {
+                        if let profileImage = post.profileImage {
+                            KFImage(URL(string: profileImage))
+                                .placeholder {
+                                    Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                }
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 48, height: 48)
+                                .clipShape(Circle())
+                        } else {
+                            Circle()
+                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                .frame(width: 48, height: 48)
+                        }
                     }
                 }
+                .buttonStyle(PlainButtonStyle()) // Add this to make the NavigationLink tap area precise
                 
                 VStack(alignment: .leading, spacing: 2) {
                     // Display name and username in Twitter-like format

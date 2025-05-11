@@ -20,48 +20,56 @@ struct PostView: View {
     
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            // Profile image
-            Group {
-                if let profileImage = post.profileImage {
-                    KFImage(URL(string: profileImage))
-                        .placeholder {
-                            Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                        }
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 48, height: 48)
-                        .clipShape(Circle())
-                } else {
-                    Circle()
-                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                        .frame(width: 48, height: 48)
+            // Profile image wrapped in NavigationLink
+            NavigationLink(destination: UserProfileView(userId: post.userId)) { // post.userId is the author
+                Group {
+                    if let profileImage = post.profileImage {
+                        KFImage(URL(string: profileImage))
+                            .placeholder {
+                                Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                            }
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 48, height: 48)
+                            .clipShape(Circle())
+                    } else {
+                        Circle()
+                            .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                            .frame(width: 48, height: 48)
+                    }
                 }
+                .contentShape(Rectangle()) // Define tappable area
             }
+            .buttonStyle(PlainButtonStyle()) // Ensure clean tap behavior
             
             // Content
             VStack(alignment: .leading, spacing: 8) {
-                // Header
-                HStack(spacing: 6) {
-                    Text(post.displayName ?? post.username)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    if post.displayName != nil {
-                        Text("@\(post.username)")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray.opacity(0.8))
+                // Header wrapped in NavigationLink
+                NavigationLink(destination: UserProfileView(userId: post.userId)) { // post.userId is the author
+                    HStack(spacing: 6) {
+                        Text(post.displayName ?? post.username)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        if post.displayName != nil {
+                            Text("@\(post.username)")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray.opacity(0.8))
+                        }
+                        
+                        Text("·")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.7))
+                        
+                        Text(post.createdAt.timeAgo())
+                            .font(.system(size: 15))
+                            .foregroundColor(.gray.opacity(0.7))
+                        
+                        Spacer(minLength: 0)
                     }
-                    
-                    Text("·")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray.opacity(0.7))
-                    
-                    Text(post.createdAt.timeAgo())
-                        .font(.system(size: 15))
-                        .foregroundColor(.gray.opacity(0.7))
-                    
-                    Spacer(minLength: 0)
+                    .contentShape(Rectangle()) // Define tappable area
                 }
+                .buttonStyle(PlainButtonStyle()) // Ensure clean tap behavior
                 
                 // Post content (includes session badge/info/note)
                 if !post.content.isEmpty {

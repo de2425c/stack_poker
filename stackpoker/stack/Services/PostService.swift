@@ -98,129 +98,146 @@ class PostService: ObservableObject {
         defer { isLoading = false }
         
         do {
-            let followingUserIds = try await fetchFollowingUsers()
+            // Ensure followingUserIds is up-to-date
+            self.followingUserIds = try await fetchFollowingUsers()
             
-            // Always fetch posts regardless of how many users are being followed
+            guard !self.followingUserIds.isEmpty else {
+                // If not following anyone (including self), clear posts and return
+                self.posts = []
+                self.lastDocument = nil
+                return
+            }
+
+            let batchSize = 10 // Firebase limit for 'in' queries
+            var allFetchedPosts: [Post] = []
             
-            // Due to Firebase's limit on whereIn queries (max 10 items), we need to batch the requests
-            let batchSize = 10
-            var allPosts: [Post] = []
-            
-            // Process user IDs in batches of 10
-            for i in stride(from: 0, to: followingUserIds.count, by: batchSize) {
-                let end = min(i + batchSize, followingUserIds.count)
-                let batch = Array(followingUserIds[i..<end])
-                
-                
+            // Use a Set to keep track of document IDs to avoid duplicates if a user is in multiple batches
+            // (though with current fetchFollowingUsers, this shouldn't happen)
+            var processedPostIDs = Set<String>()
+
+            for i in stride(from: 0, to: self.followingUserIds.count, by: batchSize) {
+                let end = min(i + batchSize, self.followingUserIds.count)
+                let userIdBatch = Array(self.followingUserIds[i..<end])
+
+                guard !userIdBatch.isEmpty else { continue }
+
                 let query = db.collection("posts")
-                    .whereField("userId", in: batch)
+                    .whereField("userId", in: userIdBatch)
                     .order(by: "createdAt", descending: true)
-                    .limit(to: 20)
-                
+                    .limit(to: postsPerPage) // Fetch postsPerPage for initial load per batch, then consolidate
+
                 let batchSnapshot = try await query.getDocuments()
-                
-                let batchPosts = try await processPosts(from: batchSnapshot)
-                allPosts.append(contentsOf: batchPosts)
+                let batchPosts = try await processPosts(from: batchSnapshot, existingIds: &processedPostIDs)
+                allFetchedPosts.append(contentsOf: batchPosts)
             }
+
+            // Sort all collected posts by creation date to get the true most recent
+            allFetchedPosts.sort { $0.createdAt > $1.createdAt }
+
+            // Take the top 'postsPerPage' (or a bit more to ensure screen fills)
+            let initialLoadCount = postsPerPage * 2 // Fetch more initially to ensure screen is full
+            self.posts = Array(allFetchedPosts.prefix(initialLoadCount))
             
-            // Sort all posts by creation date
-            allPosts.sort { $0.createdAt > $1.createdAt }
-            
-            // Limit to the most recent 20 posts total across all batches
-            if allPosts.count > 20 {
-                allPosts = Array(allPosts.prefix(20))
+            // Set the lastDocument based on the actual last post displayed
+            // This will be used by the NEW fetchMorePosts logic which relies on its timestamp
+            if let lastDisplayedPost = self.posts.last, let id = lastDisplayedPost.id {
+                 // We need the actual DocumentSnapshot for timestamp based pagination with startAfter
+                 // For simplicity now, we'll fetch it. Ideally, processPosts would return snapshots too.
+                 // Or, even better, fetchMorePosts will use the timestamp of self.posts.last.
+                 // For now, let's assume processPosts stores the snapshot or we re-fetch.
+                 // The key is that fetchMorePosts will now rely on the *timestamp* of self.posts.last
             }
-            
-            self.posts = allPosts
-            self.lastDocument = nil  // Reset for pagination
-            
+             self.lastDocument = nil // For timestamp pagination, this specific snapshot isn't the primary cursor for fetchMorePosts
+
         } catch {
+            // Consider more specific error handling or re-throwing
+            print("Error fetching posts: \\(error)")
             throw error
         }
     }
     
-    func fetchMorePosts() async throws {
-        guard let lastDocument = lastDocument, !isLoading else { return }
-        
-        await MainActor.run {
-            isLoading = true
-        }
-        defer { 
-            Task { @MainActor in
-                isLoading = false
-            }
-        }
-        
-        // Make sure we have following user IDs
-        if followingUserIds.isEmpty {
-            followingUserIds = try await fetchFollowingUsers()
-        }
-        
-        guard !followingUserIds.isEmpty else { return }
-        
-        // Use a whereIn query to fetch posts from only these users
-        let batchSize = 10
-        var allPosts: [Post] = []
-        var newLastDoc: DocumentSnapshot?
-        
-        // Process users in batches of 10 (Firebase limit for whereIn)
-        for i in stride(from: 0, to: followingUserIds.count, by: batchSize) {
-            let end = min(i + batchSize, followingUserIds.count)
-            let userIdBatch = Array(followingUserIds[i..<end])
-            
-            let query = db.collection("posts")
-                .whereField("userId", in: userIdBatch)
-                .order(by: "createdAt", descending: true)
-                .limit(to: postsPerPage)
-                .start(afterDocument: lastDocument)
-            
-            let snapshot = try await query.getDocuments()
-            
-            // Keep track of the last document from all batches for pagination
-            if newLastDoc == nil && !snapshot.documents.isEmpty {
-                newLastDoc = snapshot.documents.last
-            }
-            
-            let batchPosts = try snapshot.documents.compactMap { document in
-                var post = try document.data(as: Post.self)
-                post.id = document.documentID
-                return post
-            }
-            
-            allPosts.append(contentsOf: batchPosts)
-        }
-        
-        // Sort all posts by created date (most recent first)
-        allPosts.sort { $0.createdAt > $1.createdAt }
-        
-        // Limit to the next page
-        if allPosts.count > postsPerPage {
-            allPosts = Array(allPosts.prefix(postsPerPage))
-        }
-        
-        // Check likes status for the current user
-        if let userId = Auth.auth().currentUser?.uid {
-            for i in 0..<allPosts.count {
-                if let postId = allPosts[i].id {
-                    let likeDoc = try? await db.collection("posts")
-                        .document(postId)
-                        .collection("likes")
-                        .document(userId)
-                        .getDocument()
-                    
-                    if let likeDoc = likeDoc, likeDoc.exists {
-                        allPosts[i].isLiked = true
+    // Helper for processing posts and avoiding duplicates
+    private func processPosts(from snapshot: QuerySnapshot, existingIds: inout Set<String>) async throws -> [Post] {
+        var posts: [Post] = []
+        for document in snapshot.documents {
+            let postId = document.documentID // Assign directly, documentID is non-optional
+            if !existingIds.contains(postId) {
+                do {
+                    var post = try document.data(as: Post.self)
+                    post.id = postId // Assign the non-optional postId
+                    // Check likes status for the current user
+                    if let userId = Auth.auth().currentUser?.uid {
+                        let likeDoc = try? await db.collection("posts")
+                            .document(postId)
+                            .collection("likes")
+                            .document(userId)
+                            .getDocument()
+                        if let likeDoc = likeDoc, likeDoc.exists {
+                            post.isLiked = true
+                        }
                     }
+                    posts.append(post)
+                    existingIds.insert(postId)
+                } catch {
+                    print("Error decoding post \(postId): \(error)")
                 }
             }
         }
-        
-        if let newLastDoc = newLastDoc {
-            self.lastDocument = newLastDoc
+        return posts
+    }
+    
+    func fetchMorePosts() async throws {
+        // Use the timestamp of the oldest post currently loaded for pagination
+        guard let oldestPost = self.posts.last else {
+            // No posts loaded yet. Cannot paginate.
+            print("Cannot fetch more posts: no existing posts.")
+            return
+        }
+        let oldestPostTimestamp = oldestPost.createdAt // createdAt is non-optional
+
+        guard !isLoading else { return }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        // Ensure we have following user IDs
+        if self.followingUserIds.isEmpty {
+            self.followingUserIds = try await fetchFollowingUsers()
         }
         
-        await MainActor.run {
-            posts.append(contentsOf: allPosts)
+        guard !self.followingUserIds.isEmpty else {
+            print("Cannot fetch more posts: not following any users.")
+            return
+        }
+
+        var newlyFetchedPosts: [Post] = []
+        let batchSize = 10
+        var processedPostIDs = Set<String>(self.posts.compactMap { $0.id }) // Exclude already loaded posts
+
+        for i in stride(from: 0, to: self.followingUserIds.count, by: batchSize) {
+            let end = min(i + batchSize, self.followingUserIds.count)
+            let userIdBatch = Array(self.followingUserIds[i..<end])
+
+            guard !userIdBatch.isEmpty else { continue }
+
+            // Query for posts older than the current oldest post
+            let query = db.collection("posts")
+                .whereField("userId", in: userIdBatch)
+                .whereField("createdAt", isLessThan: oldestPostTimestamp) // Fetch posts older than the oldest one we have
+                .order(by: "createdAt", descending: true) // Still order by most recent among the older ones
+                .limit(to: postsPerPage)
+
+            let batchSnapshot = try await query.getDocuments()
+            let batchPosts = try await processPosts(from: batchSnapshot, existingIds: &processedPostIDs)
+            newlyFetchedPosts.append(contentsOf: batchPosts)
+        }
+
+        // Sort all newly fetched older posts to maintain order
+        newlyFetchedPosts.sort { $0.createdAt > $1.createdAt }
+        
+        // Append to the main posts array
+        if !newlyFetchedPosts.isEmpty {
+            self.posts.append(contentsOf: newlyFetchedPosts)
         }
     }
     
@@ -339,33 +356,6 @@ class PostService: ObservableObject {
         }
     }
     
-    private func processPosts(from snapshot: QuerySnapshot) async throws -> [Post] {
-        var posts = try snapshot.documents.compactMap { document in
-            var post = try document.data(as: Post.self)
-            post.id = document.documentID
-            return post
-        }
-        
-        // Check likes status for the current user
-        if let userId = Auth.auth().currentUser?.uid {
-            for i in 0..<posts.count {
-                if let postId = posts[i].id {
-                    let likeDoc = try? await db.collection("posts")
-                        .document(postId)
-                        .collection("likes")
-                        .document(userId)
-                        .getDocument()
-                    
-                    if let likeDoc = likeDoc, likeDoc.exists {
-                        posts[i].isLiked = true
-                    }
-                }
-            }
-        }
-        
-        return posts
-    }
-    
     // Get comments for a post
     func getComments(for postId: String) async throws -> [Comment] {
         let commentsRef = db.collection("posts").document(postId).collection("comments")
@@ -433,7 +423,8 @@ class PostService: ObservableObject {
             
             let snapshot = try await query.getDocuments()
             
-            return try await processPosts(from: snapshot)
+            var existingIds = Set<String>() // Initialize an empty set for this context
+            return try await processPosts(from: snapshot, existingIds: &existingIds)
         } catch {
             print("Error fetching session posts: \(error)")
             return []
