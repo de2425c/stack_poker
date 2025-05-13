@@ -10,12 +10,14 @@ struct DashboardView: View {
     @StateObject private var postService = PostService()
     @EnvironmentObject private var userService: UserService
     @State private var selectedTimeRange = 1 // Default to 1W (index 1)
-    @State private var selectedTab = 0 // 0 = Dashboard, 1 = Hands, 2 = Sessions
+    @State private var selectedTab: Int // Changed to be initialized with parameter
     private let timeRanges = ["24H", "1W", "1M", "6M", "1Y", "All"]
     
-    init(userId: String) {
+    init(userId: String, initialSelectedTab: Int = 0) {
         _handStore = StateObject(wrappedValue: HandStore(userId: userId))
         _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId))
+        // Initialize selectedTab with the provided parameter
+        _selectedTab = State(initialValue: initialSelectedTab)
         
         // Configure navigation bar appearance
         let appearance = UINavigationBarAppearance()

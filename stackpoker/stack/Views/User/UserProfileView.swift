@@ -144,37 +144,48 @@ struct UserProfileView: View {
                 if userService.loadedUsers[userId] == nil {
                     await userService.fetchUser(id: userId) // Fetch user details if not already loaded
                 }
+                // Fetch initial follow state
+                if let currentLoggedInUserId = loggedInUserId {
+                    self.isFollowing = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
+                }
                 // TODO: Fetch user's posts - profilePostService.fetchPosts(forUserId: userId)
-                // TODO: Check if current user is following this user - self.isFollowing = await userService.isFollowing(userId)
-                print("Displaying UserProfileView for userId: \(userId)")
+                print("Displaying UserProfileView for userId: \(userId), isFollowing: \(self.isFollowing)")
             }
         }
     }
 
     func toggleFollow() {
         guard let currentLoggedInUserId = loggedInUserId, userId != currentLoggedInUserId else { return }
+        
         isProcessingFollow = true
+        let actionIsFollow = !isFollowing // The action we are about to perform
+
         Task {
-            // TODO: Implement actual follow/unfollow logic in UserService
-            // For example: 
-            // if isFollowing {
-            //     try? await userService.unfollowUser(userIdToUnfollow: userId, currentUserId: currentLoggedInUserId)
-            // } else {
-            //     try? await userService.followUser(userIdToFollow: userId, currentUserId: currentLoggedInUserId)
-            // }
-            // self.isFollowing.toggle() // Toggle based on successful operation
-            // await userService.fetchUser(id: userId) // Refresh user data to update follower count
-            // await userService.fetchUserProfile() // Refresh current user's following count (if shown elsewhere)
-            
-            // Placeholder toggle
-            self.isFollowing.toggle()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // Simulate network request
-                 isProcessingFollow = false
-                 // After actual operation, refresh the user whose profile is being viewed to update their follower count
-                 Task { await userService.fetchUser(id: userId) }
-                 // And refresh the current user's profile to update their following count
-                 if let LUID = loggedInUserId { Task { await userService.fetchUser(id: LUID) } }
+            do {
+                if actionIsFollow {
+                    try await userService.followUser(userIdToFollow: userId)
+                } else {
+                    try await userService.unfollowUser(userIdToUnfollow: userId)
+                }
+                // Update UI optimistically based on the action taken
+                self.isFollowing = actionIsFollow 
+                print("Successfully performed \(actionIsFollow ? "follow" : "unfollow") action.")
+                
+                // Refresh both user profiles to get updated counts from their source of truth
+                // (even though UserService updated them optimistically, a refresh ensures consistency)
+                await userService.fetchUser(id: userId) // Refresh the profile being viewed
+                await userService.fetchUser(id: currentLoggedInUserId) // Refresh the current user's profile
+                if userService.currentUserProfile?.id == currentLoggedInUserId {
+                     // Also explicitly try to refresh currentUserProfile if it's the one being modified
+                     try? await userService.fetchUserProfile() 
+                }
+
+            } catch {
+                print("Error toggling follow state: \(error)")
+                // Optionally, revert optimistic UI update if server operation failed
+                // self.isFollowing = !actionIsFollow 
             }
+            isProcessingFollow = false
         }
     }
 }

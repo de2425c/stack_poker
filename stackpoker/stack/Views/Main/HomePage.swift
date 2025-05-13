@@ -11,7 +11,7 @@ class TabBarVisibilityManager: ObservableObject {
 }
 
 struct HomePage: View {
-    @State private var selectedTab: Tab = .dashboard
+    @State private var selectedTab: Tab = .feed
     let userId: String
     @State private var showingMenu = false
     @State private var showingReplay = false
@@ -32,21 +32,21 @@ struct HomePage: View {
     }
     
     enum Tab {
-        case dashboard
         case feed
+        case explore
         case add
         case groups
-        case tools
+        case profile
     }
     
     var body: some View {
         ZStack {
             TabView(selection: $selectedTab) {
-                DashboardView(userId: userId)
-                    .tag(Tab.dashboard)
-                
-                FeedView()
+                FeedView(userId: userId)
                     .tag(Tab.feed)
+                
+                ExploreView()
+                    .tag(Tab.explore)
                 
                 Color.clear
                     .tag(Tab.add)
@@ -103,11 +103,11 @@ struct HomePage: View {
                 
                 // Main content
                 TabView(selection: $selectedTab) {
-                    DashboardView(userId: userId)
-                        .tag(Tab.dashboard)
-                    
                     FeedView(userId: userId)
                         .tag(Tab.feed)
+                    
+                    ExploreView()
+                        .tag(Tab.explore)
                     
                     Color.clear // Placeholder for Add tab
                         .tag(Tab.add)
@@ -120,8 +120,13 @@ struct HomePage: View {
                         .environmentObject(tabBarVisibility)
                         .tag(Tab.groups)
                     
-                    ToolsScreen(userId: userId)
-                        .tag(Tab.tools)
+                    ProfileView(userId: userId)
+                        .environmentObject(userService)
+                        .environmentObject(handStore)
+                        .environmentObject(sessionStore)
+                        .environmentObject(postService)
+                        .environmentObject(tabBarVisibility)
+                        .tag(Tab.profile)
                 }
                 .background(Color.clear)
                 .toolbar(.hidden, for: .tabBar)
@@ -188,15 +193,15 @@ struct CustomTabBar: View {
                             .padding(.top, -12)
                         HStack(spacing: 0) {
                             TabBarButton(
-                                icon: "Dashboard",
-                                title: "Dashboard",
-                                isSelected: selectedTab == .dashboard
-                            ) { selectedTab = .dashboard }
-                            TabBarButton(
                                 icon: "Feed",
                                 title: "Feed",
                                 isSelected: selectedTab == .feed
                             ) { selectedTab = .feed }
+                            TabBarButton(
+                                icon: "Search",
+                                title: "Explore",
+                                isSelected: selectedTab == .explore
+                            ) { selectedTab = .explore }
                             Spacer(minLength: 0)
                             ZStack {
                                 Color.clear.frame(width: 1, height: 1)
@@ -211,10 +216,10 @@ struct CustomTabBar: View {
                                 isSelected: selectedTab == .groups
                             ) { selectedTab = .groups }
                             TabBarButton(
-                                icon: "Tools",
-                                title: "Tools",
-                                isSelected: selectedTab == .tools
-                            ) { selectedTab = .tools }
+                                icon: "Profile",
+                                title: "You",
+                                isSelected: selectedTab == .profile
+                            ) { selectedTab = .profile }
                         }
                         .padding(.horizontal, 0)
                         .padding(.top, 8)

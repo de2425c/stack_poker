@@ -9,6 +9,8 @@ class UserService: ObservableObject {
     @Published var currentUserProfile: UserProfile?
     @Published var loadedUsers: [String: UserProfile] = [:]
     
+    private let userFollowsCollection = "userFollows"
+
     // Helper method to get follower counts
     private func getFollowerCounts(for userId: String) async throws -> (followers: Int, following: Int) {
         async let followersCount = db.collection("users")
@@ -218,6 +220,200 @@ class UserService: ObservableObject {
         } catch {
             print("❌ Error fetching profile for user ID \(id): \(error)")
             // Optionally, handle the error, e.g., by setting nil for this ID in loadedUsers
+        }
+    }
+
+    // MARK: - New Follow/Unfollow Logic
+
+    func followUser(userIdToFollow: String) async throws {
+        guard let currentUserId = Auth.auth().currentUser?.uid else {
+            throw UserServiceError.notAuthenticated
+        }
+        
+        // Prevent following oneself
+        guard currentUserId != userIdToFollow else {
+            print("User cannot follow themselves.")
+            return // Or throw an error
+        }
+
+        // Check if already following to prevent duplicate follow documents
+        let alreadyFollowing = await isUserFollowing(targetUserId: userIdToFollow, currentUserId: currentUserId)
+        guard !alreadyFollowing else {
+            print("User \(currentUserId) is already following \(userIdToFollow).")
+            return
+        }
+
+        let followData = UserFollow(followerId: currentUserId, followeeId: userIdToFollow, createdAt: Date())
+        
+        do {
+            // Use addDocument(from:) for Encodable types
+            try await db.collection(userFollowsCollection).addDocument(from: followData)
+            print("User \(currentUserId) successfully followed \(userIdToFollow).")
+
+            // Optimistically update local counts and refresh profiles
+            DispatchQueue.main.async {
+                if var followedUser = self.loadedUsers[userIdToFollow] {
+                    followedUser.followersCount += 1
+                    self.loadedUsers[userIdToFollow] = followedUser
+                }
+                if var currentUser = self.loadedUsers[currentUserId] {
+                    currentUser.followingCount += 1
+                    self.loadedUsers[currentUserId] = currentUser
+                }
+                if self.currentUserProfile?.id == currentUserId {
+                    self.currentUserProfile?.followingCount += 1
+                }
+            }
+            // Consider re-fetching profiles for robustness or relying on Cloud Functions for counters
+            // await fetchUser(id: userIdToFollow)
+            // await fetchUser(id: currentUserId) 
+        } catch {
+            print("Error following user: \(error)")
+            throw error
+        }
+    }
+
+    func unfollowUser(userIdToUnfollow: String) async throws {
+        guard let currentUserId = Auth.auth().currentUser?.uid else {
+            throw UserServiceError.notAuthenticated
+        }
+
+        let query = db.collection(userFollowsCollection)
+            .whereField("followerId", isEqualTo: currentUserId)
+            .whereField("followeeId", isEqualTo: userIdToUnfollow)
+
+        do {
+            let snapshot = try await query.getDocuments()
+            guard !snapshot.documents.isEmpty else {
+                print("User \(currentUserId) is not following \(userIdToUnfollow), cannot unfollow.")
+                return // Or throw an error indicating not currently following
+            }
+
+            for document in snapshot.documents {
+                try await db.collection(userFollowsCollection).document(document.documentID).delete()
+            }
+            print("User \(currentUserId) successfully unfollowed \(userIdToUnfollow).")
+
+            // Optimistically update local counts and refresh profiles
+            DispatchQueue.main.async {
+                if var unfollowedUser = self.loadedUsers[userIdToUnfollow] {
+                    unfollowedUser.followersCount = max(0, unfollowedUser.followersCount - 1)
+                    self.loadedUsers[userIdToUnfollow] = unfollowedUser
+                }
+                if var currentUser = self.loadedUsers[currentUserId] {
+                    currentUser.followingCount = max(0, currentUser.followingCount - 1)
+                    self.loadedUsers[currentUserId] = currentUser
+                }
+                if self.currentUserProfile?.id == currentUserId {
+                    self.currentUserProfile?.followingCount = max(0, (self.currentUserProfile?.followingCount ?? 0) - 1)
+                }
+            }
+            // Consider re-fetching profiles or relying on Cloud Functions for counters
+            // await fetchUser(id: userIdToUnfollow)
+            // await fetchUser(id: currentUserId)
+        } catch {
+            print("Error unfollowing user: \(error)")
+            throw error
+        }
+    }
+
+    func isUserFollowing(targetUserId: String, currentUserId: String?) async -> Bool {
+        guard let currentUserId = currentUserId else {
+            return false
+        }
+        if targetUserId == currentUserId { return false } // Cannot follow oneself
+
+        let query = db.collection(userFollowsCollection)
+            .whereField("followerId", isEqualTo: currentUserId)
+            .whereField("followeeId", isEqualTo: targetUserId)
+            .limit(to: 1)
+        
+        do {
+            let snapshot = try await query.getDocuments()
+            return !snapshot.documents.isEmpty
+        } catch {
+            print("Error checking follow status: \(error)")
+            return false
+        }
+    }
+
+    func fetchFollowerIds(for userId: String) async -> [String] {
+        let query = db.collection(userFollowsCollection).whereField("followeeId", isEqualTo: userId)
+        do {
+            let snapshot = try await query.getDocuments()
+            return snapshot.documents.compactMap { $0.data()["followerId"] as? String }
+        } catch {
+            print("Error fetching follower IDs: \(error)")
+            return []
+        }
+    }
+
+    func fetchFollowingIds(for userId: String) async -> [String] {
+        let query = db.collection(userFollowsCollection).whereField("followerId", isEqualTo: userId)
+        do {
+            let snapshot = try await query.getDocuments()
+            return snapshot.documents.compactMap { $0.data()["followeeId"] as? String }
+        } catch {
+            print("Error fetching following IDs: \(error)")
+            return []
+        }
+    }
+    
+    // Method to fetch UserProfile objects based on a list of IDs
+    func fetchUserProfiles(byIds userIds: [String]) async -> [UserProfile] {
+        var profiles: [UserProfile] = []
+        guard !userIds.isEmpty else { return profiles }
+
+        // Fetch profiles in batches of 10 (Firestore 'in' query limit)
+        let chunks = userIds.chunked(into: 10)
+        for chunk in chunks {
+            if chunk.isEmpty { continue }
+            let query = db.collection("users").whereField(FieldPath.documentID(), in: chunk)
+            do {
+                let snapshot = try await query.getDocuments()
+                for document in snapshot.documents {
+                    // Use the existing fetchUser logic or UserProfile initializer
+                    // For simplicity, re-using parts of fetchUser logic here:
+                    let data = document.data()
+                    let (followersCount, followingCount) = (try? await getFollowerCounts(for: document.documentID)) ?? (0,0)
+                    let userProfile = UserProfile(
+                        id: document.documentID,
+                        username: data["username"] as? String ?? "",
+                        displayName: data["displayName"] as? String,
+                        createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                        favoriteGames: data["favoriteGames"] as? [String],
+                        bio: data["bio"] as? String,
+                        avatarURL: data["avatarURL"] as? String,
+                        location: data["location"] as? String,
+                        favoriteGame: data["favoriteGame"] as? String,
+                        followersCount: followersCount,
+                        followingCount: followingCount
+                    )
+                    profiles.append(userProfile)
+                    DispatchQueue.main.async {
+                        self.loadedUsers[document.documentID] = userProfile // Cache it
+                    }
+                }
+            } catch {
+                print("Error fetching user profiles by IDs chunk: \(error)")
+            }
+        }
+        return profiles
+    }
+
+    // The existing getFollowerCounts might be deprecated or adapted
+    // For now, the new follow system relies on querying `userFollows`.
+    // If UserProfile.followersCount/followingCount are kept as denormalized counters,
+    // they should ideally be updated by Cloud Functions. 
+    // The `fetchUser` method will continue to use `getFollowerCounts` to populate these if they exist.
+
+}
+
+// Helper extension for chunking arrays (used in fetchUserProfiles)
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0 ..< Swift.min($0 + size, count)])
         }
     }
 }

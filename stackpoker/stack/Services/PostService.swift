@@ -430,4 +430,30 @@ class PostService: ObservableObject {
             return []
         }
     }
+    
+    // Method to fetch posts specifically for a given user ID
+    func fetchPosts(forUserId userId: String) async throws -> [Post] {
+        isLoading = true
+        defer { isLoading = false }
+
+        var userSpecificPosts: [Post] = []
+        var processedPostIDs = Set<String>() // To avoid duplicates if any logic issue arises
+
+        do {
+            let query = db.collection("posts")
+                .whereField("userId", isEqualTo: userId)
+                .order(by: "createdAt", descending: true)
+                .limit(to: 20) // You can adjust the limit or make it a parameter
+
+            let snapshot = try await query.getDocuments()
+            userSpecificPosts = try await processPosts(from: snapshot, existingIds: &processedPostIDs)
+            
+            // Unlike the main feed, we don't need to set self.posts or lastDocument here,
+            // as this method is for fetching a specific user's posts for display elsewhere.
+            return userSpecificPosts
+        } catch {
+            print("Error fetching posts for user \(userId): \(error)")
+            throw error
+        }
+    }
 } 
