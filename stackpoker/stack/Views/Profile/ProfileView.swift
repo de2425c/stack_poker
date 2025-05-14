@@ -64,127 +64,113 @@ struct ProfileView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Navigation buttons - padding adjusted to respect safe area
+                // Navigation buttons with no separate background
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: 24) {
                         NavigationButton(
-                            icon: "person.fill",
                             title: "Profile",
                             isSelected: selectedView == .profile,
                             action: { selectedView = .profile }
                         )
                         
                         NavigationButton(
-                            icon: "chart.bar.fill",
                             title: "Analytics",
                             isSelected: selectedView == .analytics,
                             action: { selectedView = .analytics }
                         )
                         
                         NavigationButton(
-                            icon: "doc.text.fill",
                             title: "Hands",
                             isSelected: selectedView == .hands,
                             action: { selectedView = .hands }
                         )
                         
                         NavigationButton(
-                            icon: "clock.fill",
                             title: "Sessions",
                             isSelected: selectedView == .sessions,
                             action: { selectedView = .sessions }
                         )
                         
                         NavigationButton(
-                            icon: "gearshape.fill",
                             title: "Settings",
                             isSelected: selectedView == .settings,
                             action: { selectedView = .settings }
                         )
                     }
-                    .padding(.horizontal, 20)
-                    // This padding will be applied correctly within the safe area context
-                    .padding(.top) // Use default system padding for the top
-                    .padding(.bottom, 16)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
                 }
                 
-                // Content based on selected view
+                // Subtle divider for visual separation without a different background
+                Rectangle()
+                    .fill(Color.white.opacity(0.1))
+                    .frame(height: 1)
+                    .padding(.horizontal, 20)
+                
+                // Content based on selected view - now with no additional background ZStacks
                 Group {
                     if selectedView == .profile {
                         ProfileContent(userId: userId, showEdit: $showEdit)
                     } else if selectedView == .analytics {
-                        ZStack {
-                            AppBackgroundView()
-                                .ignoresSafeArea()
-                            ScrollView {
-                                VStack(spacing: 4) {
-                                    IntegratedChartSection(
-                                        selectedTimeRange: $selectedTimeRange,
-                                        timeRanges: timeRanges,
-                                        sessions: sessionStore.sessions,
-                                        totalProfit: totalBankroll,
-                                        timeRangeProfit: selectedTimeRangeProfit
-                                    )
-                                    .padding(.top, 6)
-                                    .padding(.bottom, 2)
-                                    
-                                    EnhancedStatsCardGrid(
-                                        winRate: winRate,
-                                        averageProfit: averageProfit,
-                                        totalSessions: totalSessions,
-                                        bestSession: bestSession
-                                    )
-                                    .padding(.horizontal, 16)
-                                    .padding(.bottom, 16)
-                                }
-                                .padding(.bottom, 90)
+                        // Analytics content without additional ZStack/background
+                        ScrollView {
+                            VStack(spacing: 4) {
+                                IntegratedChartSection(
+                                    selectedTimeRange: $selectedTimeRange,
+                                    timeRanges: timeRanges,
+                                    sessions: sessionStore.sessions,
+                                    totalProfit: totalBankroll,
+                                    timeRangeProfit: selectedTimeRangeProfit
+                                )
+                                .padding(.top, 6)
+                                .padding(.bottom, 2)
+                                
+                                EnhancedStatsCardGrid(
+                                    winRate: winRate,
+                                    averageProfit: averageProfit,
+                                    totalSessions: totalSessions,
+                                    bestSession: bestSession
+                                )
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 16)
                             }
+                            .padding(.bottom, 90)
                         }
                         .onAppear {
                             sessionStore.fetchSessions() // Ensure sessions are fetched for analytics
                         }
                     } else if selectedView == .hands {
-                        ZStack {
-                            AppBackgroundView()
-                                .ignoresSafeArea()
-                            HandsTab(handStore: handStore)
-                        }
-                        .disabled(false)
-                        .allowsHitTesting(true)
+                        // Hands content without additional ZStack/background
+                        HandsTab(handStore: handStore)
+                            .disabled(false)
+                            .allowsHitTesting(true)
                     } else if selectedView == .sessions {
-                        ZStack {
-                            AppBackgroundView()
-                                .ignoresSafeArea()
-                                
-                            // Use the transparent navigation container 
-                            TransparentNavigationView(content: 
-                                SessionsTab(sessionStore: sessionStore)
-                            )
-                        }
+                        // Sessions with TransparentNavigationView but no additional ZStack/background
+                        TransparentNavigationView(content: 
+                            SessionsTab(sessionStore: sessionStore)
+                        )
                         .disabled(false)
                         .allowsHitTesting(true)
                     } else if selectedView == .settings {
                         SettingsView(userId: userId)
                     }
                 }
-                .id(selectedView)
+                .id(selectedView) // Maintain the ID for view swapping
+            }
+        }
+        .sheet(isPresented: $showEdit) { 
+            if let profile = userService.currentUserProfile {
+                ProfileEditView(profile: profile) { updatedProfile in
+                    Task { try? await userService.fetchUserProfile() }
+                }
             }
         }
         .navigationBarHidden(true)
-        // Pass down environment objects that might be needed by sub-views like SettingsView or ProfileScreen
         .environmentObject(userService) 
         .environmentObject(postService)
         .environmentObject(sessionStore) 
         .environmentObject(handStore)
-        .sheet(isPresented: $showEdit) { // Apply sheet modifier here in ProfileView
-            if let profile = userService.currentUserProfile {
-                // Assuming ProfileEditView is accessible (defined in the same module or correctly imported)
-                ProfileEditView(profile: profile) { updatedProfile in
-                    // Handle profile update if needed, e.g., refresh userService
-                    Task { try? await userService.fetchUserProfile() } // Example: Refresh profile
-                }
-            }
-        }
     }
     
     // MARK: - Analytics Helper Properties (Copied from previous working version)
@@ -476,36 +462,27 @@ struct PostRow: View {
 }
 
 struct NavigationButton: View {
-    let icon: String
     let title: String
     let isSelected: Bool
     let action: () -> Void
     
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(isSelected ? 
-                              Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
-                              Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                        .frame(width: 50, height: 50)
-                        .shadow(color: isSelected ? Color.green.opacity(0.2) : Color.black.opacity(0.1),
-                                radius: 4, y: 2)
-                    
-                    Image(systemName: icon)
-                        .font(.system(size: 20))
-                        .foregroundColor(isSelected ? .black : .white.opacity(0.8))
-                }
-                
+            VStack(spacing: 6) {
                 Text(title)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                    .font(.system(size: 16, weight: isSelected ? .semibold : .medium))
                     .foregroundColor(isSelected ? 
                                     Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
                                     .white.opacity(0.8))
+                
+                // Small indicator line for selected tab
+                Rectangle()
+                    .fill(isSelected ? 
+                          Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
+                          Color.clear)
+                    .frame(height: 2)
+                    .frame(width: isSelected ? 24 : 0) // Width only when selected
             }
-            .frame(width: 70)
-            .padding(.vertical, 6)
             .animation(.easeInOut(duration: 0.2), value: isSelected)
         }
     }
