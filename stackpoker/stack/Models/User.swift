@@ -1,7 +1,7 @@
 import Foundation
 import FirebaseFirestore
 
-struct UserProfile: Codable, Identifiable, Hashable {
+struct UserProfile: Codable, Identifiable {
     let id: String              // Firebase Auth UID
     var username: String
     var displayName: String?
@@ -19,9 +19,6 @@ struct UserProfile: Codable, Identifiable, Hashable {
     var followingCount: Int
     var isFollowing: Bool? // Client-side only, not stored in Firestore
     
-    // Optional field to show verification badge
-    var isVerified: Bool?
-    
     enum CodingKeys: String, CodingKey {
         case id
         case username
@@ -34,10 +31,9 @@ struct UserProfile: Codable, Identifiable, Hashable {
         case favoriteGame
         case followersCount
         case followingCount
-        case isVerified
     }
     
-    init(id: String, username: String, displayName: String?, createdAt: Date, favoriteGames: [String]? = nil, bio: String? = nil, avatarURL: String? = nil, location: String? = nil, favoriteGame: String? = nil, followersCount: Int = 0, followingCount: Int = 0, isFollowing: Bool? = nil, isVerified: Bool? = nil) {
+    init(id: String, username: String, displayName: String?, createdAt: Date, favoriteGames: [String]? = nil, bio: String? = nil, avatarURL: String? = nil, location: String? = nil, favoriteGame: String? = nil, followersCount: Int = 0, followingCount: Int = 0, isFollowing: Bool? = nil) {
         self.id = id
         self.username = username
         self.displayName = displayName
@@ -50,7 +46,6 @@ struct UserProfile: Codable, Identifiable, Hashable {
         self.followersCount = followersCount
         self.followingCount = followingCount
         self.isFollowing = isFollowing
-        self.isVerified = isVerified
     }
     
     init(dictionary: [String: Any], id: String) throws {
@@ -69,16 +64,6 @@ struct UserProfile: Codable, Identifiable, Hashable {
         self.followersCount = dictionary["followersCount"] as? Int ?? 0
         self.followingCount = dictionary["followingCount"] as? Int ?? 0
         self.isFollowing = nil // This is set client-side
-        self.isVerified = dictionary["isVerified"] as? Bool
-    }
-    
-    // Hashable implementation
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-    
-    static func == (lhs: UserProfile, rhs: UserProfile) -> Bool {
-        return lhs.id == rhs.id
     }
 } 
 

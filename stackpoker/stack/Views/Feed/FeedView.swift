@@ -7,17 +7,15 @@ import Kingfisher
 
 struct FeedView: View {
     @StateObject private var postService = PostService()
-    @StateObject private var searchService = UserSearchService()
     @EnvironmentObject var userService: UserService
     @State private var showingNewPost = false
     @State private var isRefreshing = false
     @State private var showingDiscoverUsers = false
+    @State private var showingUserSearchView = false
     @State private var selectedPost: Post? = nil
     @State private var showingFullScreenImage = false
     @State private var selectedImageURL: String? = nil
     @State private var showingComments = false
-    @State private var searchText = ""
-    @State private var showSearchResults = false
     
     let userId: String
     
@@ -62,122 +60,114 @@ struct FeedView: View {
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    // Search bar instead of fixed header with "Feed" title
-                    SearchBarView(
-                        searchText: $searchText,
-                        placeholder: "Search for people to follow",
-                        onSearch: {
-                            performSearch()
-                        },
-                        onClear: {
-                            clearSearch()
+                    // Top bar: Search placeholder and Add Post button
+                    HStack(spacing: 12) {
+                        // Tappable Search Bar Placeholder
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(Color.gray.opacity(0.7))
+                            Text("Search people to follow...")
+                                .foregroundColor(Color.gray.opacity(0.9))
+                                .font(.system(size: 16))
+                            Spacer()
                         }
-                    )
-                    .padding(.top, 45)  // Adjust top padding for status bar
-                    
-                    // "New Post" button
-                    HStack {
-                        Spacer()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color.black.opacity(0.2))
+                        .cornerRadius(10)
+                        .contentShape(Rectangle()) // Make the whole area tappable
+                        .onTapGesture {
+                            showingUserSearchView = true
+                        }
+                        
+                        // Add Post Button
                         Button(action: {
                             showingNewPost = true
                         }) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.black)
-                                .padding(8)
-                                .background(Circle().fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
-                                .shadow(color: Color.black.opacity(0.15), radius: 4, y: 2)
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))) // Accent color
                         }
-                        .padding(.trailing, 16)
-                        .padding(.top, 8)
                     }
-                    
-                    // Conditional content: Search results or feed
-                    if showSearchResults {
-                        UserSearchResultsView(
-                            searchResults: searchService.searchResults,
-                            isSearching: searchService.isSearching,
-                            errorMessage: searchService.errorMessage,
-                            onFollowUser: followUser
-                        )
-                        .transition(.opacity)
-                        .animation(.easeInOut(duration: 0.2), value: showSearchResults)
-                    } else {
-                        // Feed content
-                        if postService.isLoading && postService.posts.isEmpty {
-                            // Loading state - enhanced with animation
-                            VStack {
-                                Spacer()
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.black.opacity(0.1))
-                                        .frame(width: 80, height: 80)
-                                    
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
-                                        .scaleEffect(1.5)
-                                }
-                                .shadow(color: Color.black.opacity(0.2), radius: 5)
+                    .padding(.horizontal)
+                    .padding(.top, (UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) + 8) // Safe area + some padding
+                    .padding(.bottom, 8)
+                    .background(Color(UIColor(red: 12/255, green: 12/255, blue: 16/255, alpha: 1.0))) // Background for the top bar area
+
+                    // Feed content
+                    if postService.isLoading && postService.posts.isEmpty {
+                        // Loading state - enhanced with animation
+                        VStack {
+                            Spacer()
+                            ZStack {
+                                Circle()
+                                    .fill(Color.black.opacity(0.1))
+                                    .frame(width: 80, height: 80)
                                 
-                                Text("Loading Feed")
-                                    .font(.system(size: 18, weight: .medium, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.8))
-                                    .padding(.top, 16)
-                                Spacer()
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+                                    .scaleEffect(1.5)
                             }
-                        } else if postService.posts.isEmpty {
-                            // Empty feed state
-                            EmptyFeedView(showDiscoverUsers: {
-                                showingDiscoverUsers = true
-                            })
-                        } else {
-                            // Twitter-like feed with posts
-                            ScrollView(showsIndicators: false) {
-                                LazyVStack(spacing: 0) { // Twitter has no spacing between posts
-                                    ForEach(postService.posts) { post in
-                                        VStack(spacing: 0) {
-                                            PostView(
-                                                post: post,
-                                                onLike: {
-                                                    Task {
-                                                        do {
-                                                            try await postService.toggleLike(postId: post.id ?? "", userId: userId)
-                                                        } catch {
-                                                            print("Error toggling like: \(error)")
-                                                        }
-                                                    }
-                                                },
-                                                onComment: {
-                                                    selectedPost = post
-                                                    showingComments = true
-                                                },
-                                                userId: userId
-                                            )
-                                            
-                                            // Twitter-like divider between posts
-                                            Rectangle()
-                                                .fill(Color.white.opacity(0.06))
-                                                .frame(height: 0.5)
-                                        }
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            selectedPost = post
-                                        }
-                                        .onAppear {
-                                            // Load more posts when reaching the end
-                                            if post.id == postService.posts.last?.id {
+                            .shadow(color: Color.black.opacity(0.2), radius: 5)
+                            
+                            Text("Loading Feed")
+                                .font(.system(size: 18, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.8))
+                                .padding(.top, 16)
+                            Spacer()
+                        }
+                    } else if postService.posts.isEmpty {
+                        // Empty feed state
+                        EmptyFeedView(showDiscoverUsers: {
+                            showingDiscoverUsers = true
+                        })
+                    } else {
+                        // Twitter-like feed with posts
+                        ScrollView(showsIndicators: false) {
+                            LazyVStack(spacing: 0) { // Twitter has no spacing between posts
+                                ForEach(postService.posts) { post in
+                                    VStack(spacing: 0) {
+                                        PostView(
+                                            post: post,
+                                            onLike: {
                                                 Task {
-                                                    try? await postService.fetchMorePosts()
+                                                    do {
+                                                        try await postService.toggleLike(postId: post.id ?? "", userId: userId)
+                                                    } catch {
+                                                        print("Error toggling like: \(error)")
+                                                    }
                                                 }
+                                            },
+                                            onComment: {
+                                                selectedPost = post
+                                                showingComments = true
+                                            },
+                                            userId: userId
+                                        )
+                                        
+                                        // Twitter-like divider between posts
+                                        Rectangle()
+                                            .fill(Color.white.opacity(0.06))
+                                            .frame(height: 0.5)
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        selectedPost = post
+                                    }
+                                    .onAppear {
+                                        // Load more posts when reaching the end
+                                        if post.id == postService.posts.last?.id {
+                                            Task {
+                                                try? await postService.fetchMorePosts()
                                             }
                                         }
                                     }
                                 }
                             }
-                            .refreshable {
-                                // Pull to refresh
-                                await refreshFeed()
-                            }
+                        }
+                        .refreshable {
+                            // Pull to refresh
+                            await refreshFeed()
                         }
                     }
                 }
@@ -196,6 +186,10 @@ struct FeedView: View {
                 }
                 .sheet(isPresented: $showingDiscoverUsers) {
                     DiscoverUsersView(userId: userId)
+                        .environmentObject(userService)
+                }
+                .sheet(isPresented: $showingUserSearchView) {
+                    UserSearchView(currentUserId: userId, userService: userService)
                 }
                 .sheet(item: $selectedPost) { post in
                     PostDetailView(post: post, userId: userId)
@@ -213,57 +207,7 @@ struct FeedView: View {
             .edgesIgnoringSafeArea(.top)
         }
         .navigationViewStyle(StackNavigationViewStyle())
-        .onChange(of: searchText) { newValue in
-            if newValue.isEmpty {
-                clearSearch()
-            }
-        }
     }
-    
-    // MARK: - Search Methods
-    
-    private func performSearch() {
-        guard !searchText.isEmpty else {
-            clearSearch()
-            return
-        }
-        
-        // Show search results view
-        showSearchResults = true
-        
-        // Perform the search
-        Task {
-            await searchService.searchUsers(query: searchText, currentUserId: userId)
-        }
-    }
-    
-    private func clearSearch() {
-        if showSearchResults {
-            // Animate back to the feed
-            withAnimation {
-                showSearchResults = false
-            }
-        }
-        
-        // Clear search results
-        searchService.clearResults()
-    }
-    
-    private func followUser(_ userId: String) {
-        Task {
-            do {
-                // Call your UserService method to follow/unfollow
-                try await userService.toggleFollow(userId: userId)
-                
-                // Refresh the search results to update follow button state
-                await searchService.searchUsers(query: searchText, currentUserId: self.userId)
-            } catch {
-                print("Error following user: \(error)")
-            }
-        }
-    }
-    
-    // MARK: - Feed Methods
     
     // Refresh the feed
     private func refreshFeed() async {

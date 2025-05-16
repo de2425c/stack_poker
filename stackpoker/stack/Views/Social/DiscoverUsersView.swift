@@ -2,11 +2,121 @@ import SwiftUI
 import FirebaseFirestore
 
 struct DiscoverUsersView: View {
-    let userId: String
+    let userId: String // This is the loggedInUserId
     @Environment(\.dismiss) var dismiss
     @StateObject private var viewModel = DiscoverUsersViewModel()
-    @EnvironmentObject var userService: UserService
+    @EnvironmentObject var userService: UserService // For UserListRow
     @State private var searchText = ""
+
+    // Search Bar View
+    @ViewBuilder
+    private var searchBarView: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.gray)
+            TextField("Search users", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+                .foregroundColor(.white)
+                .onChange(of: searchText) { newValue in
+                    viewModel.searchUsers(query: newValue, currentUserId: self.userId)
+                }
+            
+            if !searchText.isEmpty {
+                Button(action: { searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.gray)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+        .cornerRadius(12)
+        .padding(.horizontal)
+        .padding(.top)
+    }
+
+    // Suggested Users Section
+    @ViewBuilder
+    private var suggestedUsersSection: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Suggested Users")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal)
+                    .padding(.top, 20)
+                
+                if viewModel.isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 40)
+                } else if viewModel.suggestedUsers.isEmpty {
+                    Text("No suggestions available")
+                        .foregroundColor(.gray)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 40)
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(viewModel.suggestedUsers) { userInRow in
+                            UserListRow(
+                                user: userInRow,
+                                profileOwnerUserId: userInRow.id, // For UserListRow's internal logic
+                                loggedInUserId: self.userId      // The actual logged-in user
+                            )
+                            .environmentObject(userService)
+                            .padding(.horizontal)
+                            .padding(.vertical, 8)
+                        }
+                    }
+                    .padding(.top, 12)
+                }
+            }
+        }
+    }
+
+    // Search Results Section
+    @ViewBuilder
+    private var searchResultsSection: some View {
+        if viewModel.isLoading {
+            Spacer()
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+            Spacer()
+        } else if viewModel.searchResults.isEmpty {
+            Spacer()
+            Text("No users found")
+                .foregroundColor(.gray)
+                .padding(.top, 40)
+            Spacer()
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(viewModel.searchResults) { userInRow in
+                        UserListRow(
+                            user: userInRow,
+                            profileOwnerUserId: userInRow.id, // For UserListRow's internal logic
+                            loggedInUserId: self.userId      // The actual logged-in user
+                        )
+                        .environmentObject(userService)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                    }
+                }
+                .padding(.top, 12)
+            }
+        }
+    }
+
+    // Main Content Body
+    @ViewBuilder
+    private var contentBodyView: some View {
+        if searchText.isEmpty {
+            suggestedUsersSection
+        } else {
+            searchResultsSection
+        }
+    }
     
     var body: some View {
         NavigationView {
@@ -14,90 +124,8 @@ struct DiscoverUsersView: View {
                 Color(UIColor(red: 10/255, green: 10/255, blue: 15/255, alpha: 1.0)).ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    // Search Bar
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.gray)
-                        TextField("Search users", text: $searchText)
-                            .textFieldStyle(PlainTextFieldStyle())
-                            .foregroundColor(.white)
-                            .onChange(of: searchText) { newValue in
-                                viewModel.searchUsers(query: newValue)
-                            }
-                        
-                        if !searchText.isEmpty {
-                            Button(action: { searchText = "" }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                    }
-                    .padding(12)
-                    .background(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                    .cornerRadius(12)
-                    .padding(.horizontal)
-                    .padding(.top)
-                    
-                    if searchText.isEmpty {
-                        // Show suggested users to follow
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("Suggested Users")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal)
-                                    .padding(.top, 20)
-                                
-                                if viewModel.isLoading {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
-                                        .frame(maxWidth: .infinity, alignment: .center)
-                                        .padding(.top, 40)
-                                } else if viewModel.suggestedUsers.isEmpty {
-                                    Text("No suggestions available")
-                                        .foregroundColor(.gray)
-                                        .frame(maxWidth: .infinity, alignment: .center)
-                                        .padding(.top, 40)
-                                } else {
-                                    LazyVStack(spacing: 0) {
-                                        ForEach(viewModel.suggestedUsers) { user in
-                                            UserListRow(user: user, currentUserId: userId)
-                                                .environmentObject(userService)
-                                                .padding(.horizontal)
-                                                .padding(.vertical, 8)
-                                        }
-                                    }
-                                    .padding(.top, 12)
-                                }
-                            }
-                        }
-                    } else {
-                        // Show search results
-                        if viewModel.isLoading {
-                            Spacer()
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
-                            Spacer()
-                        } else if viewModel.searchResults.isEmpty {
-                            Spacer()
-                            Text("No users found")
-                                .foregroundColor(.gray)
-                                .padding(.top, 40)
-                            Spacer()
-                        } else {
-                            ScrollView {
-                                LazyVStack(spacing: 0) {
-                                    ForEach(viewModel.searchResults) { user in
-                                        UserListRow(user: user, currentUserId: userId)
-                                            .environmentObject(userService)
-                                            .padding(.horizontal)
-                                            .padding(.vertical, 8)
-                                    }
-                                }
-                                .padding(.top, 12)
-                            }
-                        }
-                    }
+                    searchBarView
+                    contentBodyView
                 }
             }
             .navigationTitle("Discover Users")
@@ -107,11 +135,12 @@ struct DiscoverUsersView: View {
                     Button("Done") {
                         dismiss()
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(.white) // Keep done button white
                 }
             }
         }
         .onAppear {
+            // userId here is the current logged-in user's ID
             viewModel.fetchSuggestedUsers(currentUserId: userId)
         }
     }
@@ -127,7 +156,6 @@ class DiscoverUsersViewModel: ObservableObject {
     func fetchSuggestedUsers(currentUserId: String) {
         isLoading = true
         
-        // First get the current user's following list
         db.collection("users").document(currentUserId).collection("following")
             .getDocuments { [weak self] snapshot, error in
                 guard let self = self else { return }
@@ -139,15 +167,11 @@ class DiscoverUsersViewModel: ObservableObject {
                 }
                 
                 let followingIds = snapshot?.documents.map { $0.documentID } ?? []
-                
-                // Now fetch users not in this list (exclude the current user too)
                 var excludeIds = followingIds
                 excludeIds.append(currentUserId)
                 
-                // Since Firestore doesn't support "not in" queries directly,
-                // we'll fetch a limited number of users and filter on the client side
                 self.db.collection("users")
-                    .limit(to: 50)
+                    .limit(to: 50) // Increased limit for better variety before client-side shuffle
                     .getDocuments { [weak self] snapshot, error in
                         guard let self = self else { return }
                         
@@ -159,9 +183,8 @@ class DiscoverUsersViewModel: ObservableObject {
                         
                         let fetchedUsers = snapshot?.documents.compactMap { doc -> UserProfile? in
                             if excludeIds.contains(doc.documentID) {
-                                return nil // Skip users we're already following or self
+                                return nil
                             }
-                            
                             do {
                                 return try UserProfile(dictionary: doc.data(), id: doc.documentID)
                             } catch {
@@ -170,7 +193,6 @@ class DiscoverUsersViewModel: ObservableObject {
                             }
                         } ?? []
                         
-                        // Limit to 20 random users for variety
                         let randomUsers = Array(fetchedUsers.shuffled().prefix(20))
                         
                         DispatchQueue.main.async {
@@ -181,44 +203,33 @@ class DiscoverUsersViewModel: ObservableObject {
             }
     }
     
-    func searchUsers(query: String) {
-        // Cancel any existing search timer
+    func searchUsers(query: String, currentUserId: String) {
         searchDebounceTimer?.invalidate()
         
-        // If query is empty, clear search results
         if query.isEmpty {
             self.searchResults = []
+            // fetchSuggestedUsers(currentUserId: currentUserId) // Now you can call this if needed
             return
         }
         
-        // Debounce the search to avoid too many Firestore queries
         searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
             guard let self = self else { return }
-            
             self.isLoading = true
-            
-            // Search for users where username or displayName contains the query
             let queryLower = query.lowercased()
-            
-            // We'll perform two separate queries and combine results
             let dispatchGroup = DispatchGroup()
             var combinedResults: [UserProfile] = []
-            
-            // Query by username
+
             dispatchGroup.enter()
-            db.collection("users")
+            self.db.collection("users")
                 .whereField("username", isGreaterThanOrEqualTo: queryLower)
                 .whereField("username", isLessThanOrEqualTo: queryLower + "\u{f8ff}")
                 .limit(to: 20)
-                .getDocuments { [weak self] snapshot, error in
+                .getDocuments { snapshot, error in
                     defer { dispatchGroup.leave() }
-                    guard let self = self else { return }
-                    
                     if let error = error {
                         print("Error searching users by username: \(error)")
                         return
                     }
-                    
                     for document in snapshot?.documents ?? [] {
                         if let profile = try? UserProfile(dictionary: document.data(), id: document.documentID) {
                             combinedResults.append(profile)
@@ -226,24 +237,19 @@ class DiscoverUsersViewModel: ObservableObject {
                     }
                 }
             
-            // Query by displayName
             dispatchGroup.enter()
-            db.collection("users")
+            self.db.collection("users")
                 .whereField("displayName", isGreaterThanOrEqualTo: queryLower)
                 .whereField("displayName", isLessThanOrEqualTo: queryLower + "\u{f8ff}")
                 .limit(to: 20)
-                .getDocuments { [weak self] snapshot, error in
+                .getDocuments { snapshot, error in
                     defer { dispatchGroup.leave() }
-                    guard let self = self else { return }
-                    
                     if let error = error {
                         print("Error searching users by displayName: \(error)")
                         return
                     }
-                    
                     for document in snapshot?.documents ?? [] {
                         if let profile = try? UserProfile(dictionary: document.data(), id: document.documentID) {
-                            // Only add if not already in results (to avoid duplicates)
                             if !combinedResults.contains(where: { $0.id == profile.id }) {
                                 combinedResults.append(profile)
                             }
@@ -253,12 +259,9 @@ class DiscoverUsersViewModel: ObservableObject {
             
             dispatchGroup.notify(queue: .main) { [weak self] in
                 guard let self = self else { return }
-                self.searchResults = combinedResults.sorted { 
-                    // Sort by displayName or username if displayName is nil
-                    let name1 = $0.displayName ?? $0.username
-                    let name2 = $1.displayName ?? $1.username
-                    return name1 < name2
-                }
+                // Use the passed currentUserId to filter
+                self.searchResults = combinedResults.filter { $0.id != currentUserId } 
+                                       .sorted { ($0.displayName ?? $0.username) < ($1.displayName ?? $1.username) }
                 self.isLoading = false
             }
         }

@@ -62,10 +62,4 @@ class CashGameService: ObservableObject {
         try await db.collection("cashGames").document(game.id).delete()
         print("Successfully deleted game from Firebase")
     }
-    
-    // Helper to convert to legacy GameOption format if needed
-    func toGameOption(_ cashGame: CashGame) -> GameOption {
-        // Create a GameOption instance from the CashGame
-        return GameOption(name: cashGame.name, stakes: cashGame.stakes)
-    }
 } 

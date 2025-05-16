@@ -14,6 +14,10 @@ struct FollowListView: View {
     @State private var searchText = ""
     @EnvironmentObject var userService: UserService
     
+    private var loggedInUserId: String? {
+        userService.currentUserProfile?.id
+    }
+    
     var body: some View {
         ZStack {
             Color(UIColor(red: 10/255, green: 10/255, blue: 15/255, alpha: 1.0)).ignoresSafeArea()
@@ -56,11 +60,15 @@ struct FollowListView: View {
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 0) {
-                                ForEach(viewModel.searchResults) { user in
-                                    UserListRow(user: user, currentUserId: userId)
-                                        .environmentObject(userService)
-                                        .padding(.horizontal)
-                                        .padding(.vertical, 8)
+                                ForEach(viewModel.searchResults) { userInRow in
+                                    UserListRow(
+                                        user: userInRow,
+                                        profileOwnerUserId: userId,
+                                        loggedInUserId: loggedInUserId
+                                    )
+                                    .environmentObject(userService)
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 8)
                                 }
                             }
                             .padding(.top, 12)
@@ -77,11 +85,15 @@ struct FollowListView: View {
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 0) {
-                                ForEach(viewModel.filteredUsers) { user in
-                                    UserListRow(user: user, currentUserId: userId)
-                                        .environmentObject(userService)
-                                        .padding(.horizontal)
-                                        .padding(.vertical, 8)
+                                ForEach(viewModel.filteredUsers) { userInRow in
+                                    UserListRow(
+                                        user: userInRow,
+                                        profileOwnerUserId: userId,
+                                        loggedInUserId: loggedInUserId
+                                    )
+                                    .environmentObject(userService)
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 8)
                                 }
                             }
                             .padding(.top, 12)
@@ -100,11 +112,17 @@ struct FollowListView: View {
 
 struct UserListRow: View {
     let user: UserProfile
-    let currentUserId: String
+    let profileOwnerUserId: String
+    let loggedInUserId: String?
     @State private var isFollowing = false
     @State private var isLoading = false
     @EnvironmentObject var userService: UserService
     private let followService = FollowService()
+    
+    private var shouldShowFollowButton: Bool {
+        guard let actualLoggedInUserId = loggedInUserId else { return false }
+        return user.id != actualLoggedInUserId
+    }
     
     var body: some View {
         HStack(spacing: 12) {
@@ -150,8 +168,8 @@ struct UserListRow: View {
             
             Spacer()
             
-            // Follow Button (if not current user)
-            if user.id != currentUserId {
+            // Follow Button (if not the logged-in user themselves)
+            if shouldShowFollowButton {
                 Button(action: toggleFollow) {
                     if isLoading {
                         ProgressView()
@@ -169,7 +187,7 @@ struct UserListRow: View {
                     RoundedRectangle(cornerRadius: 16)
                         .fill(isFollowing ? Color.gray.opacity(0.3) : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                 )
-                .disabled(isLoading)
+                .disabled(isLoading || loggedInUserId == nil)
             }
         }
         .onAppear {
@@ -178,35 +196,39 @@ struct UserListRow: View {
     }
     
     private func checkFollowStatus() {
+        guard let actualLoggedInUserId = loggedInUserId, user.id != actualLoggedInUserId else {
+            return
+        }
+        
         Task {
             do {
-                isFollowing = try await followService.checkIfFollowing(currentUserId: currentUserId, targetUserId: user.id)
+                isFollowing = try await followService.checkIfFollowing(currentUserId: actualLoggedInUserId, targetUserId: user.id)
             } catch {
-                print("Error checking follow status: \(error)")
+                print("Error checking follow status for user \(user.id) by loggedInUser \(actualLoggedInUserId): \(error)")
             }
         }
     }
     
     private func toggleFollow() {
-        guard !isLoading else { return }
+        guard !isLoading, let actualLoggedInUserId = loggedInUserId else { return }
+        
         isLoading = true
         
         Task {
             do {
                 if isFollowing {
-                    try await followService.unfollowUser(currentUserId: currentUserId, targetUserId: user.id)
+                    try await followService.unfollowUser(currentUserId: actualLoggedInUserId, targetUserId: user.id)
                 } else {
-                    try await followService.followUser(currentUserId: currentUserId, targetUserId: user.id)
+                    try await followService.followUser(currentUserId: actualLoggedInUserId, targetUserId: user.id)
                 }
                 
-                // Refresh the current user's profile to update counts
                 try await userService.fetchUserProfile()
                 
                 withAnimation {
                     isFollowing.toggle()
                 }
             } catch {
-                print("Error toggling follow status: \(error)")
+                print("Error toggling follow state for user \(user.id) by loggedInUser \(actualLoggedInUserId): \(error)")
             }
             isLoading = false
         }
@@ -225,165 +247,96 @@ class FollowListViewModel: ObservableObject {
         isLoading = true
         let followsCollection = listType == .followers ? "followers" : "following"
         
-        // First get the list of follower/following IDs
         db.collection("users").document(userId).collection(followsCollection)
             .getDocuments { [weak self] snapshot, error in
                 guard let self = self else { return }
                 
                 if let error = error {
-                    print("Error fetching follow list: \(error)")
+                    print("Error fetching follow list for user \(userId): \(error)")
                     self.isLoading = false
                     return
                 }
                 
                 guard let documents = snapshot?.documents else {
+                    print("No follow documents found for user \(userId) in \(followsCollection)")
                     self.isLoading = false
+                    self.users = []
+                    self.filteredUsers = []
                     return
                 }
                 
-                // Get all user IDs from the follow collection
                 let userIds = documents.map { $0.documentID }
                 
                 if userIds.isEmpty {
+                    print("User ID list is empty for user \(userId) in \(followsCollection)")
                     self.users = []
                     self.filteredUsers = []
                     self.isLoading = false
                     return
                 }
                 
-                // Fetch user profiles for all IDs
                 self.fetchUserProfiles(userIds: userIds)
             }
     }
     
     private func fetchUserProfiles(userIds: [String]) {
-        let group = DispatchGroup()
-        var fetchedUsers: [UserProfile] = []
-        
-        for userId in userIds {
-            group.enter()
-            
-            db.collection("users").document(userId).getDocument { [weak self] snapshot, error in
-                defer { group.leave() }
-                guard let self = self else { return }
-                
-                if let error = error {
-                    print("Error fetching user profile: \(error)")
-                    return
-                }
-                
-                if let data = snapshot?.data(),
-                   let profile = try? UserProfile(dictionary: data, id: userId) {
-                    fetchedUsers.append(profile)
-                }
-            }
-        }
-        
-        group.notify(queue: .main) { [weak self] in
-            guard let self = self else { return }
-            self.users = fetchedUsers.sorted { $0.username < $1.username }
-            self.filteredUsers = self.users
+        guard !userIds.isEmpty else {
+            self.users = []
+            self.filteredUsers = []
             self.isLoading = false
-        }
-    }
-    
-    func searchUsers(query: String) {
-        // Cancel any existing search timer
-        searchDebounceTimer?.invalidate()
-        
-        // If query is empty, clear search results
-        if query.isEmpty {
-            self.searchResults = []
             return
         }
         
-        // Debounce the search to avoid too many Firestore queries
-        searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-            guard let self = self else { return }
-            
-            self.isLoading = true
-            let queryLower = query.lowercased()
-            
-            // We'll perform two separate queries (username and displayName) and combine results
-            let dispatchGroup = DispatchGroup()
-            var combinedResults: [UserProfile] = []
-            
-            // Query by username
-            dispatchGroup.enter()
-            db.collection("users")
-                .whereField("username", isGreaterThanOrEqualTo: queryLower)
-                .whereField("username", isLessThanOrEqualTo: queryLower + "\u{f8ff}")
-                .limit(to: 20)
-                .getDocuments { [weak self] snapshot, error in
-                    defer { dispatchGroup.leave() }
-                    guard let self = self else { return }
-                    
-                    if let error = error {
-                        print("Error searching users by username: \(error)")
-                        return
-                    }
-                    
-                    for document in snapshot?.documents ?? [] {
-                        if let profile = try? UserProfile(dictionary: document.data(), id: document.documentID) {
-                            combinedResults.append(profile)
-                        }
-                    }
-                }
-            
-            // Query by displayName
-            dispatchGroup.enter()
-            db.collection("users")
-                .whereField("displayName", isGreaterThanOrEqualTo: queryLower)
-                .whereField("displayName", isLessThanOrEqualTo: queryLower + "\u{f8ff}")
-                .limit(to: 20)
-                .getDocuments { [weak self] snapshot, error in
-                    defer { dispatchGroup.leave() }
-                    guard let self = self else { return }
-                    
-                    if let error = error {
-                        print("Error searching users by displayName: \(error)")
-                        return
-                    }
-                    
-                    for document in snapshot?.documents ?? [] {
-                        if let profile = try? UserProfile(dictionary: document.data(), id: document.documentID) {
-                            // Only add if not already in results (to avoid duplicates)
-                            if !combinedResults.contains(where: { $0.id == profile.id }) {
-                                combinedResults.append(profile)
-                            }
-                        }
-                    }
-                }
-            
-            dispatchGroup.notify(queue: .main) { [weak self] in
+        db.collection("users").whereField(FieldPath.documentID(), in: userIds)
+            .getDocuments { [weak self] (querySnapshot, error) in
                 guard let self = self else { return }
-                self.searchResults = combinedResults.sorted { 
-                    // Sort by displayName or username if displayName is nil
-                    let name1 = $0.displayName ?? $0.username
-                    let name2 = $1.displayName ?? $1.username
-                    return name1 < name2
+                defer { self.isLoading = false }
+
+                if let error = error {
+                    print("Error fetching user profiles: \(error.localizedDescription)")
+                    self.users = []
+                    self.filteredUsers = []
+                    return
                 }
-                self.isLoading = false
+
+                guard let documents = querySnapshot?.documents else {
+                    print("No documents found for user profiles.")
+                    self.users = []
+                    self.filteredUsers = []
+                    return
+                }
+
+                self.users = documents.compactMap { queryDocumentSnapshot -> UserProfile? in
+                    try? UserProfile(dictionary: queryDocumentSnapshot.data(), id: queryDocumentSnapshot.documentID)
+                }
+                self.users.sort {
+                    ($0.displayName ?? $0.username).lowercased() < ($1.displayName ?? $1.username).lowercased()
+                }
+                self.filteredUsers = self.users
+                print("Successfully fetched \(self.users.count) user profiles.")
             }
-        }
     }
     
     func filterUsers(searchText: String) {
         if searchText.isEmpty {
             filteredUsers = users
         } else {
-            let query = searchText.lowercased()
+            let lowercasedQuery = searchText.lowercased()
             filteredUsers = users.filter { user in
-                // Check username
-                let usernameMatch = user.username.lowercased().contains(query)
-                
-                // Check display name if available
-                let displayNameMatch = user.displayName?.lowercased().contains(query) ?? false
-                
-                // Check bio if available
-                let bioMatch = user.bio?.lowercased().contains(query) ?? false
-                
-                return usernameMatch || displayNameMatch || bioMatch
+                (user.displayName?.lowercased().contains(lowercasedQuery) ?? false) ||
+                user.username.lowercased().contains(lowercasedQuery)
+            }
+        }
+    }
+    
+    func searchUsers(query: String) {
+        if query.isEmpty {
+            searchResults = []
+        } else {
+            let lowercasedQuery = query.lowercased()
+            searchResults = users.filter { user in
+                (user.displayName?.lowercased().contains(lowercasedQuery) ?? false) ||
+                user.username.lowercased().contains(lowercasedQuery)
             }
         }
     }

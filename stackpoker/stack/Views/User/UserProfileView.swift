@@ -148,7 +148,8 @@ struct UserProfileView: View {
                 if let currentLoggedInUserId = loggedInUserId {
                     self.isFollowing = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
                 }
-                // TODO: Fetch user's posts - profilePostService.fetchPosts(forUserId: userId)
+                // Fetch user's posts
+                try? await profilePostService.fetchPosts(forUserId: userId)
                 print("Displaying UserProfileView for userId: \(userId), isFollowing: \(self.isFollowing)")
             }
         }
@@ -167,18 +168,17 @@ struct UserProfileView: View {
                 } else {
                     try await userService.unfollowUser(userIdToUnfollow: userId)
                 }
-                // Update UI optimistically based on the action taken
-                self.isFollowing = actionIsFollow 
                 print("Successfully performed \(actionIsFollow ? "follow" : "unfollow") action.")
                 
-                // Refresh both user profiles to get updated counts from their source of truth
-                // (even though UserService updated them optimistically, a refresh ensures consistency)
-                await userService.fetchUser(id: userId) // Refresh the profile being viewed
-                await userService.fetchUser(id: currentLoggedInUserId) // Refresh the current user's profile
+                // Refresh both user profiles to get updated counts
+                await userService.fetchUser(id: userId) 
+                await userService.fetchUser(id: currentLoggedInUserId) 
                 if userService.currentUserProfile?.id == currentLoggedInUserId {
-                     // Also explicitly try to refresh currentUserProfile if it's the one being modified
                      try? await userService.fetchUserProfile() 
                 }
+
+                // Re-fetch the follow status from the source of truth
+                self.isFollowing = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
 
             } catch {
                 print("Error toggling follow state: \(error)")

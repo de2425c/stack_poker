@@ -431,28 +431,41 @@ class PostService: ObservableObject {
         }
     }
     
-    // Method to fetch posts specifically for a given user ID
-    func fetchPosts(forUserId userId: String) async throws -> [Post] {
+    // MARK: - Fetching Posts for a Specific User
+    func fetchPosts(forUserId userId: String) async throws {
         isLoading = true
         defer { isLoading = false }
 
-        var userSpecificPosts: [Post] = []
-        var processedPostIDs = Set<String>() // To avoid duplicates if any logic issue arises
+        print("🚀 Fetching posts for user ID: \\(userId)")
+
+        let query = db.collection("posts")
+            .whereField("userId", isEqualTo: userId)
+            .order(by: "createdAt", descending: true)
+            .limit(to: postsPerPage * 2) // Fetch a decent amount for initial load
 
         do {
-            let query = db.collection("posts")
-                .whereField("userId", isEqualTo: userId)
-                .order(by: "createdAt", descending: true)
-                .limit(to: 20) // You can adjust the limit or make it a parameter
-
             let snapshot = try await query.getDocuments()
-            userSpecificPosts = try await processPosts(from: snapshot, existingIds: &processedPostIDs)
+            var fetchedPosts: [Post] = []
+            var processedPostIDs = Set<String>() // To avoid duplicates if any, though unlikely for single user fetch
+
+            // Use the existing processPosts helper
+            fetchedPosts = try await processPosts(from: snapshot, existingIds: &processedPostIDs)
             
-            // Unlike the main feed, we don't need to set self.posts or lastDocument here,
-            // as this method is for fetching a specific user's posts for display elsewhere.
-            return userSpecificPosts
+            // Assign to the main posts array for this service instance
+            // This assumes this PostService instance on UserProfileView is dedicated to that profile's posts
+            self.posts = fetchedPosts
+            
+            // Set lastDocument for potential pagination if we implement "load more" on profile
+            // For now, the primary use case is fetching the initial set.
+            self.lastDocument = snapshot.documents.last 
+            
+            print("✅ Successfully fetched \\(self.posts.count) posts for user \\(userId).")
+
         } catch {
-            print("Error fetching posts for user \(userId): \(error)")
+            print("❌ Error fetching posts for user \\(userId): \\(error)")
+            // Clear posts on error or handle as needed
+            self.posts = []
+            self.lastDocument = nil
             throw error
         }
     }

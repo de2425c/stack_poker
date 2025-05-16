@@ -206,7 +206,7 @@ struct CustomTabBar: View {
                             ZStack {
                                 Color.clear.frame(width: 1, height: 1)
                                 AddButton(userId: userId, showingMenu: $showingMenu)
-                                    .offset(y: -18)
+                                    .offset(y: -10)
                             }
                             .frame(width: 80)
                             Spacer(minLength: 0)
