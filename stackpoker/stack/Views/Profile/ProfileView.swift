@@ -339,302 +339,365 @@ struct ProfileView: View {
             } else if selectedTab == .analytics {
                 // Analytics content
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 20) {
                         // Bankroll section with past month profit/loss indicator
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Bankroll")
-                                .font(.system(size: 16, weight: .medium))
+                                .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(.gray)
-                                .padding(.horizontal, 20)
                             
-                            Text("$\(Int(totalBankroll))")
-                                .font(.system(size: 32, weight: .bold))
+                            Text("$\(Int(totalBankroll).formattedWithCommas)")
+                                .font(.system(size: 36, weight: .bold))
                                 .foregroundColor(.white)
-                    .padding(.horizontal, 20)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                 
                             HStack(spacing: 4) {
-                                // Get profit from past month for indicator
-                                let calendar = Calendar.current
-                                let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-                                let pastMonthSessions = sessionStore.sessions.filter { $0.startDate >= oneMonthAgo }
-                                let pastMonthProfit = pastMonthSessions.reduce(0) { $0 + $1.profit }
+                                // Get profit from selected time range instead of hardcoded month
+                                let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                                let timeRangeProfit = filteredSessions.reduce(0) { $0 + $1.profit }
                                 
-                                Image(systemName: pastMonthProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                                Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
                                     .font(.system(size: 10))
-                                    .foregroundColor(pastMonthProfit >= 0 ? 
+                                    .foregroundColor(timeRangeProfit >= 0 ? 
                                         Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
                                         Color.red)
                                 
-                                Text("$\(abs(Int(pastMonthProfit)))")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(pastMonthProfit >= 0 ? 
+                                Text("$\(abs(Int(timeRangeProfit)).formattedWithCommas)")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(timeRangeProfit >= 0 ? 
                                         Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
                                         Color.red)
                                 
-                                Text("Past month")
+                                Text(getTimeRangeLabel(for: selectedTimeRange))
                                     .font(.system(size: 14))
                                     .foregroundColor(.gray)
+                                
+                                Spacer()
                             }
-                            .padding(.horizontal, 20)
                             .padding(.top, 2)
-                            .padding(.bottom, 6)
                         }
-                        .padding(.top, 16)
+                        .padding(.horizontal, 20)
                         
                         // Chart display with time selectors at bottom
-                        ZStack {
+                        VStack(spacing: 10) {
                             if sessionStore.sessions.isEmpty {
                                 Text("No sessions recorded")
                                     .foregroundColor(.gray)
                                     .frame(height: 220)
                             } else {
                                 // Display chart using BankrollGraph
-                                VStack {
-                                    GeometryReader { geometry in
-                                        ZStack {
-                                            // Y-axis grid lines (subtle)
-                                            VStack(spacing: 0) {
-                                                ForEach(0..<5) { _ in
-                                                    Spacer()
-                                                    Divider()
-                                                        .background(Color.gray.opacity(0.1))
-                                                }
-                                            }
-                                            
-                                            // Simple line chart - use green or red based on profit/loss
-                                            let isProfit = totalBankroll >= 0
-                                            let chartColor = isProfit ? 
-                                                Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
-                                                Color.red
-                                            
-                                            // Simplified line chart
-                                            Path { path in
-                                                let sessions = filteredSessionsForTimeRange(selectedTimeRange)
-                                                
-                                                guard !sessions.isEmpty else { return }
-                                                
-                                                var cumulativeProfit: [Double] = []
-                                                var cumulative = 0.0
-                                                
-                                                for session in sessions.sorted(by: { $0.startDate < $1.startDate }) {
-                                                    cumulative += session.profit
-                                                    cumulativeProfit.append(cumulative)
-                                                }
-                                                
-                                                guard !cumulativeProfit.isEmpty else { return }
-                                                
-                                                // Find the min/max for scaling
-                                                let minProfit = cumulativeProfit.min() ?? 0
-                                                let maxProfit = max(cumulativeProfit.max() ?? 1, 1)
-                                                let range = max(maxProfit - minProfit, 1)
-                                                
-                                                // Draw the path
-                                                let step = geometry.size.width / CGFloat(cumulativeProfit.count - 1)
-                                                
-                                                // Function to get Y position
-                                                func getY(_ value: Double) -> CGFloat {
-                                                    let normalized = (value - minProfit) / range
-                                                    return geometry.size.height * (1 - CGFloat(normalized))
-                                                }
-                                                
-                                                // Start path
-                                                path.move(to: CGPoint(x: 0, y: getY(cumulativeProfit[0])))
-                                                
-                                                // Draw lines to each point
-                                                for i in 1..<cumulativeProfit.count {
-                                                    let x = CGFloat(i) * step
-                                                    let y = getY(cumulativeProfit[i])
-                                                    
-                                                    // Smooth curve
-                                                    if i > 0 {
-                                                        let prevX = CGFloat(i-1) * step
-                                                        let prevY = getY(cumulativeProfit[i-1])
-                                                        
-                                                        let controlPoint1 = CGPoint(x: prevX + step/3, y: prevY)
-                                                        let controlPoint2 = CGPoint(x: x - step/3, y: y)
-                                                        
-                                                        path.addCurve(to: CGPoint(x: x, y: y), 
-                                                                  control1: controlPoint1, 
-                                                                  control2: controlPoint2)
-                                                    }
-                                                }
-                                            }
-                                            .stroke(
-                                                chartColor,
-                                                style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
-                                            )
-                                            .shadow(color: chartColor.opacity(0.3), radius: 3, y: 1)
-                                        }
-                                    }
-                                    .frame(height: 220)
-                                    
-                                    // Time period selector
-                                    HStack {
-                                        ForEach(0..<timeRanges.count, id: \.self) { index in
-                                            Button(action: {
-                                                selectedTimeRange = index
-                                            }) {
-                                                Text(timeRanges[index])
-                                                    .font(.system(size: 12))
-                                                    .foregroundColor(selectedTimeRange == index ? .white : .gray)
-                                                    .padding(.vertical, 6)
-                                                    .padding(.horizontal, 10)
-                                                    .background(
-                                                        selectedTimeRange == index ?
-                                                        Color.gray.opacity(0.3) :
-                                                        Color.clear
-                                                    )
-                                                    .cornerRadius(12)
-                                            }
-                                            if index < timeRanges.count - 1 {
+                                GeometryReader { geometry in
+                                    ZStack {
+                                        // Y-axis grid lines (subtle)
+                                        VStack(spacing: 0) {
+                                            ForEach(0..<5) { _ in
                                                 Spacer()
+                                                Divider()
+                                                    .background(Color.gray.opacity(0.1))
                                             }
                                         }
+                                        
+                                        // Simple line chart - use green or red based on profit/loss for the selected time range
+                                        let selectedSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                                        let selectedTimeRangeProfit = selectedSessions.reduce(0) { $0 + $1.profit }
+                                        let isProfit = selectedTimeRangeProfit >= 0
+                                        let chartColor = isProfit ? 
+                                            Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
+                                            Color.red
+                                        
+                                        // Simplified line chart
+                                        Path { path in
+                                            let sessions = filteredSessionsForTimeRange(selectedTimeRange)
+                                            
+                                            guard !sessions.isEmpty else { return }
+                                            
+                                            var cumulativeProfit: [Double] = []
+                                            var cumulative = 0.0
+                                            
+                                            for session in sessions.sorted(by: { $0.startDate < $1.startDate }) {
+                                                cumulative += session.profit
+                                                cumulativeProfit.append(cumulative)
+                                            }
+                                            
+                                            guard !cumulativeProfit.isEmpty else { return }
+                                            
+                                            // Find the min/max for scaling
+                                            let minProfit = cumulativeProfit.min() ?? 0
+                                            let maxProfit = max(cumulativeProfit.max() ?? 1, 1)
+                                            let range = max(maxProfit - minProfit, 1)
+                                            
+                                            // Draw the path
+                                            let step = geometry.size.width / CGFloat(cumulativeProfit.count - 1)
+                                            
+                                            // Function to get Y position
+                                            func getY(_ value: Double) -> CGFloat {
+                                                let normalized = (value - minProfit) / range
+                                                return geometry.size.height * (1 - CGFloat(normalized))
+                                            }
+                                            
+                                            // Start path
+                                            path.move(to: CGPoint(x: 0, y: getY(cumulativeProfit[0])))
+                                            
+                                            // Draw lines to each point
+                                            for i in 1..<cumulativeProfit.count {
+                                                let x = CGFloat(i) * step
+                                                let y = getY(cumulativeProfit[i])
+                                                
+                                                // Smooth curve
+                                                if i > 0 {
+                                                    let prevX = CGFloat(i-1) * step
+                                                    let prevY = getY(cumulativeProfit[i-1])
+                                                    
+                                                    let controlPoint1 = CGPoint(x: prevX + step/3, y: prevY)
+                                                    let controlPoint2 = CGPoint(x: x - step/3, y: y)
+                                                    
+                                                    path.addCurve(to: CGPoint(x: x, y: y), 
+                                                              control1: controlPoint1, 
+                                                              control2: controlPoint2)
+                                                }
+                                            }
+                                        }
+                                        .stroke(
+                                            chartColor,
+                                            style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+                                        )
+                                        .shadow(color: chartColor.opacity(0.3), radius: 3, y: 1)
+                                        
+                                        // Add chart area fill with gradient
+                                        Path { path in
+                                            let sessions = filteredSessionsForTimeRange(selectedTimeRange)
+                                            
+                                            guard !sessions.isEmpty else { return }
+                                            
+                                            var cumulativeProfit: [Double] = []
+                                            var cumulative = 0.0
+                                            
+                                            for session in sessions.sorted(by: { $0.startDate < $1.startDate }) {
+                                                cumulative += session.profit
+                                                cumulativeProfit.append(cumulative)
+                                            }
+                                            
+                                            guard !cumulativeProfit.isEmpty else { return }
+                                            
+                                            // Find the min/max for scaling
+                                            let minProfit = cumulativeProfit.min() ?? 0
+                                            let maxProfit = max(cumulativeProfit.max() ?? 1, 1)
+                                            let range = max(maxProfit - minProfit, 1)
+                                            
+                                            // Draw the path
+                                            let step = geometry.size.width / CGFloat(cumulativeProfit.count - 1)
+                                            
+                                            // Function to get Y position
+                                            func getY(_ value: Double) -> CGFloat {
+                                                let normalized = (value - minProfit) / range
+                                                return geometry.size.height * (1 - CGFloat(normalized))
+                                            }
+                                            
+                                            // Start path - bottom left
+                                            path.move(to: CGPoint(x: 0, y: geometry.size.height))
+                                            
+                                            // Bottom left to first data point
+                                            path.addLine(to: CGPoint(x: 0, y: getY(cumulativeProfit[0])))
+                                            
+                                            // Draw curves through all points
+                                            for i in 1..<cumulativeProfit.count {
+                                                let x = CGFloat(i) * step
+                                                let y = getY(cumulativeProfit[i])
+                                                
+                                                // Smooth curve
+                                                if i > 0 {
+                                                    let prevX = CGFloat(i-1) * step
+                                                    let prevY = getY(cumulativeProfit[i-1])
+                                                    
+                                                    let controlPoint1 = CGPoint(x: prevX + step/3, y: prevY)
+                                                    let controlPoint2 = CGPoint(x: x - step/3, y: y)
+                                                    
+                                                    path.addCurve(to: CGPoint(x: x, y: y), 
+                                                               control1: controlPoint1, 
+                                                               control2: controlPoint2)
+                                                }
+                                            }
+                                            
+                                            // Last point to bottom right
+                                            path.addLine(to: CGPoint(x: geometry.size.width, y: geometry.size.height))
+                                            
+                                            // Close the path
+                                            path.closeSubpath()
+                                        }
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [
+                                                    chartColor.opacity(0.3),
+                                                    chartColor.opacity(0.05)
+                                                ]),
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            )
+                                        )
                                     }
-                                    .padding(.horizontal, 16)
                                 }
+                                .frame(height: 220)
+                                
+                                // Time period selector
+                                HStack {
+                                    ForEach(["1H", "24H", "1W", "1M", "6M", "1Y", "All"], id: \.self) { range in
+                                        let index = timeRanges.firstIndex(of: range) ?? 0
+                                        Button(action: {
+                                            selectedTimeRange = index
+                                        }) {
+                                            Text(range)
+                                                .font(.system(size: 13, weight: selectedTimeRange == index ? .medium : .regular))
+                                                .foregroundColor(selectedTimeRange == index ? .white : .gray)
+                                                .frame(maxWidth: .infinity)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                }
+                                .padding(.horizontal, 20)
                             }
                         }
-                        .padding(.horizontal, 16)
                         
                         // Stats cards in grid layout
                         Text("MORE STATS")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.gray)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 20)
-                            .padding(.top, 12)
+                            .padding(.top, 10)
                         
-                        // Win Rate
-                        HStack {
-                            ZStack {
-                                Circle()
-                                    .stroke(Color.gray.opacity(0.2), lineWidth: 5)
-                                    .frame(width: 44, height: 44)
-                                
-                                Circle()
-                                    .trim(from: 0, to: CGFloat(winRate) / 100)
-                                    .stroke(
-                                        Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)),
-                                        lineWidth: 5
-                                    )
-                                    .frame(width: 44, height: 44)
-                                    .rotationEffect(.degrees(-90))
-                                
-                                Text("\(Int(winRate))%")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white)
-                            }
-                            
-                            Text("Win Rate")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.white)
-                            
-                            Spacer()
-                        }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 16)
-                        .background(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)))
-                        .cornerRadius(12)
-                        .padding(.horizontal, 16)
-                        
-                        // Average Profit, Best Session, Total Sessions
                         VStack(spacing: 12) {
-                            // Average Profit
+                            // Win Rate
                             HStack {
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.2)))
-                                        .frame(width: 24, height: 24)
+                                    Circle()
+                                        .stroke(Color.gray.opacity(0.2), lineWidth: 4)
+                                        .frame(width: 44, height: 44)
                                     
-                                    Image(systemName: "chart.line.uptrend.xyaxis")
-                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                        .font(.system(size: 14))
+                                    Circle()
+                                        .trim(from: 0, to: CGFloat(winRate) / 100)
+                                        .stroke(
+                                            Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)),
+                                            lineWidth: 4
+                                        )
+                                        .frame(width: 44, height: 44)
+                                        .rotationEffect(.degrees(-90))
+                                    
+                                    Text("\(Int(winRate))%")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(.white)
                                 }
                                 
-                                Text("Average Profit")
+                                Text("Win Rate")
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(.white)
                                 
                                 Spacer()
-                                
-                                Text("$\(Int(averageProfit))")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                
-                                Text("/session")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.gray)
                             }
                             .padding(.vertical, 12)
                             .padding(.horizontal, 16)
-                            .background(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)))
+                            .background(Color.black.opacity(0.3))
                             .cornerRadius(12)
+                            .padding(.horizontal, 20)
                             
-                            // Best Session
-                            HStack {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(Color.blue.opacity(0.2))
-                                        .frame(width: 24, height: 24)
+                            // Average Profit, Best Session, Total Sessions
+                            VStack(spacing: 12) {
+                                // Average Profit
+                                HStack {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.15)))
+                                            .frame(width: 24, height: 24)
+                                        
+                                        Image(systemName: "chart.line.uptrend.xyaxis")
+                                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                            .font(.system(size: 12))
+                                    }
                                     
-                                    Image(systemName: "star.fill")
-                                        .foregroundColor(.blue)
-                                        .font(.system(size: 14))
-                                }
-                                
-                                Text("Best Session")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.white)
-                                
-                                Spacer()
-                                
-                                Text("$\(Int(bestSession?.profit ?? 0))")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                
-                                Text("Profit")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                            .background(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)))
-                            .cornerRadius(12)
-                            
-                            // Total Sessions
-                            HStack {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(Color.orange.opacity(0.2))
-                                        .frame(width: 24, height: 24)
+                                    Text("Average Profit")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
                                     
-                                    Image(systemName: "calendar")
-                                        .foregroundColor(.orange)
-                                        .font(.system(size: 14))
+                                    Spacer()
+                                    
+                                    Text("$\(Int(averageProfit).formattedWithCommas)")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                    
+                                    Text("/session")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.gray)
                                 }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                                .background(Color.black.opacity(0.3))
+                                .cornerRadius(12)
                                 
-                                Text("Total Sessions")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.white)
+                                // Best Session
+                                HStack {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.blue.opacity(0.15))
+                                            .frame(width: 24, height: 24)
+                                        
+                                        Image(systemName: "star.fill")
+                                            .foregroundColor(.blue)
+                                            .font(.system(size: 12))
+                                    }
+                                    
+                                    Text("Best Session")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
+                                    
+                                    Spacer()
+                                    
+                                    Text("$\(Int(bestSession?.profit ?? 0).formattedWithCommas)")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                    
+                                    Text("Profit")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                                .background(Color.black.opacity(0.3))
+                                .cornerRadius(12)
                                 
-                                Spacer()
-                                
-                                Text("\(totalSessions)")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                
-                                Text("Played")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.gray)
+                                // Total Sessions
+                                HStack {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.orange.opacity(0.15))
+                                            .frame(width: 24, height: 24)
+                                        
+                                        Image(systemName: "calendar")
+                                            .foregroundColor(.orange)
+                                            .font(.system(size: 12))
+                                    }
+                                    
+                                    Text("Total Sessions")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
+                                    
+                                    Spacer()
+                                    
+                                    Text("\(totalSessions)")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                    
+                                    Text("Played")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                                .background(Color.black.opacity(0.3))
+                                .cornerRadius(12)
                             }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                            .background(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)))
-                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
                         }
-                        .padding(.horizontal, 16)
                     }
+                    .padding(.bottom, 30)
                 }
             } else if selectedTab == .hands {
                 // Use transparent navigation container to keep background consistent
@@ -654,6 +717,18 @@ struct ProfileView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity) // Allow Group to expand
         .padding(.bottom, 30) // Add padding at bottom for tab bar
+    }
+    
+    private func getTimeRangeLabel(for index: Int) -> String {
+        switch index {
+        case 0: return "Past 24H"
+        case 1: return "Past week"
+        case 2: return "Past month" 
+        case 3: return "Past 6 months"
+        case 4: return "Past year"
+        case 5: return "All time"
+        default: return "Selected period"
+        }
     }
 }
 
@@ -837,9 +912,7 @@ struct ActivityContentView: View {
                                 onComment: { /* If PostView has a comment button that navigates, it might need its own programmatic trigger */ },
                                 userId: userService.currentUserProfile?.id ?? ""
                             )
-                            .background(Color.black.opacity(0.05))
-                            .cornerRadius(10)
-                            .padding(.horizontal, 16)
+                            .padding(.leading, 8)
                             .contentShape(Rectangle()) // Ensure the whole area is tappable
                             .onTapGesture {
                                 self.selectedPostForNavigation = post
@@ -847,12 +920,12 @@ struct ActivityContentView: View {
                             }
                         }
                     }
-                    .padding(.vertical, 8)
+                    .padding(.top, 0)
                 }
-                .padding(.top, 16) 
+                .padding(.top, 8)
             }
         }
-        .padding(.bottom, 16)
+        .padding(.bottom, 8)
         // .onAppear is handled by ProfileView's .onChange for selectedTab
     }
 }
@@ -999,6 +1072,15 @@ struct SettingsRow: View {
             .padding(.horizontal, 18)
         }
         .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// Add at the bottom of the file, outside any struct
+extension Int {
+    var formattedWithCommas: String {
+        let numberFormatter = NumberFormatter()
+        numberFormatter.numberStyle = .decimal
+        return numberFormatter.string(from: NSNumber(value: self)) ?? "\(self)"
     }
 }
 
