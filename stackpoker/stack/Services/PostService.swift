@@ -356,11 +356,43 @@ class PostService: ObservableObject {
         }
     }
     
-    // Get comments for a post
+    // Get comments for a post (filters for top-level comments client-side)
     func getComments(for postId: String) async throws -> [Comment] {
         let commentsRef = db.collection("posts").document(postId).collection("comments")
-        let snapshot = try await commentsRef.order(by: "createdAt", descending: false).getDocuments()
+        // Fetch all comments for the post, order by creation date
+        let snapshot = try await commentsRef
+            .order(by: "createdAt", descending: false)
+            .getDocuments()
+
+        let allComments = try snapshot.documents.compactMap { document -> Comment? in
+            // Ensure you handle potential decoding errors gracefully
+            do {
+                var comment = try document.data(as: Comment.self)
+                comment.id = document.documentID
+                return comment
+            } catch {
+                print("Error decoding comment \\(document.documentID): \\(error)")
+                return nil
+            }
+        }
         
+        // Filter for top-level comments (where parentCommentId is nil or empty string)
+        // This handles new comments (parentCommentId explicitly null),
+        // old comments (parentCommentId field might be missing, decoding to nil for Optional type),
+        // or very old comments (parentCommentId might be an empty string).
+        let topLevelComments = allComments.filter { $0.parentCommentId == nil || $0.parentCommentId == "" }
+        
+        return topLevelComments
+    }
+    
+    // Get replies for a specific comment
+    func getReplies(for parentCommentId: String, on postId: String) async throws -> [Comment] {
+        let commentsRef = db.collection("posts").document(postId).collection("comments")
+        let snapshot = try await commentsRef
+            .whereField("parentCommentId", isEqualTo: parentCommentId)
+            .order(by: "createdAt", descending: false)
+            .getDocuments()
+
         return try snapshot.documents.compactMap { document in
             var comment = try document.data(as: Comment.self)
             comment.id = document.documentID
@@ -368,47 +400,93 @@ class PostService: ObservableObject {
         }
     }
     
-    // Add a comment to a post
-    func addComment(to postId: String, userId: String, username: String, profileImage: String?, content: String) async throws {
+    // Add a comment to a post or reply to a comment
+    func addComment(to postId: String, userId: String, username: String, profileImage: String?, content: String, parentCommentId: String? = nil) async throws {
         let postRef = db.collection("posts").document(postId)
         let commentRef = postRef.collection("comments").document()
-        
-        let comment = Comment(
+
+        let isReply = parentCommentId != nil
+        let newComment = Comment(
             id: commentRef.documentID,
             postId: postId,
             userId: userId,
             username: username,
             profileImage: profileImage,
-            content: content
+            content: content,
+            createdAt: Date(),
+            parentCommentId: parentCommentId,
+            replies: 0, // Replies will be 0 for new comments/replies initially
+            isReplyable: !isReply // Top-level comments are replyable, replies are not
         )
-        
-        try await commentRef.setData(from: comment)
-        
-        // Update comment count on the post
-        try await postRef.updateData(["comments": FieldValue.increment(Int64(1))])
-        
-        // Update local post object
-        await MainActor.run {
-            if let index = posts.firstIndex(where: { $0.id == postId }) {
-                posts[index].comments += 1
+
+        try await commentRef.setData(from: newComment)
+
+        if isReply {
+            // Increment replies count on the parent comment
+            if let parentId = parentCommentId {
+                let parentCommentRef = postRef.collection("comments").document(parentId)
+                try await parentCommentRef.updateData(["replies": FieldValue.increment(Int64(1))])
+                // Note: Post.comments count is not directly incremented for replies here.
+                // The overall count of interactions might be managed differently or Post.comments refers only to top-level.
+            }
+        } else {
+            // Increment comment count on the post for top-level comments
+            try await postRef.updateData(["comments": FieldValue.increment(Int64(1))])
+            
+            // Update local post object
+            // Ensure this runs on the main actor if posts is a @Published property
+            await MainActor.run {
+                if let index = self.posts.firstIndex(where: { $0.id == postId }) {
+                    self.posts[index].comments += 1
+                }
             }
         }
     }
     
-    // Delete a comment
+    // Delete a comment (and its replies if it's a top-level comment)
+    // Or delete a reply
     func deleteComment(postId: String, commentId: String) async throws {
         let postRef = db.collection("posts").document(postId)
         let commentRef = postRef.collection("comments").document(commentId)
-        
+
+        // Fetch the comment to determine if it's a top-level or a reply, and if it has replies
+        let commentSnapshot = try await commentRef.getDocument()
+        guard commentSnapshot.exists, var commentData = try? commentSnapshot.data(as: Comment.self) else {
+            print("Error: Comment \\(commentId) not found or couldn't be decoded.")
+            throw NSError(domain: "CommentError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Comment not found or could not be decoded"])
+        }
+        commentData.id = commentSnapshot.documentID // Ensure ID is set
+
         try await commentRef.delete()
-        
-        // Update comment count on the post
-        try await postRef.updateData(["comments": FieldValue.increment(Int64(-1))])
-        
-        // Update local post object
-        await MainActor.run {
-            if let index = posts.firstIndex(where: { $0.id == postId }) {
-                posts[index].comments -= 1
+
+        if let parentId = commentData.parentCommentId { // This is a reply being deleted
+            // Decrement replies count on the parent comment
+            let parentCommentRef = postRef.collection("comments").document(parentId)
+            try await parentCommentRef.updateData(["replies": FieldValue.increment(Int64(-1))])
+            // Post.comments count is not affected by deleting a reply directly.
+        } else { // This is a top-level comment being deleted
+            // Decrement comment count on the post
+            try await postRef.updateData(["comments": FieldValue.increment(Int64(-1))])
+            
+            await MainActor.run {
+                if let index = self.posts.firstIndex(where: { $0.id == postId }) {
+                    if self.posts[index].comments > 0 { // Ensure counter doesn't go negative
+                         self.posts[index].comments -= 1
+                    }
+                }
+            }
+
+            // If it was a replyable comment and had replies, delete its replies
+            if commentData.isReplyable && commentData.replies > 0 {
+                let repliesSnapshot = try await postRef.collection("comments")
+                    .whereField("parentCommentId", isEqualTo: commentId)
+                    .getDocuments()
+                
+                for replyDoc in repliesSnapshot.documents {
+                    try await replyDoc.reference.delete()
+                    // Note: We don't need to individually decrement parent's reply count here,
+                    // as the parent (the comment being deleted) is gone.
+                }
             }
         }
     }
@@ -467,6 +545,42 @@ class PostService: ObservableObject {
             self.posts = []
             self.lastDocument = nil
             throw error
+        }
+    }
+    
+    // MARK: - Fetching Single Post by ID
+    func fetchSinglePost(byId postId: String) async throws -> Post? {
+        print("🌐 PostService: Fetching single post with ID: \(postId)")
+        let documentSnapshot = try await db.collection("posts").document(postId).getDocument()
+        
+        guard documentSnapshot.exists else {
+            print("⚠️ PostService: Post with ID \(postId) not found.")
+            return nil
+        }
+        
+        do {
+            var post = try documentSnapshot.data(as: Post.self)
+            post.id = documentSnapshot.documentID // Ensure ID is set from the document
+
+            // Optionally, fetch like status for the current user if PostDetailView needs it
+            // and if your Post model has an `isLiked` property.
+            if let currentUserId = Auth.auth().currentUser?.uid {
+                let likeDocRef = db.collection("posts").document(postId).collection("likes").document(currentUserId)
+                let likeDoc = try? await likeDocRef.getDocument() // Use try? to not fail if like doc doesn't exist
+                if let likeDoc = likeDoc, likeDoc.exists {
+                    post.isLiked = true // Assuming your Post model has `isLiked: Bool?` or `isLiked: Bool = false`
+                } else {
+                    post.isLiked = false // Ensure isLiked is set even if no like document exists
+                }
+            }
+            
+            print("✅ PostService: Successfully fetched and decoded post \(postId).")
+            return post
+        } catch {
+            print("❌ PostService: Error decoding post \(postId): \(error.localizedDescription)")
+            // It might be better to throw a specific error or return nil depending on desired behavior
+            // For now, re-throwing the decoding error.
+            throw error 
         }
     }
 } 

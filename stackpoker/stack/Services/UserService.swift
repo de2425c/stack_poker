@@ -138,6 +138,83 @@ class UserService: ObservableObject {
         try await db.collection("users").document(userId).updateData(updates)
         try await fetchUserProfile() // Refresh the local profile
     }
+
+    // Function to update or set the FCM token for a user
+    func updateFCMToken(userId: String, token: String) async throws {
+        print("🔄 Attempting to update FCM token for user: \(userId) with token: \(token)")
+        let userRef = db.collection("users").document(userId)
+        do {
+            // Check if the document exists
+            let document = try await userRef.getDocument()
+            
+            if document.exists {
+                // Get existing tokens, or initialize if not present
+                var existingTokens = document.data()?["fcmTokens"] as? [String] ?? []
+                
+                // Check if token already exists to avoid duplication
+                if !existingTokens.contains(token) {
+                    // If we have too many tokens (device changed multiple times),
+                    // keep only the most recent ones (e.g., last 5)
+                    let maxTokens = 5
+                    if existingTokens.count >= maxTokens {
+                        existingTokens = Array(existingTokens.suffix(maxTokens - 1))
+                        print("ℹ️ Trimming old FCM tokens for user: \(userId). Keeping most recent \(maxTokens - 1) tokens.")
+                    }
+                    
+                    // Add the new token
+                    existingTokens.append(token)
+                    try await userRef.updateData(["fcmTokens": existingTokens])
+                    print("✅ FCM token appended for user: \(userId)")
+                } else {
+                    // If token exists, refresh its position to be the most recent
+                    if let index = existingTokens.firstIndex(of: token), index < existingTokens.count - 1 {
+                        existingTokens.remove(at: index)
+                        existingTokens.append(token)
+                        try await userRef.updateData(["fcmTokens": existingTokens])
+                        print("ℹ️ FCM token refreshed position for user: \(userId)")
+                    } else {
+                        print("ℹ️ FCM token already exists and is most recent for user: \(userId)")
+                    }
+                }
+            } else {
+                // Document doesn't exist, create it with the FCM token
+                print("⚠️ User document \(userId) does not exist. Creating with FCM token.")
+                try await userRef.setData(["fcmTokens": [token]], merge: true)
+                print("✅ FCM token set for new/non-existent user document: \(userId)")
+            }
+        } catch {
+            print("❌ Error updating FCM token for user \(userId): \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    // Add a function to handle token invalidation
+    func invalidateFCMToken(userId: String, token: String) async {
+        print("🔄 Attempting to remove invalid FCM token for user: \(userId)")
+        let userRef = db.collection("users").document(userId)
+        
+        do {
+            let document = try await userRef.getDocument()
+            
+            if document.exists, var existingTokens = document.data()?["fcmTokens"] as? [String], !existingTokens.isEmpty {
+                let initialCount = existingTokens.count
+                
+                // Remove the specific token
+                existingTokens.removeAll(where: { $0 == token })
+                
+                if existingTokens.count < initialCount {
+                    try await userRef.updateData(["fcmTokens": existingTokens])
+                    print("✅ Removed invalid FCM token for user: \(userId)")
+                } else {
+                    print("ℹ️ FCM token was not found in user's tokens array: \(userId)")
+                }
+            } else {
+                print("ℹ️ No FCM tokens found for user: \(userId) or document doesn't exist")
+            }
+        } catch {
+            print("❌ Error removing invalid FCM token for user \(userId): \(error.localizedDescription)")
+        }
+    }
     
     func uploadProfileImage(_ image: UIImage, userId: String, completion: @escaping (Result<String, Error>) -> Void) {
         let storageRef = Storage.storage().reference().child("profile_images/\(userId).jpg")

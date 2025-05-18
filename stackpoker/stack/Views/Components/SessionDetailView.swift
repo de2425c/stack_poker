@@ -51,12 +51,18 @@ struct SessionDetailView: View {
     
     var body: some View {
         ZStack {
-            // Use a dark background that matches the potential ImageCompositionView
-            Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 1.0))
-                .edgesIgnoringSafeArea(.all)
+            // Use the unified app background
+            AppBackgroundView()
+                .ignoresSafeArea()
 
             ScrollView {
                 VStack(alignment: .center, spacing: 20) {
+                    // Instruction text ABOVE card
+                    Text("Tap card to customize & share")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                        .padding(.top, 10)
+
                     FinishedSessionCardView(
                         gameName: session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)",
                         stakes: session.stakes,
@@ -78,11 +84,6 @@ struct SessionDetailView: View {
                         }
                     }
                     
-                    Text("Tap card to customize & share")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                        .padding(.bottom, 10) // Adjusted padding
-
                     // Hands Section
                     if isLoadingHands {
                         ProgressView()
@@ -137,19 +138,37 @@ struct SessionDetailView: View {
                     // to ensure content can be scrolled fully if it's short but scrollable
                     Spacer(minLength: 30) // Adjust minLength as needed
                 }
-                .padding(.top, 20)
+                .padding(.top, 60) // Extra top padding so content starts below close button
             }
         }
+        // Close button overlay similar to HandReplayView
+        .overlay(
+            HStack {
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(12)
+                        .background(Color.black.opacity(0.5))
+                        .clipShape(Circle())
+                }
+                Spacer()
+            }
+            .padding(.top, 8)
+            .padding(.leading, 16)
+            , alignment: .topLeading
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure ZStack is flexible
         .onAppear {
             fetchSessionDetails()
         }
-        .sheet(isPresented: $showingImagePicker, onDismiss: {
-            if selectedImageForComposer != nil {
+        .sheet(isPresented: $showingImagePicker) {
+            ImagePicker(selectedImage: $selectedImageForComposer)
+        }
+        .onChange(of: selectedImageForComposer) { newValue in
+            if newValue != nil {
                 showImageComposer = true
             }
-        }) {
-            ImagePicker(selectedImage: $selectedImageForComposer)
         }
         .fullScreenCover(isPresented: $showImageComposer) {
             if let selectedImage = selectedImageForComposer, #available(iOS 16.0, *) {

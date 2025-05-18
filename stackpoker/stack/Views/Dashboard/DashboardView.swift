@@ -1094,6 +1094,8 @@ struct SessionsTab: View {
     @State private var selectedDate: Date? = nil
     @State private var currentMonth = Date()
     @State private var calendarAppearAnimation = false
+    // NEW: State to present full-screen session detail
+    @State private var showingSessionDetail = false
     
     // Group sessions by time periods
     private var groupedSessions: (today: [Session], lastWeek: [Session], older: [Session]) {
@@ -1266,17 +1268,16 @@ struct SessionsTab: View {
                             // Sessions for selected date with animation
                             VStack(spacing: 12) {
                                 ForEach(Array(sessionsForDate(selectedDate).enumerated()), id: \.element.id) { index, session in
-                                    NavigationLink(destination: SessionDetailView(session: session)) {
-                                        EnhancedSessionSummaryRow(
-                                            session: session, 
-                                            onSelect: { }, 
-                                            onDelete: {
-                                                selectedSession = session
-                                                showingDeleteAlert = true
-                                            }
-                                        )
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
+                                    EnhancedSessionSummaryRow(
+                                        session: session,
+                                        onSelect: {
+                                            selectedSession = session
+                                        },
+                                        onDelete: {
+                                            selectedSession = session
+                                            showingDeleteAlert = true
+                                        }
+                                    )
                                     .transition(.asymmetric(
                                         insertion: .scale(scale: 0.95).combined(with: .opacity),
                                         removal: .scale(scale: 0.95).combined(with: .opacity)
@@ -1301,7 +1302,9 @@ struct SessionsTab: View {
                     // Today's sessions
                     if !groupedSessions.today.isEmpty && (selectedDate == nil || !Calendar.current.isDate(selectedDate!, inSameDayAs: Date())) {
                         EnhancedSessionsSection(title: "Today", sessions: groupedSessions.today, 
-                                                onSelect: { _ in }, 
+                                                onSelect: { session in
+                                                    selectedSession = session
+                                                }, 
                                                 onDelete: { session in
                             selectedSession = session
                             showingDeleteAlert = true
@@ -1312,7 +1315,9 @@ struct SessionsTab: View {
                     // Last week's sessions
                     if !groupedSessions.lastWeek.isEmpty {
                         EnhancedSessionsSection(title: "Last Week", sessions: groupedSessions.lastWeek, 
-                                                onSelect: { _ in }, 
+                                                onSelect: { session in
+                                                    selectedSession = session
+                                                }, 
                                                 onDelete: { session in
                             selectedSession = session
                             showingDeleteAlert = true
@@ -1323,7 +1328,9 @@ struct SessionsTab: View {
                     // Older sessions
                     if !groupedSessions.older.isEmpty {
                         EnhancedSessionsSection(title: "All Time", sessions: groupedSessions.older, 
-                                                onSelect: { _ in }, 
+                                                onSelect: { session in
+                                                    selectedSession = session
+                                                }, 
                                                 onDelete: { session in
                             selectedSession = session
                             showingDeleteAlert = true
@@ -1358,6 +1365,10 @@ struct SessionsTab: View {
                 secondaryButton: .cancel()
             )
         }
+        // Full-screen detail sheet
+        .fullScreenCover(item: $selectedSession, content: { session in
+            SessionDetailView(session: session)
+        })
         .sheet(isPresented: $showEditSheet) {
             if let session = selectedSession {
                 EditSessionSheetView(
@@ -1468,9 +1479,7 @@ struct EnhancedSessionsSection: View {
     let onSelect: (Session) -> Void
     let onDelete: (Session) -> Void
     
-    // Add state to track navigation
-    @State private var selectedSessionId: String? = nil
-    
+    // Remove selectedSessionId state and NavigationLink
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Section header
@@ -1490,23 +1499,11 @@ struct EnhancedSessionsSection: View {
             // Sessions in this section
             VStack(spacing: 12) {
                 ForEach(sessions) { session in
-                    // Here's the trick - use NavigationLink as a background
-                    NavigationLink(
-                        destination: SessionDetailView(session: session),
-                        tag: session.id,
-                        selection: $selectedSessionId
-                    ) {
-                        EnhancedSessionSummaryRow(
-                            session: session,
-                            onSelect: {
-                                selectedSessionId = session.id
-                            },
-                            onDelete: {
-                                onDelete(session)
-                            }
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                    EnhancedSessionSummaryRow(
+                        session: session,
+                        onSelect: { onSelect(session) },
+                        onDelete: { onDelete(session) }
+                    )
                 }
             }
         }
@@ -1950,6 +1947,11 @@ struct EnhancedSessionSummaryRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 1.0)))
         )
+        .contentShape(Rectangle()) // Make entire row tappable
+        .onTapGesture {
+            hapticFeedback(style: .light)
+            onSelect()
+        }
         .contextMenu {
             Button(action: onSelect) {
                 Label("Edit", systemImage: "pencil")

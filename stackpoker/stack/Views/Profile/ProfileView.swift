@@ -912,20 +912,30 @@ struct ActivityContentView: View {
                                 onComment: { /* If PostView has a comment button that navigates, it might need its own programmatic trigger */ },
                                 userId: userService.currentUserProfile?.id ?? ""
                             )
-                            .padding(.leading, 8)
+                            .padding(.leading, 8) // Reduced horizontal padding, more to the left
                             .contentShape(Rectangle()) // Ensure the whole area is tappable
                             .onTapGesture {
+                                // Direct navigation instead of sheet
                                 self.selectedPostForNavigation = post
-                                self.showingPostDetailSheet = true // Trigger the sheet
                             }
+                            .background(
+                                NavigationLink(
+                                    destination: PostDetailView(post: post, userId: userId),
+                                    isActive: Binding<Bool>(
+                                       get: { selectedPostForNavigation?.id == post.id },
+                                       set: { if !$0 { selectedPostForNavigation = nil } }
+                                    ),
+                                    label: { EmptyView() }
+                                ).opacity(0)
+                            )
                         }
                     }
-                    .padding(.top, 0)
+                    .padding(.top, 0) // Removed vertical padding, posts will be closer to the top
                 }
-                .padding(.top, 8)
+                .padding(.top, 8) // Reduced top padding for the ScrollView
             }
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, 8) // Reduced bottom padding for the entire ActivityContentView
         // .onAppear is handled by ProfileView's .onChange for selectedTab
     }
 }
