@@ -174,29 +174,72 @@ struct HandEvaluator {
     
     // Evaluate the best 5-card hand from the given cards
     static func evaluateBestHand(cards: [String]) -> HandEvaluation? {
-        print("hello")
-        // Convert string cards to Card objects
-        let parsedCards = cards.compactMap { Card(from: $0) }
-        guard parsedCards.count >= 5 else { return nil }
+        // Safety checks for empty or invalid input
+        guard !cards.isEmpty else {
+            print("Warning: Empty card array passed to evaluateBestHand")
+            return nil
+        }
         
-        // Get all possible 5-card combinations from the available cards
-        let combinations = getCombinations(cards: parsedCards, k: 5)
-        
-        var bestHand: HandEvaluation?
-        var bestCombo: [Card] = []
-        
-        for combo in combinations {
-            let evaluation = evaluateHand(cards: combo)
-            print("[HandEval] Combo: \(combo.map { "\($0.rank)\($0.suit)" }.joined(separator: ", ")) => \(evaluation.rank) | Tiebreakers: \(evaluation.tiebreakers)")
-            if bestHand == nil || evaluation > bestHand! {
-                bestHand = evaluation
-                bestCombo = combo
+        // Parse card strings to Card objects
+        let parsedCards: [Card] = cards.compactMap { cardString in
+            guard cardString.count >= 2 else {
+                print("Warning: Invalid card format: \(cardString)")
+                return nil
             }
+            return Card(from: cardString)
         }
-        if let bestHand = bestHand {
-            print("[HandEval] BEST: \(bestCombo.map { "\($0.rank)\($0.suit)" }.joined(separator: ", ")) => \(bestHand.rank) | Tiebreakers: \(bestHand.tiebreakers)")
+        
+        // Ensure we have valid cards
+        guard !parsedCards.isEmpty else {
+            print("Warning: No valid cards could be parsed from input")
+            return nil
         }
-        return bestHand
+        
+        // Need at least 5 cards for a valid poker hand
+        if parsedCards.count < 5 {
+            print("Warning: Not enough cards to form a valid poker hand: \(parsedCards.count)")
+            
+            // If at least 1 card, return a partial hand evaluation for display purposes
+            if parsedCards.count >= 1 {
+                let sortedCards = parsedCards.sorted(by: { $0.rankValue > $1.rankValue })
+                return HandEvaluation(
+                    rank: .highCard,
+                    cards: Array(sortedCards.prefix(parsedCards.count)),
+                    tiebreakers: sortedCards.map { $0.rankValue }
+                )
+            }
+            return nil
+        }
+        
+        // Evaluate the best hand from the available cards
+        if let royal = checkRoyalFlush(cards: parsedCards) {
+            return royal
+        }
+        if let straightFlush = checkStraightFlush(cards: parsedCards) {
+            return straightFlush
+        }
+        if let quads = checkFourOfAKind(cards: parsedCards) {
+            return quads
+        }
+        if let fullHouse = checkFullHouse(cards: parsedCards) {
+            return fullHouse
+        }
+        if let flush = checkFlush(cards: parsedCards) {
+            return flush
+        }
+        if let straight = checkStraight(cards: parsedCards) {
+            return straight
+        }
+        if let trips = checkThreeOfAKind(cards: parsedCards) {
+            return trips
+        }
+        if let twoPair = checkTwoPair(cards: parsedCards) {
+            return twoPair
+        }
+        if let pair = checkPair(cards: parsedCards) {
+            return pair
+        }
+        return checkHighCard(cards: parsedCards)
     }
     
     // Evaluate a specific 5-card hand
@@ -365,6 +408,12 @@ struct HandEvaluator {
             rankToCard[1] = aceLowCard
         }
         let uniqueRanks = rankToCard.keys.sorted(by: >)
+        
+        // Safety check: Need at least 5 unique ranks to form a straight
+        if uniqueRanks.count < 5 {
+            return nil
+        }
+        
         // Check for any sequence of 5 consecutive values
         for i in 0...(uniqueRanks.count - 5) {
             let window = Array(uniqueRanks[i..<(i+5)])

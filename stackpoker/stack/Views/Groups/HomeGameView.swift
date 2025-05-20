@@ -8,7 +8,7 @@ struct HomeGame: Identifiable, Codable {
     var createdAt: Date
     var creatorId: String
     var creatorName: String
-    var groupId: String
+    var groupId: String?
     var status: GameStatus
     var players: [Player]
     var buyInRequests: [BuyInRequest]
@@ -81,8 +81,8 @@ struct HomeGameView: View {
     @EnvironmentObject var userService: UserService
     @StateObject private var homeGameService = HomeGameService()
     
-    let groupId: String
-    let onGameCreated: (HomeGame) -> Void
+    let groupId: String?
+    let onGameCreated: ((HomeGame) -> Void)?
     
     @State private var gameTitle = ""
     @State private var isCreating = false
@@ -90,6 +90,11 @@ struct HomeGameView: View {
     @State private var showError = false
     @State private var existingActiveGame: HomeGame?
     @State private var isCheckingForExistingGames = true
+    
+    init(groupId: String?, onGameCreated: ((HomeGame) -> Void)? = nil) {
+        self.groupId = groupId
+        self.onGameCreated = onGameCreated
+    }
     
     var body: some View {
         NavigationView {
@@ -309,12 +314,18 @@ struct HomeGameView: View {
                 )
             }
             .onAppear {
-                checkForExistingGames()
+                if let currentGroupId = groupId {
+                    checkForExistingGames(groupId: currentGroupId)
+                } else {
+                    // For standalone games (groupId is nil), no group-specific check needed.
+                    isCheckingForExistingGames = false
+                    existingActiveGame = nil
+                }
             }
         }
     }
     
-    private func checkForExistingGames() {
+    private func checkForExistingGames(groupId: String) {
         isCheckingForExistingGames = true
         
         Task {
@@ -346,25 +357,27 @@ struct HomeGameView: View {
         
         Task {
             do {
-                // Double-check for existing active games
-                let activeGames = try await homeGameService.fetchActiveGamesForGroup(groupId: groupId)
-                
-                if !activeGames.isEmpty {
-                    // There's already an active game, show error
-                    await MainActor.run {
-                        existingActiveGame = activeGames.first
-                        isCreating = false
-                        checkForExistingGames() // Refresh the UI
+                // If part of a group, double-check for existing active games in that group
+                if let currentGroupId = groupId {
+                    let activeGames = try await homeGameService.fetchActiveGamesForGroup(groupId: currentGroupId)
+                    if !activeGames.isEmpty {
+                        await MainActor.run {
+                            existingActiveGame = activeGames.first
+                            isCreating = false
+                            // Refresh the UI to show the existing game message
+                            isCheckingForExistingGames = true // Trigger re-check which will show the message
+                            checkForExistingGames(groupId: currentGroupId)
+                        }
+                        return
                     }
-                    return
-                }
+                } // For standalone games, this check is skipped.
                 
-                // Create the game in Firestore
+                // Create the game in Firestore (groupId can be nil here)
                 let newGame = try await homeGameService.createHomeGame(title: gameTitle, groupId: groupId)
                 
-                // Call the completion handler with the new game
+                // Call the completion handler with the new game if provided
                 await MainActor.run {
-                    onGameCreated(newGame)
+                    onGameCreated?(newGame)
                     presentationMode.wrappedValue.dismiss()
                 }
             } catch {

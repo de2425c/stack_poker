@@ -1,7 +1,6 @@
 import Foundation
 import FirebaseFirestore
 import SwiftUI
-import UserNotifications
 
 // Provide an alias so existing references remain valid within the module
 typealias LiveSessionData_Enhanced = LiveSessionData.Enhanced
@@ -233,8 +232,6 @@ class SessionStore: ObservableObject {
         showLiveSessionBar = true
         saveLiveSessionState()
         saveEnhancedLiveSessionState()
-        requestNotificationPermission()
-        scheduleLiveSessionNotification()
     }
     
     func pauseLiveSession() {
@@ -248,7 +245,6 @@ class SessionStore: ObservableObject {
         liveSession = session // triggers SwiftUI update
         stopLiveSessionTimer()
         saveLiveSessionState()
-        removeLiveSessionNotification()
     }
     
     func resumeLiveSession() {
@@ -258,7 +254,6 @@ class SessionStore: ObservableObject {
         liveSession = session // triggers SwiftUI update
         startLiveSessionTimer()
         saveLiveSessionState()
-        scheduleLiveSessionNotification()
     }
     
     func updateLiveSessionBuyIn(amount: Double) {
@@ -266,9 +261,13 @@ class SessionStore: ObservableObject {
         saveLiveSessionState()
     }
     
+    func setTotalBuyIn(amount: Double) {
+        liveSession.buyIn = amount
+        saveLiveSessionState()
+    }
+    
     func endLiveSession(cashout: Double, completion: @escaping (Error?) -> Void) {
         stopLiveSessionTimer()
-        removeLiveSessionNotification()
         
         let currentLiveSessionId = liveSession.id
 
@@ -301,7 +300,6 @@ class SessionStore: ObservableObject {
     
     func endLiveSessionAsync(cashout: Double) async -> Error? {
         stopLiveSessionTimer()
-        removeLiveSessionNotification()
         
         let currentLiveSessionId = liveSession.id
 
@@ -351,9 +349,6 @@ class SessionStore: ObservableObject {
         // Remove from UserDefaults
         removeLiveSessionState()
         removeEnhancedLiveSessionState()
-        
-        // Make sure any notifications are removed
-        removeLiveSessionNotification()
     }
     
     // MARK: - Timer Management
@@ -446,38 +441,6 @@ class SessionStore: ObservableObject {
     
     private func removeLiveSessionState() {
         UserDefaults.standard.removeObject(forKey: "LiveSession_\(userId)")
-    }
-    
-    // MARK: - Notification Logic
-    private func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            if let error = error {
-                print("Notification permission error: \(error)")
-            }
-        }
-    }
-    private func scheduleLiveSessionNotification() {
-        removeLiveSessionNotification() // Remove any previous
-        let content = UNMutableNotificationContent()
-        content.title = "Live Poker Session Running"
-        let elapsed = Int(liveSession.elapsedTime)
-        let hours = elapsed / 3600
-        let minutes = (elapsed % 3600) / 60
-        let seconds = elapsed % 60
-        let timeString = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-        content.body = "Time: \(timeString)\nBuy-in: $\(Int(liveSession.buyIn))"
-        content.sound = .default
-        // Show immediately and repeat every 60 seconds
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: true)
-        let request = UNNotificationRequest(identifier: "LiveSessionNotification", content: content, trigger: trigger)
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("Error scheduling live session notification: \(error)")
-            }
-        }
-    }
-    private func removeLiveSessionNotification() {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["LiveSessionNotification"])
     }
     
     deinit {

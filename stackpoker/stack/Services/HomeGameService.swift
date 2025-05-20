@@ -63,7 +63,7 @@ class HomeGameService: ObservableObject {
     // MARK: - Game Management
     
     /// Create a new home game
-    func createHomeGame(title: String, groupId: String) async throws -> HomeGame {
+    func createHomeGame(title: String, groupId: String?) async throws -> HomeGame {
         guard let currentUser =
             Auth.auth().currentUser else {
             throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
@@ -100,13 +100,12 @@ class HomeGameService: ObservableObject {
         )
         
         // Save to Firestore
-        try await db.collection("homeGames").document(game.id).setData([
+        var gameDataToSave: [String: Any] = [
             "id": game.id,
             "title": game.title,
             "createdAt": Timestamp(date: game.createdAt),
             "creatorId": game.creatorId,
             "creatorName": game.creatorName,
-            "groupId": game.groupId,
             "status": game.status.rawValue,
             "players": [],
             "buyInRequests": [],
@@ -121,13 +120,20 @@ class HomeGameService: ObservableObject {
                     "description": game.gameHistory[0].description
                 ]
             ]
-        ])
+        ]
+        
+        if let groupId = groupId {
+            gameDataToSave["groupId"] = groupId
+        }
+        
+        try await db.collection("homeGames").document(game.id).setData(gameDataToSave)
         
         return game
     }
     
     /// End a game and process all active players
     func endGame(gameId: String) async throws {
+        print("[HomeGameService] endGame called for gameId: \(gameId)")
         guard let currentUser = Auth.auth().currentUser else {
             throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
@@ -250,6 +256,37 @@ class HomeGameService: ObservableObject {
             self.activeGames = games
         }
         
+        return games
+    }
+    
+    /// Fetch all active games created by a specific user ID
+    func fetchActiveGames(createdBy userId: String) async throws -> [HomeGame] {
+        DispatchQueue.main.async {
+            self.isLoading = true
+        }
+        defer { 
+            DispatchQueue.main.async {
+                self.isLoading = false
+            }
+        }
+        
+        let querySnapshot = try await db.collection("homeGames")
+            .whereField("creatorId", isEqualTo: userId)
+            .whereField("status", isEqualTo: HomeGame.GameStatus.active.rawValue)
+            .order(by: "createdAt", descending: true)
+            .getDocuments()
+        
+        var games: [HomeGame] = []
+        for document in querySnapshot.documents {
+            let data = document.data()
+            // Ensure we correctly parse games, including those with an optional groupId
+            if let game = try? parseHomeGame(data: data, id: document.documentID) {
+                games.append(game)
+            }
+        }
+        // Note: This function doesn't update the @Published activeGames property directly,
+        // as that property is typically used for group-specific active games.
+        // The caller (HomePage) will manage the state for these fetched games.
         return games
     }
     
@@ -805,13 +842,13 @@ class HomeGameService: ObservableObject {
         guard let title = data["title"] as? String,
               let creatorId = data["creatorId"] as? String,
               let creatorName = data["creatorName"] as? String,
-              let groupId = data["groupId"] as? String,
               let statusRaw = data["status"] as? String,
               let status = HomeGame.GameStatus(rawValue: statusRaw),
               let createdAtTimestamp = data["createdAt"] as? Timestamp else {
             throw NSError(domain: "HomeGameService", code: 100, userInfo: [NSLocalizedDescriptionKey: "Invalid game data format"])
         }
         
+        let groupId = data["groupId"] as? String
         let createdAt = createdAtTimestamp.dateValue()
         
         // Parse players

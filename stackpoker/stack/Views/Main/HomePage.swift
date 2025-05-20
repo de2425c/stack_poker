@@ -18,12 +18,19 @@ struct HomePage: View {
     @State private var replayHand: ParsedHandHistory?
     @State private var showingSessionForm = false
     @State private var showingLiveSession = false
+    @State private var showingOpenHomeGameFlow = false
     @State private var liveSessionBarExpanded = false
     @StateObject private var sessionStore: SessionStore
     @StateObject private var handStore: HandStore
     @StateObject private var postService = PostService()
     @StateObject private var tabBarVisibility = TabBarVisibilityManager()
     @EnvironmentObject private var userService: UserService
+    
+    // Added for HomeGameDetailView presentation
+    @StateObject private var pageLevelHomeGameService = HomeGameService()
+    @State private var gameForDetailView: HomeGame?
+    @State private var showGameDetailView = false
+    @State private var activeHostedStandaloneGame: HomeGame?
     
     init(userId: String) {
         self.userId = userId
@@ -40,46 +47,31 @@ struct HomePage: View {
     }
     
     var body: some View {
-        ZStack {
-            TabView(selection: $selectedTab) {
-                FeedView(userId: userId)
-                    .tag(Tab.feed)
+        NavigationView {
+            ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea()
                 
-                ExploreView()
-                    .tag(Tab.explore)
+                // Dim overlay to darken screen outside the menu (only when menu is showing)
+                if showingMenu {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation { showingMenu = false }
+                        }
+                }
                 
-                Color.clear
-                    .tag(Tab.add)
-                
-                // Cutout for the + button - positioned at center bottom
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Circle()
-                            .fill(Color.black.opacity(0.01)) // Nearly transparent
-                            .blendMode(.destinationOut) // This creates the "hole" effect
-                            .frame(width: 70, height: 70)
-                        Spacer()
+                // Main view structure
+                VStack(spacing: 0) {
+                    // Standalone Home Game Bar (if active)
+                    if let hostedGame = activeHostedStandaloneGame {
+                        StandaloneHomeGameBar(game: hostedGame, onTap: {
+                            self.gameForDetailView = hostedGame
+                            self.showGameDetailView = true
+                        })
                     }
-                    .padding(.bottom, 20)
-                }
-            }
-            .compositingGroup() // Ensures the blendMode works properly
-            
-            // Dim overlay to darken screen outside the menu
-            Color.black.opacity(0.3)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    withAnimation { showingMenu = false }
-                }
-            
-            // Main view structure
-            VStack(spacing: 0) {
-                // Live session bar (if active)
-                ZStack(alignment: .top) {
-                    Color.clear.frame(height: 0) // Zero-height placeholder that doesn't affect layout
-                    
+                
+                    // Live session bar (if active)
                     if sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && 
                        (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive) {
                         LiveSessionBar(
@@ -99,78 +91,178 @@ struct HomePage: View {
                             }
                         }
                     }
+                    
+                    // Main content
+                    TabView(selection: $selectedTab) {
+                        ZStack {
+                            // Extend background fully behind everything
+                            AppBackgroundView()
+                                .ignoresSafeArea()
+                            
+                            // Wrap FeedView with padding
+                            VStack(spacing: 0) {
+                                // Only add space when needed
+                                if activeHostedStandaloneGame == nil {
+                                    Spacer()
+                                        .frame(height: 25)
+                                }
+                                
+                                // FeedView with transparent background
+                                FeedView(userId: userId)
+                                    .edgesIgnoringSafeArea(.top)
+                            }
+                        }
+                        .tag(Tab.feed)
+                        
+                        ExploreView()
+                            .tag(Tab.explore)
+                        
+                        Color.clear // Placeholder for Add tab
+                            .tag(Tab.add)
+                            .overlay(
+                                // Cutout for the + button - positioned at center bottom
+                                VStack {
+                                    Spacer()
+                                    HStack {
+                                        Spacer()
+                                        Circle()
+                                            .fill(Color.black.opacity(0.01)) // Nearly transparent
+                                            .blendMode(.destinationOut) // This creates the "hole" effect
+                                            .frame(width: 70, height: 70)
+                                        Spacer()
+                                    }
+                                    .padding(.bottom, 20)
+                                }
+                            )
+                        
+                        GroupsView()
+                            .environmentObject(userService)
+                            .environmentObject(handStore)
+                            .environmentObject(sessionStore)
+                            .environmentObject(postService)
+                            .environmentObject(tabBarVisibility)
+                            .tag(Tab.groups)
+                        
+                        ProfileView(userId: userId)
+                            .environmentObject(userService)
+                            .environmentObject(handStore)
+                            .environmentObject(sessionStore)
+                            .environmentObject(postService)
+                            .environmentObject(tabBarVisibility)
+                            .tag(Tab.profile)
+                    }
+                    .compositingGroup() // Ensures the blendMode works properly
+                    .background(Color.clear)
+                    .toolbar(.hidden, for: .tabBar)
+                }
+
+                // Show custom tab bar only when it should be visible
+                if tabBarVisibility.isVisible {
+                    CustomTabBar(
+                        selectedTab: $selectedTab,
+                        userId: userId,
+                        showingMenu: $showingMenu
+                    )
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 10)  // Adjusted for the new tab bar design
+                    .opacity(showingReplay ? 0 : 1)
+                    .ignoresSafeArea(.keyboard)
                 }
                 
-                // Main content
-                TabView(selection: $selectedTab) {
-                    FeedView(userId: userId)
-                        .tag(Tab.feed)
-                    
-                    ExploreView()
-                        .tag(Tab.explore)
-                    
-                    Color.clear // Placeholder for Add tab
-                        .tag(Tab.add)
-                    
-                    GroupsView()
-                        .environmentObject(userService)
-                        .environmentObject(handStore)
-                        .environmentObject(sessionStore)
-                        .environmentObject(postService)
-                        .environmentObject(tabBarVisibility)
-                        .tag(Tab.groups)
-                    
-                    ProfileView(userId: userId)
-                        .environmentObject(userService)
-                        .environmentObject(handStore)
-                        .environmentObject(sessionStore)
-                        .environmentObject(postService)
-                        .environmentObject(tabBarVisibility)
-                        .tag(Tab.profile)
+                if showingMenu {
+                    AddMenuOverlay(
+                        showingMenu: $showingMenu,
+                        userId: userId,
+                        showSessionForm: $showingSessionForm,
+                        showingLiveSession: $showingLiveSession,
+                        showingOpenHomeGameFlow: $showingOpenHomeGameFlow
+                    )
+                    .zIndex(1)
                 }
-                .background(Color.clear)
-                .toolbar(.hidden, for: .tabBar)
-            }
 
-            // Show custom tab bar only when it should be visible
-            if tabBarVisibility.isVisible {
-                CustomTabBar(
-                    selectedTab: $selectedTab,
-                    userId: userId,
-                    showingMenu: $showingMenu
-                )
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .opacity(showingReplay ? 0 : 1)
+                // NavigationLink to HomeGameDetailView (exactly matching GroupsView implementation)
+                NavigationLink(
+                    destination: Group {
+                        if let game = gameForDetailView {
+                            ZStack {
+                                // Keep AppBackgroundView for consistent background
+                                AppBackgroundView()
+                                    .ignoresSafeArea()
+                                
+                                HomeGameDetailView(game: game, onGameUpdated: {
+                                    // This callback is triggered from HomeGameDetailView
+                                    Task {
+                                        if let updatedGame = try? await self.pageLevelHomeGameService.fetchHomeGame(gameId: game.id) {
+                                            self.gameForDetailView = updatedGame
+                                        }
+                                    }
+                                    loadActiveHostedStandaloneGame()
+                                })
+                            }
+                            .navigationBarBackButtonHidden(true)
+                        }
+                    },
+                    isActive: $showGameDetailView
+                ) {
+                    EmptyView()
+                }
             }
-            
-            if showingMenu {
-                AddMenuOverlay(
-                    showingMenu: $showingMenu,
-                    userId: userId,
-                    showSessionForm: $showingSessionForm,
-                    showingLiveSession: $showingLiveSession
-                )
-                .zIndex(1)
+            .ignoresSafeArea(edges: .bottom)
+            .ignoresSafeArea(.keyboard)
+            .fullScreenCover(isPresented: $showingReplay) {
+                if let hand = replayHand {
+                    HandReplayView(hand: hand, userId: userId)
+                }
+            }
+            .sheet(isPresented: $showingSessionForm) {
+                SessionFormView(userId: userId)
+            }
+            .sheet(isPresented: $showingOpenHomeGameFlow, onDismiss: {
+                // If showing game detail, the sheet dismissal should let the navigation link activate
+                if self.gameForDetailView != nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self.showGameDetailView = true
+                    }
+                }
+            }) {
+                HomeGameView(groupId: nil, onGameCreated: { newGame in
+                    self.gameForDetailView = newGame
+                    self.showingOpenHomeGameFlow = false // Dismiss HomeGameView sheet
+                    
+                    // Set active hosted game for the banner immediately
+                    if newGame.status == .active && newGame.creatorId == self.userId && newGame.groupId == nil {
+                        self.activeHostedStandaloneGame = newGame
+                    }
+                })
+                .environmentObject(userService)
+            }
+            .fullScreenCover(isPresented: $showingLiveSession) {
+                EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
+            }
+            .onAppear {
+                loadActiveHostedStandaloneGame()
+            }
+            .onDisappear {
+                // Remove observer when view disappears
+                NotificationCenter.default.removeObserver(self)
+            }
+            .environmentObject(tabBarVisibility)
+        }
+        .accentColor(.white) // Set navigation bar buttons to white
+        .navigationViewStyle(StackNavigationViewStyle()) // Use StackNavigationViewStyle for consistent presentation
+    }
+    
+    private func loadActiveHostedStandaloneGame() {
+        Task {
+            do {
+                let allHostedGames = try await pageLevelHomeGameService.fetchActiveGames(createdBy: self.userId)
+                // Find the first active game hosted by the user that is standalone (no groupId)
+                self.activeHostedStandaloneGame = allHostedGames.first(where: { $0.groupId == nil && $0.status == .active })
+            } catch {
+                print("Error fetching active hosted standalone games: \(error.localizedDescription)")
+                self.activeHostedStandaloneGame = nil // Ensure it's nil on error
             }
         }
-        .ignoresSafeArea(edges: .bottom)
-        .ignoresSafeArea(.keyboard)
-        .fullScreenCover(isPresented: $showingReplay) {
-            if let hand = replayHand {
-                HandReplayView(hand: hand, userId: userId)
-            }
-        }
-        .sheet(isPresented: $showingSessionForm) {
-            SessionFormView(userId: userId)
-        }
-        .fullScreenCover(isPresented: $showingLiveSession) {
-            EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
-        }
-        .onDisappear {
-            // Remove observer when view disappears
-            NotificationCenter.default.removeObserver(self)
-        }
-        .environmentObject(tabBarVisibility)
     }
 }
 
@@ -180,55 +272,135 @@ struct CustomTabBar: View {
     @Binding var showingMenu: Bool
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Background
-            Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0))
-                .frame(height: 80)
+        ZStack {
+            // Tab bar with circular wrap-around for plus button
+            TabBarShape()
+                .fill(Color(red: 22/255, green: 24/255, blue: 28/255))
+                .frame(height: 62)
                 .overlay(
-                    VStack(spacing: 0) {
-                        Rectangle()
-                            .fill(Color.black.opacity(0.2))
-                            .frame(height: 1)
-                            .padding(.horizontal, 24)
-                            .padding(.top, -12)
-                        HStack(spacing: 0) {
-                            TabBarButton(
-                                icon: "Feed",
-                                title: "Feed",
-                                isSelected: selectedTab == .feed
-                            ) { selectedTab = .feed }
-                            TabBarButton(
-                                icon: "Search",
-                                title: "Explore",
-                                isSelected: selectedTab == .explore
-                            ) { selectedTab = .explore }
-                            Spacer(minLength: 0)
-                            ZStack {
-                                Color.clear.frame(width: 1, height: 1)
-                                AddButton(userId: userId, showingMenu: $showingMenu)
-                                    .offset(y: -10)
-                            }
-                            .frame(width: 80)
-                            Spacer(minLength: 0)
-                            TabBarButton(
-                                icon: "Groups",
-                                title: "Groups",
-                                isSelected: selectedTab == .groups
-                            ) { selectedTab = .groups }
-                            TabBarButton(
-                                icon: "Profile",
-                                title: "You",
-                                isSelected: selectedTab == .profile
-                            ) { selectedTab = .profile }
-                        }
-                        .padding(.horizontal, 0)
-                        .padding(.top, 8)
-                        .padding(.bottom, 24)
-                    }
+                    TabBarShape()
+                        .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
                 )
+                .shadow(color: Color.black.opacity(0.2), radius: 15, y: 5)
+            
+            // Tab buttons
+            HStack {
+                TabBarButton(
+                    icon: "Feed",
+                    title: "Feed",
+                    isSelected: selectedTab == .feed
+                ) { selectedTab = .feed }
+                
+                TabBarButton(
+                    icon: "Search",
+                    title: "Explore",
+                    isSelected: selectedTab == .explore
+                ) { selectedTab = .explore }
+                
+                // Center spacer for plus button
+                Spacer()
+                    .frame(width: 70)
+                
+                TabBarButton(
+                    icon: "Groups",
+                    title: "Groups",
+                    isSelected: selectedTab == .groups
+                ) { selectedTab = .groups }
+                
+                TabBarButton(
+                    icon: "Profile",
+                    title: "You",
+                    isSelected: selectedTab == .profile
+                ) { selectedTab = .profile }
+            }
+            .padding(.horizontal, 20)
+            
+            // Plus button centered
+            AddButton(userId: userId, showingMenu: $showingMenu)
+                .offset(y: -10) // Adjusted offset to match new circle position
         }
-        .frame(height: 80)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 30)
+        .padding(.bottom, 20)
+    }
+}
+
+// Custom shape for tab bar with circular wrap-around for plus button
+struct TabBarShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let width = rect.width
+        let height = rect.height
+        let centerX = width / 2
+        let circleRadius: CGFloat = 34 // Slightly smaller radius
+        let cutoutWidth: CGFloat = 80 // Width of the area where the circle extends from
+        let barRadius: CGFloat = 28
+        let circleY: CGFloat = 20 // Circle center further down
+        
+        var path = Path()
+        
+        // Start from top left
+        path.move(to: CGPoint(x: 0, y: barRadius))
+        
+        // Top left corner
+        path.addArc(
+            center: CGPoint(x: barRadius, y: barRadius),
+            radius: barRadius,
+            startAngle: .degrees(180),
+            endAngle: .degrees(270),
+            clockwise: false
+        )
+        
+        // Left horizontal section - go to where circle starts
+        path.addLine(to: CGPoint(x: centerX - cutoutWidth/2, y: 0))
+        
+        // Create semi-circle bump that extends from the top edge
+        path.addArc(
+            center: CGPoint(x: centerX, y: circleY),
+            radius: circleRadius,
+            startAngle: .degrees(180 + asin((circleY)/circleRadius) * (180 / .pi)),
+            endAngle: .degrees(0 - asin((circleY)/circleRadius) * (180 / .pi)),
+            clockwise: false
+        )
+        
+        // Right horizontal section
+        path.addLine(to: CGPoint(x: width - barRadius, y: 0))
+        
+        // Top right corner
+        path.addArc(
+            center: CGPoint(x: width - barRadius, y: barRadius),
+            radius: barRadius,
+            startAngle: .degrees(270),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        
+        // Right edge
+        path.addLine(to: CGPoint(x: width, y: height - barRadius))
+        
+        // Bottom right corner
+        path.addArc(
+            center: CGPoint(x: width - barRadius, y: height - barRadius),
+            radius: barRadius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        
+        // Bottom edge
+        path.addLine(to: CGPoint(x: barRadius, y: height))
+        
+        // Bottom left corner
+        path.addArc(
+            center: CGPoint(x: barRadius, y: height - barRadius),
+            radius: barRadius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        
+        // Left edge
+        path.closeSubpath()
+        
+        return path
     }
 }
 
@@ -245,16 +417,15 @@ struct TabBarButton: View {
                     .renderingMode(.template)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 28, height: 28)
-                    .padding(.top, 2) // Move icon up a bit
-                    .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.85))
+                    .frame(width: 24, height: 24)
+                    .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.8))
                 
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .padding(.top, -2) // Move text up a bit
-                    .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.85))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.8))
             }
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
     }
 }
@@ -272,29 +443,14 @@ struct AddButton: View {
             ZStack {
                 Circle()
                     .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                    .frame(width: 56, height: 56)
-                    .shadow(color: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.3)), radius: 10)
-                PlusIcon()
-                    .frame(width: 28, height: 28)
+                    .frame(width: 58, height: 58)
+                    .shadow(color: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.25)), radius: 8, y: 2)
+                
+                // Clean plus icon
+                Image(systemName: "plus")
+                    .font(.system(size: 26, weight: .medium))
                     .foregroundColor(.black)
                     .rotationEffect(.degrees(showingMenu ? 45 : 0))
-            }
-        }
-        .padding(.trailing, 12)
-        .padding(.bottom, 5)
-    }
-}
-
-struct PlusIcon: View {
-    var body: some View {
-        GeometryReader { geo in
-            let lineWidth: CGFloat = geo.size.width * 0.13
-            let length: CGFloat = geo.size.width
-            ZStack {
-                RoundedRectangle(cornerRadius: lineWidth/2)
-                    .frame(width: lineWidth, height: length)
-                RoundedRectangle(cornerRadius: lineWidth/2)
-                    .frame(width: length, height: lineWidth)
             }
         }
     }
@@ -556,7 +712,7 @@ struct ProfileScreen: View {
                             .padding(.trailing, 16)
                     }
                     .padding(.top, 32)
-                    .padding(.bottom, 0)
+                    .padding(.bottom, 25)
                     .frame(maxWidth: .infinity, alignment: .center)
                     
                     Spacer(minLength: 0)
@@ -1423,11 +1579,13 @@ struct AddMenuOverlay: View {
     @State private var showHandInput = false
     @Binding var showSessionForm: Bool
     @Binding var showingLiveSession: Bool
+    @Binding var showingOpenHomeGameFlow: Bool
     
     // Create staggered animation delays for each menu item
     private let staggerDelay1 = 0.05
-    private let staggerDelay2 = 0.1
+    private let staggerDelay2 = 0.10
     private let staggerDelay3 = 0.15
+    private let staggerDelay4 = 0.20
 
     var body: some View {
         ZStack {
@@ -1447,29 +1605,21 @@ struct AddMenuOverlay: View {
                 
                 if showingMenu {
                     // Floating menu items
-                    VStack(spacing: 22) { // Increased spacing between buttons
-                        // Hand menu item - appears third
+                    VStack(spacing: 22) {
+                        // Home Game menu item - appears first (closest to the + button visually when menu expands upwards)
                         FloatingMenuButton(
-                            icon: "doc.text",
-                            title: "Add Hand",
-                            action: { showHandInput = true },
-                            delay: staggerDelay3
-                        )
-                        
-                        // Live Session menu item - appears second
-                        FloatingMenuButton(
-                            icon: "clock",
-                            title: "Live Session",
+                            icon: "house.fill",
+                            title: "Home Game",
                             action: {
                                 withAnimation(nil) {
-                                    showingLiveSession = true
+                                    showingOpenHomeGameFlow = true
                                     showingMenu = false
                                 }
                             },
-                            delay: staggerDelay2
+                            delay: staggerDelay1
                         )
-                        
-                        // Past Session menu item - appears first
+
+                        // Past Session menu item - appears second
                         FloatingMenuButton(
                             icon: "clock.arrow.circlepath",
                             title: "Past Session",
@@ -1479,19 +1629,41 @@ struct AddMenuOverlay: View {
                                     showingMenu = false
                                 }
                             },
-                            delay: staggerDelay1
+                            delay: staggerDelay2
+                        )
+
+                        // Live Session menu item - appears third
+                        FloatingMenuButton(
+                            icon: "clock",
+                            title: "Live Session",
+                            action: {
+                                withAnimation(nil) {
+                                    showingLiveSession = true
+                                    showingMenu = false
+                                }
+                            },
+                            delay: staggerDelay3
+                        )
+                        
+                        // Hand menu item - appears fourth (furthest from + button)
+                        FloatingMenuButton(
+                            icon: "doc.text",
+                            title: "Add Hand",
+                            action: { showHandInput = true },
+                            delay: staggerDelay4
                         )
                     }
-                    .padding(.bottom, 120) // Increased bottom padding to position menu higher
-                    .transition(.identity) // Controlled by each button's internal animation
+                    .padding(.bottom, 120)
+                    .transition(.identity)
                 }
             }
         }
         .sheet(isPresented: $showHandInput) {
-            HandInputViewSleek(userId: userId) {
-                showHandInput = false
-                showingMenu = false
-            }
+            NewHandEntryView()
+        }
+        .onDisappear {
+            showHandInput = false
+            showingMenu = false
         }
     }
     
@@ -1541,8 +1713,8 @@ struct FloatingMenuButton: View {
             .padding(.vertical, 8)
             .background(
                 Capsule()
-                    .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 0.95))) // Increased opacity
-                    .shadow(color: Color.black.opacity(0.25), radius: 8, y: 4) // Enhanced shadow
+                    .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 0.95)))
+                    .shadow(color: Color.black.opacity(0.25), radius: 8, y: 4)
             )
             .scaleEffect(appeared ? 1.0 : 0.7)
             .opacity(appeared ? 1.0 : 0)
@@ -1639,12 +1811,33 @@ struct HandInputViewSleek: View {
                 Spacer()
             }
         }
-        .fullScreenCover(isPresented: $showingHandEntryWizard) {
-            ManualHandEntryWizardView()
-        }
         .onDisappear {
             // Call dismiss callback when view disappears
             onDismiss()
         }
+    }
+}
+
+
+struct HandInputView: View {
+    let userId: String
+    var onDismiss: () -> Void
+    @Environment(\.dismiss) var dismiss
+    @StateObject private var handStore = HandStore(userId: "")
+    @State private var handText = ""
+    @State private var isLoading = false
+    @State private var showingError = false
+    @State private var errorMessage = ""
+    @State private var showingHandEntryWizard = false
+
+    init(userId: String, onDismiss: @escaping () -> Void) {
+        self.userId = userId
+        self.onDismiss = onDismiss
+        _handStore = StateObject(wrappedValue: HandStore(userId: userId))
+    }
+
+    var body: some View {
+        // Implementation of HandInputView
+        Text("Hand Input View")
     }
 } 

@@ -77,6 +77,10 @@ struct EnhancedLiveSessionView: View {
     // Add state for tracking selected post
     @State private var selectedPost: Post? = nil
     
+    // Add state variable for tracking whether the edit buy-in section is expanded
+    @State private var showEditBuyIn = false
+    @State private var editBuyInAmount = ""
+    
     // MARK: - Enum Definitions
     enum LiveSessionTab {
         case session
@@ -178,9 +182,6 @@ struct EnhancedLiveSessionView: View {
         .sheet(isPresented: $showingHandHistorySheet) {
             handHistorySheet
         }
-        .fullScreenCover(isPresented: $showingHandWizard) {
-            handWizardView
-        }
         .alert("Exit Session?", isPresented: $showingExitAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Exit Without Saving", role: .destructive) {
@@ -210,6 +211,15 @@ struct EnhancedLiveSessionView: View {
         }
         .sheet(isPresented: $showingRebuySheet) {
             rebuyView
+        }
+        .sheet(isPresented: $showingHandWizard) {
+            NavigationView {
+                NewHandEntryView(sessionId: sessionStore.liveSession.id)
+                    .environmentObject(handStore)
+            }
+            .onDisappear {
+                checkForNewHands()
+            }
         }
         .alert("Sign In Required", isPresented: $showingNoProfileAlert) {
             Button("OK", role: .cancel) { }
@@ -294,16 +304,7 @@ struct EnhancedLiveSessionView: View {
         )
     }
     
-    private var handWizardView: some View {
-        NavigationView {
-            HandWizardWrapper(
-                isPresented: $showingHandWizard,
-                sessionId: sessionStore.liveSession.id,
-                stakes: sessionStore.liveSession.stakes,
-                onDismiss: { checkForNewHands() }
-            )
-        }
-    }
+
     
     // MARK: - Toolbar Content
     
@@ -1624,53 +1625,163 @@ struct EnhancedLiveSessionView: View {
     private var rebuyView: some View {
         NavigationView {
             ZStack {
-                Color(red: 17/255, green: 18/255, blue: 23/255)
+                Color(red: 18/255, green: 20/255, blue: 24/255)
                     .ignoresSafeArea()
                 
-                VStack(spacing: 24) {
-                    Text("Add Rebuy")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Rebuy Amount")
-                            .font(.system(size: 16, weight: .medium))
+                VStack(spacing: 20) {
+                    // Header
+                    HStack {
+                        Text("Add Rebuy")
+                            .font(.system(size: 22, weight: .bold))
                             .foregroundColor(.white)
                         
-                        TextField("0", text: $rebuyAmount)
-                            .keyboardType(.decimalPad)
-                            .padding()
-                            .background(Color.black.opacity(0.3))
-                            .cornerRadius(10)
-                            .foregroundColor(.white)
+                        Spacer()
+                        
+                        Button(action: { showingRebuySheet = false }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    
+                    // Rebuy amount field
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("REBUY AMOUNT")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        
+                        HStack {
+                            Text("$")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.gray)
+                            
+                            TextField("Amount", text: $rebuyAmount)
+                                .keyboardType(.decimalPad)
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(red: 25/255, green: 28/255, blue: 32/255))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                    }
+                    
+                    // Edit Buy-in Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("EDIT TOTAL BUY-IN")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        
+                        // Edit Buy-in button/expandable section
+                        VStack(spacing: 12) {
+                            Button(action: {
+                                withAnimation {
+                                    showEditBuyIn.toggle()
+                                    if showEditBuyIn {
+                                        editBuyInAmount = String(sessionStore.liveSession.buyIn)
+                                    }
+                                }
+                            }) {
+                                HStack {
+                                    Text("Edit Buy-in")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.white)
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: showEditBuyIn ? "chevron.up" : "chevron.down")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.gray)
+                                }
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(red: 25/255, green: 28/255, blue: 32/255))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                            
+                            // Expanded edit section
+                            if showEditBuyIn {
+                                VStack(spacing: 12) {
+                                    HStack {
+                                        Text("$")
+                                            .font(.system(size: 18, weight: .semibold))
+                                            .foregroundColor(.gray)
+                                        
+                                        TextField("Total Buy-in Amount", text: $editBuyInAmount)
+                                            .keyboardType(.decimalPad)
+                                            .font(.system(size: 18, weight: .semibold))
+                                            .foregroundColor(.white)
+                                    }
+                                    .padding()
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(red: 25/255, green: 28/255, blue: 32/255).opacity(0.7))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    )
+                                    
+                                    Button(action: {
+                                        // Update the total buy-in amount
+                                        if let amount = Double(editBuyInAmount.trimmingCharacters(in: .whitespacesAndNewlines)), amount > 0 {
+                                            sessionStore.setTotalBuyIn(amount: amount)
+                                            updateLocalDataFromStore()
+                                            withAnimation {
+                                                showEditBuyIn = false
+                                            }
+                                        }
+                                    }) {
+                                        Text("Update Buy-in")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.black)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .fill(Color.white)
+                                            )
+                                    }
+                                }
+                                .padding(.horizontal, 4)
+                                .padding(.top, 4)
+                                .transition(.opacity)
+                            }
+                        }
                     }
                     
                     Spacer()
                     
+                    // Submit button
                     Button(action: {
                         handleRebuy()
                         showingRebuySheet = false
                     }) {
                         Text("Add Rebuy")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.black)
-                            .padding()
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(Color(red: 25/255, green: 28/255, blue: 32/255))
                             .frame(maxWidth: .infinity)
+                            .padding()
                             .background(
-                                isValidRebuyAmount() 
-                                ? Color(red: 123/255, green: 255/255, blue: 99/255)
-                                : Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5)
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(isValidRebuyAmount() ? Color.white : Color.white.opacity(0.5))
                             )
-                            .cornerRadius(12)
                     }
                     .disabled(!isValidRebuyAmount())
                 }
-                .padding()
+                .padding(24)
             }
-            .navigationBarItems(trailing: Button("Cancel") {
-                showingRebuySheet = false
-            })
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(true)
         }
     }
     
@@ -1814,54 +1925,7 @@ private struct SessionMinimizedFloatingControl: View {
     }
 }
 
-// Hand wizard wrapper to make it easier to dismiss and handle session context
-struct HandWizardWrapper: View {
-    @Binding var isPresented: Bool
-    let sessionId: String
-    let stakes: String
-    let onDismiss: () -> Void
-    @Environment(\.presentationMode) var presentationMode
-    
-    var body: some View {
-        ZStack {
-            // The actual hand entry wizard
-            ManualHandEntryWizardView(
-                sessionId: sessionId,
-                stakes: stakes,
-                onComplete: {
-                    isPresented = false
-                    onDismiss()
-                }
-            )
-            .ignoresSafeArea()
-            
-            // Custom navigation for easier dismissal
-            VStack {
-                HStack {
-                    Button(action: {
-                        isPresented = false
-                        onDismiss()
-                    }) {
-                        HStack {
-                            Image(systemName: "chevron.left")
-                            Text("Back to Session")
-                        }
-                        .foregroundColor(.white)
-                        .padding(8)
-                        .padding(.horizontal, 8)
-                        .background(Color.black.opacity(0.5))
-                        .cornerRadius(20)
-                    }
-                    .padding()
-                    
-                    Spacer()
-                }
-                
-                Spacer()
-            }
-        }
-    }
-}
+
 
 #Preview {
     EnhancedLiveSessionView(

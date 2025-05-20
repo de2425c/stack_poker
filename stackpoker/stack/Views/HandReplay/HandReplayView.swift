@@ -574,25 +574,18 @@ struct HandReplayView: View {
     private func handleShowdown() {
         print("DEBUG - handleShowdown() called - Checking if card reveal is needed")
         
-        // Only reveal cards if it's explicitly a showdown hand or there are multiple active players
-        withAnimation(.easeInOut(duration: 0.5)) {
-            // Mark hand as complete, but don't immediately show cards
-            
-            // CRITICAL: Check hand.raw.showdown to determine if cards should be revealed
-            if let showdown = hand.raw.showdown, showdown == true {
-                print("DEBUG - Hand has showdown=true flag, revealing cards immediately at end")
-                showdownRevealed = true
-                isShowdownComplete = true
-                
-                // Show winner popup after a short delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    showWinnerAnnouncement()
-                }
-            } else {
-                // For non-showdown hands, check if multiple players are active
-                let activePlayerCount = hand.raw.players.filter { !foldedPlayers.contains($0.name) }.count
-                if activePlayerCount > 1 {
-                    print("DEBUG - Multiple active players at showdown but no explicit flag. Revealing immediately.")
+        // First, log the showdown status to help with debugging
+        if let showdown = hand.raw.showdown {
+            print("DEBUG - Hand showdown flag is explicitly set to: \(showdown)")
+        } else {
+            print("DEBUG - Hand has no explicit showdown flag")
+        }
+        
+        // Priority #1: Always respect the explicit showdown flag if it exists
+        if let showdownFlag = hand.raw.showdown {
+            if showdownFlag {
+                print("DEBUG - Respecting explicit showdown=true flag")
+                withAnimation(.easeInOut(duration: 0.5)) {
                     showdownRevealed = true
                     isShowdownComplete = true
                     
@@ -600,14 +593,80 @@ struct HandReplayView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                         showWinnerAnnouncement()
                     }
-                } else {
-                    print("DEBUG - No showdown: \(activePlayerCount) active player(s) and showdown flag is \(hand.raw.showdown)")
+                }
+                
+                // Proceed with distributing the pot
+                handlePotDistribution()
+                return
+            } else {
+                // Explicit showdown=false - no showdown should happen
+                print("DEBUG - Respecting explicit showdown=false flag - no cards will be revealed")
+                withAnimation(.easeInOut(duration: 0.5)) {
                     showdownRevealed = false
                     isShowdownComplete = false
+                    
+                    // Handle pot distribution without showing cards
+                    handlePotDistribution()
                 }
+                return
             }
         }
         
+        // Priority #2: If no explicit flag, check if multiple players are active with cards
+        let activePlayers = hand.raw.players.filter { !foldedPlayers.contains($0.name) }
+        let activePlayerCount = activePlayers.count
+        
+        if activePlayerCount > 1 {
+            // Check if multiple players have cards (implying showdown)
+            let playersWithCards = activePlayers.filter { 
+                ($0.cards != nil && $0.cards!.count >= 2) || 
+                ($0.finalCards != nil && $0.finalCards!.count >= 2) 
+            }
+            
+            if playersWithCards.count >= 2 {
+                print("DEBUG - Multiple players with cards at end - treating as showdown")
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    showdownRevealed = true
+                    isShowdownComplete = true
+                    
+                    // Show winner popup after a short delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        showWinnerAnnouncement()
+                    }
+                }
+                
+                // Proceed with distributing the pot
+                handlePotDistribution()
+                return
+            }
+        }
+        
+        // Priority #3: If only one player is active, they win without showdown
+        if activePlayerCount == 1 {
+            print("DEBUG - Only one active player - no showdown needed")
+            withAnimation(.easeInOut(duration: 0.5)) {
+                showdownRevealed = false
+                isShowdownComplete = true
+                
+                // Handle pot distribution without showing cards
+                handlePotDistribution()
+            }
+            return
+        }
+        
+        // Fallback: No clear showdown condition
+        print("DEBUG - No clear showdown determination - defaulting to no showdown")
+        withAnimation(.easeInOut(duration: 0.5)) {
+            showdownRevealed = false
+            isShowdownComplete = true
+            
+            // Still distribute the pot even with no showdown
+            handlePotDistribution()
+        }
+    }
+    
+    // Add a separate function for pot distribution logic
+    private func handlePotDistribution() {
         // Determine winners based on pot distribution or defaults
         if let distribution = hand.raw.pot.distribution {
             // Use explicit pot distribution from hand history
@@ -706,34 +765,41 @@ struct HandReplayView: View {
                         }
                     }
                 } else {
-                    // Can't determine winner, distribute randomly
-                    print("DEBUG - Cannot determine winner, using fallback equal distribution")
-                    
-                    winningPlayers = Set(activePlayers.map { $0.name })
-                    
-                    // Split pot equally
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
-                            showPotDistribution = true
-                            
-                            if !activePlayers.isEmpty {
-                                let splitAmount = self.potAmount / Double(activePlayers.count)
-                                
-                                for player in activePlayers {
-                                    if let currentStack = self.playerStacks[player.name] {
-                                        self.playerStacks[player.name] = currentStack + splitAmount
-                                    }
-                                }
-                            }
-                            
-                            self.potAmount = 0
-                        }
-                    }
+                    distributeToAllActivePlayers(activePlayers)
                 }
+            } else {
+                distributeToAllActivePlayers(activePlayers)
             }
         }
         
         isHandComplete = true
+    }
+    
+    // Helper function to distribute pot to all active players
+    private func distributeToAllActivePlayers(_ activePlayers: [Player]) {
+        // Can't determine winner, distribute evenly
+        print("DEBUG - Cannot determine winner, using fallback equal distribution")
+        
+        winningPlayers = Set(activePlayers.map { $0.name })
+        
+        // Split pot equally
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                showPotDistribution = true
+                
+                if !activePlayers.isEmpty {
+                    let splitAmount = self.potAmount / Double(activePlayers.count)
+                    
+                    for player in activePlayers {
+                        if let currentStack = self.playerStacks[player.name] {
+                            self.playerStacks[player.name] = currentStack + splitAmount
+                        }
+                    }
+                }
+                
+                self.potAmount = 0
+            }
+        }
     }
 }
 

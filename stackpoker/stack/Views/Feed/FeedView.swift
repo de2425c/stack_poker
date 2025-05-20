@@ -55,8 +55,8 @@ struct FeedView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                // Use the AppBackgroundView for a rich background
-                AppBackgroundView()
+                // Add a dark background color to prevent white background
+                Color(red: 18/255, green: 18/255, blue: 24/255)
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
@@ -73,7 +73,7 @@ struct FeedView: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
-                        .background(Color.black.opacity(0.2))
+                        .background(Color.black.opacity(0.15)) // More transparent background to show app background
                         .cornerRadius(10)
                         .contentShape(Rectangle()) // Make the whole area tappable
                         .onTapGesture {
@@ -90,9 +90,9 @@ struct FeedView: View {
                         }
                     }
                     .padding(.horizontal)
-                    .padding(.top, (UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) + 8) // Safe area + some padding
+                    .padding(.top, 8) // Reduced from a larger value that included safe area
                     .padding(.bottom, 8)
-                    .background(Color(UIColor(red: 12/255, green: 12/255, blue: 16/255, alpha: 1.0))) // Background for the top bar area
+                    .background(Color.clear) // Remove solid background to let app background show through
 
                     // Feed content
                     if postService.isLoading && postService.posts.isEmpty {
@@ -1794,7 +1794,7 @@ private struct PostBodyContentView: View {
     @Binding var selectedImageURL: String?
     @Binding var showingFullScreenImage: Bool
 
-    // Helper functions like isNote, extractSessionInfo, extractCommentContent, 
+    // Helper functions like isNote, extractSessionInfo, extractCommentContent,
     // extractNoteContent, parseSessionContent should be accessible here.
     // If they are private to PostDetailView, they need to be moved or made available.
     // For now, assuming they are top-level private functions in the file or accessible.
@@ -1831,7 +1831,7 @@ private struct PostBodyContentView: View {
                             SharedNoteView(note: extractNoteContent(from: post.content))
                         }
                         .padding(.horizontal, 16)
-                    } 
+                    }
                     // Hand post with session badge
                     else if post.postType == .hand {
                         VStack(alignment: .leading, spacing: 12) {
@@ -1877,7 +1877,7 @@ private struct PostBodyContentView: View {
                             }
                         }
                         .padding(.horizontal, 16)
-                    } 
+                    }
                     // Fallback for other session posts
                     else {
                         Text(post.content)
@@ -1887,7 +1887,7 @@ private struct PostBodyContentView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
                     }
-                } 
+                }
                 // Check for non-session notes
                 else if isNote(content: post.content) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -2128,5 +2128,4 @@ private struct PostCommentsSectionView: View {
 // used within PostBodyContentView must be accessible. If they are private to PostDetailView,
 // they need to be moved to be top-level private functions in the file, or passed into PostBodyContentView.
 // Assuming they are accessible for now.
-
 

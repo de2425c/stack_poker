@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseStorage
 import Charts
 import UIKit
 
@@ -947,9 +948,17 @@ struct ActivityContentView: View {
 struct SettingsView: View {
     let userId: String
     @EnvironmentObject var authViewModel: AuthViewModel
+    @State private var showDeleteConfirmation = false
+    @State private var showFinalDeleteConfirmation = false
+    @State private var deleteError: String? = nil
+    @State private var isDeleting = false
     
     var body: some View {
-        ScrollView {
+        ZStack {
+            // Use AppBackgroundView as the background
+            AppBackgroundView()
+                .ignoresSafeArea()
+            
             VStack(spacing: 24) {
                 // Header
                 Text("Settings")
@@ -959,24 +968,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
                 
-                // Settings Groups
-                SettingsGroup(title: "Account") {
-                    SettingsRow(icon: "person.fill", title: "Account Information")
-                    SettingsRow(icon: "bell.fill", title: "Notifications")
-                    SettingsRow(icon: "lock.fill", title: "Privacy & Security")
-                }
-                
-                SettingsGroup(title: "App Settings") {
-                    SettingsRow(icon: "display", title: "Appearance")
-                    SettingsRow(icon: "hand.raised.fill", title: "Hand History Format")
-                    SettingsRow(icon: "dollarsign.circle.fill", title: "Currency Settings")
-                }
-                
-                SettingsGroup(title: "Support") {
-                    SettingsRow(icon: "questionmark.circle.fill", title: "Help & Support")
-                    SettingsRow(icon: "exclamationmark.bubble.fill", title: "Report a Problem")
-                    SettingsRow(icon: "hand.thumbsup.fill", title: "Rate the App")
-                }
+                Spacer()
                 
                 // Sign Out Button
                 Button(action: signOut) {
@@ -994,10 +986,9 @@ struct SettingsView: View {
                     )
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 16)
                 
                 // Delete Account Button
-                Button(action: {}) {
+                Button(action: { showDeleteConfirmation = true }) {
                     HStack {
                         Spacer()
                         Text("Delete Account")
@@ -1015,14 +1006,138 @@ struct SettingsView: View {
                 .padding(.bottom, 120) // Extra padding for tab bar
             }
         }
+        .alert("Delete Your Account?", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                showFinalDeleteConfirmation = true
+            }
+        } message: {
+            Text("This will remove all your data from the app. This action cannot be undone.")
+        }
+        .alert("Permanently Delete Account", isPresented: $showFinalDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Yes, Delete Everything", role: .destructive) {
+                deleteAccount()
+            }
+        } message: {
+            Text("Are you absolutely sure? All your data, posts, groups, and messages will be permanently deleted.")
+        }
+        .alert("Error", isPresented: .init(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deleteError ?? "An unknown error occurred")
+        }
     }
     
     private func signOut() {
         do {
             try Auth.auth().signOut()
-            authViewModel.checkAuthState()
+            // Directly set auth state to signed out to trigger the welcome screen
+            DispatchQueue.main.async {
+                // Clear user data first to prevent any state inconsistencies
+                authViewModel.userService.currentUserProfile = nil
+                // This will directly switch to the WelcomeView through MainCoordinator
+                authViewModel.authState = .signedOut
+            }
         } catch {
             print("Error signing out: \(error)")
+        }
+    }
+    
+    private func deleteAccount() {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            deleteError = "Not signed in"
+            return
+        }
+        
+        isDeleting = true
+        
+        Task {
+            do {
+                // 1. Delete user data from collections
+                try await deleteUserDataFromFirestore(userId)
+                
+                // 2. Delete Firebase Auth user
+                try await Auth.auth().currentUser?.delete()
+                
+                // 3. Sign out immediately after successful deletion
+                do {
+                    try Auth.auth().signOut()
+                } catch {
+                    print("Error signing out after account deletion: \(error.localizedDescription)")
+                }
+                
+                await MainActor.run {
+                    isDeleting = false
+                    // The app will automatically redirect to the sign-in page due to auth state change
+                    authViewModel.checkAuthState()
+                }
+            } catch {
+                await MainActor.run {
+                    isDeleting = false
+                    deleteError = "Failed to delete account: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    
+    private func deleteUserDataFromFirestore(_ userId: String) async throws {
+        let db = Firestore.firestore()
+        let batch = db.batch()
+        
+        // Delete user document
+        batch.deleteDocument(db.collection("users").document(userId))
+        
+        // Delete user's groups
+        let userGroups = try await db.collection("users")
+            .document(userId)
+            .collection("groups")
+            .getDocuments()
+        
+        for doc in userGroups.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        
+        // Delete user's group invites
+        let userInvites = try await db.collection("users")
+            .document(userId)
+            .collection("groupInvites")
+            .getDocuments()
+        
+        for doc in userInvites.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        
+        // Delete user's followers/following
+        let followers = try await db.collection("users")
+            .document(userId)
+            .collection("followers")
+            .getDocuments()
+        
+        for doc in followers.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        
+        let following = try await db.collection("users")
+            .document(userId)
+            .collection("following")
+            .getDocuments()
+        
+        for doc in following.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        
+        // Commit the batch deletion of Firestore data
+        try await batch.commit()
+        
+        // Attempt to delete profile image, but don't let it stop the account deletion process
+        do {
+            try await Storage.storage().reference()
+                .child("profile_images/\(userId).jpg")
+                .delete()
+        } catch {
+            // Log the error but continue with account deletion
+            print("Profile image deletion failed: \(error.localizedDescription). Continuing with account deletion.")
         }
     }
 }
