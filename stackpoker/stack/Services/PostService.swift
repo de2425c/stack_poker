@@ -295,7 +295,7 @@ class PostService: ObservableObject {
         }
     }
     
-    func createHandPost(content: String, userId: String, username: String, displayName: String? = nil, profileImage: String?, hand: ParsedHandHistory, sessionId: String? = nil) async throws {
+    func createHandPost(content: String, userId: String, username: String, displayName: String?, profileImage: String?, hand: ParsedHandHistory, sessionId: String?, location: String?) async throws {
         let documentRef = db.collection("posts").document()
         
         let post = Post(
@@ -311,13 +311,26 @@ class PostService: ObservableObject {
             comments: 0,
             postType: .hand,
             handHistory: hand,
-            sessionId: sessionId
+            sessionId: sessionId,
+            location: location
         )
         
         try await documentRef.setData(from: post)
         
-        await MainActor.run {
-            posts.insert(post, at: 0)
+        // Fetch the newly created post to include its full data (like server timestamp for createdAt)
+        // and then insert it locally to ensure UI consistency.
+        if let newPost = try await fetchSinglePost(byId: documentRef.documentID) {
+            await MainActor.run {
+                // Add to the beginning of the posts array if it's relevant to the current feed view
+                // This logic might need adjustment based on how/if PostService filters posts
+                posts.insert(newPost, at: 0)
+            }
+        } else {
+            // Fallback or error handling if the new post couldn't be fetched
+            // For now, we'll print an error. Consider more robust error handling.
+            print("Error: Newly created hand post (\\(documentRef.documentID)) could not be fetched after creation.")
+            // As a minimal fallback, we could try to insert the locally created `post` object,
+            // but it might lack server-generated fields like the precise `createdAt` timestamp.
         }
     }
     

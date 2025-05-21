@@ -360,14 +360,14 @@ struct ProfileView: View {
                                 Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
                                     .font(.system(size: 10))
                                     .foregroundColor(timeRangeProfit >= 0 ? 
-                                        Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
-                                        Color.red)
+                                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
                                 
                                 Text("$\(abs(Int(timeRangeProfit)).formattedWithCommas)")
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(timeRangeProfit >= 0 ? 
-                                        Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
-                                        Color.red)
+                                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
                                 
                                 Text(getTimeRangeLabel(for: selectedTimeRange))
                                     .font(.system(size: 14))
@@ -403,8 +403,8 @@ struct ProfileView: View {
                                         let selectedTimeRangeProfit = selectedSessions.reduce(0) { $0 + $1.profit }
                                         let isProfit = selectedTimeRangeProfit >= 0
                                         let chartColor = isProfit ? 
-                                            Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
-                                            Color.red
+                                            Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                            Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
                                         
                                         // Simplified line chart
                                         Path { path in

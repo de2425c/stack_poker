@@ -1,17 +1,17 @@
 {
   "images" : [
     {
-      "filename" : "Screenshot_2025-04-28_at_2.42.45_PM_1-removebg-preview.png",
+      "filename" : "home.png",
       "idiom" : "universal",
       "scale" : "1x"
     },
     {
-      "filename" : "Screenshot_2025-04-28_at_2.42.45_PM_1-removebg-preview 1.png",
+      "filename" : "home 1.png",
       "idiom" : "universal",
       "scale" : "2x"
     },
     {
-      "filename" : "Screenshot_2025-04-28_at_2.42.45_PM_1-removebg-preview 2.png",
+      "filename" : "home 2.png",
       "idiom" : "universal",
       "scale" : "3x"
     }

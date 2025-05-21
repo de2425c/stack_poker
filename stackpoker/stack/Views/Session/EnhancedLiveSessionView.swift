@@ -81,6 +81,13 @@ struct EnhancedLiveSessionView: View {
     @State private var showEditBuyIn = false
     @State private var editBuyInAmount = ""
     
+    // New states
+    @State private var showingShareToFeedPrompt = false
+    @State private var sessionDetails: (buyIn: Double, cashout: Double, profit: Double, duration: String, gameName: String, stakes: String, sessionId: String)? = nil
+    @State private var showingSimpleNoteEditor = false // New state for presenting the note editor
+    @State private var showingNewHandEntry = false // New state for presenting NewHandEntryView
+    @State private var sessionToNavigateTo: Session? = nil // For navigating to SessionDetailView
+    
     // MARK: - Enum Definitions
     enum LiveSessionTab {
         case session
@@ -154,6 +161,21 @@ struct EnhancedLiveSessionView: View {
         ZStack {
             // Base background
             AppBackgroundView()
+                .ignoresSafeArea()
+            
+            // NavigationLink for programmatic navigation to SessionDetailView
+            // It's active when sessionToNavigateTo is not nil.
+            // Ensure mainContent or its parent is in a NavigationView/NavigationStack
+            if let session = sessionToNavigateTo {
+                NavigationLink(
+                    destination: SessionDetailView(session: session)
+                                 .navigationBarBackButtonHidden(true), // Hide back button if we are dismissing this view anyway
+                    isActive: .constant(true) // Activate link immediately when session is set
+                ) {
+                    EmptyView()
+                }
+                .hidden() // Keep the NavigationLink view itself hidden
+            }
             
             // Main content
             VStack(spacing: 0) {
@@ -206,7 +228,46 @@ struct EnhancedLiveSessionView: View {
         } message: {
             Text("Enter your final chip count to end the session")
         }
-        .sheet(isPresented: $showingPostEditor) {
+        .alert("Share Session Result", isPresented: $showingShareToFeedPrompt) {
+            Button("Not Now", role: .cancel) {
+                dismiss()
+            }
+            Button("Share to Feed") {
+                if let details = sessionDetails, userService.currentUserProfile != nil {
+                    // Create session summary content
+                    let profitText = details.profit >= 0 ? "+$\(Int(details.profit))" : "-$\(Int(abs(details.profit)))"
+                    let content = """
+                    Session at \(details.gameName) (\(details.stakes))
+                    Duration: \(details.duration)
+                    Buy-in: $\(Int(details.buyIn))
+                    Cashout: $\(Int(details.cashout))
+                    Profit: \(profitText)
+                    """
+                    
+                    // Show the post editor with session details
+                    shareToFeedContent = content
+                    shareToFeedIsHand = false
+                    shareToFeedHandData = nil
+                    shareToFeedUpdateId = nil
+                    shareToFeedIsNote = false
+                    shareToFeedIsChipUpdate = false
+                    showingPostEditor = true
+                } else {
+                    dismiss()
+                }
+            }
+        } message: {
+            if let details = sessionDetails {
+                let profitText = details.profit >= 0 ? "+$\(Int(details.profit))" : "-$\(Int(abs(details.profit)))"
+                Text("Share your \(profitText) session result with your followers?")
+            } else {
+                Text("Would you like to share your session result?")
+            }
+        }
+        .sheet(isPresented: $showingPostEditor, onDismiss: {
+            // When the post editor dismisses, also dismiss this view
+            dismiss()
+        }) {
             postEditorSheet
         }
         .sheet(isPresented: $showingRebuySheet) {
@@ -229,8 +290,8 @@ struct EnhancedLiveSessionView: View {
     }
     
     private var activeSessionView: some View {
-        VStack(spacing: 0) {
-            // Main content with tabs
+        ZStack(alignment: .bottom) { // Align content to the bottom for the tab bar
+            // TabView takes up the main space
             TabView(selection: $selectedTab) {
                 sessionTabView
                     .tag(LiveSessionTab.session)
@@ -249,8 +310,14 @@ struct EnhancedLiveSessionView: View {
                     .contentShape(Rectangle())
             }
             .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            // Add bottom padding to the TabView itself to make space for the floating tab bar
+            // This value should be roughly the height of the customTabBar + its container's bottom padding
+            .padding(.bottom, 80) // Example: 50 for tab bar + 15 for top padding + 15 for bottom container padding
             
+            // Container for the floating tab bar
             customTabBar
+                .padding(.horizontal, 20) // Padding from screen edges
+                .padding(.bottom, 50) // Padding from the very bottom of the screen (adjust for safe area if needed)
         }
     }
     
@@ -261,17 +328,14 @@ struct EnhancedLiveSessionView: View {
             tabButton(title: "Hands", icon: "suit.spade", tab: .hands)
             tabButton(title: "Posts", icon: "text.bubble", tab: .posts)
         }
+        .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(
-            Color(red: 22/255, green: 24/255, blue: 28/255)
-                .edgesIgnoringSafeArea(.bottom)
+            // Use a Material blur for a modern floating effect
+            .ultraThinMaterial
         )
-        .overlay(
-            Rectangle()
-                .frame(height: 1)
-                .foregroundColor(Color.black.opacity(0.3)),
-            alignment: .top
-        )
+        .clipShape(Capsule()) // Rounded capsule shape for the floating bar
+        .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 5) // Soft shadow
     }
     
     private var minimizedControl: some View {
@@ -304,14 +368,34 @@ struct EnhancedLiveSessionView: View {
         )
     }
     
-
-    
     // MARK: - Toolbar Content
     
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) { titleView }
         ToolbarItem(placement: .navigationBarLeading) { leadingButton }
+        
+        if selectedTab == .notes {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showingSimpleNoteEditor = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(accentColor)
+                }
+            }
+        } else if selectedTab == .hands {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showingNewHandEntry = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(accentColor)
+                }
+            }
+        }
     }
     
     private var titleView: some View {
@@ -366,20 +450,16 @@ struct EnhancedLiveSessionView: View {
     private func handleOnAppear() {
         // Check if there's an active session first
         if sessionStore.liveSession.buyIn > 0 {
-            if sessionStore.liveSession.isActive {
-                sessionMode = .active
-            } else if sessionStore.liveSession.lastPausedAt != nil {
-                sessionMode = .paused
+            // Determine session mode more directly
+            sessionMode = sessionStore.liveSession.isActive ? .active : .paused
+            
+            // If it's a new session or the initial buy-in hasn't been recorded as a chip update yet
+            if sessionStore.enhancedLiveSession.chipUpdates.isEmpty && sessionStore.liveSession.buyIn > 0 {
+                 sessionStore.updateChipStack(amount: sessionStore.liveSession.buyIn, note: "Initial buy-in")
             }
             // Initialize data from session store's enhanced session
-            updateLocalDataFromStore()
+            updateLocalDataFromStore() // This will now include Session Started and the initial chip update if just added
             
-            // If no chip updates yet, initialize with buy-in
-            if chipUpdates.isEmpty {
-                handleStackUpdate(amount: String(sessionStore.liveSession.buyIn), note: "Initial buy-in")
-            }
-            
-            // Load session posts
             loadSessionPosts()
             
             // Check for hands associated with this session
@@ -413,124 +493,137 @@ struct EnhancedLiveSessionView: View {
     
     // View for setting up a new session
     private var setupView: some View {
-        ScrollView {
-            VStack(spacing: 32) {
-                // Game Selection Section
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Select Game")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white)
-                    
-                    if cashGameService.cashGames.isEmpty {
-                        HStack {
-                            Text("No games added. Tap to add a new game.")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                            
-                            Spacer()
-                            
-                            Button(action: { showingAddGame = true }) {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(.white)
-                                    .padding(10)
-                                    .background(Circle().fill(Color.gray.opacity(0.3)))
-                            }
-                        }
-                        .padding(.vertical, 20)
-                    } else {
-                        // Game selection grid
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                            ForEach(cashGameService.cashGames) { game in
-                                GameCard(
-                                    title: game.name,
-                                    subtitle: game.stakes,
-                                    isSelected: selectedGame?.id == game.id
-                                )
-                                .onTapGesture {
-                                    selectedGame = game
-                                }
-                            }
-                            
-                            // Add new game card
-                            Button(action: { showingAddGame = true }) {
-                                VStack(spacing: 12) {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 24))
-                                        .foregroundColor(.white.opacity(0.6))
-                                    
-                                    Text("Add Game")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.6))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 100)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.gray.opacity(0.15))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                                        )
-                                )
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal)
+        ZStack {
+            // Use AppBackgroundView as background
+            AppBackgroundView()
+                .ignoresSafeArea()
                 
-                // Buy-in Section
-                if selectedGame != nil {
+            ScrollView {
+                VStack(spacing: 32) {
+                    // Add top padding for transparent navigation bar
+                    Spacer()
+                        .frame(height: 50)
+                    
+                    // Game Selection Section
                     VStack(alignment: .leading, spacing: 16) {
-                        Text("Buy-in Amount")
+                        Text("Select Game")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.white)
                         
-                        HStack {
-                            Text("$")
-                                .font(.system(size: 20, weight: .medium))
-                                .foregroundColor(.gray)
-                            
-                            TextField("0", text: $buyIn)
-                                .keyboardType(.decimalPad)
-                                .font(.system(size: 20, weight: .medium))
-                                .foregroundColor(.white)
+                        if cashGameService.cashGames.isEmpty {
+                            HStack {
+                                Text("No games added. Tap to add a new game.")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
+                                
+                                Spacer()
+                                
+                                Button(action: { showingAddGame = true }) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(.white)
+                                        .padding(10)
+                                        .background(Circle().fill(Color.gray.opacity(0.3)))
+                                }
+                            }
+                            .padding(.vertical, 20)
+                        } else {
+                            // Game selection grid with consistent sizing
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                                ForEach(cashGameService.cashGames) { game in
+                                    GameCard(
+                                        title: game.name,
+                                        subtitle: game.stakes,
+                                        isSelected: selectedGame?.id == game.id
+                                    )
+                                    .onTapGesture {
+                                        selectedGame = game
+                                    }
+                                }
+                                
+                                // Add new game card (matches game card style)
+                                Button(action: { showingAddGame = true }) {
+                                    HStack {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 18))
+                                            .foregroundColor(.white)
+                                        
+                                        Text("Add Game")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(.white)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .frame(height: 50)
+                                    .padding(12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                                            )
+                                    )
+                                }
+                            }
                         }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                                )
-                        )
                     }
                     .padding(.horizontal)
-                }
-                
-                // Start Button
-                if selectedGame != nil {
-                    Button(action: startSession) {
-                        Text("Start Session")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 54)
+                    
+                    // Buy-in Section
+                    if selectedGame != nil {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Buy-in Amount")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.white)
+                            
+                            HStack {
+                                Text("$")
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundColor(.gray)
+                                
+                                TextField("0", text: $buyIn)
+                                    .keyboardType(.decimalPad)
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundColor(.white)
+                            }
+                            .padding()
                             .background(
-                                RoundedRectangle(cornerRadius: 27)
-                                    .fill(buyIn.isEmpty ? Color.gray.opacity(0.5) : accentColor)
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                                    )
                             )
+                        }
+                        .padding(.horizontal)
                     }
-                    .disabled(buyIn.isEmpty)
-                    .padding(.horizontal)
-                    .padding(.top, 16)
+                    
+                    // Start Button
+                    if selectedGame != nil {
+                        Button(action: startSession) {
+                            Text("Start Session")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 54)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 27)
+                                        .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.5))
+                                        .background(.ultraThinMaterial)
+                                        .clipShape(RoundedRectangle(cornerRadius: 27))
+                                )
+                        }
+                        .disabled(buyIn.isEmpty)
+                        .padding(.horizontal)
+                        .padding(.top, 16)
+                    }
+                    
+                    Spacer()
                 }
-                
-                Spacer()
+                .padding(.top, 16)
+                .padding(.bottom, 40)
             }
-            .padding(.top, 16)
-            .padding(.bottom, 40)
         }
         .sheet(isPresented: $showingAddGame) {
             AddCashGameView(cashGameService: cashGameService)
@@ -548,22 +641,22 @@ struct EnhancedLiveSessionView: View {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
+                    .lineLimit(1)
                 
                 Text(subtitle)
                     .font(.system(size: 14))
-                    .foregroundColor(.gray)
-                
-                Spacer()
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 100)
+            .frame(height: 50)
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : Color.gray.opacity(0.3), lineWidth: isSelected ? 2 : 1)
+                            .stroke(isSelected ? Color.white : Color.gray.opacity(0.3), lineWidth: isSelected ? 2 : 1)
                     )
             )
         }
@@ -607,48 +700,57 @@ struct EnhancedLiveSessionView: View {
                             .foregroundColor(.white)
 
                         ForEach(recentUpdates.prefix(4)) { item in
+                            // Get the share action (will be nil for notes)
+                            let shareAction = getShareAction(for: item)
+                            
                             SessionUpdateCard(
                                 title: item.title,
                                 description: item.description,
                                 timestamp: item.timestamp,
-                                isPosted: false,
-                                onPost: {
-                                    // Post content based on type
-                                    if item.kind == .chip {
-                                        if let update = chipUpdates.first(where: { $0.id == item.id }) {
-                                            let updateContent = "Stack update: $\(Int(update.amount))\(update.note != nil ? "\nNote: \(update.note!)" : "")"
-                                            showShareToFeedDialog(content: updateContent, isHand: false, handData: nil, updateId: update.id)
-                                        }
-                                    } else if item.kind == .note {
-                                        if let noteId = item.id.split(separator: "_").last,
-                                           let index = Int(noteId),
-                                           index < notes.count {
-                                            let noteContent = notes[index]
-                                            showShareToFeedDialog(content: noteContent, isHand: false)
-                                        }
-                                    } else if item.kind == .hand {
-                                        if let entry = handHistories.first(where: { $0.id == item.id }) {
-                                            var handData: ParsedHandHistory? = nil
-                                            if let hand = handStore.savedHands.first(where: { 
-                                                entry.content.contains("Hand ID: \($0.id)") 
-                                            }) {
-                                                handData = hand.hand
-                                            }
-                                            showShareToFeedDialog(content: cleanHandHistoryContent(entry.content), isHand: true, handData: handData)
-                                        }
-                                    } else if item.kind == .sessionStart {
-                                        // For session start updates, share basic session info
-                                        let sessionInfo = getSessionDetailsText()
-                                        showShareToFeedDialog(content: "Started a new session", isHand: false)
-                                    }
-                                }
+                                isPosted: false, // Assuming this is for UI state of the card
+                                onPost: shareAction // Pass the optional shareAction directly
                             )
                         }
                     }
                     .padding(.horizontal)
                 }
             }
-            .padding(.vertical, 16)
+            .padding(.top, 16)
+            // No longer need extra bottom padding here, as TabView is padded
+            // .padding(.bottom, 70) 
+        }
+    }
+    
+    // Helper function to create the appropriate share action for each activity item
+    private func getShareAction(for item: UpdateItem) -> (() -> Void)? {
+        // No share action for notes
+        if item.kind == .note {
+            return nil
+        }
+        
+        // Return appropriate action for other types
+        return {
+            if item.kind == .chip {
+                if let update = self.chipUpdates.first(where: { $0.id == item.id }) {
+                    let updateContent = "Stack update: $\(Int(update.amount))\(update.note != nil ? "\nNote: \(update.note!)" : "")"
+                    self.showShareToFeedDialog(content: updateContent, isHand: false, handData: nil, updateId: update.id)
+                }
+            } else if item.kind == .hand {
+                // Directly find the SavedHand using item.id from handStore
+                if let savedHand = self.handStore.savedHands.first(where: { $0.id == item.id }) {
+                    // Pass the ParsedHandHistory from the found SavedHand
+                    // The content for showShareToFeedDialog can be minimal or derived, as PostEditorView will use the ParsedHandHistory
+                    let handContentSummary = self.createSummaryFromParsedHand(hand: savedHand.hand) // Optional: for a brief text part if needed
+                    self.showShareToFeedDialog(content: "", isHand: true, handData: savedHand.hand, updateId: savedHand.id)
+                } else {
+                    print("Error: Could not find SavedHand in handStore for ID: \(item.id)")
+                    // Optionally, show an alert to the user that the hand data couldn't be loaded for sharing
+                }
+            } else if item.kind == .sessionStart {
+                // For session start updates, share basic session info
+                let sessionInfo = self.getSessionDetailsText()
+                self.showShareToFeedDialog(content: "Started a new session", isHand: false)
+            }
         }
     }
     
@@ -673,9 +775,11 @@ struct EnhancedLiveSessionView: View {
                     .padding(16)
                 }
             }
-            
-            // Note input at bottom
-            noteInputView
+        }
+        .sheet(isPresented: $showingSimpleNoteEditor, onDismiss: {
+            updateLocalDataFromStore() // Refresh local notes data when editor dismisses
+        }) { 
+            SimpleNoteEditorView(sessionStore: sessionStore, sessionId: sessionStore.liveSession.id)
         }
     }
     
@@ -702,100 +806,46 @@ struct EnhancedLiveSessionView: View {
         .padding()
     }
     
-    private var noteInputView: some View {
-        VStack(spacing: 0) {
-            Divider()
-                .background(Color.white.opacity(0.1))
-            
-            SessionInputField(
-                icon: "square.and.pencil",
-                placeholdText: "Add a note...",
-                text: $noteText,
-                onSubmit: {
-                    handleSimpleNote()
-                }
-            )
-            .padding(12)
-        }
-        .background(Color(red: 22/255, green: 24/255, blue: 28/255))
-    }
-    
     // Hands Tab - For viewing and adding hand histories
     private var handsTabView: some View {
         VStack(spacing: 0) {
-            // Hand Histories List
-            if handHistories.isEmpty {
-                emptyHandsView
+            // Filter hands directly in the ForEach to ensure it observes changes to handStore.savedHands
+            let currentSessionHands = handStore.savedHands.filter { $0.sessionId == sessionStore.liveSession.id }
+                                                              .sorted(by: { $0.timestamp > $1.timestamp })
+
+            if currentSessionHands.isEmpty {
+                emptyHandsView // Keep the empty state view
             } else {
                 ScrollView {
                     LazyVStack(spacing: 16) {
-                        ForEach(handHistories.sorted(by: { $0.timestamp > $1.timestamp }), id: \.id) { entry in
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text("Hand History")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white)
-                                    
-                                    Spacer()
-                                    
-                                    Text(formattedTime(entry.timestamp))
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.gray)
-                                }
-                                
-                                // Cleaner display of hand history with proper formatting
-                                VStack(alignment: .leading, spacing: 4) {
-                                    let content = cleanHandHistoryContent(entry.content)
-                                    let lines = content.split(separator: "\n")
-                                    
-                                    ForEach(0..<lines.count, id: \.self) { index in
-                                        Text(String(lines[index]))
-                                            .font(.system(size: 12, design: .monospaced))
-                                            .foregroundColor(getColorForHandHistoryLine(String(lines[index])))
-                                    }
-                                }
-                                .padding(12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color(red: 25/255, green: 28/255, blue: 32/255))
-                                )
-                            }
-                            .padding(16)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
+                        // Use handData.id for ForEach identification, as SavedHand is Identifiable
+                        ForEach(currentSessionHands) { handData in 
+                            HandDisplayCardView(
+                                hand: handData.hand, // Pass the ParsedHandHistory object
+                                onReplayTap: { 
+                                    // Placeholder for future replay functionality
+                                    // You would typically present a HandReplayView here, possibly passing handData.id or handData.hand
+                                    print("Replay tapped for hand ID: \(handData.id)")
+                                }, 
+                                location: "$\(Int(handData.hand.raw.gameInfo.smallBlind))/$\(Int(handData.hand.raw.gameInfo.bigBlind))", // Use stakes as location
+                                createdAt: handData.timestamp, // Use handData.timestamp
+                                showReplayInFeed: false // Set to false to SHOW the replay button
                             )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                            )
+                            .padding(.horizontal) // Add some horizontal padding to the card
                         }
                     }
-                    .padding(16)
+                    .padding(.vertical, 16) // Padding for the content within ScrollView
                 }
             }
-            
-            // Add hand button at bottom
-            VStack(spacing: 0) {
-                Divider()
-                    .background(Color.white.opacity(0.1))
-                
-                Button(action: {
-                    showingHandWizard = true
-                }) {
-                    HStack {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 18))
-                        
-                        Text("Add Hand History")
-                            .font(.system(size: 15, weight: .medium))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                }
-            }
-            .background(Color(red: 22/255, green: 24/255, blue: 28/255))
+        }
+        .sheet(isPresented: $showingNewHandEntry) {
+            NewHandEntryView(sessionId: sessionStore.liveSession.id)
+                .environmentObject(handStore)
+        }
+        .onAppear {
+            // Call method on the observed object instance
+            self.handStore.loadSavedHands() // Or fetchSavedHands() if that's the correct method name
+            self.checkForNewHands() 
         }
     }
     
@@ -873,6 +923,7 @@ struct EnhancedLiveSessionView: View {
                                             do {
                                                 try await postService.toggleLike(postId: post.id ?? "", userId: userId)
                                                 // Reload posts after liking
+                                
                                                 loadSessionPosts()
                                             } catch {
                                                 print("Error toggling like: \(error)")
@@ -1090,23 +1141,47 @@ struct EnhancedLiveSessionView: View {
     private func endSession(cashout: Double) {
         isLoadingSave = true
         
+        // Store details for potential sharing - this might be removed if direct navigation occurs
+        let buyIn = sessionStore.liveSession.buyIn
+        let profit = cashout - buyIn
+        let elapsedTime = Int(sessionStore.liveSession.elapsedTime)
+        let hours = elapsedTime / 3600
+        let minutes = (elapsedTime % 3600) / 60
+        let durationString = "\(hours)h \(minutes)m"
+        
+        // Keep local copy for now, might be used if navigation target needs more than just ID
+        let tempSessionDetails = (
+            buyIn: buyIn,
+            cashout: cashout,
+            profit: profit,
+            duration: durationString,
+            gameName: sessionStore.liveSession.gameName,
+            stakes: sessionStore.liveSession.stakes,
+            sessionId: sessionStore.liveSession.id // This is the liveSessionUUID
+        )
+        
         Task {
-            // Make one final stack update to record the cashout amount
-            if sessionStore.enhancedLiveSession.chipUpdates.isEmpty || 
-               sessionStore.enhancedLiveSession.currentChipAmount != cashout {
-                sessionStore.updateChipStack(amount: cashout, note: "Final cashout amount")
+            if self.sessionStore.enhancedLiveSession.chipUpdates.isEmpty || 
+               self.sessionStore.enhancedLiveSession.currentChipAmount != cashout {
+                self.sessionStore.updateChipStack(amount: cashout, note: "Final cashout amount")
             }
             
-            if let error = await sessionStore.endLiveSessionAsync(cashout: cashout) {
-                await MainActor.run {
-                    isLoadingSave = false
-                    print("Error saving session: \(error.localizedDescription)")
-                    // Could show an alert here
-                }
-            } else {
-                await MainActor.run {
-                    isLoadingSave = false
-                    dismiss()
+            // Call methods on self.sessionStore
+            let endedSessionId = await self.sessionStore.endLiveSessionAndGetId(cashout: cashout) 
+            
+            await MainActor.run {
+                self.isLoadingSave = false
+                if let sessionId = endedSessionId {
+                    if let completedSession = self.sessionStore.getSessionById(sessionId) { 
+                        self.sessionToNavigateTo = completedSession
+                        self.dismiss() 
+                    } else {
+                        print("Error: Could not fetch completed session details for ID: \(sessionId)")
+                        self.dismiss() 
+                    }
+                } else {
+                    print("Error saving session or getting ID.")
+                    self.dismiss() 
                 }
             }
         }
@@ -1145,23 +1220,6 @@ struct EnhancedLiveSessionView: View {
         
         // Update local data
         updateLocalDataFromStore()
-    }
-    
-    // Handle simple note input
-    private func handleSimpleNote() {
-        guard !noteText.isEmpty else { return }
-        
-        // Update the store's enhanced session data
-        sessionStore.addNote(note: noteText)
-        
-        // Update local data
-        updateLocalDataFromStore()
-        
-        // Clear the input text
-        noteText = ""
-        
-        // Ensure new hands are checked (in case any were added)
-        checkForNewHands()
     }
     
     // Share update to feed
@@ -1278,14 +1336,6 @@ struct EnhancedLiveSessionView: View {
             if !wasPostsTab && isPostsTab {
                 loadSessionPosts()
             }
-        }
-    }
-    
-    // App background
-    private struct AppBackgroundView: View {
-        var body: some View {
-            Color(red: 20/255, green: 22/255, blue: 26/255)
-                .ignoresSafeArea()
         }
     }
     
@@ -1534,12 +1584,43 @@ struct EnhancedLiveSessionView: View {
         let gameName = sessionStore.liveSession.gameName
         let stakes = sessionStore.liveSession.stakes
         
-        // For notes or hands, show BADGE (not full card)
-        if shareToFeedIsNote || shareToFeedIsHand {
+        // For session result share after session ends
+        if let details = sessionDetails {
+            // Create session summary content
+            let profitText = details.profit >= 0 ? "+$\(Int(details.profit))" : "-$\(Int(abs(details.profit)))"
+            let content = """
+            Session at \(details.gameName) (\(details.stakes))
+            Duration: \(details.duration)
+            Buy-in: $\(Int(details.buyIn))
+            Cashout: $\(Int(details.cashout))
+            Profit: \(profitText)
+            """
+            
+            return PostEditorView(
+                userId: userId,
+                initialText: content,
+                initialHand: nil,
+                sessionId: details.sessionId,
+                isSessionPost: true,
+                isNote: false,
+                showFullSessionCard: true,
+                sessionGameName: details.gameName,
+                sessionStakes: details.stakes
+            )
+            .environmentObject(postService)
+            .environmentObject(userService)
+            .environmentObject(handStore)
+            .onDisappear {
+                // When post editor closes, we need to dismiss the entire view
+                dismiss()
+            }
+        }
+        // For notes or hands during the session, show BADGE (not full card)
+        else if shareToFeedIsNote || shareToFeedIsHand {
             return PostEditorView(
                 userId: userId,
                 initialText: shareToFeedContent,
-                hand: shareToFeedHandData,
+                initialHand: shareToFeedHandData,
                 sessionId: sessionStore.liveSession.id,
                 isSessionPost: true,
                 isNote: shareToFeedIsNote,
@@ -1549,6 +1630,7 @@ struct EnhancedLiveSessionView: View {
             )
             .environmentObject(postService)
             .environmentObject(userService)
+            .environmentObject(handStore)
             .onDisappear {
                 handlePostEditorDisappear()
             }
@@ -1558,7 +1640,7 @@ struct EnhancedLiveSessionView: View {
             return PostEditorView(
                 userId: userId,
                 initialText: getSessionDetailsText() + "\n\n" + shareToFeedContent,
-                hand: nil,
+                initialHand: nil,
                 sessionId: sessionStore.liveSession.id,
                 isSessionPost: true,
                 isNote: false,
@@ -1568,6 +1650,7 @@ struct EnhancedLiveSessionView: View {
             )
             .environmentObject(postService)
             .environmentObject(userService)
+            .environmentObject(handStore)
             .onDisappear {
                 handlePostEditorDisappear()
             }
@@ -1577,7 +1660,7 @@ struct EnhancedLiveSessionView: View {
             return PostEditorView(
                 userId: userId,
                 initialText: getSessionDetailsText() + "\n\n" + shareToFeedContent,
-                hand: shareToFeedHandData,
+                initialHand: shareToFeedHandData,
                 sessionId: sessionStore.liveSession.id,
                 isSessionPost: true,
                 isNote: false,
@@ -1587,6 +1670,7 @@ struct EnhancedLiveSessionView: View {
             )
             .environmentObject(postService)
             .environmentObject(userService)
+            .environmentObject(handStore)
             .onDisappear {
                 handlePostEditorDisappear()
             }
@@ -1925,8 +2009,6 @@ private struct SessionMinimizedFloatingControl: View {
     }
 }
 
-
-
 #Preview {
     EnhancedLiveSessionView(
         userId: "preview",
@@ -1945,3 +2027,4 @@ private struct SessionMinimizedFloatingControl: View {
         }()
     )
 } 
+

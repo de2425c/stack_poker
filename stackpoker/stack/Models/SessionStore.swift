@@ -210,6 +210,11 @@ class SessionStore: ObservableObject {
         db.collection("sessions").document(sessionId).delete(completion: completion)
     }
     
+    // New method to get a session by its ID from the fetched list
+    func getSessionById(_ id: String) -> Session? {
+        return sessions.first(where: { $0.id == id })
+    }
+    
     // MARK: - Live Session Management
     
     func startLiveSession(gameName: String, stakes: String, buyIn: Double) {
@@ -266,75 +271,37 @@ class SessionStore: ObservableObject {
         saveLiveSessionState()
     }
     
-    func endLiveSession(cashout: Double, completion: @escaping (Error?) -> Void) {
+    // Modify endLiveSessionAsync to return the new session ID or nil
+    func endLiveSessionAndGetId(cashout: Double) async -> String? {
         stopLiveSessionTimer()
         
         let currentLiveSessionId = liveSession.id
 
-        // Create a copy of the current session data for saving
-        var sessionData: [String: Any] = [
-            "userId": userId,
-            "gameType": "CASH GAME",
-            "gameName": liveSession.gameName,
-            "stakes": liveSession.stakes,
-            "startDate": Timestamp(date: liveSession.startTime),
-            "startTime": Timestamp(date: liveSession.startTime),
-            "endTime": Timestamp(date: Date()),
-            "hoursPlayed": liveSession.elapsedTime / 3600, // Convert to hours
-            "buyIn": liveSession.buyIn,
-            "cashout": cashout,
-            "profit": cashout - liveSession.buyIn,
-            "createdAt": FieldValue.serverTimestamp(),
-            "notes": enhancedLiveSession.notes,
-            "liveSessionUUID": currentLiveSessionId
-        ]
-        
-        addSession(sessionData) { error in
-            if error == nil {
-                // Important: Only clear session AFTER successful save
-                self.clearLiveSession()
-            }
-            completion(error)
-        }
-    }
-    
-    func endLiveSessionAsync(cashout: Double) async -> Error? {
-        stopLiveSessionTimer()
-        
-        let currentLiveSessionId = liveSession.id
-
-        // Create a copy of the current session data for saving
         let sessionData: [String: Any] = [
             "userId": userId,
-            "gameType": "CASH GAME",
+            "gameType": "CASH GAME", // Assuming cash game for now, adjust if needed
             "gameName": liveSession.gameName,
             "stakes": liveSession.stakes,
             "startDate": Timestamp(date: liveSession.startTime),
             "startTime": Timestamp(date: liveSession.startTime),
-            "endTime": Timestamp(date: Date()),
-            "hoursPlayed": liveSession.elapsedTime / 3600, // Convert to hours
+            "endTime": Timestamp(date: Date()), // Current time for end time
+            "hoursPlayed": liveSession.elapsedTime / 3600,
             "buyIn": liveSession.buyIn,
             "cashout": cashout,
             "profit": cashout - liveSession.buyIn,
-            "createdAt": FieldValue.serverTimestamp(),
-            "notes": enhancedLiveSession.notes,
-            "liveSessionUUID": currentLiveSessionId
+            "createdAt": FieldValue.serverTimestamp(), // Firestore server timestamp for creation
+            "notes": enhancedLiveSession.notes, // Include notes
+            "liveSessionUUID": currentLiveSessionId // Link to the live session instance
         ]
         
         do {
-            // Create a new document reference
-            let docRef = db.collection("sessions").document()
-            
-            // Save the session data
-            try await docRef.setData(sessionData)
-            
-            // IMPORTANT: Explicitly clear the session state after saving
+            let docRef = try await db.collection("sessions").addDocument(data: sessionData)
+            // After successful save, clear the live session state
             clearLiveSession()
-            
-            return nil
-        } catch let error {
+            return docRef.documentID // Return the new document ID
+        } catch {
             print("Error saving session: \(error.localizedDescription)")
-            return error
+            return nil // Return nil if saving failed
         }
     }
     

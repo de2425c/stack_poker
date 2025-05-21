@@ -1,3 +1,58 @@
+//import SwiftUI
+//
+//struct AppBackgroundView: View {
+//    
+//    enum Edges {
+//        case all
+//        case top
+//        case bottom
+//        case horizontal
+//        case vertical
+//        case leading
+//        case trailing
+//        case none
+//    }
+//    
+//    let edges: Edges
+//    
+//    init(edges: Edges = .all) {
+//        self.edges = edges
+//    }
+//    
+//    var body: some View {
+//        // Simple dark grayish background for a clean dark mode look
+//        Color(hex: "#121418") // Dark gray with slight blue tint
+//            .edgesIgnoringSafeArea(getEdges())
+//    }
+//    
+//    private func getEdges() -> Edge.Set {
+//        switch edges {
+//        case .all:
+//            return .all
+//        case .top:
+//            return .top
+//        case .bottom:
+//            return .bottom
+//        case .horizontal:
+//            return [.leading, .trailing]
+//        case .vertical:
+//            return [.top, .bottom]
+//        case .leading:
+//            return .leading
+//        case .trailing:
+//            return .trailing
+//        case .none:
+//            return []
+//        }
+//    }
+//}
+//
+//struct AppBackgroundView_Previews: PreviewProvider {
+//    static var previews: some View {
+//        AppBackgroundView()
+//    }
+//}
+
 import SwiftUI
 
 struct AppBackgroundView: View {
@@ -20,53 +75,33 @@ struct AppBackgroundView: View {
     
     var body: some View {
         ZStack {
-            // Rich dark gradient base with deep blues and subtle accent
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(red: 12/255, green: 12/255, blue: 20/255),
-                    Color(red: 18/255, green: 20/255, blue: 28/255),
-                    Color(red: 16/255, green: 22/255, blue: 32/255)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            
-            // Noise-like texture effect using overlapping dots
-            NoiseOverlayView()
-                .blendMode(.overlay)
-                .opacity(0.015)
-                .allowsHitTesting(false)
-                .ignoresSafeArea()
-            
-            // Soft highlight gradient at the top
-            VStack {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.white.opacity(0.07),
-                        Color.white.opacity(0.0)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 120)
-                Spacer()
-            }
-            .ignoresSafeArea()
-            
-            // Optional accent glow in bottom corner
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    Circle()
-                        .fill(Color(red: 123/255, green: 255/255, blue: 99/255, opacity: 0.05))
-                        .frame(width: 150, height: 150)
-                        .blur(radius: 70)
-                        .offset(x: 50, y: 50)
-                }
-            }
-            .ignoresSafeArea()
+            // Always use the "background" image
+            Image("background")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .edgesIgnoringSafeArea(getEdges())
+        }
+        .edgesIgnoringSafeArea(getEdges())
+    }
+    
+    private func getEdges() -> Edge.Set {
+        switch edges {
+        case .all:
+            return .all
+        case .top:
+            return .top
+        case .bottom:
+            return .bottom
+        case .horizontal:
+            return [.leading, .trailing]
+        case .vertical:
+            return [.top, .bottom]
+        case .leading:
+            return .leading
+        case .trailing:
+            return .trailing
+        case .none:
+            return []
         }
     }
 }
@@ -101,4 +136,4 @@ struct NoiseOverlayView: View {
 
 #Preview {
     AppBackgroundView()
-} 
+}

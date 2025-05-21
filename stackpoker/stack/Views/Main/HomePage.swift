@@ -49,7 +49,7 @@ struct HomePage: View {
     var body: some View {
         NavigationView {
             ZStack {
-                AppBackgroundView()
+                AppBackgroundView(edges: .horizontal)
                     .ignoresSafeArea()
                 
                 // Dim overlay to darken screen outside the menu (only when menu is showing)
@@ -101,11 +101,7 @@ struct HomePage: View {
                             
                             // Wrap FeedView with padding
                             VStack(spacing: 0) {
-                                // Only add space when needed
-                                if activeHostedStandaloneGame == nil {
-                                    Spacer()
-                                        .frame(height: 25)
-                                }
+                                // Remove extra spacing that could create a black bar
                                 
                                 // FeedView with transparent background
                                 FeedView(userId: userId)
@@ -270,159 +266,62 @@ struct CustomTabBar: View {
     @Binding var selectedTab: HomePage.Tab
     let userId: String
     @Binding var showingMenu: Bool
-    
+
     var body: some View {
         ZStack {
-            // Tab bar with circular wrap-around for plus button
-            TabBarShape()
-                .fill(Color(red: 22/255, green: 24/255, blue: 28/255))
-                .frame(height: 62)
-                .overlay(
-                    TabBarShape()
-                        .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
-                )
-                .shadow(color: Color.black.opacity(0.2), radius: 15, y: 5)
-            
+            // Background color for the tab bar - now transparent
+            Color.clear
+                .frame(height: 80) // Increased height to accommodate larger icons and padding
+                .edgesIgnoringSafeArea(.bottom) // Extend to the bottom edge
+
             // Tab buttons
             HStack {
                 TabBarButton(
-                    icon: "Feed",
-                    title: "Feed",
+                    icon: "Feed", // Changed to asset name
                     isSelected: selectedTab == .feed
                 ) { selectedTab = .feed }
-                
+
                 TabBarButton(
-                    icon: "Search",
-                    title: "Explore",
+                    icon: "Search", // Changed to asset name
                     isSelected: selectedTab == .explore
                 ) { selectedTab = .explore }
-                
-                // Center spacer for plus button
-                Spacer()
-                    .frame(width: 70)
-                
+
+                // Plus button
+                AddButton(userId: userId, showingMenu: $showingMenu)
+                    .padding(.horizontal, 20) // Add some spacing around the plus button
+
+
                 TabBarButton(
-                    icon: "Groups",
-                    title: "Groups",
+                    icon: "Groups", // Changed to asset name
                     isSelected: selectedTab == .groups
                 ) { selectedTab = .groups }
-                
+
                 TabBarButton(
-                    icon: "Profile",
-                    title: "You",
+                    icon: "Profile", // Changed to asset name
                     isSelected: selectedTab == .profile
                 ) { selectedTab = .profile }
             }
             .padding(.horizontal, 20)
-            
-            // Plus button centered
-            AddButton(userId: userId, showingMenu: $showingMenu)
-                .offset(y: -10) // Adjusted offset to match new circle position
         }
-        .padding(.horizontal, 30)
-        .padding(.bottom, 20)
-    }
-}
-
-// Custom shape for tab bar with circular wrap-around for plus button
-struct TabBarShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let width = rect.width
-        let height = rect.height
-        let centerX = width / 2
-        let circleRadius: CGFloat = 34 // Slightly smaller radius
-        let cutoutWidth: CGFloat = 80 // Width of the area where the circle extends from
-        let barRadius: CGFloat = 28
-        let circleY: CGFloat = 20 // Circle center further down
-        
-        var path = Path()
-        
-        // Start from top left
-        path.move(to: CGPoint(x: 0, y: barRadius))
-        
-        // Top left corner
-        path.addArc(
-            center: CGPoint(x: barRadius, y: barRadius),
-            radius: barRadius,
-            startAngle: .degrees(180),
-            endAngle: .degrees(270),
-            clockwise: false
-        )
-        
-        // Left horizontal section - go to where circle starts
-        path.addLine(to: CGPoint(x: centerX - cutoutWidth/2, y: 0))
-        
-        // Create semi-circle bump that extends from the top edge
-        path.addArc(
-            center: CGPoint(x: centerX, y: circleY),
-            radius: circleRadius,
-            startAngle: .degrees(180 + asin((circleY)/circleRadius) * (180 / .pi)),
-            endAngle: .degrees(0 - asin((circleY)/circleRadius) * (180 / .pi)),
-            clockwise: false
-        )
-        
-        // Right horizontal section
-        path.addLine(to: CGPoint(x: width - barRadius, y: 0))
-        
-        // Top right corner
-        path.addArc(
-            center: CGPoint(x: width - barRadius, y: barRadius),
-            radius: barRadius,
-            startAngle: .degrees(270),
-            endAngle: .degrees(0),
-            clockwise: false
-        )
-        
-        // Right edge
-        path.addLine(to: CGPoint(x: width, y: height - barRadius))
-        
-        // Bottom right corner
-        path.addArc(
-            center: CGPoint(x: width - barRadius, y: height - barRadius),
-            radius: barRadius,
-            startAngle: .degrees(0),
-            endAngle: .degrees(90),
-            clockwise: false
-        )
-        
-        // Bottom edge
-        path.addLine(to: CGPoint(x: barRadius, y: height))
-        
-        // Bottom left corner
-        path.addArc(
-            center: CGPoint(x: barRadius, y: height - barRadius),
-            radius: barRadius,
-            startAngle: .degrees(90),
-            endAngle: .degrees(180),
-            clockwise: false
-        )
-        
-        // Left edge
-        path.closeSubpath()
-        
-        return path
+        .frame(height: 80) // Ensure ZStack respects the increased height
+        .padding(.bottom, 20) // Increased bottom padding to move tab bar higher
     }
 }
 
 struct TabBarButton: View {
     let icon: String
-    let title: String
     let isSelected: Bool
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(icon)
+            VStack(spacing: 4) { 
+                Image(icon) // Using asset image name
                     .renderingMode(.template)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 24, height: 24)
-                    .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.8))
-                
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.8))
+                    .frame(width: 30, height: 30) // Increased icon size
+                    .foregroundColor(isSelected ? .white : Color.gray.opacity(0.8))
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -442,15 +341,12 @@ struct AddButton: View {
         }) {
             ZStack {
                 Circle()
-                    .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                    .frame(width: 58, height: 58)
-                    .shadow(color: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.25)), radius: 8, y: 2)
-                
-                // Clean plus icon
+                    .fill(Color(hex: "B1B5C3"))
+                    .frame(width: 50, height: 50)
+
                 Image(systemName: "plus")
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundColor(.black)
-                    .rotationEffect(.degrees(showingMenu ? 45 : 0))
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundColor(.white)
             }
         }
     }
@@ -1580,18 +1476,12 @@ struct AddMenuOverlay: View {
     @Binding var showSessionForm: Bool
     @Binding var showingLiveSession: Bool
     @Binding var showingOpenHomeGameFlow: Bool
-    
-    // Create staggered animation delays for each menu item
-    private let staggerDelay1 = 0.05
-    private let staggerDelay2 = 0.10
-    private let staggerDelay3 = 0.15
-    private let staggerDelay4 = 0.20
 
     var body: some View {
         ZStack {
-            // Semi-transparent background with blur
+            // Dark background overlay
             if showingMenu {
-                Color.black.opacity(0.3)
+                Color.black.opacity(0.5)
                     .ignoresSafeArea()
                     .onTapGesture {
                         closeMenu()
@@ -1599,137 +1489,158 @@ struct AddMenuOverlay: View {
                     .transition(.opacity)
             }
             
-            // Menu items positioned to emerge from the + button
-            VStack {
-                Spacer()
-                
-                if showingMenu {
-                    // Floating menu items
-                    VStack(spacing: 22) {
-                        // Home Game menu item - appears first (closest to the + button visually when menu expands upwards)
-                        FloatingMenuButton(
-                            icon: "house.fill",
-                            title: "Home Game",
-                            action: {
-                                withAnimation(nil) {
-                                    showingOpenHomeGameFlow = true
-                                    showingMenu = false
-                                }
-                            },
-                            delay: staggerDelay1
-                        )
-
-                        // Past Session menu item - appears second
-                        FloatingMenuButton(
-                            icon: "clock.arrow.circlepath",
-                            title: "Past Session",
-                            action: {
-                                withAnimation(nil) {
-                                    showSessionForm = true
-                                    showingMenu = false
-                                }
-                            },
-                            delay: staggerDelay2
-                        )
-
-                        // Live Session menu item - appears third
-                        FloatingMenuButton(
-                            icon: "clock",
-                            title: "Live Session",
-                            action: {
-                                withAnimation(nil) {
-                                    showingLiveSession = true
-                                    showingMenu = false
-                                }
-                            },
-                            delay: staggerDelay3
-                        )
+            // Menu panel
+            if showingMenu {
+                // Center vertically in the screen
+                VStack(spacing: 0) {
+                    Spacer()
+                    
+                    // Menu container
+                    VStack(spacing: 0) {
+                        // X button at top right and greyed out
+                        HStack {
+                            Spacer()
+                            
+                            Button(action: closeMenu) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 17, weight: .medium))
+                                    .foregroundColor(Color(white: 0.7))
+                            }
+                            .padding(.top, 16)
+                            .padding(.bottom, 16)
+                            .padding(.trailing, 20)
+                        }
                         
-                        // Hand menu item - appears fourth (furthest from + button)
-                        FloatingMenuButton(
-                            icon: "doc.text",
-                            title: "Add Hand",
-                            action: { showHandInput = true },
-                            delay: staggerDelay4
-                        )
+                        VStack(spacing: 16) {
+                            // Home Game button
+                            MenuRow(
+                                icon: "house.fill",
+                                title: "Home Game",
+                                action: {
+                                    withAnimation(nil) {
+                                        showingOpenHomeGameFlow = true
+                                        showingMenu = false
+                                    }
+                                }
+                            )
+                            
+                            // Past Session button
+                            MenuRow(
+                                icon: "clock.arrow.circlepath",
+                                title: "Past Session",
+                                action: {
+                                    withAnimation(nil) {
+                                        showSessionForm = true
+                                        showingMenu = false
+                                    }
+                                }
+                            )
+                            
+                            // Live Session button
+                            MenuRow(
+                                icon: "clock",
+                                title: "Live Session",
+                                action: {
+                                    withAnimation(nil) {
+                                        showingLiveSession = true
+                                        showingMenu = false
+                                    }
+                                }
+                            )
+                            
+                            // Add Hand button
+                            MenuRow(
+                                icon: "doc.text",
+                                title: "Add Hand",
+                                action: { 
+                                    showHandInput = true 
+                                    showingMenu = false
+                                }
+                            )
+                            
+                            // Bottom padding
+                            Color.clear.frame(height: 16)
+                        }
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.bottom, 120)
-                    .transition(.identity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(hex: "23262F"))
+                    )
+                    .padding(.horizontal, 24)
+                    
+                    Spacer()
                 }
+                .transition(.opacity)
             }
         }
         .sheet(isPresented: $showHandInput) {
             NewHandEntryView()
         }
-        .onDisappear {
-            showHandInput = false
-            showingMenu = false
-        }
     }
     
     private func closeMenu() {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+        withAnimation(.easeOut(duration: 0.2)) {
             showingMenu = false
         }
     }
 }
 
-// New animated floating menu button
-struct FloatingMenuButton: View {
+// Menu row that exactly matches the screenshot
+struct MenuRow: View {
     let icon: String
     let title: String
     let action: () -> Void
-    let delay: Double
-    
-    @State private var appeared = false
     
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                // Icon container
-                ZStack {
-                    Circle()
-                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 0.95)))
-                        .frame(width: 54, height: 54)
-                        .shadow(color: Color.green.opacity(0.25), radius: 8, y: 4)
-                        .overlay(
-                            Circle()
-                                .stroke(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)), lineWidth: 2)
-                        )
-                    
+            ZStack {
+                // Main button background
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(hex: "454959"))
+                
+                HStack(spacing: 12) {
+                    // Icon without container
                     Image(systemName: icon)
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                        .font(.system(size: 22))
+                        .foregroundColor(.white)
+                        .frame(width: 44)
+                        .padding(.leading, 4)
+                    
+                    // Text label
+                    Text(title)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    // Chevron icon
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color(white: 0.7))
+                        .padding(.trailing, 16)
                 }
-                
-                // Text label
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Spacer()
+                .padding(.vertical, 10) // Reduced vertical padding for shorter boxes
+                .padding(.horizontal, 8)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(
-                Capsule()
-                    .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 0.95)))
-                    .shadow(color: Color.black.opacity(0.25), radius: 8, y: 4)
-            )
-            .scaleEffect(appeared ? 1.0 : 0.7)
-            .opacity(appeared ? 1.0 : 0)
-            .offset(y: appeared ? 0 : 20)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(width: 220)
-        .buttonStyle(PressableButtonStyle())
-        .onAppear {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.7).delay(delay)) {
-                appeared = true
-            }
-        }
-        .onDisappear {
-            appeared = false
-        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// Add Color hex extension if it doesn't exist
+extension Color {
+    init(hex: String) {
+        let scanner = Scanner(string: hex)
+        var rgbValue: UInt64 = 0
+        scanner.scanHexInt64(&rgbValue)
+        
+        let r = Double((rgbValue & 0xFF0000) >> 16) / 255.0
+        let g = Double((rgbValue & 0x00FF00) >> 8) / 255.0
+        let b = Double(rgbValue & 0x0000FF) / 255.0
+        
+        self.init(red: r, green: g, blue: b)
     }
 }
 

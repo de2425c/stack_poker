@@ -903,10 +903,17 @@ struct HandListSection: View {
             // Hands in this section - keep original cards
             VStack(spacing: 12) {
                 ForEach(hands) { savedHand in
-                    HandSummaryRow(hand: savedHand.hand, id: savedHand.id)
-                        .background(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                        .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
+                    HandDisplayCardView(hand: savedHand.hand, 
+                                        onReplayTap: {
+                                            // Add action to show HandReplayView, likely involving a @State variable
+                                            // For now, this is a placeholder action
+                                            print("Replay tapped for hand ID: \(savedHand.id)")
+                                        },
+                                        location: savedHand.hand.raw.gameInfo.tableSize > 2 ? "Live Game" : "Online Game", // Example: derive from table size or pass nil
+                                        createdAt: savedHand.timestamp)
+                    .background(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                    .cornerRadius(12)
+                    .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
                 }
             }
         }

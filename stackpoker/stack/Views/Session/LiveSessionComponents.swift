@@ -289,7 +289,7 @@ struct SessionUpdateCard: View {
     let description: String
     let timestamp: Date
     let isPosted: Bool
-    let onPost: () -> Void
+    let onPost: (() -> Void)?
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -313,9 +313,9 @@ struct SessionUpdateCard: View {
                 .lineLimit(nil)
                 .multilineTextAlignment(.leading)
             
-            // Action button
-            if !isPosted {
-                Button(action: onPost) {
+            // Action button - only show if onPost is provided and not posted
+            if let postAction = onPost, !isPosted {
+                Button(action: postAction) {
                     HStack {
                         Spacer()
                         

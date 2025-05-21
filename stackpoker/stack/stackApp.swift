@@ -9,6 +9,31 @@ extension Notification.Name {
     static let handlePushNotificationTap = Notification.Name("handlePushNotificationTap")
 }
 
+// Register fonts
+struct FontRegistration {
+    static func register() {
+        // Register Plus Jakarta Sans fonts
+        registerFont(bundle: .main, fontName: "PlusJakartaSans-Regular", fontExtension: "ttf")
+        registerFont(bundle: .main, fontName: "PlusJakartaSans-Medium", fontExtension: "ttf")
+        registerFont(bundle: .main, fontName: "PlusJakartaSans-SemiBold", fontExtension: "ttf")
+        registerFont(bundle: .main, fontName: "PlusJakartaSans-Bold", fontExtension: "ttf")
+    }
+    
+    private static func registerFont(bundle: Bundle, fontName: String, fontExtension: String) {
+        guard let fontURL = bundle.url(forResource: fontName, withExtension: fontExtension),
+              let fontDataProvider = CGDataProvider(url: fontURL as CFURL),
+              let font = CGFont(fontDataProvider) else {
+            print("Error loading font: \(fontName)")
+            return
+        }
+        
+        var error: Unmanaged<CFError>?
+        if !CTFontManagerRegisterGraphicsFont(font, &error) {
+            print("Error registering font: \(fontName). \(error.debugDescription)")
+        }
+    }
+}
+
 // AppDelegate to handle Firebase setup and Push Notifications
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     
@@ -17,6 +42,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
+        
+        // Register custom fonts
+        FontRegistration.register()
         
         UNUserNotificationCenter.current().delegate = self
         Messaging.messaging().delegate = self
@@ -30,8 +58,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Your existing UI setup code for TabBar and NavigationBar
         UITabBar.appearance().isHidden = true
         let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor.systemBlue
+        appearance.configureWithTransparentBackground()
         appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
         appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
         UINavigationBar.appearance().standardAppearance   = appearance

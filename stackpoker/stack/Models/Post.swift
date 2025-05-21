@@ -16,10 +16,12 @@ struct Post: Identifiable, Codable {
     let postType: PostType
     let handHistory: ParsedHandHistory?
     let sessionId: String?
+    let location: String?
     
     enum PostType: String, Codable {
         case text
         case hand
+        case location
     }
     
     enum CodingKeys: String, CodingKey {
@@ -36,9 +38,10 @@ struct Post: Identifiable, Codable {
         case postType
         case handHistory
         case sessionId
+        case location
     }
     
-    init(id: String, userId: String, content: String, createdAt: Date, username: String, displayName: String? = nil, profileImage: String? = nil, imageURLs: [String]? = nil, likes: Int = 0, comments: Int = 0, postType: PostType = .text, handHistory: ParsedHandHistory? = nil, sessionId: String? = nil) {
+    init(id: String, userId: String, content: String, createdAt: Date, username: String, displayName: String? = nil, profileImage: String? = nil, imageURLs: [String]? = nil, likes: Int = 0, comments: Int = 0, postType: PostType = .text, handHistory: ParsedHandHistory? = nil, sessionId: String? = nil, location: String? = nil) {
         self.id = id
         self.userId = userId
         self.content = content
@@ -52,6 +55,7 @@ struct Post: Identifiable, Codable {
         self.postType = postType
         self.handHistory = handHistory
         self.sessionId = sessionId
+        self.location = location
     }
     
     init(from decoder: Decoder) throws {
@@ -78,6 +82,7 @@ struct Post: Identifiable, Codable {
         
         // Handle sessionId
         sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
+        location = try container.decodeIfPresent(String.self, forKey: .location)
         
         // Handle handHistory - try to decode as ParsedHandHistory directly
         self.handHistory = try? container.decodeIfPresent(ParsedHandHistory.self, forKey: .handHistory)
@@ -114,6 +119,7 @@ struct Post: Identifiable, Codable {
         
         // Decode sessionId
         sessionId = data["sessionId"] as? String
+        location = data["location"] as? String
         
         // Decode hand history if present
         if let handDict = data["handHistory"] as? [String: Any],
@@ -153,6 +159,11 @@ struct Post: Identifiable, Codable {
         // Add sessionId if present
         if let sessionId = sessionId {
             dict["sessionId"] = sessionId
+        }
+        
+        // Add location if present
+        if let location = location {
+            dict["location"] = location
         }
         
         return dict

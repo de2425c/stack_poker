@@ -254,9 +254,10 @@ struct HandReplayView: View {
             Text("Would you like to share this hand to your feed?")
         }
         .sheet(isPresented: $showingShareSheet) {
-            PostEditorView(userId: userId, hand: hand)
+            PostEditorView(userId: userId, initialHand: hand)
                 .environmentObject(postService)
                 .environmentObject(userService)
+                .environmentObject(HandStore(userId: userId))
         }
     }
     

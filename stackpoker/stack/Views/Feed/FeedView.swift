@@ -8,6 +8,8 @@ import Kingfisher
 struct FeedView: View {
     @EnvironmentObject var postService: PostService
     @EnvironmentObject var userService: UserService
+    @StateObject private var handStore: HandStore // Added HandStore
+    @StateObject private var sessionStore: SessionStore // Added SessionStore
     @State private var showingNewPost = false
     @State private var isRefreshing = false
     @State private var showingDiscoverUsers = false
@@ -21,6 +23,8 @@ struct FeedView: View {
     
     init(userId: String = Auth.auth().currentUser?.uid ?? "") {
         self.userId = userId
+        _handStore = StateObject(wrappedValue: HandStore(userId: userId)) // Initialize HandStore
+        _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId)) // Initialize SessionStore
         
         // Configure the Kingfisher cache
         let cache = ImageCache.default
@@ -33,180 +37,255 @@ struct FeedView: View {
         let diskCacheMB: UInt = 1000
         let diskCacheBytes = diskCacheMB * 1024 * 1024
         cache.diskStorage.config.sizeLimit = diskCacheBytes
-        
-        // Configure navigation bar appearance to prevent white bar when scrolling
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithTransparentBackground()
-        
-        // Break the color creation into separate steps
-        let bgRed: CGFloat = 12/255
-        let bgGreen: CGFloat = 12/255
-        let bgBlue: CGFloat = 16/255
-        let backgroundColor = UIColor(red: bgRed, green: bgGreen, blue: bgBlue, alpha: 1.0)
-        
-        appearance.backgroundColor = backgroundColor
-        appearance.shadowColor = .clear
-        
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
-        UINavigationBar.appearance().compactAppearance = appearance
     }
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                // Add a dark background color to prevent white background
-                Color(red: 18/255, green: 18/255, blue: 24/255)
-                    .ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Top bar: Search placeholder and Add Post button
-                    HStack(spacing: 12) {
-                        // Tappable Search Bar Placeholder
-                        HStack {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundColor(Color.gray.opacity(0.7))
-                            Text("Search people to follow...")
-                                .foregroundColor(Color.gray.opacity(0.9))
-                                .font(.system(size: 16))
-                            Spacer()
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color.black.opacity(0.15)) // More transparent background to show app background
-                        .cornerRadius(10)
-                        .contentShape(Rectangle()) // Make the whole area tappable
-                        .onTapGesture {
-                            showingUserSearchView = true
-                        }
+        // Simple ZStack without fixed header - directly show content
+        ZStack {
+            // Background that fills the entire screen but respects top safe area
+            AppBackgroundView(edges: .horizontal) // Changed to .horizontal
+                .ignoresSafeArea() 
+            
+            // Content area - now directly includes the header for scrolling
+            contentView // This will now include the header as part of its scrollable content
+        }
+        // Sheets and modals
+        .sheet(isPresented: $showingNewPost) {
+            PostEditorView(userId: userId)
+                .environmentObject(postService)
+                .environmentObject(userService)
+                .environmentObject(handStore) // Pass HandStore to PostEditorView
+                .environmentObject(sessionStore) // Pass SessionStore to PostEditorView
+        }
+        .sheet(isPresented: $showingDiscoverUsers) {
+            DiscoverUsersView(userId: userId)
+                .environmentObject(userService)
+        }
+        .fullScreenCover(isPresented: $showingUserSearchView) {
+            UserSearchView(currentUserId: userId, userService: userService)
+        }
+        .fullScreenCover(item: $selectedPost) { post in // Changed from .sheet to .fullScreenCover
+            PostDetailView(post: post, userId: userId)
+                .environmentObject(postService)
+                .environmentObject(userService)
+        }
+        .fullScreenCover(isPresented: $showingFullScreenImage) {
+            if let imageUrl = selectedImageURL {
+                FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
+            }
+        }
+        .onAppear {
+            // Load posts when the view appears
+            if postService.posts.isEmpty {
+                Task {
+                    try? await postService.fetchPosts()
+                }
+            }
+            // Ensure user profile is loaded for the avatar
+            if userService.currentUserProfile == nil {
+                Task {
+                    try? await userService.fetchUserProfile()
+                }
+            }
+        }
+    }
+    
+    // MARK: - Content View
+    private var contentView: some View {
+        Group {
+            if postService.isLoading && postService.posts.isEmpty {
+                // Loading state
+                VStack {
+                    Spacer()
+                    ZStack {
+                        Circle()
+                            .fill(Color.black.opacity(0.1))
+                            .frame(width: 80, height: 80)
                         
-                        // Add Post Button
-                        Button(action: {
-                            showingNewPost = true
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 28))
-                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))) // Accent color
-                        }
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+                            .scaleEffect(1.5)
                     }
-                    .padding(.horizontal)
-                    .padding(.top, 8) // Reduced from a larger value that included safe area
-                    .padding(.bottom, 8)
-                    .background(Color.clear) // Remove solid background to let app background show through
-
-                    // Feed content
-                    if postService.isLoading && postService.posts.isEmpty {
-                        // Loading state - enhanced with animation
-                        VStack {
-                            Spacer()
-                            ZStack {
-                                Circle()
-                                    .fill(Color.black.opacity(0.1))
-                                    .frame(width: 80, height: 80)
-                                
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
-                                    .scaleEffect(1.5)
-                            }
-                            .shadow(color: Color.black.opacity(0.2), radius: 5)
-                            
-                            Text("Loading Feed")
-                                .font(.system(size: 18, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.8))
-                                .padding(.top, 16)
-                            Spacer()
-                        }
-                    } else if postService.posts.isEmpty {
-                        // Empty feed state
+                    .shadow(color: Color.black.opacity(0.2), radius: 5)
+                    
+                    Text("Loading Feed")
+                        .font(.system(size: 18, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.8))
+                        .padding(.top, 16)
+                    Spacer()
+                }
+            } else if postService.posts.isEmpty {
+                // Empty feed state
+                ScrollView { 
+                    VStack(spacing: 0) {
+                        Spacer().frame(height: 45) // Re-added top spacer
+                        feedHeader() // Add header here
                         EmptyFeedView(showDiscoverUsers: {
                             showingDiscoverUsers = true
                         })
-                    } else {
-                        // Twitter-like feed with posts
-                        ScrollView(showsIndicators: false) {
-                            LazyVStack(spacing: 0) { // Twitter has no spacing between posts
-                                ForEach(postService.posts) { post in
-                                    VStack(spacing: 0) {
-                                        PostView(
-                                            post: post,
-                                            onLike: {
-                                                Task {
-                                                    do {
-                                                        try await postService.toggleLike(postId: post.id ?? "", userId: userId)
-                                                    } catch {
-                                                        print("Error toggling like: \(error)")
-                                                    }
-                                                }
-                                            },
-                                            onComment: {
-                                                selectedPost = post
-                                                showingComments = true
-                                            },
-                                            userId: userId
-                                        )
-                                        
-                                        // Twitter-like divider between posts
-                                        Rectangle()
-                                            .fill(Color.white.opacity(0.06))
-                                            .frame(height: 0.5)
-                                    }
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        selectedPost = post
-                                    }
-                                    .onAppear {
-                                        // Load more posts when reaching the end
-                                        if post.id == postService.posts.last?.id {
-                                            Task {
-                                                try? await postService.fetchMorePosts()
-                                            }
-                                        }
-                                    }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure EmptyFeedView can expand
+                    }
+                }
+            } else {
+                // Twitter-like feed with posts
+                feedContent // This will now include the header
+            }
+        }
+    }
+
+    // Extracted Header View
+    @ViewBuilder
+    private func feedHeader() -> some View {
+        VStack(spacing: 0) {
+            // Removed top Spacer().frame(height: 45) as the header is now part of scroll content
+            
+            HStack(spacing: 0) { // Main HStack for the bar
+                // Profile Picture and Search Icon (Left Aligned Group)
+                HStack(spacing: 12) {
+                    if let profile = userService.currentUserProfile {
+                        NavigationLink(destination: ProfileView(userId: userId)) {
+                            Group {
+                                if let avatarURLString = profile.avatarURL, let avatarURL = URL(string: avatarURLString) {
+                                    KFImage(avatarURL)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 36, height: 36)
+                                        .clipShape(Circle())
+                                        .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                                } else {
+                                    Image(systemName: "person.circle.fill")
+                                        .resizable()
+                                        .frame(width: 36, height: 36)
+                                        .foregroundColor(.gray) // Placeholder color
                                 }
                             }
                         }
-                        .refreshable {
-                            // Pull to refresh
-                            await refreshFeed()
+                    } else {
+                        // Placeholder if profile is not loaded
+                        Circle().fill(Color.gray.opacity(0.5)).frame(width: 36, height: 36)
+                    }
+
+                    Button(action: {
+                        showingUserSearchView = true
+                    }) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .padding(.leading, 16)
+
+                Spacer()
+
+                // Centered Stack Logo
+                Image("stack_logo") 
+                    .resizable()
+                    .renderingMode(.template) // Assuming you want to color it
+                    .foregroundColor(.white)   // Color set to white
+                    .scaledToFit()
+                    .frame(height: 35)      // User updated height
+                    .offset(x: -4) // Offset to shift left by 4 points
+
+                Spacer()
+
+                // Notification Bell and Write Post (Right Aligned Group)
+                HStack(spacing: 16) {
+                    Button(action: {
+                        // Placeholder action for notifications
+                        print("Notification bell tapped")
+                    }) {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+
+                    Button(action: {
+                        showingNewPost = true
+                    }) {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(.white) // Changed from green to white
+                    }
+                }
+                .padding(.trailing, 16)
+            }
+            .frame(height: 44) // Set a fixed height for the HStack
+            .padding(.vertical, 8) // Add some vertical padding
+            .background(Color.clear) 
+            
+            // Divider
+            Rectangle()
+                .fill(Color.gray.opacity(0.7)) // This was the previous color for the bottom divider
+                .frame(height: 2)
+                // .shadow(color: Color.black.opacity(0.3), radius: 1, y: 1) // Optional shadow
+        }
+        // Removed .safeAreaInset as this is now part of the scrollable content
+    }
+    
+    // MARK: - Feed Content
+    private var feedContent: some View {
+        ZStack { 
+            // The StackLogo watermark is fine here if it should be behind all content
+            Image("StackLogo") 
+                .resizable()
+                .scaledToFit()
+                .frame(width: 100) 
+                .opacity(0.1) 
+
+            ScrollView(showsIndicators: false) {
+                LazyVStack(spacing: 0) { 
+                    Spacer().frame(height: 45) // Re-added top spacer
+                    feedHeader() // Header is now the first item in LazyVStack
+
+                    // Add top padding for the first post *below the header*
+                    // Spacer().frame(height: 10) // This might not be needed if header has padding
+                    
+                    ForEach(postService.posts) { post in
+                        VStack(spacing: 0) {
+                            PostView(
+                                post: post,
+                                onLike: {
+                                    Task {
+                                        do {
+                                            try await postService.toggleLike(postId: post.id ?? "", userId: userId)
+                                        } catch {
+                                            print("Error toggling like: \(error)")
+                                        }
+                                    }
+                                },
+                                onComment: {
+                                    selectedPost = post
+                                    showingComments = true
+                                },
+                                userId: userId
+                            )
+                            Divider() 
+                                .frame(height: 0.5) 
+                                .background(Color.white.opacity(0.1)) 
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedPost = post
+                        }
+                        .onAppear {
+                            // Load more posts when reaching the end
+                            if post.id == postService.posts.last?.id {
+                                Task {
+                                    try? await postService.fetchMorePosts()
+                                }
+                            }
                         }
                     }
-                }
-                .onAppear {
-                    // Load posts when the view appears
-                    if postService.posts.isEmpty {
-                        Task {
-                            try? await postService.fetchPosts()
-                        }
-                    }
-                }
-                .sheet(isPresented: $showingNewPost) {
-                    PostEditorView(userId: userId)
-                        .environmentObject(postService)
-                        .environmentObject(userService)
-                }
-                .sheet(isPresented: $showingDiscoverUsers) {
-                    DiscoverUsersView(userId: userId)
-                        .environmentObject(userService)
-                }
-                .sheet(isPresented: $showingUserSearchView) {
-                    UserSearchView(currentUserId: userId, userService: userService)
-                }
-                .sheet(item: $selectedPost) { post in
-                    PostDetailView(post: post, userId: userId)
-                        .environmentObject(postService)
-                        .environmentObject(userService)
-                }
-                .fullScreenCover(isPresented: $showingFullScreenImage) {
-                    if let imageUrl = selectedImageURL {
-                        FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
-                    }
+                    
+                    Spacer().frame(height: 20)
                 }
             }
-            .navigationBarHidden(true)
-            .navigationBarTitle("", displayMode: .inline)
-            .edgesIgnoringSafeArea(.top)
+            // .refreshable is fine on ScrollView
+            .refreshable {
+                await refreshFeed()
+            }
+            .edgesIgnoringSafeArea(.horizontal) // This is okay for horizontal scroll content
         }
-        .navigationViewStyle(StackNavigationViewStyle())
     }
     
     // Refresh the feed
@@ -234,191 +313,389 @@ struct FeedView: View {
         Task {
             do {
                 if let postId = post.id {
+                    print("[FeedView] Attempting to delete post with ID: \(postId)")
                     try await postService.deletePost(postId: postId)
+                    print("[FeedView] Post deletion successful for ID: \(postId), refreshing feed.")
                     // Refresh feed after deletion
                     try await postService.fetchPosts()
+                } else {
+                    print("[FeedView] Error: Post ID is nil, cannot delete.")
                 }
             } catch {
-                print("Error deleting post: \(error)")
+                print("[FeedView] Error deleting post ID \(post.id ?? "N/A"): \(error.localizedDescription)")
             }
         }
     }
 }
 
-// Update BasicPostCardView to be more Twitter-like
+// Add the new PostContextTagView struct here
+private struct PostContextTagView: View {
+    let title: String
+    let iconName: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: iconName)
+                .font(.system(size: 13))
+                .foregroundColor(Color.gray.opacity(0.8))
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color.gray.opacity(0.9))
+                .lineLimit(1)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(Color.gray.opacity(0.8))
+            Spacer()
+        }
+        .padding(.bottom, 8) // Add some space below this tag
+    }
+}
+
+// Update BasicPostCardView with the optimized layout
 struct BasicPostCardView: View {
     let post: Post
     let onLike: () -> Void
     let onComment: () -> Void
     let onDelete: () -> Void
     let isCurrentUser: Bool
+    var openPostDetail: (() -> Void)?
+    var onReplay: (() -> Void)?
     @State private var isLiked: Bool
     @State private var animateLike = false
     @State private var showDeleteConfirm = false
-    
-    init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, onDelete: @escaping () -> Void, isCurrentUser: Bool) {
+
+    init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, onDelete: @escaping () -> Void, isCurrentUser: Bool, openPostDetail: (() -> Void)? = nil, onReplay: (() -> Void)? = nil) {
         self.post = post
         self.onLike = onLike
         self.onComment = onComment
         self.onDelete = onDelete
         self.isCurrentUser = isCurrentUser
-        // Initialize isLiked from the post's state
+        self.openPostDetail = openPostDetail
+        self.onReplay = onReplay
         _isLiked = State(initialValue: post.isLiked)
     }
-    
+
+    // Computed property for context tag information
+    private var contextTagInfo: (title: String, iconName: String)? {
+        let iconName = "rectangle.stack.fill"
+        var titleToShow: String?
+
+        if post.postType == .hand, let hand = post.handHistory {
+            let smallBlind = hand.raw.gameInfo.smallBlind
+            let bigBlind = hand.raw.gameInfo.bigBlind
+            if bigBlind > 0 || smallBlind > 0 {
+                 let stakesString = String(format: "$%g/$%g", smallBlind, bigBlind)
+                 var title = "Playing \(stakesString)"
+                 if let location = post.location, !location.isEmpty {
+                     title += " at \(location)"
+                 }
+                 titleToShow = title
+            }
+        } else {
+            // Attempt to derive session information for non-hand posts
+
+            // 1. Check for completed session format first
+            let (completedOpt, _) = parseCompletedSessionInfo(from: post.content)
+            if let completed = completedOpt {
+                // Use stakes from completed session info if available, else fallback to gameName
+                let primaryDisplay: String = {
+                    if !completed.stakes.isEmpty && !completed.gameName.isEmpty {
+                        return "\(completed.stakes) \(completed.gameName)"
+                    } else if !completed.stakes.isEmpty {
+                        return completed.stakes
+                    } else {
+                        return completed.gameName
+                    }
+                }()
+                var title = "Playing \(primaryDisplay)"
+                if let loc = post.location, !loc.isEmpty {
+                    title += " at \(loc)"
+                }
+                titleToShow = title
+            // 2. Check for explicit SESSION_INFO or other session parsing
+            } else if let (_, stakes) = extractSessionInfo(from: post.content), !stakes.isEmpty {
+                var title = "Playing \(stakes)"
+                if let loc = post.location, !loc.isEmpty {
+                    title += " at \(loc)"
+                }
+                titleToShow = title
+            // 3. Live session posts (chip updates) identified by non-nil sessionId
+            } else if post.sessionId != nil {
+                // Attempt to parse stakes via parseSessionContent for live chip updates
+                if let parsed = parseSessionContent(from: post.content) {
+                    let primaryDisp = parsed.stakes.isEmpty ? parsed.gameName : "\(parsed.stakes) \(parsed.gameName)"
+                    var title = "Playing \(primaryDisp)"
+                    if let loc = post.location, !loc.isEmpty {
+                        title += " at \(loc)"
+                    }
+                    titleToShow = title
+                } else {
+                    // Fallback generic session tag
+                    var title = "Playing Session"
+                    if let loc = post.location, !loc.isEmpty {
+                        title += " at \(loc)"
+                    }
+                    titleToShow = title
+                }
+            }
+        }
+
+        if let title = titleToShow {
+            return (title, iconName)
+        }
+        return nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Twitter-like header layout
-            HStack(alignment: .top, spacing: 12) {
-                // Profile image with Twitter-like styling, wrapped in NavigationLink
-                NavigationLink(destination: UserProfileView(userId: post.userId)) {
-                    Group {
-                        if let profileImage = post.profileImage {
-                            KFImage(URL(string: profileImage))
-                                .placeholder {
-                                    Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                }
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 48, height: 48)
-                                .clipShape(Circle())
-                        } else {
-                            Circle()
-                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                .frame(width: 48, height: 48)
+        ZStack {
+            VStack(alignment: .leading, spacing: 0) {
+                // Use the computed property to display the tag
+                if let tagInfo = contextTagInfo {
+                    PostContextTagView(title: tagInfo.title, iconName: tagInfo.iconName)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10) // Added top padding for the tag view
+                }
+                
+                // Header with user info & optional delete button
+                HStack(alignment: .top, spacing: 10) {
+                    // Smaller profile image
+                    NavigationLink(destination: ProfileView(userId: post.userId)) {
+                        Group {
+                            if let profileImage = post.profileImage {
+                                KFImage(URL(string: profileImage))
+                                    .placeholder {
+                                        Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                    }
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 40, height: 40) 
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            } else {
+                                Circle()
+                                    .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                    .frame(width: 40, height: 40) 
+                            }
+                        }
+                    }
+                    
+                    // User info (username, etc.)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .center, spacing: 4) {
+                            Text(post.displayName ?? post.username)
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.white)
+                                
+                            Text("@\(post.username)")
+                                .font(.system(size: 13))
+                                .foregroundColor(.gray.opacity(0.8))
+                        }
+                        
+                        Text(post.createdAt.timeAgo())
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray.opacity(0.6))
+                    }
+                    
+                    Spacer()
+                    
+                    // Delete option (only for user's own posts, moved to top right)
+                    if isCurrentUser {
+                        Button(action: { showDeleteConfirm = true }) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 15))
+                                .foregroundColor(.gray.opacity(0.7))
+                                .padding(6) // Add some padding for easier tapping
+                        }
+                        .confirmationDialog(
+                            "Delete this post?",
+                            isPresented: $showDeleteConfirm,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Delete", role: .destructive) {
+                                onDelete()
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("This action cannot be undone.")
                         }
                     }
                 }
-                .buttonStyle(PlainButtonStyle()) // Add this to make the NavigationLink tap area precise
+                .padding(.horizontal, 16)
+                // Adjust top padding based on tag presence
+                .padding(.top, contextTagInfo == nil ? 14 : 6) 
+                .padding(.bottom, 8)
                 
-                VStack(alignment: .leading, spacing: 2) {
-                    // Display name and username in Twitter-like format
-                    HStack(alignment: .center, spacing: 4) {
-                        Text(post.displayName ?? post.username)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                            
-                        Text("@\(post.username)")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray.opacity(0.8))
-                        
-                        Text("·")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray.opacity(0.8))
-                            
-                        Text(post.createdAt.timeAgo())
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray.opacity(0.7))
+                // Check for Completed Session Info FIRST
+                let (parsedCompletedSessionInfo, remainingContentForCompletedSession) = parseCompletedSessionInfo(from: post.content)
+
+                if let completedSession = parsedCompletedSessionInfo {
+                    CompletedSessionFeedCardView(sessionInfo: completedSession)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                    if !remainingContentForCompletedSession.isEmpty {
+                        Text(remainingContentForCompletedSession)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.95))
+                            .lineSpacing(5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 6) // Adjusted padding
+                            .padding(.bottom, 8)
                     }
-                    
-                    // Post content directly under the username (Twitter-style)
+                } else if post.postType == .hand { // Handle hand posts specifically if NOT a completed session
+                    if let hand = post.handHistory {
+                        HandSummaryView(hand: hand, showReplayButton: false)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 4)
+                    }
+                    // Now display the comment for the hand post
+                    if let handComment = extractCommentContent(from: post.content), !handComment.isEmpty {
+                        Text(handComment)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.95))
+                            .lineSpacing(5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.top, post.handHistory != nil ? 4 : 14) // Space between hand summary and comment, or top padding if no summary
+                            .padding(.bottom, 8)
+                    }
+                } else {
+                    // Original content display for regular posts (not completed session, not hand)
                     if !post.content.isEmpty {
                         Text(post.content)
                             .font(.system(size: 16))
                             .foregroundColor(.white.opacity(0.95))
                             .lineSpacing(5)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 4)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 14)
+                            .padding(.bottom, 8)
                     }
-                    
-                    // Images - Twitter-like layout
-                    if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(imageURLs, id: \.self) { url in
-                                    if let imageUrl = URL(string: url) {
-                                        KFImage(imageUrl)
-                                            .placeholder {
-                                                Rectangle()
-                                                    .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                                    .overlay(
-                                                        ProgressView()
-                                                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                                    )
-                                            }
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 200, height: 200)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10)) // Twitter has slightly rounded images
-                                    }
+                }
+                
+                // Images
+                if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(imageURLs, id: \.self) { url in
+                                if let imageUrl = URL(string: url) {
+                                    KFImage(imageUrl)
+                                        .placeholder {
+                                            Rectangle()
+                                                .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                                .overlay(
+                                                    ProgressView()
+                                                        .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                                )
+                                        }
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: UIScreen.main.bounds.width - 32, height: 350)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
                             }
                         }
-                        .padding(.top, 8)
+                        .padding(.leading, 8)
+                        .padding(.trailing, 8)
                     }
-                    
-                    // Twitter-like actions bar
-                    HStack(spacing: 48) {
-                        Button(action: onComment) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "bubble.left")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.gray.opacity(0.7))
-                                
-                                Text("\(post.comments)")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.gray.opacity(0.7))
+                    .padding(.top, 10)
+                    .padding(.bottom, 14)
+                }
+                
+                // Twitter-like actions bar
+                HStack(spacing: 36) {
+                    // Like Button (Moved to be first)
+                    Button(action: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            animateLike = true
+                            isLiked.toggle()
+                            onLike()
+                            
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                animateLike = false
                             }
                         }
-                        
-                        Button(action: {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                animateLike = true
-                                isLiked.toggle()
-                                onLike()
-                                
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                    animateLike = false
-                                }
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: isLiked ? "heart.fill" : "heart")
+                                .font(.system(size: 16))
+                                .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
+                                .scaleEffect(animateLike ? 1.3 : 1.0)
+                            
+                            Text("\(post.likes)")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray.opacity(0.7))
+                        }
+                    }
+                    
+                    // Comment Button (Moved to be second)
+                    Button(action: {
+                        if let postDetailAction = openPostDetail {
+                            postDetailAction()
+                        }
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bubble.left")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray.opacity(0.7))
+                            
+                            Text("\(post.comments)")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray.opacity(0.7))
+                        }
+                    }
+                    
+                    if post.postType == .hand {
+                        Button(action: { 
+                            if let onReplay = onReplay {
+                                onReplay()
                             }
                         }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: isLiked ? "heart.fill" : "heart")
+                            HStack(spacing: 6) {
+                                Image(systemName: "play.circle")
                                     .font(.system(size: 16))
-                                    .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
-                                    .scaleEffect(animateLike ? 1.3 : 1.0)
-                                
-                                Text("\(post.likes)")
+                                Text("Replay")
                                     .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.gray.opacity(0.7))
                             }
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
                         }
-                        
-                        // Delete option (only for user's own posts) - more subtle
-                        if isCurrentUser {
-                            Button(action: { showDeleteConfirm = true }) {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 15))
-                                    .foregroundColor(.gray.opacity(0.7))
-                            }
-                            .confirmationDialog(
-                                "Delete this post?",
-                                isPresented: $showDeleteConfirm,
-                                titleVisibility: .visible
-                            ) {
-                                Button("Delete", role: .destructive) {
-                                    onDelete()
-                                }
-                                Button("Cancel", role: .cancel) {}
-                            } message: {
-                                Text("This action cannot be undone.")
-                            }
-                        }
-                        
-                        Spacer()
                     }
-                    .padding(.top, 12)
+                    
+                    Spacer()
+                    
+                    // Share button
+                    Button(action: {
+                        // Non-functional share button
+                    }) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray.opacity(0.7))
+                    }
                 }
-                .padding(.trailing, 2)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .background(Color.clear) // Modified for transparency
+            .cornerRadius(0) // Modified for transparency
+            
+            // Make the entire cell tappable
+            if let postDetailAction = openPostDetail {
+                Button(action: {
+                    postDetailAction()
+                }) {
+                    Rectangle()
+                        .fill(Color.clear)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
-        .background(Color(red: 18/255, green: 18/255, blue: 24/255)) // More neutral Twitter-like background
     }
 }
 
-// Update PostCardView to match the Twitter-like layout of BasicPostCardView
+// Update PostCardView to match the optimized BasicPostCardView
 struct PostCardView: View {
     let post: Post
     let onLike: () -> Void
@@ -438,15 +715,92 @@ struct PostCardView: View {
         self.onDelete = onDelete
         self.isCurrentUser = isCurrentUser
         self.userId = userId
-        // Initialize isLiked from the post's state
         _isLiked = State(initialValue: post.isLiked)
     }
     
+    // Computed property for context tag information
+    private var contextTagInfo: (title: String, iconName: String)? {
+        let iconName = "rectangle.stack.fill"
+        var titleToShow: String?
+
+        if post.postType == .hand, let hand = post.handHistory {
+            let smallBlind = hand.raw.gameInfo.smallBlind
+            let bigBlind = hand.raw.gameInfo.bigBlind
+            if bigBlind > 0 || smallBlind > 0 {
+                let stakesString = String(format: "$%g/$%g", smallBlind, bigBlind)
+                var title = "Playing \(stakesString)"
+                if let location = post.location, !location.isEmpty {
+                    title += " at \(location)"
+                }
+                titleToShow = title
+            }
+        } else {
+            // Attempt to derive session information for non-hand posts
+
+            // 1. Check for completed session format first
+            let (completedOpt2, _) = parseCompletedSessionInfo(from: post.content)
+            if let completed = completedOpt2 {
+                // Use stakes from completed session info if available, else fallback to gameName
+                let primaryDisplay: String = {
+                    if !completed.stakes.isEmpty && !completed.gameName.isEmpty {
+                        return "\(completed.stakes) \(completed.gameName)"
+                    } else if !completed.stakes.isEmpty {
+                        return completed.stakes
+                    } else {
+                        return completed.gameName
+                    }
+                }()
+                var title = "Playing \(primaryDisplay)"
+                if let loc = post.location, !loc.isEmpty {
+                    title += " at \(loc)"
+                }
+                titleToShow = title
+            // 2. Check for explicit SESSION_INFO or other session parsing
+            } else if let (_, stakes) = extractSessionInfo(from: post.content), !stakes.isEmpty {
+                var title = "Playing \(stakes)"
+                if let loc = post.location, !loc.isEmpty {
+                    title += " at \(loc)"
+                }
+                titleToShow = title
+            // 3. Live session posts (chip updates) identified by non-nil sessionId
+            } else if post.sessionId != nil {
+                // Attempt to parse stakes via parseSessionContent for live chip updates
+                if let parsed = parseSessionContent(from: post.content) {
+                    let primaryDisp2 = parsed.stakes.isEmpty ? parsed.gameName : "\(parsed.stakes) \(parsed.gameName)"
+                    var title = "Playing \(primaryDisp2)"
+                    if let loc = post.location, !loc.isEmpty {
+                        title += " at \(loc)"
+                    }
+                    titleToShow = title
+                } else {
+                    // Fallback generic session tag
+                    var title = "Playing Session"
+                    if let loc = post.location, !loc.isEmpty {
+                        title += " at \(loc)"
+                    }
+                    titleToShow = title
+                }
+            }
+        }
+
+        if let title = titleToShow {
+            return (title, iconName)
+        }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Twitter-like header layout
-            HStack(alignment: .top, spacing: 12) {
-                // Profile image with Twitter-like styling
+            // Use the computed property to display the tag
+            if let tagInfo = contextTagInfo {
+                PostContextTagView(title: tagInfo.title, iconName: tagInfo.iconName)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10) // Added top padding for the tag view
+            }
+
+            // Header with user info & optional delete button
+            HStack(alignment: .top, spacing: 10) {
+                // Smaller profile image
                 Group {
                     if let profileImage = post.profileImage {
                         KFImage(URL(string: profileImage))
@@ -455,157 +809,213 @@ struct PostCardView: View {
                             }
                             .resizable()
                             .scaledToFill()
-                            .frame(width: 48, height: 48)
+                            .frame(width: 40, height: 40) 
                             .clipShape(Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            )
                     } else {
                         Circle()
                             .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                            .frame(width: 48, height: 48)
+                            .frame(width: 40, height: 40) 
                     }
                 }
                 
+                // User info (username, etc.)
                 VStack(alignment: .leading, spacing: 2) {
-                    // Display name and username in Twitter-like format
                     HStack(alignment: .center, spacing: 4) {
                         Text(post.displayName ?? post.username)
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 15, weight: .bold))
                             .foregroundColor(.white)
                             
                         Text("@\(post.username)")
-                            .font(.system(size: 14))
+                            .font(.system(size: 13))
                             .foregroundColor(.gray.opacity(0.8))
-                        
-                        Text("·")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray.opacity(0.8))
-                            
-                        Text(post.createdAt.timeAgo())
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray.opacity(0.7))
                     }
                     
-                    // Post content directly under the username (Twitter-style)
-                    if !post.content.isEmpty {
-                        Text(post.content)
-                            .font(.system(size: 16))
-                            .foregroundColor(.white.opacity(0.95))
-                            .lineSpacing(5)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 4)
-                    }
-                    
-                    // Hand post content
-                    if post.postType == .hand, let hand = post.handHistory {
-                        HandSummaryView(hand: hand, showReplayButton: false)
-                            .padding(.top, 8)
-                    }
-                    
-                    // Images - Twitter-like layout
-                    if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(imageURLs, id: \.self) { url in
-                                    if let imageUrl = URL(string: url) {
-                                        KFImage(imageUrl)
-                                            .placeholder {
-                                                Rectangle()
-                                                    .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                                    .overlay(
-                                                        ProgressView()
-                                                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                                    )
-                                            }
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 200, height: 200)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10)) // Twitter has slightly rounded images
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.top, 8)
-                    }
-                    
-                    // Twitter-like actions bar
-                    HStack(spacing: 36) {
-                        Button(action: onComment) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "bubble.left")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.gray.opacity(0.7))
-                                
-                                Text("\(post.comments)")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.gray.opacity(0.7))
-                            }
-                        }
-                        
-                        Button(action: {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                animateLike = true
-                                isLiked.toggle()
-                                onLike()
-                                
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                    animateLike = false
-                                }
-                            }
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: isLiked ? "heart.fill" : "heart")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
-                                    .scaleEffect(animateLike ? 1.3 : 1.0)
-                                
-                                Text("\(post.likes)")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.gray.opacity(0.7))
-                            }
-                        }
-                        
-                        if post.postType == .hand {
-                            Button(action: { showingReplay = true }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "play.circle")
-                                        .font(.system(size: 16))
-                                    Text("Replay")
-                                        .font(.system(size: 14, weight: .medium))
-                                }
-                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
-                            }
-                        }
-                        
-                        // Delete option (only for user's own posts)
-                        if isCurrentUser {
-                            Button(action: { showDeleteConfirm = true }) {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 15))
-                                    .foregroundColor(.gray.opacity(0.7))
-                            }
-                            .confirmationDialog(
-                                "Delete this post?",
-                                isPresented: $showDeleteConfirm,
-                                titleVisibility: .visible
-                            ) {
-                                Button("Delete", role: .destructive) {
-                                    onDelete()
-                                }
-                                Button("Cancel", role: .cancel) {}
-                            } message: {
-                                Text("This action cannot be undone.")
-                            }
-                        }
-                        
-                        Spacer()
-                    }
-                    .padding(.top, 12)
+                    Text(post.createdAt.timeAgo())
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray.opacity(0.6))
                 }
-                .padding(.trailing, 2)
+                
+                Spacer()
+                
+                // Delete option (only for user's own posts, moved to top right)
+                if isCurrentUser {
+                    Button(action: { showDeleteConfirm = true }) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 15))
+                            .foregroundColor(.gray.opacity(0.7))
+                            .padding(6) // Add some padding for easier tapping
+                    }
+                    .confirmationDialog(
+                        "Delete this post?",
+                        isPresented: $showDeleteConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete", role: .destructive) {
+                            onDelete()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This action cannot be undone.")
+                    }
+                }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            // Adjust top padding based on tag presence
+            .padding(.top, contextTagInfo == nil ? 14 : 6)
+            .padding(.bottom, 8)
+            
+            // Check for Completed Session Info FIRST
+            let (parsedCompletedSessionInfo, remainingContentForCompletedSession) = parseCompletedSessionInfo(from: post.content)
+
+            if let completedSession = parsedCompletedSessionInfo {
+                CompletedSessionFeedCardView(sessionInfo: completedSession)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8) // Add consistent padding
+                if !remainingContentForCompletedSession.isEmpty {
+                    Text(remainingContentForCompletedSession)
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.95))
+                        .lineSpacing(5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 6) // Adjusted padding
+                        .padding(.bottom, 8)
+                }
+            } else if post.postType == .hand { // Handle hand posts specifically if NOT a completed session
+                if let hand = post.handHistory {
+                     HandDisplayCardView(hand: hand,
+                                         onReplayTap: { showingReplay = true },
+                                         location: post.location,
+                                         createdAt: post.createdAt,
+                                         showReplayInFeed: true)
+                     // No specific padding here, HandDisplayCardView handles its own
+                }
+                // Now display the comment for the hand post
+                if let handComment = extractCommentContent(from: post.content), !handComment.isEmpty {
+                    Text(handComment)
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.95))
+                        .lineSpacing(5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, post.handHistory != nil ? 8 : 14) // Space below HandDisplayCardView or top padding
+                        .padding(.bottom, 8)
+                }
+            } else {
+                 // Original content display for regular posts (not completed session, not hand)
+                if !post.content.isEmpty { // post.postType != .hand condition removed here
+                    Text(post.content)
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.95))
+                        .lineSpacing(5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 14)
+                        .padding(.bottom, 8)
+                }
+            }
+            
+            // Images - Twitter-like layout
+            if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(imageURLs, id: \.self) { url in
+                            if let imageUrl = URL(string: url) {
+                                KFImage(imageUrl)
+                                    .placeholder {
+                                        Rectangle()
+                                            .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                            .overlay(
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                            )
+                                    }
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: UIScreen.main.bounds.width - 32, height: 350)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
+                    .padding(.leading, 8)
+                    .padding(.trailing, 8)
+                }
+                .padding(.top, 10)
+                .padding(.bottom, 14)
+            }
+            
+            // Twitter-like actions bar
+            HStack(spacing: 36) {
+                // Like Button (Moved to be first)
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        animateLike = true
+                        isLiked.toggle()
+                        onLike()
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            animateLike = false
+                        }
+                    }
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: isLiked ? "heart.fill" : "heart")
+                            .font(.system(size: 16))
+                            .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
+                            .scaleEffect(animateLike ? 1.3 : 1.0)
+                        
+                        Text("\(post.likes)")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.7))
+                    }
+                }
+                
+                // Comment Button (Moved to be second)
+                Button(action: onComment) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bubble.left")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray.opacity(0.7))
+                        
+                        Text("\(post.comments)")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.7))
+                    }
+                }
+                
+                if post.postType == .hand {
+                    Button(action: { showingReplay = true }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.circle")
+                                .font(.system(size: 16))
+                            Text("Replay")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+                    }
+                }
+                
+                // Delete option REMOVED from here
+                
+                Spacer()
+                
+                // Share button
+                Button(action: {
+                    // Non-functional share button
+                }) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray.opacity(0.7))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
-        .background(Color(red: 18/255, green: 18/255, blue: 24/255)) // More neutral Twitter-like background
+        .background(Color.clear) 
         .sheet(isPresented: $showingReplay) {
             if let hand = post.handHistory {
                 HandReplayView(hand: hand, userId: userId)
@@ -670,7 +1080,7 @@ struct EmptyFeedView: View {
                 VStack(spacing: 12) {
                     Text("Your feed is empty")
                         .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
+                        .foregroundColor(.white)
                     
                     Text("Follow other players or create a post to\nstart seeing content here")
                         .font(.system(size: 17, weight: .medium, design: .rounded))
@@ -736,8 +1146,8 @@ struct PostDetailView: View {
     @State private var newCommentText = ""
     @State private var isLoadingComments = true
     @State private var showDeleteConfirm = false
-    @State private var keyboardHeight: CGFloat = 0
     @FocusState private var isCommentFieldFocused: Bool
+    @State private var keyboardHeight: CGFloat = 0 // Added for manual keyboard handling
     
     init(post: Post, userId: String) {
         self.post = post
@@ -746,287 +1156,286 @@ struct PostDetailView: View {
     }
     
     var body: some View {
-        ZStack {
-            // Use AppBackgroundView for consistent design
-            AppBackgroundView()
-                .ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                // Top header bar with enhanced styling
-                HStack {
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(12)
-                            .background(
-                                Circle()
-                                    .fill(Color.black.opacity(0.25))
-                                    .shadow(color: .black.opacity(0.2), radius: 2)
-                            )
-                    }
-                    
-                    Spacer()
-                    
-                    if post.userId == userId {
-                        Button(action: { showDeleteConfirm = true }) {
-                            Image(systemName: "trash")
-                                .font(.system(size: 18))
-                                .foregroundColor(.white.opacity(0.7))
-                                .padding(12)
-                                .background(
-                                    Circle()
-                                        .fill(Color.black.opacity(0.25))
-                                        .shadow(color: .black.opacity(0.2), radius: 2)
-                                )
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 12)
-                .background(
-                    Rectangle()
-                        .fill(Color(red: 16/255, green: 16/255, blue: 20/255).opacity(0.8))
-                        .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
-                )
-                
-                // Content area with enhanced styling
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 20) {
-                        // Post header with enhanced profile image
-                        HStack(spacing: 12) {
-                            // Profile image
-                            Group {
-                                if let profileImage = post.profileImage {
-                                    KFImage(URL(string: profileImage))
-                                        .placeholder {
-                                            Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                        }
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 50, height: 50)
-                                        .clipShape(Circle())
-                                        .overlay(
-                                            Circle()
-                                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                        )
-                                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
-                                } else {
-                                    Circle()
-                                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                        .frame(width: 50, height: 50)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                        )
-                                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
-                                }
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 3) {
-                                // Display name and username in format: "DisplayName @username"
-                                HStack(spacing: 4) {
-                                    Text(post.displayName ?? post.username)
-                                        .font(.system(size: 18, weight: .bold))
-                                        .foregroundColor(.white)
-                                        
-                                    Text("@\(post.username)")
-                                        .font(.system(size: 15))
-                                        .foregroundColor(.gray.opacity(0.8))
-                                }
-                                
-                                Text(post.createdAt.timeAgo())
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.gray.opacity(0.6))
-                            }
-                            
-                            Spacer()
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 20)
-                        
-                        PostBodyContentView(post: post, showingReplay: $showingReplay, selectedImageURL: $selectedImageURL, showingFullScreenImage: $showingFullScreenImage)
-                            
-                            // Actions with enhanced styling - but no replay button
-                            HStack(spacing: 32) {
-                                Button(action: {
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                        animateLike = true
-                                        isLiked.toggle()
-                                        likePost()
-                                        
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                            animateLike = false
-                                        }
-                                    }
-                                }) {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: isLiked ? "heart.fill" : "heart")
-                                            .font(.system(size: 20))
-                                            .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
-                                            .scaleEffect(animateLike ? 1.3 : 1.0)
-                                        
-                                        Text("\(post.likes)")
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(.gray.opacity(0.9))
-                                    }
-                                }
-                                
-                                HStack(spacing: 10) {
-                                    Image(systemName: "bubble.left")
-                                        .font(.system(size: 20))
-                                        .foregroundColor(.gray.opacity(0.7))
-                                    
-                                    Text("\(post.comments)")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(.gray.opacity(0.9))
-                                }
-                                
-                                Spacer()
-                            }
-                            .padding(.top, 12)
-                            .padding(.horizontal, 16)
-                        
-                        Divider()
-                            .background(Color.white.opacity(0.1))
-                            .padding(.vertical, 16)
-                        
-                        // EXTRACTED COMMENTS SECTION
-                        if let postId = post.id {
-                            PostCommentsSectionView(
-                                comments: comments,
-                                replies: replies,
-                                isLoadingComments: isLoadingComments,
-                                isLoadingReplies: isLoadingReplies,
-                                userId: userId,
-                                postId: postId,
-                                commentToExpandReplies: commentToExpandReplies,
-                                onReplyTapped: { comment in
-                                                replyingToComment = comment
-                                                newCommentText = "@\(comment.username) "
-                                                isCommentFieldFocused = true
-                                            },
-                                onToggleRepliesTapped: { comment in
-                                    self.toggleRepliesExpansion(for: comment)
-                                },
-                                onDeleteTapped: { (commentId, parentComment) in
-                                    self.deleteComment(commentId, forPost: postId, parentOfDeletedReply: parentComment)
-                                }
-                            )
-                        }
-                        
-                        // Space at the bottom to account for comment input
-                        Color.clear
-                            .frame(height: 80)
-                    }
-                }
-                
-                // Comment input field with enhanced styling
+        NavigationView { 
+            ZStack { 
+                AppBackgroundView().ignoresSafeArea() 
+
+                // Main content layout (Header and ScrollView)
                 VStack(spacing: 0) {
-                    Divider()
-                        .background(Color.white.opacity(0.1))
-                    
-                    HStack(spacing: 14) {
-                        // User avatar for comment input
-                        if let profileImageURL = userService.currentUserProfile?.avatarURL {
-                            KFImage(URL(string: profileImageURL))
-                                .placeholder {
-                                    Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                }
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 32, height: 32)
-                                .clipShape(Circle())
-                        } else {
-                            Circle()
-                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                .frame(width: 32, height: 32)
-                        }
-                        
-                        ZStack(alignment: .trailing) {
-                            TextField(replyingToComment != nil ? "Replying to @\(replyingToComment!.username)..." : "Add a comment...", text: $newCommentText)
-                                .font(.system(size: 16))
-                                .padding(12)
-                                .background(Color(red: 25/255, green: 25/255, blue: 30/255))
-                                .cornerRadius(20)
+                    // Top header bar - remains the same
+                    HStack {
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(.white)
-                                .focused($isCommentFieldFocused)
-                            
-                            if !newCommentText.isEmpty {
-                                Button(action: addComment) {
-                                    Image(systemName: "arrow.up.circle.fill")
-                                        .font(.system(size: 26))
-                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                        .padding(.trailing, 8)
-                                }
+                                .padding(12)
+                                .background(Circle().fill(Color.black.opacity(0.25)))
+                        }
+                        Spacer()
+                        if post.userId == userId {
+                            Button(action: { showDeleteConfirm = true }) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .padding(12)
+                                    .background(Circle().fill(Color.black.opacity(0.25)))
                             }
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color(red: 20/255, green: 20/255, blue: 24/255),
-                                Color(red: 18/255, green: 18/255, blue: 22/255)
-                            ]),
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .shadow(color: .black.opacity(0.3), radius: 5, y: -2)
-                    )
-                }
-                .offset(y: -keyboardHeight > 0 ? -keyboardHeight + (UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0) : 0)
-                .animation(.easeOut(duration: 0.16), value: keyboardHeight)
-            }
-        }
-        .confirmationDialog(
-            "Delete this post?",
-            isPresented: $showDeleteConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                deletePost()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This action cannot be undone.")
-        }
-        .onTapGesture {
-            // Dismiss keyboard when tapping outside
-            isCommentFieldFocused = false
-        }
-        .fullScreenCover(isPresented: $showingFullScreenImage) {
-            if let imageUrl = selectedImageURL {
-                FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
-            }
-        }
-        .sheet(isPresented: $showingReplay) {
-            if let hand = post.handHistory {
-                HandReplayView(hand: hand, userId: userId)
-            }
-        }
-        .onAppear {
-            loadComments()
-            
-            // Set up keyboard observers
-            NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
-                if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-                    keyboardHeight = keyboardFrame.height
+                    .padding(.top, (UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) + 5) 
+                    .padding(.bottom, 8) 
+                    .background(Color.clear) 
+
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 20) { 
+                            postHeaderAndBody 
+                            postActionsAndComments 
+                        }
+                        .padding(.bottom, 70) 
+                    }
+
+
                 }
             }
-            
-            NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
-                keyboardHeight = 0
+                        // Overlay the commentInputView at the bottom of the ZStack
+            .overlay(
+                VStack(spacing:0) { // Use a VStack to easily apply bottom padding to the input bar itself
+                    Spacer() // Pushes the input bar to the bottom of the overlay area
+                    commentInputView
+                        // .padding(.bottom, 15) // OLD PADDING - REMOVE/REPLACE
+                        // .ignoresSafeArea(.keyboard, edges: .bottom) // REMOVE
+                        .padding(.bottom, keyboardHeight > 0 ? max(0, keyboardHeight - (UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0)) : 15)
+                        .animation(.easeInOut(duration: 0.25), value: keyboardHeight) // Added animation
+                }
+                .ignoresSafeArea(.keyboard, edges: .bottom) // The overlay container ignores the keyboard, allowing input bar to sit on it
+                , alignment: .bottom // Align the overlay to the bottom of the ZStack
+            )
+            .confirmationDialog(
+                "Delete this post?",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    deletePost()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This action cannot be undone.")
             }
-        }
-        .onDisappear {
-            // Clean up keyboard observers
-            NotificationCenter.default.removeObserver(self)
+            .onTapGesture {
+                isCommentFieldFocused = false
+            }
+            .fullScreenCover(isPresented: $showingFullScreenImage) {
+                if let imageUrl = selectedImageURL {
+                    FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
+                }
+            }
+            .sheet(isPresented: $showingReplay) {
+                if let hand = post.handHistory {
+                    HandReplayView(hand: hand, userId: userId)
+                }
+            }
+            .onAppear {
+                loadComments()
+                NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
+                    guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+                    self.keyboardHeight = keyboardFrame.height
+                }
+                NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+                    self.keyboardHeight = 0
+                }
+            }
+            .onDisappear {
+                NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
+                NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+            }
         }
     }
     
+    // Extracted ViewBuilder for Post Header and Body
+    @ViewBuilder
+    private var postHeaderAndBody: some View {
+        // Post header with enhanced profile image
+        HStack(spacing: 12) {
+            // Profile image
+            Group {
+                if let profileImage = post.profileImage {
+                    KFImage(URL(string: profileImage))
+                        .placeholder {
+                            Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                        }
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 50, height: 50)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                } else {
+                    Circle()
+                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                        .frame(width: 50, height: 50)
+                        .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Text(post.displayName ?? post.username)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                        
+                    Text("@\(post.username)")
+                        .font(.system(size: 15))
+                        .foregroundColor(.gray.opacity(0.8))
+                }
+                
+                Text(post.createdAt.timeAgo())
+                    .font(.system(size: 13))
+                    .foregroundColor(.gray.opacity(0.6))
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 20) // This padding is within the ScrollView now
+        
+        PostBodyContentView(post: post, showingReplay: $showingReplay, selectedImageURL: $selectedImageURL, showingFullScreenImage: $showingFullScreenImage)
+    }
+    
+    // Extracted ViewBuilder for Post Actions and Comments
+    @ViewBuilder
+    private var postActionsAndComments: some View {
+        // Actions with enhanced styling - but no replay button
+        HStack(spacing: 32) {
+            Button(action: {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    animateLike = true
+                    isLiked.toggle()
+                    likePost()
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        animateLike = false
+                    }
+                }
+            }) {
+                HStack(spacing: 10) {
+                    Image(systemName: isLiked ? "heart.fill" : "heart")
+                        .font(.system(size: 20))
+                        .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
+                        .scaleEffect(animateLike ? 1.3 : 1.0)
+                    
+                    Text("\(post.likes)")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.gray.opacity(0.9))
+                }
+            }
+            
+            HStack(spacing: 10) {
+                Image(systemName: "bubble.left")
+                    .font(.system(size: 20))
+                    .foregroundColor(.gray.opacity(0.7))
+                
+                Text("\(post.comments)")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.gray.opacity(0.9))
+            }
+            
+            Spacer()
+        }
+        .padding(.top, 12)
+        .padding(.horizontal, 16)
+    
+        Divider()
+            .background(Color.white.opacity(0.1))
+            .padding(.vertical, 8) // Reduced from 16
+        
+        // EXTRACTED COMMENTS SECTION
+        if let postId = post.id {
+            PostCommentsSectionView(
+                comments: comments,
+                replies: replies,
+                isLoadingComments: isLoadingComments,
+                isLoadingReplies: isLoadingReplies,
+                userId: userId,
+                postId: postId,
+                commentToExpandReplies: commentToExpandReplies,
+                onReplyTapped: { comment in
+                                replyingToComment = comment
+                                newCommentText = "@\(comment.username) "
+                                isCommentFieldFocused = true
+                            },
+                onToggleRepliesTapped: { comment in
+                    self.toggleRepliesExpansion(for: comment)
+                },
+                onDeleteTapped: { (commentId, parentComment) in
+                    self.deleteComment(commentId, forPost: postId, parentOfDeletedReply: parentComment)
+                }
+            )
+        }
+    }
+    
+    // Extracted ViewBuilder for Comment Input View
+    @ViewBuilder
+    private var commentInputView: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .background(Color.white.opacity(0.1))
+            
+            HStack(spacing: 14) {
+                if let profileImageURL = userService.currentUserProfile?.avatarURL {
+                    KFImage(URL(string: profileImageURL))
+                        .placeholder {
+                            Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                        }
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 32, height: 32)
+                        .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                        .frame(width: 32, height: 32)
+                }
+                
+                ZStack(alignment: .trailing) {
+                    TextField(replyingToComment != nil ? "Replying to @\(replyingToComment!.username)..." : "Add a comment...", text: $newCommentText)
+                        .font(.system(size: 16))
+                        .padding(12)
+                        .background(Color(red: 25/255, green: 25/255, blue: 30/255))
+                        .cornerRadius(20)
+                        .foregroundColor(.white)
+                        .focused($isCommentFieldFocused)
+                        // .ignoresSafeArea(.keyboard, edges: .bottom) // REMOVE
+                    
+                    if !newCommentText.isEmpty {
+                        Button(action: addComment) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 26))
+                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                .padding(.trailing, 8)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12) // This is the internal padding of the input bar
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 20/255, green: 20/255, blue: 24/255),
+                        Color(red: 18/255, green: 18/255, blue: 22/255)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .shadow(color: .black.opacity(0.3), radius: 5, y: -2)
+            )
+        }
+        // No .ignoresSafeArea(.keyboard) here on the commentInputView itself
+    }
+
     private func loadComments() {
         isLoadingComments = true
         replies = [:] // Clear any previously loaded replies
@@ -1052,12 +1461,9 @@ struct PostDetailView: View {
         }
     }
 
-    // Renamed and refactored: primary role is to fetch replies if needed.
-    // Expansion is controlled by expandAfterLoading or by toggleRepliesExpansion.
     private func loadReplies(for parentComment: Comment, expandAfterLoading: Bool = true) {
         guard let parentCommentId = parentComment.id, let postId = post.id else { return }
 
-        // Only load if replies are not already fetched for this parentCommentId
         if replies[parentCommentId] == nil {
             isLoadingReplies[parentCommentId] = true
             Task {
@@ -1067,8 +1473,6 @@ struct PostDetailView: View {
                         self.replies[parentCommentId] = loadedReplies
                         self.isLoadingReplies[parentCommentId] = false
                         if expandAfterLoading {
-                            // If we were asked to expand after loading, and no other comment is currently set to expand,
-                            // or if the currently expanding comment is this one, then set it.
                             if self.commentToExpandReplies == nil || self.commentToExpandReplies?.id == parentCommentId {
                                 self.commentToExpandReplies = parentComment
                             }
@@ -1082,24 +1486,17 @@ struct PostDetailView: View {
                 }
             }
         } else if expandAfterLoading {
-            // Replies are already loaded, and we want to ensure this comment's replies are shown.
-            // This will effectively re-assert that this comment should be the one expanded.
             self.commentToExpandReplies = parentComment
         }
-        // If expandAfterLoading is false and replies are already loaded, this function does nothing further.
     }
 
-    // New function to explicitly handle the user tapping "View/Hide Replies"
     private func toggleRepliesExpansion(for comment: Comment) {
         guard let commentId = comment.id else { return }
 
         if commentToExpandReplies?.id == commentId {
-            commentToExpandReplies = nil // Collapse if currently expanded
+            commentToExpandReplies = nil 
         } else {
-            commentToExpandReplies = comment // Expand this comment's replies
-            // If replies for this comment haven't been loaded yet, load them.
-            // loadReplies will handle the isLoadingReplies state and populate self.replies.
-            // The expandAfterLoading: true ensures that if it successfully loads, it keeps this comment expanded.
+            commentToExpandReplies = comment 
             if replies[commentId] == nil {
                 loadReplies(for: comment, expandAfterLoading: true)
             }
@@ -1112,18 +1509,15 @@ struct PostDetailView: View {
         Task {
             var usernameToUse: String
             var profileImageToUse: String?
-            let localCurrentUserId = self.userId // Assuming self.userId is the current user's ID
+            let localCurrentUserId = self.userId 
 
-            // Step 1: Get current profile or fetch if needed
             let userProfile: UserProfile?
             if let existingProfile = userService.currentUserProfile {
                 userProfile = existingProfile
             } else {
                 print("[FeedView.addComment] Profile nil, attempting fetch for user ID: \(localCurrentUserId)...")
                 do {
-                    // Ensure fetchUserProfile is called for the correct user if it takes a userId parameter
-                    // If it inherently knows the current user, this is fine.
-                    try await userService.fetchUserProfile() // Assuming this fetches for self.userId
+                    try await userService.fetchUserProfile() 
                     userProfile = userService.currentUserProfile
                     if userProfile == nil {
                         print("[FeedView.addComment] Profile still nil after fetch for user ID: \(localCurrentUserId).")
@@ -1132,146 +1526,96 @@ struct PostDetailView: View {
                     }
                 } catch {
                     print("[FeedView.addComment] Error fetching profile for user ID \(localCurrentUserId): \(error.localizedDescription). Cannot add comment.")
-                    // Optionally show an alert to the user or handle error
                     return
                 }
             }
 
-            // Step 2: Validate the obtained profile
             guard let validProfile = userProfile else {
                 print("[FeedView.addComment] User profile is nil even after fetch attempt for user ID: \(localCurrentUserId). Cannot add comment.")
-                // Optionally show an alert or handle
                 return
             }
 
-            // Step 3: Username is non-optional on UserProfile, so direct access.
             let fetchedUsername = validProfile.username
 
-            // Step 4: Validate username
             guard !fetchedUsername.isEmpty else {
                 print("[FeedView.addComment] Error: Username in profile for user ID \(localCurrentUserId) is empty. Username: '\(fetchedUsername)'. Cannot add comment.")
-                // Optionally show an alert or handle
                 return
             }
             
             guard fetchedUsername != "User" else {
                  print("[FeedView.addComment] Error: Username for user ID \(localCurrentUserId) is placeholder 'User'. Username: '\(fetchedUsername)'. Cannot add comment.")
-                // Optionally show an alert or handle
                 return
             }
 
-            // Step 5: If all checks pass
             usernameToUse = fetchedUsername
-            profileImageToUse = validProfile.avatarURL // Assuming avatarURL is the correct property
-            print("[FeedView.addComment] Using username: '\(usernameToUse)' and profile image: '\(profileImageToUse ?? "nil")' for comment on post \(postId) by user \(localCurrentUserId).")
+            profileImageToUse = validProfile.avatarURL
+            print("[FeedView.addComment] Using username: '\(usernameToUse)' and profile image: '\(profileImageToUse ?? "nil")\' for comment on post \(postId) by user \(localCurrentUserId).")
 
-            // Proceed with adding comment
             do {
-                let parentId = replyingToComment?.id // Assuming replyingToComment logic exists or is adapted
+                let parentId = replyingToComment?.id 
                 try await postService.addComment(
                     to: postId,
-                    userId: localCurrentUserId, // Ensure this is the actual current user's ID
+                    userId: localCurrentUserId, 
                     username: usernameToUse,
                     profileImage: profileImageToUse,
                     content: newCommentText,
-                    parentCommentId: parentId // nil if not a reply
+                    parentCommentId: parentId 
                 )
                 print("[FeedView.addComment] Comment successfully added to post \(postId) by user \(localCurrentUserId).")
 
-                // Refresh comments or UI
                 if let parent = replyingToComment, let parentId = parent.id {
-                     // If it's a reply, update reply list for the parent comment
-                     // This might involve re-fetching replies for that specific parent comment
-                     // Example:
-                     // await loadReplies(for: parent, expandAfterLoading: true) // If loadReplies is adapted
                     print("[FeedView.addComment] It was a reply to comment \(parentId). Refreshing replies (logic to be implemented).")
-                    // For FeedView, direct replies might not be shown, or handled differently.
-                    // If comments are reloaded for the post, that might be sufficient.
                     await refreshPostComments(postId: postId)
 
 
                 } else {
-                    // If it's a top-level comment, refresh all comments for the post
                     await refreshPostComments(postId: postId)
                     print("[FeedView.addComment] It was a top-level comment. Refreshed comments for post \(postId).")
                 }
                 
                 await MainActor.run {
                     newCommentText = ""
-                    replyingToComment = nil // Reset reply state
-                    // activePostForComment = nil // Or however you manage the comment input UI state
-                    isCommentFieldFocused = false // Dismiss keyboard if applicable
+                    replyingToComment = nil 
+                    isCommentFieldFocused = false 
                      print("[FeedView.addComment] UI reset after adding comment.")
                 }
 
             } catch {
                 print("[FeedView.addComment] Error occurred while finally trying to add comment to post \(postId) by user \(localCurrentUserId): \(error.localizedDescription)")
-                // Optionally show an alert
             }
         }
     }
 
-    // Helper function to refresh comments for a specific post in the list
-    // This is a conceptual example; implementation depends on how posts array is managed
     private func refreshPostComments(postId: String) async {
-        // Find the post in postService.posts and update its comment count or reload its comments
-        // For simplicity, we can just re-fetch all posts if granular update is complex
-        // or if PostService handles comment count updates internally when a comment is added.
-        // The Post object itself has a 'comments' count. We need to ensure this is updated.
-        
-        // Option 1: Optimistically update local post data (if possible)
         if let index = postService.posts.firstIndex(where: { $0.id == postId }) {
             var postToUpdate = postService.posts[index]
-            // Assuming addComment in PostService updates the comment count in Firestore
-            // We might need to re-fetch this specific post or just increment its comment count locally
-            // For now, let's assume PostService handles the backend, and we might need a fresh fetch
-            // or PostService could publish changes to the specific post.
-
-            // If PostService's addComment doesn't return the updated post or new count directly,
-            // we might need a way to get the new comment count.
-            // For now, let's simulate an increment.
-            // This is a simplification. Ideally, the backend or PostService.addComment tells us the new count.
-            postToUpdate.comments += 1 // Optimistic update.
-            
-            // This direct mutation might not work if postService.posts is not directly mutable
-            // or if it doesn't trigger UI updates.
-            // A better way might be for PostService to publish the updated post.
-            // await postService.fetchPost(id: postId) // if such a function exists and updates the posts array
-            
-            // Simplest for now: refresh the whole feed if granular update is tricky
-            // await postService.fetchPosts()
+            postToUpdate.comments += 1 
+            // This direct mutation may not trigger UI updates depending on how PostService.posts is published.
+            // If PostService publishes changes to individual posts or re-fetches, this might not be needed,
+            // or a more robust update mechanism from PostService would be better.
+            // For now, this attempts a local optimistic update.
+            // postService.posts[index] = postToUpdate // This line might be problematic if posts is not directly mutable or doesn't trigger updates.
             print("[FeedView.refreshPostComments] Post \(postId) comment count potentially updated. UI should refresh.")
         }
-        // If FeedView displays comments directly (it doesn't seem to, PostDetailView does),
-        // then here you would reload the comments for THAT post.
-        // Since FeedView shows a summary (PostView), updating the comment count on the Post object is key.
+         // Reload comments for the detail view
+        loadComments()
     }
     
-    // The commentId is the ID of the comment/reply to delete.
-    // The optional parentComment is the Comment object if we are deleting a reply (so we can refresh its replies).
     private func deleteComment(_ commentId: String, forPost postId: String, parentOfDeletedReply: Comment? = nil) {
         Task {
             do {
                 try await postService.deleteComment(postId: postId, commentId: commentId)
                 
-                // Refresh comments after deletion
                 if let parent = parentOfDeletedReply {
-                    // We deleted a reply, refresh the replies for its parent
-                    // Also, the parent's reply count in DB was decremented by PostService.
-                    // We need to update our local copy of the parent comment.
                     if let index = comments.firstIndex(where: { $0.id == parent.id }) {
                         var updatedParent = parent
                         if updatedParent.replies > 0 { updatedParent.replies -= 1 }
                         comments[index] = updatedParent
-                        loadReplies(for: comments[index]) // Refresh and potentially collapse/expand
+                        loadReplies(for: comments[index]) 
                     } else {
-                         // Parent not found in top-level, this case should be rare with 1-level deep replies
-                         // Fallback to reloading all comments
                         loadComments()
                     }
                 } else {
-                    // We deleted a top-level comment, so reload all top-level comments
-                    // This will also clear out any loaded replies from the state.
                     loadComments()
                 }
             } catch {
@@ -1285,6 +1629,7 @@ struct PostDetailView: View {
             do {
                 if let postId = post.id {
                     try await postService.toggleLike(postId: postId, userId: userId)
+                    // Optionally update local post like count if needed, or rely on PostService to publish update
                 }
             } catch {
                 print("Error liking post: \(error)")
@@ -1296,13 +1641,18 @@ struct PostDetailView: View {
         Task {
             do {
                 if let postId = post.id {
+                    print("[PostDetailView] Attempting to delete post with ID: \(postId)")
                     try await postService.deletePost(postId: postId)
+                    print("[PostDetailView] Post deletion successful for ID: \(postId)")
                     await MainActor.run {
-                    dismiss()
+                       dismiss()
                     }
+                    // Optionally, trigger a refresh of the feed in FeedView via a callback or service update
+                } else {
+                    print("[PostDetailView] Error: Post ID is nil, cannot delete.")
                 }
             } catch {
-                print("Error deleting post: \(error)")
+                print("[PostDetailView] Error deleting post ID \(post.id ?? "N/A"): \(error.localizedDescription)")
             }
         }
     }
@@ -1738,8 +2088,8 @@ private func extractSessionInfo(from content: String) -> (String, String)? {
         return (parsed.gameName, parsed.stakes)
     }
     
-    return nil
-}
+        return nil
+    }
 
 private func extractCommentContent(from content: String) -> String? {
     // Handle SESSION_INFO format
@@ -1798,11 +2148,27 @@ private struct PostBodyContentView: View {
     // extractNoteContent, parseSessionContent should be accessible here.
     // If they are private to PostDetailView, they need to be moved or made available.
     // For now, assuming they are top-level private functions in the file or accessible.
-
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if !post.content.isEmpty {
-                // Check for session posts
+            // Parse completed session info first
+            let (parsedCompletedSession, commentTextForCompletedSession) = parseCompletedSessionInfo(from: post.content)
+
+            if let completedInfo = parsedCompletedSession {
+                CompletedSessionFeedCardView(sessionInfo: completedInfo)
+                    .padding(.horizontal, 16) // Added horizontal padding for detail view context
+                if !commentTextForCompletedSession.isEmpty {
+                    Text(commentTextForCompletedSession)
+                        .font(.system(size: 17))
+                        .foregroundColor(.white.opacity(0.95))
+                        .lineSpacing(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8) // Add some space between card and comment
+                }
+            } else if !post.content.isEmpty {
+                // Original logic if not a completed session post
+                // Check for live session posts (SESSION_INFO prefix)
                 if post.sessionId != nil || post.content.starts(with: "SESSION_INFO:") {
                     // Check if this is a note
                     if isNote(content: post.content) {
@@ -1919,15 +2285,11 @@ private struct PostBodyContentView: View {
             
             // Hand post content
             if post.postType == .hand, let hand = post.handHistory {
-                Button(action: {
-                    showingReplay = true
-                }) {
-                    HandSummaryView(hand: hand, onReplayTap: {
-                        showingReplay = true
-                    })
-                }
-                .padding(.top, 4)
-                .padding(.horizontal, 16)
+                HandDisplayCardView(hand: hand, 
+                                    onReplayTap: { showingReplay = true }, 
+                                    location: post.location, 
+                                    createdAt: post.createdAt,
+                                    showReplayInFeed: true) // Hide Replay button in feed post card
             }
             
             // Images with enhanced styling
@@ -1939,7 +2301,7 @@ private struct PostBodyContentView: View {
                                 if let imageUrl = URL(string: url) {
                                     KFImage(imageUrl)
                                         .placeholder {
-                                            ZStack {
+        ZStack {
                                                 Rectangle()
                                                     .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
                             ProgressView()
@@ -2084,7 +2446,7 @@ private struct PostCommentsSectionView: View {
                                 }
                                 .padding(.horizontal, 16 + 15)
                             } else if let currentReplies = replies[comment.id ?? ""], !currentReplies.isEmpty {
-                                VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                                     ForEach(currentReplies) { reply in
                                         CommentRow(
                                             comment: reply,
@@ -2128,4 +2490,55 @@ private struct PostCommentsSectionView: View {
 // used within PostBodyContentView must be accessible. If they are private to PostDetailView,
 // they need to be moved to be top-level private functions in the file, or passed into PostBodyContentView.
 // Assuming they are accessible for now.
+
+// MARK: - Completed Session Feed Card View
+
+private struct CompletedSessionFeedCardView: View {
+    let sessionInfo: ParsedCompletedSessionInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(sessionInfo.title)
+                .font(.system(size: 22, weight: .bold)) // Prominent title for feed
+                .foregroundColor(.white)
+                .lineLimit(2)
+                .padding(.bottom, 6)
+
+            // Strava-like stats display for the feed
+            HStack(alignment: .top, spacing: 12) { // Use spacing for distinct metrics
+                FeedStatDisplayView(label: "DURATION", value: sessionInfo.duration)
+                Spacer()
+                FeedStatDisplayView(label: "BUY-IN", value: sessionInfo.buyIn)
+                Spacer()
+                FeedStatDisplayView(label: "CASHOUT", value: sessionInfo.cashout)
+                Spacer()
+                FeedStatDisplayView(label: "PROFIT", value: sessionInfo.profit, 
+                                  valueColor: sessionInfo.profit.contains("-") ? .red : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+            }
+        }
+        .padding(.vertical, 10) 
+    }
+}
+
+// Renamed FeedStatView to FeedStatDisplayView for clarity and consistency
+private struct FeedStatDisplayView: View {
+    let label: String
+    let value: String
+    var valueColor: Color = .white
+    var isWide: Bool = false
+
+    var body: some View {
+        VStack(alignment: isWide ? .leading : .center, spacing: 2) { // Center align normal stats, left align wide ones
+            Text(value)
+                .font(.system(size: isWide ? 18 : 20, weight: .bold)) // Slightly smaller for wide, larger for normal metrics
+                .foregroundColor(valueColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(label) // Label below value, as in Strava
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.gray)
+        }
+        .frame(maxWidth: isWide ? .infinity : nil, alignment: isWide ? .leading : .center)
+    }
+}
 

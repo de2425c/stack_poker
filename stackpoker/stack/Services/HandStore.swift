@@ -146,6 +146,43 @@ class HandStore: ObservableObject {
         }
     }
     
+    // Method to fetch a specific hand by its ID for the current user
+    func fetchHandById(_ handId: String) async -> SavedHand? {
+        // Check local cache first
+        if let cachedHand = self.savedHands.first(where: { $0.id == handId }) {
+            return cachedHand
+        }
+        
+        // If not in cache, fetch from Firestore
+        do {
+            let document = try await db.collection("users")
+                                      .document(userId)
+                                      .collection("hands")
+                                      .document(handId)
+                                      .getDocument()
+            
+            if document.exists,
+               let data = document.data(),
+               let dict = data["hand"] as? [String: Any],
+               let jsonData = try? JSONSerialization.data(withJSONObject: dict),
+               let handDetail = try? JSONDecoder().decode(ParsedHandHistory.self, from: jsonData),
+               let timestamp = data["timestamp"] as? Timestamp {
+                
+                var savedHand = SavedHand(id: document.documentID,
+                                          hand: handDetail,
+                                          timestamp: timestamp.dateValue())
+                savedHand.sessionId = data["sessionId"] as? String
+                return savedHand
+            } else {
+                print("HandStore: Document \(handId) does not exist or failed to decode.")
+                return nil
+            }
+        } catch {
+            print("HandStore: Error fetching hand by ID \(handId): \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
     // New function to fetch hands for a specific session ID
     func fetchHands(forSessionId sessionId: String, completion: @escaping ([SavedHand]) -> Void) {
         guard !userId.isEmpty else {

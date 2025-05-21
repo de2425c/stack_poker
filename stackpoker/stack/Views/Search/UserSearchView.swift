@@ -148,7 +148,7 @@ struct SearchBarView: View {
                 )
         )
         .padding(.horizontal)
-        .padding(.top, 15)
+        .padding(.top, 5) //keep this
         .padding(.bottom, 12)
     }
 }
@@ -233,6 +233,7 @@ struct SearchResultsView: View {
             }
             .padding(.vertical, 10)
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 }
 
@@ -310,23 +311,17 @@ struct UserSearchView: View {
     }
 
     var body: some View {
-        NavigationView { 
-            ZStack {
-                // Background View
-                backgroundView
+        NavigationView {
+            VStack(spacing: 0) {
+                // Search Bar Input
+                SearchBarView(
+                    text: $viewModel.searchText,
+                    onClear: viewModel.clearSearch,
+                    focusedField: $isSearchFieldFocused // Pass the FocusState binding directly
+                )
                 
-                // Main Content
-                VStack(spacing: 0) {
-                    // Search Bar Input
-                    SearchBarView(
-                        text: $viewModel.searchText,
-                        onClear: viewModel.clearSearch,
-                        focusedField: $isSearchFieldFocused // Pass the FocusState binding directly
-                    )
-                    
-                    // Search Results/States Area
-                    contentView
-                }
+                // Search Results/States Area
+                contentView
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -346,7 +341,10 @@ struct UserSearchView: View {
                     isSearchFieldFocused = true
                 }
             }
+            // Attach background to the entire NavigationView instead of using a ZStack
+            .background(backgroundView)
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .environmentObject(passedUserService)
     }
 }
