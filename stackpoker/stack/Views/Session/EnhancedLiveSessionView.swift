@@ -89,7 +89,8 @@ struct EnhancedLiveSessionView: View {
     @State private var sessionDetails: (buyIn: Double, cashout: Double, profit: Double, duration: String, gameName: String, stakes: String, sessionId: String)? = nil
     @State private var showingSimpleNoteEditor = false // New state for presenting the note editor
     @State private var showingNewHandEntry = false // New state for presenting NewHandEntryView
-    @State private var sessionToNavigateTo: Session? = nil // For navigating to SessionDetailView
+    @State private var completedSessionToShowInSheet: Session? = nil // For sheet presentation
+    @State private var showSessionDetailSheet = false // Controls sheet presentation
     
     // MARK: - Enum Definitions
     enum LiveSessionTab {
@@ -275,6 +276,24 @@ struct EnhancedLiveSessionView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("You need to sign in to share content to the feed.")
+        }
+        .sheet(isPresented: $showSessionDetailSheet) { // Sheet for SessionDetailView
+            if let session = completedSessionToShowInSheet {
+                NavigationView { // Embed in NavigationView for title and dismiss button
+                    SessionDetailView(session: session)
+                        .navigationBarBackButtonHidden(true)
+                        .toolbar { // Add a dismiss button to the SessionDetailView sheet
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("Done") {
+                                    showSessionDetailSheet = false
+                                    // Now dismiss EnhancedLiveSessionView after detail sheet is closed
+                                    self.dismiss() 
+                                }
+                                .foregroundColor(.white)
+                            }
+                        }
+                }
+            }
         }
     }
     
@@ -1141,12 +1160,16 @@ struct EnhancedLiveSessionView: View {
             await MainActor.run {
                 self.isLoadingSave = false
                 if let sessionId = endedSessionId {
-                    // Call the callback with the new session ID
-                    self.onSessionDidEnd?(sessionId)
-                    self.dismiss() 
+                    if let completedSession = self.sessionStore.getSessionById(sessionId) { 
+                        self.completedSessionToShowInSheet = completedSession
+                        self.showSessionDetailSheet = true
+                        // Do NOT dismiss EnhancedLiveSessionView here; it will be dismissed when the sheet is closed.
+                    } else {
+                        print("Error: Could not fetch completed session details for ID: \(sessionId)")
+                        self.dismiss() // Dismiss if we can't show details
+                    }
                 } else {
                     print("Error saving session or getting ID.")
-                    // Optionally, show an error alert to the user here
                     self.dismiss() 
                 }
             }
