@@ -13,6 +13,9 @@ struct EnhancedLiveSessionView: View {
     @StateObject private var handStore = HandStore(userId: Auth.auth().currentUser?.uid ?? "")
     @State private var handEntryMinimized = false
     
+    // Callback for when a session ends, passing the new session ID
+    var onSessionDidEnd: ((_ sessionId: String) -> Void)?
+    
     // UI States
     @State private var selectedTab: LiveSessionTab = .session
     @State private var sessionMode: SessionMode = .setup
@@ -162,20 +165,6 @@ struct EnhancedLiveSessionView: View {
             // Base background
             AppBackgroundView()
                 .ignoresSafeArea()
-            
-            // NavigationLink for programmatic navigation to SessionDetailView
-            // It's active when sessionToNavigateTo is not nil.
-            // Ensure mainContent or its parent is in a NavigationView/NavigationStack
-            if let session = sessionToNavigateTo {
-                NavigationLink(
-                    destination: SessionDetailView(session: session)
-                                 .navigationBarBackButtonHidden(true), // Hide back button if we are dismissing this view anyway
-                    isActive: .constant(true) // Activate link immediately when session is set
-                ) {
-                    EmptyView()
-                }
-                .hidden() // Keep the NavigationLink view itself hidden
-            }
             
             // Main content
             VStack(spacing: 0) {
@@ -1141,46 +1130,23 @@ struct EnhancedLiveSessionView: View {
     private func endSession(cashout: Double) {
         isLoadingSave = true
         
-        // Store details for potential sharing - this might be removed if direct navigation occurs
-        let buyIn = sessionStore.liveSession.buyIn
-        let profit = cashout - buyIn
-        let elapsedTime = Int(sessionStore.liveSession.elapsedTime)
-        let hours = elapsedTime / 3600
-        let minutes = (elapsedTime % 3600) / 60
-        let durationString = "\(hours)h \(minutes)m"
-        
-        // Keep local copy for now, might be used if navigation target needs more than just ID
-        let tempSessionDetails = (
-            buyIn: buyIn,
-            cashout: cashout,
-            profit: profit,
-            duration: durationString,
-            gameName: sessionStore.liveSession.gameName,
-            stakes: sessionStore.liveSession.stakes,
-            sessionId: sessionStore.liveSession.id // This is the liveSessionUUID
-        )
-        
         Task {
             if self.sessionStore.enhancedLiveSession.chipUpdates.isEmpty || 
                self.sessionStore.enhancedLiveSession.currentChipAmount != cashout {
                 self.sessionStore.updateChipStack(amount: cashout, note: "Final cashout amount")
             }
             
-            // Call methods on self.sessionStore
             let endedSessionId = await self.sessionStore.endLiveSessionAndGetId(cashout: cashout) 
             
             await MainActor.run {
                 self.isLoadingSave = false
                 if let sessionId = endedSessionId {
-                    if let completedSession = self.sessionStore.getSessionById(sessionId) { 
-                        self.sessionToNavigateTo = completedSession
-                        self.dismiss() 
-                    } else {
-                        print("Error: Could not fetch completed session details for ID: \(sessionId)")
-                        self.dismiss() 
-                    }
+                    // Call the callback with the new session ID
+                    self.onSessionDidEnd?(sessionId)
+                    self.dismiss() 
                 } else {
                     print("Error saving session or getting ID.")
+                    // Optionally, show an error alert to the user here
                     self.dismiss() 
                 }
             }
