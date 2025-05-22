@@ -501,134 +501,135 @@ struct EnhancedLiveSessionView: View {
     
     // View for setting up a new session
     private var setupView: some View {
-        GeometryReader { _ in
+        GeometryReader { geometry in
             ZStack {
                 // Use AppBackgroundView as background
                 AppBackgroundView()
                     .ignoresSafeArea()
-                
+                    
                 ScrollView {
                     VStack(spacing: 20) {
                         // Add top padding for transparent navigation bar
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Add top padding for transparent navigation bar
-                    Spacer()
-                        .frame(height: 64)
-                    
-                    // Game Selection Section
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Select Game")
-                            .font(.plusJakarta(.headline, weight: .medium))
-                            .foregroundColor(.white)
-                            .padding(.leading, 6)
-                            .padding(.bottom, 2)
+                        Spacer()
+                            .frame(height: 64)
                         
-                        if cashGameService.cashGames.isEmpty {
-                            HStack {
-                                Text("No games added. Tap to add a new game.")
-                                    .font(.plusJakarta(.caption, weight: .medium))
-                                    .foregroundColor(.gray)
-                                
-                                Spacer()
-                                
-                                Button(action: { showingAddGame = true }) {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.white)
-                                        .padding(10)
-                                        .background(Circle().fill(Color.gray.opacity(0.3)))
-                                }
-                            }
-                            .padding(.vertical, 20)
-                        } else {
-                            // Game selection horizontal scroll
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 12) {
-                                    ForEach(cashGameService.cashGames) { game in
-                                        let stakes = formatStakes(game: game)
-                                        GameCard(
-                                            stakes: stakes,
-                                            name: game.name,
-                                            isSelected: selectedGame?.id == game.id,
-                                            titleColor: .white,
-                                            subtitleColor: Color.white.opacity(0.7),
-                                            glassOpacity: 0.01,
-                                            materialOpacity: 0.2
-                                        )
-                                        .onTapGesture {
-                                            selectedGame = game
-                                        }
-                                    }
-                                    
-                                    // Add Game Button with glassy style
-                                    AddGameButton(
-                                        textColor: .white,
-                                        glassOpacity: 0.01,
-                                        materialOpacity: 0.2
-                                    )
-                                    .onTapGesture {
-                                        showingAddGame = true
-                                    }
-                                }
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    // Buy-in Section
-                    if selectedGame != nil {
+                        // Game Selection Section
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Buy-in Amount")
+                            Text("Select Game")
                                 .font(.plusJakarta(.headline, weight: .medium))
                                 .foregroundColor(.white)
                                 .padding(.leading, 6)
                                 .padding(.bottom, 2)
                             
-                            // Glassy Buy-in field
-                            GlassyInputField(
-                                icon: "dollarsign.circle",
-                                title: "Buy in",
-                                content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
-                                glassOpacity: 0.01,
-                                labelColor: .gray,
-                                materialOpacity: 0.2
-                            )
+                            if cashGameService.cashGames.isEmpty {
+                                HStack {
+                                    Text("No games added. Tap to add a new game.")
+                                        .font(.plusJakarta(.caption, weight: .medium))
+                                        .foregroundColor(.gray)
+                                    
+                                    Spacer()
+                                    
+                                    Button(action: { showingAddGame = true }) {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 18))
+                                            .foregroundColor(.white)
+                                            .padding(10)
+                                            .background(Circle().fill(Color.gray.opacity(0.3)))
+                                    }
+                                }
+                                .padding(.vertical, 20)
+                            } else {
+                                // Game selection horizontal scroll
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 12) {
+                                        ForEach(cashGameService.cashGames) { game in
+                                            let stakes = formatStakes(game: game)
+                                            GameCard(
+                                                stakes: stakes,
+                                                name: game.name,
+                                                isSelected: selectedGame?.id == game.id,
+                                                titleColor: .white,
+                                                subtitleColor: Color.white.opacity(0.7),
+                                                glassOpacity: 0.01,
+                                                materialOpacity: 0.2
+                                            )
+                                            .onTapGesture {
+                                                selectedGame = game
+                                            }
+                                        }
+                                        
+                                        // Add Game Button with glassy style
+                                        AddGameButton(
+                                            textColor: .white,
+                                            glassOpacity: 0.01,
+                                            materialOpacity: 0.2
+                                        )
+                                        .onTapGesture {
+                                            showingAddGame = true
+                                        }
+                                    }
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                }
+                            }
                         }
                         .padding(.horizontal)
-                    }
-                    
-                    // Start Button
-                    if selectedGame != nil {
-                        Button(action: startSession) {
-                            Text("Start Session")
-                                .font(.plusJakarta(.body, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 54)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 27)
-                                        .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
-                                        .background(.ultraThinMaterial)
-                                        .clipShape(RoundedRectangle(cornerRadius: 27))
+                        
+                        // Buy-in Section
+                        if selectedGame != nil {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Buy-in Amount")
+                                    .font(.plusJakarta(.headline, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 6)
+                                    .padding(.bottom, 2)
+                                
+                                // Glassy Buy-in field
+                                GlassyInputField(
+                                    icon: "dollarsign.circle",
+                                    title: "Buy in",
+                                    content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
+                                    glassOpacity: 0.01,
+                                    labelColor: .gray,
+                                    materialOpacity: 0.2
                                 )
+                            }
+                            .padding(.horizontal)
                         }
-                        .disabled(buyIn.isEmpty)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
+                        
+                        // Start Button
+                        if selectedGame != nil {
+                            Button(action: startSession) {
+                                Text("Start Session")
+                                    .font(.plusJakarta(.body, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 54)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 27)
+                                            .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
+                                            .background(.ultraThinMaterial)
+                                            .clipShape(RoundedRectangle(cornerRadius: 27))
+                                    )
+                            }
+                            .disabled(buyIn.isEmpty)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 16)
+                        }
+                        
+                        Spacer()
                     }
-                    
-                    Spacer()
+                    .padding(.top, 16)
+                    .padding(.bottom, 40)
+                    .frame(minHeight: geometry.size.height) // Ensure full height
                 }
-                .padding(.top, 16)
-                .padding(.bottom, 40)
             }
         }
         .sheet(isPresented: $showingAddGame) {
             AddCashGameView(cashGameService: cashGameService)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .ignoresSafeArea(.keyboard) // Prevent keyboard from pushing content
     }
     
     // Helper function to format stakes
