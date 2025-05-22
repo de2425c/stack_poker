@@ -8,6 +8,7 @@ struct SessionDetailView: View {
     // Session data
     let session: Session
     @Environment(\.dismiss) var dismiss
+    @Environment(\.presentationMode) var presentationMode
     
     // HandStore for fetching hands related to this session
     @StateObject private var handStore: HandStore
@@ -48,6 +49,11 @@ struct SessionDetailView: View {
         return hrs > 0 ? "\(hrs)h \(mins)m" : "\(mins)m"
     }
     
+    private func dismissView() {
+        // Use both dismissal methods to ensure compatibility
+        dismiss()
+        presentationMode.wrappedValue.dismiss()
+    }
     
     var body: some View {
         ZStack {
@@ -144,14 +150,19 @@ struct SessionDetailView: View {
         // Close button overlay similar to HandReplayView
         .overlay(
             HStack {
-                Button(action: { dismiss() }) {
+                Button(action: dismissView) {
                     Image(systemName: "xmark")
                         .font(.system(size: 20, weight: .bold))
                         .foregroundColor(.white)
                         .padding(12)
-                        .background(Color.black.opacity(0.5))
-                        .clipShape(Circle())
+                        .background(
+                            Circle()
+                                .fill(Color.black.opacity(0.5))
+                                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                        )
                 }
+                .buttonStyle(BorderlessButtonStyle()) // Add this to ensure tap area is proper
+                .padding(8) // Increase tap area
                 Spacer()
             }
             .padding(.top, 8)

@@ -50,12 +50,19 @@ struct FeedView: View {
             contentView // This will now include the header as part of its scrollable content
         }
         // Sheets and modals
-        .sheet(isPresented: $showingNewPost) {
+        .fullScreenCover(isPresented: $showingNewPost) {
+          GeometryReader { geometry in
             PostEditorView(userId: userId)
-                .environmentObject(postService)
-                .environmentObject(userService)
-                .environmentObject(handStore) // Pass HandStore to PostEditorView
-                .environmentObject(sessionStore) // Pass SessionStore to PostEditorView
+              .environmentObject(postService)
+              .environmentObject(userService)
+              .environmentObject(handStore)
+              .environmentObject(sessionStore)
+              // make it fill the sheet
+              .frame(width: geometry.size.width,
+                     height: geometry.size.height)
+              // now ignores the keyboard entirely
+              .ignoresSafeArea(.keyboard)
+          }
         }
         .sheet(isPresented: $showingDiscoverUsers) {
             DiscoverUsersView(userId: userId)
@@ -88,6 +95,7 @@ struct FeedView: View {
                 }
             }
         }
+        .ignoresSafeArea(.keyboard) // Prevent keyboard from resizing view
     }
     
     // MARK: - Content View
@@ -1157,60 +1165,59 @@ struct PostDetailView: View {
     
     var body: some View {
         NavigationView { 
-            ZStack { 
-                AppBackgroundView().ignoresSafeArea() 
+            GeometryReader { _ in
+                ZStack { 
+                    AppBackgroundView().ignoresSafeArea() 
 
-                // Main content layout (Header and ScrollView)
-                VStack(spacing: 0) {
-                    // Top header bar - remains the same
-                    HStack {
-                        Button(action: { dismiss() }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(12)
-                                .background(Circle().fill(Color.black.opacity(0.25)))
-                        }
-                        Spacer()
-                        if post.userId == userId {
-                            Button(action: { showDeleteConfirm = true }) {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(.white.opacity(0.7))
+                    // Main content layout (Header and ScrollView)
+                    VStack(spacing: 0) {
+                        // Top header bar - remains the same
+                        HStack {
+                            Button(action: { dismiss() }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.white)
                                     .padding(12)
                                     .background(Circle().fill(Color.black.opacity(0.25)))
                             }
+                            Spacer()
+                            if post.userId == userId {
+                                Button(action: { showDeleteConfirm = true }) {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(12)
+                                        .background(Circle().fill(Color.black.opacity(0.25)))
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        // .padding(.top, UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) // Previous attempt
+                        .padding(.top, (UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) - 10) // Move further up
+                        .padding(.bottom, 8) 
+                        .background(Color.clear) 
+
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 20) { 
+                                postHeaderAndBody 
+                                postActionsAndComments 
+                            }
+                            .padding(.bottom, 70) 
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, (UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) + 5) 
-                    .padding(.bottom, 8) 
-                    .background(Color.clear) 
-
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 20) { 
-                            postHeaderAndBody 
-                            postActionsAndComments 
-                        }
-                        .padding(.bottom, 70) 
+                } // End ZStack
+                .overlay( // Reinstate the overlay for the commentInputView
+                    VStack(spacing:0) {
+                        Spacer() 
+                        commentInputView
+                            .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 45 : 75) // Added 35 to keyboardHeight
+                            .animation(.easeInOut(duration: 0.25), value: keyboardHeight)
                     }
-
-
-                }
-            }
-                        // Overlay the commentInputView at the bottom of the ZStack
-            .overlay(
-                VStack(spacing:0) { // Use a VStack to easily apply bottom padding to the input bar itself
-                    Spacer() // Pushes the input bar to the bottom of the overlay area
-                    commentInputView
-                        // .padding(.bottom, 15) // OLD PADDING - REMOVE/REPLACE
-                        // .ignoresSafeArea(.keyboard, edges: .bottom) // REMOVE
-                        .padding(.bottom, keyboardHeight > 0 ? max(0, keyboardHeight - (UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0)) : 15)
-                        .animation(.easeInOut(duration: 0.25), value: keyboardHeight) // Added animation
-                }
-                .ignoresSafeArea(.keyboard, edges: .bottom) // The overlay container ignores the keyboard, allowing input bar to sit on it
-                , alignment: .bottom // Align the overlay to the bottom of the ZStack
-            )
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
+                    , alignment: .bottom
+                )
+            } // End GeometryReader
+            .ignoresSafeArea(.keyboard) // This is correct on GeometryReader
             .confirmationDialog(
                 "Delete this post?",
                 isPresented: $showDeleteConfirm,
@@ -1223,33 +1230,33 @@ struct PostDetailView: View {
             } message: {
                 Text("This action cannot be undone.")
             }
-            .onTapGesture {
-                isCommentFieldFocused = false
+        }
+        .onTapGesture {
+            isCommentFieldFocused = false
+        }
+        .fullScreenCover(isPresented: $showingFullScreenImage) {
+            if let imageUrl = selectedImageURL {
+                FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
             }
-            .fullScreenCover(isPresented: $showingFullScreenImage) {
-                if let imageUrl = selectedImageURL {
-                    FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
-                }
+        }
+        .sheet(isPresented: $showingReplay) {
+            if let hand = post.handHistory {
+                HandReplayView(hand: hand, userId: userId)
             }
-            .sheet(isPresented: $showingReplay) {
-                if let hand = post.handHistory {
-                    HandReplayView(hand: hand, userId: userId)
-                }
+        }
+        .onAppear {
+            loadComments()
+            NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
+                guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+                self.keyboardHeight = keyboardFrame.height
             }
-            .onAppear {
-                loadComments()
-                NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
-                    guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
-                    self.keyboardHeight = keyboardFrame.height
-                }
-                NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
-                    self.keyboardHeight = 0
-                }
+            NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+                self.keyboardHeight = 0
             }
-            .onDisappear {
-                NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
-                NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
-            }
+        }
+        .onDisappear {
+            NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
+            NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
         }
     }
     

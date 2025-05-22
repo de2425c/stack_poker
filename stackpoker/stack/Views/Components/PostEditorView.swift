@@ -175,113 +175,116 @@ struct PostEditorView: View {
 
     var body: some View {
         NavigationView {
-            ZStack {
-                // Background
-                AppBackgroundView().ignoresSafeArea()
+            GeometryReader { geometry in
+                ZStack {
+                    // Background
+                    AppBackgroundView().ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    // Header with user profile
-                    profileHeaderView
-                        .padding(.top, 80) // Significantly increased top padding
+                    VStack(spacing: 0) {
+                        // Header with user profile
+                        profileHeaderView
+                            .padding(.top, 20) // Reduced top padding to move UI upward
 
-                    // Session display section
-                    sessionDisplayView
+                        // Session display section
+                        sessionDisplayView
 
-                    // Note view (only for note posts)
-                    if isNote {
-                        SharedNoteView(note: initialText)
-                            .padding(.horizontal)
-                    }
-
-                    // Hand Summary (only for hand posts)
-                    if isHandPost, let handData = hand {
-                        HandSummaryView(hand: handData)
-                            .padding(.horizontal)
-                        locationTextField
-                            .padding(.horizontal)
-                            .padding(.bottom, 8)
-                    }
-
-                    // Completed Session Display
-                    if let completedSession = selectedCompletedSession {
-                        VStack(alignment: .leading, spacing: 10) {
-                            // Session Title TextField - Strava Style
-                            TextField("Session Title", text: $completedSessionTitle)
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                                .padding(.bottom, 2)
-
-                            // Caption TextEditor - Directly below title
-                            TextEditor(text: $postText) // Using postText for caption here
-                                .foregroundColor(postText == "Describe your session..." ? .gray.opacity(0.6) : .white) // Placeholder color
-                                .font(.system(size: 16))
-                                .frame(height: 80) // Fixed height for caption editor
-                                .scrollContentBackground(.hidden)
-                                .background(Color.black.opacity(0.1))
-                                .cornerRadius(8)
-                                .onTapGesture {
-                                    if postText == "Describe your session..." {
-                                        postText = "" // Clear placeholder on tap
-                                    }
-                                }
-                                .onAppear {
-                                    if postText.isEmpty { // Set placeholder if empty
-                                        postText = "Describe your session..."
-                                    }
-                                }
-                                .padding(.bottom, 12)
-                            
-                            // Session Stats - Strava-like prominent display
-                            // Arrange in HStacks for a row-based metric display
-                            VStack(alignment: .leading, spacing: 16) { // Overall container for stats
-                                HStack(spacing: 16) {
-                                    SessionStatMetricView(label: "Game", value: "\(completedSession.gameName) @ \(completedSession.stakes)", isWide: true)
-                                }
-                                HStack(spacing: 16) {
-                                    SessionStatMetricView(label: "Duration", value: String(format: "%.1f hr", completedSession.hoursPlayed))
-                                    SessionStatMetricView(label: "Buy-in", value: String(format: "$%.0f", completedSession.buyIn))
-                                }
-                                HStack(spacing: 16) {
-                                    SessionStatMetricView(label: "Cashout", value: String(format: "$%.0f", completedSession.cashout))
-                                    SessionStatMetricView(label: "Profit", value: String(format: "$%.2f", completedSession.profit), 
-                                                        valueColor: completedSession.profit >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
-                                }
-                            }
+                        // Note view (only for note posts)
+                        if isNote {
+                            SharedNoteView(note: initialText)
+                                .padding(.horizontal)
                         }
-                        .padding(.horizontal)
-                        .padding(.bottom, 15)
-                    } else {
-                        // Text Editor for regular posts / notes / hands (not a completed session share)
-                        ZStack(alignment: .topLeading) {
-                            TextEditor(text: $postText)
-                                .focused($isTextEditorFocused)
-                                .foregroundColor(.white)
-                                .font(.system(size: 16))
-                                .scrollContentBackground(.hidden)
-                                .padding()
-                                .background(Color.clear)
-                                .frame(minHeight: 100, idealHeight: 200 ,maxHeight: .infinity)
 
-                            if postText.isEmpty && !isTextEditorFocused {
-                                Text(placeholderText) // Original placeholder logic
-                                    .foregroundColor(Color.gray)
+                        // Hand Summary (only for hand posts)
+                        if isHandPost, let handData = hand {
+                            HandSummaryView(hand: handData)
+                                .padding(.horizontal)
+                            locationTextField
+                                .padding(.horizontal)
+                                .padding(.bottom, 8)
+                        }
+
+                        // Completed Session Display
+                        if let completedSession = selectedCompletedSession {
+                            VStack(alignment: .leading, spacing: 10) {
+                                // Session Title TextField - Strava Style
+                                TextField("Session Title", text: $completedSessionTitle)
+                                    .font(.system(size: 28, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.bottom, 2)
+
+                                // Caption TextEditor - Directly below title
+                                TextEditor(text: $postText) // Using postText for caption here
+                                    .foregroundColor(postText == "Describe your session..." ? .gray.opacity(0.6) : .white) // Placeholder color
                                     .font(.system(size: 16))
-                                    .padding(.horizontal, 20)
-                                    .padding(.top, 24)
+                                    .frame(height: 80) // Fixed height for caption editor
+                                    .scrollContentBackground(.hidden)
+                                    .background(Color.black.opacity(0.1))
+                                    .cornerRadius(8)
+                                    .onTapGesture {
+                                        if postText == "Describe your session..." {
+                                            postText = "" // Clear placeholder on tap
+                                        }
+                                    }
+                                    .onAppear {
+                                        if postText.isEmpty { // Set placeholder if empty
+                                            postText = "Describe your session..."
+                                        }
+                                    }
+                                    .padding(.bottom, 12)
+                                
+                                // Session Stats - Strava-like prominent display
+                                // Arrange in HStacks for a row-based metric display
+                                VStack(alignment: .leading, spacing: 16) { // Overall container for stats
+                                    HStack(spacing: 16) {
+                                        SessionStatMetricView(label: "Game", value: "\(completedSession.gameName) @ \(completedSession.stakes)", isWide: true)
+                                    }
+                                    HStack(spacing: 16) {
+                                        SessionStatMetricView(label: "Duration", value: String(format: "%.1f hr", completedSession.hoursPlayed))
+                                        SessionStatMetricView(label: "Buy-in", value: String(format: "$%.0f", completedSession.buyIn))
+                                    }
+                                    HStack(spacing: 16) {
+                                        SessionStatMetricView(label: "Cashout", value: String(format: "$%.0f", completedSession.cashout))
+                                        SessionStatMetricView(label: "Profit", value: String(format: "$%.2f", completedSession.profit), 
+                                                            valueColor: completedSession.profit >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                            .padding(.bottom, 15)
+                        } else {
+                            // Text Editor for regular posts / notes / hands (not a completed session share)
+                            ZStack(alignment: .topLeading) {
+                                TextEditor(text: $postText)
+                                    .focused($isTextEditorFocused)
+                                    .foregroundColor(.white)
+                                    .font(.system(size: 16))
+                                    .scrollContentBackground(.hidden)
+                                    .padding()
+                                    .background(Color.clear)
+                                    .frame(minHeight: 100, idealHeight: 200 ,maxHeight: .infinity)
+
+                                if postText.isEmpty && !isTextEditorFocused {
+                                    Text(placeholderText) // Original placeholder logic
+                                        .foregroundColor(Color.gray)
+                                        .font(.system(size: 16))
+                                        .padding(.horizontal, 20)
+                                        .padding(.top, 24)
+                                }
                             }
                         }
-                    }
 
-                    // Spacer() // Pushes buttons to the bottom - this might need to be conditional or removed if stats are large
-                    Spacer(minLength: selectedCompletedSession != nil ? 20 : 0) // Add more space if session details are shown
+                        // Spacer() // Pushes buttons to the bottom - this might need to be conditional or removed if stats are large
+                        Spacer(minLength: selectedCompletedSession != nil ? 20 : 0) // Add more space if session details are shown
 
-                    // Image picker and preview (only for regular posts)
-                    if !isHandPost && !isNote {
-                        actionButtonsView
+                        // Image picker and preview (only for regular posts)
+                        if !isHandPost && !isNote {
+                            actionButtonsView
+                        }
                     }
+                    .padding(.bottom, 100) // Reduced bottom padding to lift action buttons
                 }
-                .padding(.bottom, 50) // Add padding for the transparent tab bar
             }
+            .ignoresSafeArea(.keyboard) // Prevent keyboard from pushing content up
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -315,6 +318,14 @@ struct PostEditorView: View {
                             selectedImages.append(image)
                         }
                     }
+                }
+            }
+            // Close keyboard when Return key is pressed (TextEditor inserts "\n")
+            .onChange(of: postText) { newValue in
+                if newValue.last == "\n" {
+                    // Remove the newline and dismiss keyboard
+                    postText.removeLast()
+                    isTextEditorFocused = false
                 }
             }
             .onAppear {
@@ -732,7 +743,7 @@ struct PostEditorView: View {
 
     @ViewBuilder
     private var actionButtonsView: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             // Action buttons in a scrollable view to prevent overflow
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) { 
@@ -749,8 +760,8 @@ struct PostEditorView: View {
                 selectedImagesPreview
             }
         }
-        .padding(.vertical, 10)
-        .padding(.bottom, 10) // Added a little bottom padding to lift buttons slightly
+        .padding(.vertical, 4)
+        .padding(.bottom, 0) // Reduced bottom padding to lift buttons higher
     }
 
     @ViewBuilder

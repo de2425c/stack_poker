@@ -501,27 +501,33 @@ struct EnhancedLiveSessionView: View {
     
     // View for setting up a new session
     private var setupView: some View {
-        ZStack {
-            // Use AppBackgroundView as background
-            AppBackgroundView()
-                .ignoresSafeArea()
+        GeometryReader { _ in
+            ZStack {
+                // Use AppBackgroundView as background
+                AppBackgroundView()
+                    .ignoresSafeArea()
                 
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Add top padding for transparent navigation bar
             ScrollView {
-                VStack(spacing: 32) {
+                VStack(spacing: 20) {
                     // Add top padding for transparent navigation bar
                     Spacer()
-                        .frame(height: 50)
+                        .frame(height: 64)
                     
                     // Game Selection Section
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("Select Game")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.plusJakarta(.headline, weight: .medium))
                             .foregroundColor(.white)
+                            .padding(.leading, 6)
+                            .padding(.bottom, 2)
                         
                         if cashGameService.cashGames.isEmpty {
                             HStack {
                                 Text("No games added. Tap to add a new game.")
-                                    .font(.system(size: 14))
+                                    .font(.plusJakarta(.caption, weight: .medium))
                                     .foregroundColor(.gray)
                                 
                                 Spacer()
@@ -536,42 +542,37 @@ struct EnhancedLiveSessionView: View {
                             }
                             .padding(.vertical, 20)
                         } else {
-                            // Game selection grid with consistent sizing
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                                ForEach(cashGameService.cashGames) { game in
-                                    GameCard(
-                                        title: game.name,
-                                        subtitle: game.stakes,
-                                        isSelected: selectedGame?.id == game.id
+                            // Game selection horizontal scroll
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(cashGameService.cashGames) { game in
+                                        let stakes = formatStakes(game: game)
+                                        GameCard(
+                                            stakes: stakes,
+                                            name: game.name,
+                                            isSelected: selectedGame?.id == game.id,
+                                            titleColor: .white,
+                                            subtitleColor: Color.white.opacity(0.7),
+                                            glassOpacity: 0.01,
+                                            materialOpacity: 0.2
+                                        )
+                                        .onTapGesture {
+                                            selectedGame = game
+                                        }
+                                    }
+                                    
+                                    // Add Game Button with glassy style
+                                    AddGameButton(
+                                        textColor: .white,
+                                        glassOpacity: 0.01,
+                                        materialOpacity: 0.2
                                     )
                                     .onTapGesture {
-                                        selectedGame = game
+                                        showingAddGame = true
                                     }
                                 }
-                                
-                                // Add new game card (matches game card style)
-                                Button(action: { showingAddGame = true }) {
-                                    HStack {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 18))
-                                            .foregroundColor(.white)
-                                        
-                                        Text("Add Game")
-                                            .font(.system(size: 14, weight: .medium))
-                                            .foregroundColor(.white)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .frame(height: 50)
-                                    .padding(12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                                            )
-                                    )
-                                }
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
                             }
                         }
                     }
@@ -579,29 +580,21 @@ struct EnhancedLiveSessionView: View {
                     
                     // Buy-in Section
                     if selectedGame != nil {
-                        VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
                             Text("Buy-in Amount")
-                                .font(.system(size: 16, weight: .medium))
+                                .font(.plusJakarta(.headline, weight: .medium))
                                 .foregroundColor(.white)
+                                .padding(.leading, 6)
+                                .padding(.bottom, 2)
                             
-                            HStack {
-                                Text("$")
-                                    .font(.system(size: 20, weight: .medium))
-                                    .foregroundColor(.gray)
-                                
-                                TextField("0", text: $buyIn)
-                                    .keyboardType(.decimalPad)
-                                    .font(.system(size: 20, weight: .medium))
-                                    .foregroundColor(.white)
-                            }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                                    )
+                            // Glassy Buy-in field
+                            GlassyInputField(
+                                icon: "dollarsign.circle",
+                                title: "Buy in",
+                                content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
+                                glassOpacity: 0.01,
+                                labelColor: .gray,
+                                materialOpacity: 0.2
                             )
                         }
                         .padding(.horizontal)
@@ -611,19 +604,19 @@ struct EnhancedLiveSessionView: View {
                     if selectedGame != nil {
                         Button(action: startSession) {
                             Text("Start Session")
-                                .font(.system(size: 17, weight: .bold))
+                                .font(.plusJakarta(.body, weight: .bold))
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 54)
                                 .background(
                                     RoundedRectangle(cornerRadius: 27)
-                                        .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.5))
+                                        .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
                                         .background(.ultraThinMaterial)
                                         .clipShape(RoundedRectangle(cornerRadius: 27))
                                 )
                         }
                         .disabled(buyIn.isEmpty)
-                        .padding(.horizontal)
+                        .padding(.horizontal, 20)
                         .padding(.top, 16)
                     }
                     
@@ -638,35 +631,182 @@ struct EnhancedLiveSessionView: View {
         }
     }
     
-    // Game selection card
+    // Helper function to format stakes
+    private func formatStakes(game: CashGame) -> String {
+        var stakes = "$\(Int(game.smallBlind))/$\(Int(game.bigBlind))"
+        if let straddle = game.straddle, straddle > 0 {
+            stakes += " $\(Int(straddle))"
+        }
+        return stakes
+    }
+    
+    // Game card with stakes and name
     private struct GameCard: View {
-        let title: String
-        let subtitle: String
+        let stakes: String
+        let name: String
         let isSelected: Bool
+        var titleColor: Color = Color(white: 0.25)
+        var subtitleColor: Color = Color(white: 0.4)
+        var glassOpacity: Double = 0.01
+        var materialOpacity: Double = 0.2
         
         var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(stakes)
+                    .font(.plusJakarta(.title3, weight: .bold))
+                    .foregroundColor(titleColor)
                 
-                Text(subtitle)
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.7))
-                    .lineLimit(1)
+                Text(name)
+                    .font(.plusJakarta(.caption, weight: .medium))
+                    .foregroundColor(subtitleColor)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 50)
-            .padding(12)
+            .frame(width: 130)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected ? Color.white : Color.gray.opacity(0.3), lineWidth: isSelected ? 2 : 1)
-                    )
+                ZStack {
+                    // Ultra-transparent glass effect
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(materialOpacity)
+                    
+                    // Almost invisible white overlay
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(glassOpacity))
+                    
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.white, lineWidth: 2)
+                    }
+                }
             )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+    }
+    
+    // Add game button
+    private struct AddGameButton: View {
+        var textColor: Color = Color(white: 0.25)
+        var glassOpacity: Double = 0.01
+        var materialOpacity: Double = 0.2
+        
+        var body: some View {
+            VStack(spacing: 8) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 24))
+                    .foregroundColor(textColor)
+                
+                Text("Add")
+                    .font(.plusJakarta(.body, weight: .medium))
+                    .foregroundColor(textColor)
+            }
+            .frame(width: 130)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .background(
+                ZStack {
+                    // Ultra-transparent glass effect
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(materialOpacity)
+                    
+                    // Almost invisible white overlay
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(glassOpacity))
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+    }
+    
+    // Protocol for glass content (if not already defined elsewhere)
+    protocol GlassyContent {
+        associatedtype ContentView: View
+        @ViewBuilder var body: ContentView { get }
+    }
+    
+    // Type-erased wrapper for GlassyContent
+    struct AnyGlassyContent: View {
+        private let content: AnyView
+        
+        init<T: GlassyContent>(_ content: T) {
+            self.content = AnyView(content.body)
+        }
+        
+        var body: some View {
+            content
+        }
+    }
+    
+    struct TextFieldContent: GlassyContent {
+        @Binding var text: String
+        var keyboardType: UIKeyboardType = .default
+        var prefix: String? = nil
+        var isReadOnly: Bool = false
+        var textColor: Color = Color(white: 0.25)
+        var prefixColor: Color = Color(white: 0.4)
+        
+        var body: some View {
+            HStack {
+                if let prefix = prefix {
+                    Text(prefix)
+                        .font(.plusJakarta(.body, weight: .semibold))
+                        .foregroundColor(prefixColor)
+                }
+                
+                if isReadOnly {
+                    Text(text)
+                        .font(.plusJakarta(.body, weight: .regular))
+                        .foregroundColor(textColor)
+                } else {
+                    TextField("0", text: $text)
+                        .keyboardType(keyboardType)
+                        .font(.plusJakarta(.body, weight: .regular))
+                        .foregroundColor(textColor)
+                }
+            }
+            .frame(height: 35)
+        }
+    }
+    
+    // Glassy input field with consistent styling
+    struct GlassyInputField<Content: View>: View {
+        let icon: String
+        let title: String
+        let content: Content
+        var glassOpacity: Double = 0.01
+        var labelColor: Color = Color(white: 0.4)
+        var materialOpacity: Double = 0.2
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 14))
+                        .foregroundColor(labelColor)
+                    Text(title)
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(labelColor)
+                }
+                
+                content
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(
+                ZStack {
+                    // Ultra-transparent glass effect
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(materialOpacity)
+                    
+                    // Almost invisible white overlay
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(glassOpacity))
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
     

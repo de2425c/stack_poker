@@ -58,13 +58,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Your existing UI setup code for TabBar and NavigationBar
         UITabBar.appearance().isHidden = true
         let appearance = UINavigationBarAppearance()
-        appearance.configureWithTransparentBackground()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor(white: 0.1, alpha: 0.01) // Almost clear but technically opaque
         appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
         appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        appearance.shadowColor = .clear // Remove the shadow line
         UINavigationBar.appearance().standardAppearance   = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
         UINavigationBar.appearance().compactAppearance    = appearance
-        UINavigationBar.appearance().tintColor            = .white
+        UINavigationBar.appearance().tintColor 
         DispatchQueue.main.async {
             if let tbc = UIApplication.shared
                 .windows
