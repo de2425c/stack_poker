@@ -219,6 +219,17 @@ struct NoteCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
+        // Stack logo at top-right
+        .overlay(
+            Image("stack_logo")
+                .resizable()
+                .renderingMode(.template)
+                .foregroundColor(.white)
+                .scaledToFit()
+                .frame(width: 20, height: 20)
+                .padding(8),
+            alignment: .topTrailing
+        )
     }
     
     private var formattedTime: String {

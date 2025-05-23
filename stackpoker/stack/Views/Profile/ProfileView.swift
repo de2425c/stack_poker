@@ -1030,18 +1030,10 @@ struct SettingsView: View {
     }
     
     private func signOut() {
-        do {
-            try Auth.auth().signOut()
-            // Directly set auth state to signed out to trigger the welcome screen
-            DispatchQueue.main.async {
-                // Clear user data first to prevent any state inconsistencies
-                authViewModel.userService.currentUserProfile = nil
-                // This will directly switch to the WelcomeView through MainCoordinator
-                authViewModel.authState = .signedOut
-            }
-        } catch {
-            print("Error signing out: \(error)")
-        }
+        // Use the AuthViewModel's signOut method for proper cleanup
+        authViewModel.signOut()
+        
+        // No need to manually set authState as the listener will handle it
     }
     
     private func deleteAccount() {

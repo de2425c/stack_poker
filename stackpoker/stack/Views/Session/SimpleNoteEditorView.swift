@@ -5,12 +5,23 @@ struct SimpleNoteEditorView: View {
     @Environment(\.dismiss) var dismiss
     @ObservedObject var sessionStore: SessionStore
     let sessionId: String
+    var existingNoteIndex: Int? = nil
+    var existingNoteText: String? = nil
 
     @State private var noteText: String = ""
     @State private var selectedImage: PhotosPickerItem? = nil
     @State private var imageData: Data? = nil // To store image data for saving
     @State private var showingImagePicker = false
     @State private var isSaving = false
+
+    init(sessionStore: SessionStore, sessionId: String, existingNoteIndex: Int? = nil, existingNoteText: String? = nil) {
+        self.sessionStore = sessionStore
+        self.sessionId = sessionId
+        self.existingNoteIndex = existingNoteIndex
+        self.existingNoteText = existingNoteText
+        // Initialize noteText with existing text if editing
+        _noteText = State(initialValue: existingNoteText ?? "")
+    }
 
     var body: some View {
         NavigationView {
@@ -122,14 +133,8 @@ struct SimpleNoteEditorView: View {
         guard !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageData != nil else { return }
         isSaving = true
         
-        // Here you would typically save the note text and image data
-        // For now, we'll just add it to the sessionStore as a simple note string
-        // and a placeholder if there's an image.
-        
         var noteToSave = noteText
         if imageData != nil {
-            // In a real app, you'd upload the image and store a URL or identifier
-            // For this example, just indicate an image was attached.
             if !noteToSave.isEmpty {
                 noteToSave += "\n\n[Image Attached]"
             } else {
@@ -137,10 +142,15 @@ struct SimpleNoteEditorView: View {
             }
         }
         
-        sessionStore.addNote(note: noteToSave)
+        if let editIndex = existingNoteIndex {
+            // Update existing note
+            sessionStore.updateNote(at: editIndex, with: noteToSave)
+        } else {
+            // Add new note
+            sessionStore.addNote(note: noteToSave)
+        }
         
-        // Simulate network request
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             isSaving = false
             dismiss()
         }

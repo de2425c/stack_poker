@@ -162,6 +162,16 @@ class SessionStore: ObservableObject {
         saveEnhancedLiveSessionState()
     }
     
+    // Update a note at a specific index
+    func updateNote(at index: Int, with newText: String) {
+        guard enhancedLiveSession.notes.indices.contains(index) else {
+            print("Error: Note index out of bounds")
+            return
+        }
+        enhancedLiveSession.notes[index] = newText
+        saveEnhancedLiveSessionState()
+    }
+    
     // MARK: - Session Database Operations
     
     func fetchSessions() {
@@ -208,6 +218,21 @@ class SessionStore: ObservableObject {
     
     func deleteSession(_ sessionId: String, completion: @escaping (Error?) -> Void) {
         db.collection("sessions").document(sessionId).delete(completion: completion)
+    }
+    
+    // Method to update session details in Firestore
+    func updateSessionDetails(sessionId: String, updatedData: [String: Any], completion: @escaping (Error?) -> Void) {
+        db.collection("sessions").document(sessionId).updateData(updatedData) { error in
+            if let error = error {
+                print("Error updating session \(sessionId): \(error.localizedDescription)")
+                completion(error)
+            } else {
+                print("Session \(sessionId) updated successfully.")
+                // Refresh the local sessions array to reflect changes
+                self.fetchSessions() 
+                completion(nil)
+            }
+        }
     }
     
     // New method to get a session by its ID from the fetched list

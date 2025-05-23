@@ -63,9 +63,8 @@ class HomeGameService: ObservableObject {
     // MARK: - Game Management
     
     /// Create a new home game
-    func createHomeGame(title: String, groupId: String?) async throws -> HomeGame {
-        guard let currentUser =
-            Auth.auth().currentUser else {
+    func createHomeGame(title: String, groupId: String? = nil) async throws -> HomeGame {
+        guard let currentUser = Auth.auth().currentUser else {
             throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
@@ -74,11 +73,56 @@ class HomeGameService: ObservableObject {
         let userData = userDoc.data()
         let displayName = userData?["displayName"] as? String ?? userData?["username"] as? String ?? "Unknown"
         
-        // Create the game object
-        let game = HomeGame(
-            id: UUID().uuidString,
+        // Create game document
+        let gameId = UUID().uuidString
+        let createdAt = Date()
+        
+        var gameData: [String: Any] = [
+            "title": title,
+            "createdAt": Timestamp(date: createdAt),
+            "creatorId": currentUser.uid,
+            "creatorName": displayName,
+            "status": HomeGame.GameStatus.active.rawValue,
+            "players": [],
+            "buyInRequests": [],
+            "cashOutRequests": [],
+        ]
+        
+        // Only add groupId if it's provided and not nil
+        if let groupId = groupId {
+            gameData["groupId"] = groupId
+        } else {
+            // Explicitly set groupId to nil for standalone games (to ensure it's searchable)
+            gameData["groupId"] = NSNull()
+        }
+        
+        // Add initial game created event
+        let event: [String: Any] = [
+            "id": UUID().uuidString,
+            "timestamp": Timestamp(date: createdAt),
+            "eventType": HomeGame.GameEvent.EventType.gameCreated.rawValue,
+            "userId": currentUser.uid,
+            "userName": displayName,
+            "description": "Game created: \(title)"
+        ]
+        
+        gameData["gameHistory"] = [event]
+        
+        // Save the game
+        try await db.collection("homeGames").document(gameId).setData(gameData)
+        
+        // If this is for a group, add a reference to the game in the group
+        if let groupId = groupId {
+            try await db.collection("groups").document(groupId).updateData([
+                "gameIds": FieldValue.arrayUnion([gameId])
+            ])
+        }
+        
+        // Create and return the HomeGame object
+        return HomeGame(
+            id: gameId,
             title: title,
-            createdAt: Date(),
+            createdAt: createdAt,
             creatorId: currentUser.uid,
             creatorName: displayName,
             groupId: groupId,
@@ -88,8 +132,8 @@ class HomeGameService: ObservableObject {
             cashOutRequests: [],
             gameHistory: [
                 HomeGame.GameEvent(
-                    id: UUID().uuidString,
-                    timestamp: Date(),
+                    id: event["id"] as! String,
+                    timestamp: createdAt,
                     eventType: .gameCreated,
                     userId: currentUser.uid,
                     userName: displayName,
@@ -98,37 +142,6 @@ class HomeGameService: ObservableObject {
                 )
             ]
         )
-        
-        // Save to Firestore
-        var gameDataToSave: [String: Any] = [
-            "id": game.id,
-            "title": game.title,
-            "createdAt": Timestamp(date: game.createdAt),
-            "creatorId": game.creatorId,
-            "creatorName": game.creatorName,
-            "status": game.status.rawValue,
-            "players": [],
-            "buyInRequests": [],
-            "cashOutRequests": [],
-            "gameHistory": [
-                [
-                    "id": game.gameHistory[0].id,
-                    "timestamp": Timestamp(date: game.gameHistory[0].timestamp),
-                    "eventType": game.gameHistory[0].eventType.rawValue,
-                    "userId": game.gameHistory[0].userId,
-                    "userName": game.gameHistory[0].userName,
-                    "description": game.gameHistory[0].description
-                ]
-            ]
-        ]
-        
-        if let groupId = groupId {
-            gameDataToSave["groupId"] = groupId
-        }
-        
-        try await db.collection("homeGames").document(game.id).setData(gameDataToSave)
-        
-        return game
     }
     
     /// End a game and process all active players

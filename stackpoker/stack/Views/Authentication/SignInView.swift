@@ -15,60 +15,89 @@ struct SignInView: View {
     
     var body: some View {
         NavigationView {
-            ZStack {
-                Color(UIColor(red: 22/255, green: 23/255, blue: 26/255, alpha: 1.0))
-                    .ignoresSafeArea()
-                
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        Text("Sign in")
-                            .font(.system(size: 32, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.top, 20)
-                        
-                        Text("Enter your username and password")
-                            .font(.system(size: 16))
-                            .foregroundColor(.gray)
-                        
-                        // Login Form
-                        VStack(spacing: 16) {
-                            TextField("Email", text: $email)
-                                .textFieldStyle(CustomTextFieldStyle())
-                                .autocapitalization(.none)
-                                .keyboardType(.emailAddress)
+            GeometryReader { geometry in
+                ZStack {
+                    AppBackgroundView()
+                    
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Sign In")
+                                .font(.custom("PlusJakartaSans-Bold", size: 32))
+                                .foregroundColor(.white)
+                                .padding(.top, 85)
                             
-                            SecureField("Password", text: $password)
-                                .textFieldStyle(CustomTextFieldStyle())
+                            Text("Enter your email and password")
+                                .font(.custom("PlusJakartaSans-Regular", size: 16))
+                                .foregroundColor(.white.opacity(0.7))
+                                .padding(.bottom, 4)
                             
-                            Button(action: signIn) {
-                                if isLoading {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .black))
-                                } else {
-                                    Text("Sign in")
+                            // Login Form
+                            VStack(spacing: 16) {
+                                GlassyInputField(icon: "envelope", title: "EMAIL", labelColor: Color.white.opacity(0.6)) {
+                                    TextField("", text: $email)
+                                        .font(.plusJakarta(.body))
+                                        .foregroundColor(.white)
+                                        .keyboardType(.emailAddress)
+                                        .autocapitalization(.none)
                                 }
+                                
+                                GlassyInputField(icon: "lock", title: "PASSWORD", labelColor: Color.white.opacity(0.6)) {
+                                    SecureField("", text: $password)
+                                        .font(.plusJakarta(.body))
+                                        .foregroundColor(.white)
+                                }
+                                
+                                Button(action: signIn) {
+                                    if isLoading {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Text("Sign In")
+                                            .font(.custom("PlusJakartaSans-SemiBold", size: 18))
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 56)
+                                .background(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                .foregroundColor(.black)
+                                .cornerRadius(12)
+                                .disabled(isLoading)
+                                
+                                // Sign up button
+                                Button(action: { showingSignUp = true }) {
+                                    Text("Don't have an account? Sign up")
+                                        .font(.custom("PlusJakartaSans-Medium", size: 14))
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                                .padding(.top, 8)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 56)
-                            .background(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                            .foregroundColor(.black)
-                            .cornerRadius(12)
-                            .disabled(isLoading)
-                            
-                            // Sign up button
-                            Button(action: { showingSignUp = true }) {
-                                Text("Don't have an account? Sign up")
-                                    .foregroundColor(.gray)
-                            }
+                            .padding(.top, 12)
                         }
-                        .padding(.top, 32)
+                        .padding(.horizontal, 24)
                     }
-                    .padding(.horizontal, 24)
+                    
+                    // Close button
+                    VStack {
+                        HStack {
+                            Button(action: { dismiss() }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(Color.black.opacity(0.3))
+                                    .clipShape(Circle())
+                            }
+                            .padding(.leading, 16)
+                            .padding(.top, 25)
+                            
+                            Spacer()
+                        }
+                        Spacer()
+                    }
                 }
+                .ignoresSafeArea(.keyboard)
             }
-            .navigationBarItems(leading: Button(action: { dismiss() }) {
-                Image(systemName: "xmark")
-                    .foregroundColor(.white)
-            })
+            .navigationBarHidden(true)
         }
         .alert("Error", isPresented: $showingError) {
             if errorMessage == AuthError.emailNotVerified.message {
@@ -81,12 +110,15 @@ struct SignInView: View {
             }
         } message: {
             Text(errorMessage)
+                .font(.custom("PlusJakartaSans-Medium", size: 16))
         }
         .sheet(isPresented: $showingSignUp) {
             SignUpView()
+                .environmentObject(authViewModel)
         }
         .fullScreenCover(isPresented: $showingEmailVerification) {
             EmailVerificationView()
+                .environmentObject(authViewModel)
         }
     }
     
@@ -96,7 +128,7 @@ struct SignInView: View {
             do {
                 try await authService.signInWithEmail(email: email, password: password)
                 DispatchQueue.main.async {
-                    authViewModel.authState = .signedIn
+                    // The AuthViewModel listener will detect the sign-in and update the UI.
                     dismiss()
                 }
             } catch let error as AuthError {

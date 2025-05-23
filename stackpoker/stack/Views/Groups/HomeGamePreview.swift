@@ -311,17 +311,15 @@ struct BuyInView: View {
                     .ignoresSafeArea()
                 
                 VStack(spacing: 24) {
-                    Text("Request Buy-In")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.white)
+                    // Add top spacing for navigation bar clearance
+                    Color.clear.frame(height: 60)
                     
-                    // Amount input
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("BUY-IN AMOUNT")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                            .padding(.leading, 4)
-                        
+                    // Amount input using GlassyInputField
+                    GlassyInputField(
+                        icon: "dollarsign.circle.fill",
+                        title: "BUY-IN AMOUNT",
+                        labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
+                    ) {
                         HStack {
                             Text("$")
                                 .foregroundColor(.white)
@@ -335,27 +333,7 @@ struct BuyInView: View {
                                 .foregroundColor(.white)
                                 .keyboardType(.numberPad)
                         }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            Color.white.opacity(0.1),
-                                            Color.clear,
-                                            Color.clear,
-                                            Color.clear
-                                        ]),
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
+                        .padding(.vertical, 8)
                     }
                     
                     Text("Your buy-in request will be sent to the game creator for approval.")
@@ -366,7 +344,7 @@ struct BuyInView: View {
                     
                     Spacer()
                     
-                    // Submit button
+                    // Submit button with bottom padding
                     Button(action: submitBuyIn) {
                         HStack {
                             if isProcessing {
@@ -391,6 +369,7 @@ struct BuyInView: View {
                         .cornerRadius(16)
                     }
                     .disabled(!isValidAmount() || isProcessing)
+                    .padding(.bottom, 60) // Added more bottom padding
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 16)
@@ -412,9 +391,15 @@ struct BuyInView: View {
                     dismissButton: .default(Text("OK"))
                 )
             }
-                .onAppear {
-                    fetchGame()
+            .onAppear {
+                fetchGame()
             }
+            // Add tap to dismiss keyboard
+            .onTapGesture {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
+            // Fix keyboard movement issues
+            .ignoresSafeArea(.keyboard)
         }
     }
     
@@ -490,6 +475,10 @@ struct HomeGameDetailView: View {
     @State private var liveGame: HomeGame?
     @State private var showCopiedMessage = false
     
+    // Add new state variables for share prompt
+    @State private var showSharePrompt = false
+    @State private var hasShownSharePrompt = false
+    
     // State for Save Session feature
     @State private var previousGame: HomeGame?
     @State private var justCashedOutPlayer: HomeGame.Player?
@@ -560,6 +549,9 @@ struct HomeGameDetailView: View {
             }
             
             ScrollView {
+                // Add top spacing for navigation bar clearance
+                Color.clear.frame(height: 80)
+                
                 if let liveGame = liveGame, liveGame.status == .completed {
                     // Show game summary for completed games
                     gameSummaryView
@@ -573,6 +565,98 @@ struct HomeGameDetailView: View {
             }
             .refreshable {
                 refreshGame()
+            }
+            // Fix keyboard movement issues
+            .ignoresSafeArea(.keyboard)
+            
+            // Share prompt overlay
+            if showSharePrompt {
+                ZStack {
+                    Color.black.opacity(0.7)
+                        .edgesIgnoringSafeArea(.all)
+                        .onTapGesture {
+                            withAnimation {
+                                showSharePrompt = false
+                            }
+                        }
+                    
+                    VStack(spacing: 20) {
+                        Text("Game Created!")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text("Share this game with your friends so they can join!")
+                            .font(.system(size: 16))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                        
+                        HStack(spacing: 16) {
+                            Button(action: {
+                                copyGameLink()
+                                withAnimation {
+                                    showSharePrompt = false
+                                }
+                            }) {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "link.circle.fill")
+                                        .font(.system(size: 28))
+                                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                    
+                                    Text("Copy Link")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
+                                }
+                                .frame(width: 100, height: 100)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                                )
+                            }
+                            
+                            Button(action: {
+                                shareGame()
+                                withAnimation {
+                                    showSharePrompt = false
+                                }
+                            }) {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "square.and.arrow.up.fill")
+                                        .font(.system(size: 28))
+                                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                    
+                                    Text("Share")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
+                                }
+                                .frame(width: 100, height: 100)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                                )
+                            }
+                        }
+                        
+                        Button(action: {
+                            withAnimation {
+                                showSharePrompt = false
+                            }
+                        }) {
+                            Text("Not Now")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray)
+                                .padding(.vertical, 12)
+                        }
+                    }
+                    .padding(24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color(UIColor(red: 30/255, green: 32/255, blue: 36/255, alpha: 0.95)))
+                    )
+                    .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
+                    .padding(.horizontal, 40)
+                }
+                .zIndex(3)
+                .transition(.opacity)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -649,6 +733,16 @@ struct HomeGameDetailView: View {
         }
         .onAppear {
             setupLiveUpdates()
+            
+            // Show share prompt when view appears if it's the creator and hasn't been shown
+            if isGameCreator && !hasShownSharePrompt && (liveGame?.status ?? game.status) == .active {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    withAnimation {
+                        showSharePrompt = true
+                        hasShownSharePrompt = true
+                    }
+                }
+            }
         }
         .onDisappear {
             homeGameService.stopListeningForGameUpdates()
@@ -1508,6 +1602,42 @@ struct HomeGameDetailView: View {
                 }
             }
         }
+        
+        // Fix the shareGame function to ensure it works correctly
+        private func shareGame() {
+            let gameId = (liveGame ?? game).id
+            let shareURLString = "https://stackpoker.gg/games/\(gameId)"
+            let shareText = "Join my poker game on Stack Poker! "
+            
+            // Use main thread to present the share sheet
+            DispatchQueue.main.async {
+                let activityVC = UIActivityViewController(
+                    activityItems: [shareText, shareURLString],
+                    applicationActivities: nil
+                )
+                
+                // Find the top-most view controller to present from
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let rootViewController = windowScene.windows.first?.rootViewController {
+                    // Find the presented view controller
+                    var topController = rootViewController
+                    while let presentedVC = topController.presentedViewController {
+                        topController = presentedVC
+                    }
+                    
+                    // Set source view for iPad
+                    if let popover = activityVC.popoverPresentationController {
+                        popover.sourceView = topController.view
+                        popover.sourceRect = CGRect(x: topController.view.bounds.midX, 
+                                                   y: topController.view.bounds.midY, 
+                                                   width: 0, height: 0)
+                        popover.permittedArrowDirections = []
+                    }
+                    
+                    topController.present(activityVC, animated: true, completion: nil)
+                }
+            }
+        }
     }
     
     // Enhanced owner-specific player row with more detailed info and controls
@@ -1839,17 +1969,15 @@ struct GameEventRow: View {
                         .ignoresSafeArea()
                     
                     VStack(spacing: 24) {
-                        Text("Request Rebuy")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundColor(.white)
+                        // Add top spacing for navigation bar clearance
+                        Color.clear.frame(height: 60)
                         
-                        // Amount input
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("REBUY AMOUNT")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                .padding(.leading, 4)
-                            
+                        // Amount input using GlassyInputField
+                        GlassyInputField(
+                            icon: "dollarsign.circle.fill",
+                            title: "REBUY AMOUNT",
+                            labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
+                        ) {
                             HStack {
                                 Text("$")
                                     .foregroundColor(.white)
@@ -1863,27 +1991,7 @@ struct GameEventRow: View {
                                     .foregroundColor(.white)
                                     .keyboardType(.numberPad)
                             }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(
-                                        LinearGradient(
-                                            gradient: Gradient(colors: [
-                                                Color.white.opacity(0.1),
-                                                Color.clear,
-                                                Color.clear,
-                                                Color.clear
-                                            ]),
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1
-                                    )
-                            )
+                            .padding(.vertical, 8)
                         }
                         
                         Text("Your rebuy request will be sent to the game creator for approval.")
@@ -1894,7 +2002,7 @@ struct GameEventRow: View {
                         
                         Spacer()
                         
-                        // Submit button
+                        // Submit button with bottom padding
                         Button(action: submitRebuy) {
                             HStack {
                                 if isProcessing {
@@ -1919,6 +2027,7 @@ struct GameEventRow: View {
                             .cornerRadius(16)
                         }
                         .disabled(!isValidAmount() || isProcessing)
+                        .padding(.bottom, 60) // Added more bottom padding
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 16)
@@ -1940,6 +2049,12 @@ struct GameEventRow: View {
                         dismissButton: .default(Text("OK"))
                     )
                 }
+                // Add tap to dismiss keyboard
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                // Fix keyboard movement issues
+                .ignoresSafeArea(.keyboard)
             }
         }
         
@@ -2060,9 +2175,8 @@ struct GameEventRow: View {
                         .ignoresSafeArea()
                     
                     VStack(spacing: 24) {
-                        Text("Request Cash Out")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundColor(.white)
+                        // Add top spacing for navigation bar clearance
+                        Color.clear.frame(height: 60)
                         
                         // Stack information
                         HStack {
@@ -2078,13 +2192,12 @@ struct GameEventRow: View {
                         }
                         .padding(.horizontal, 4)
                         
-                        // Amount input
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("CASH OUT AMOUNT")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                .padding(.leading, 4)
-                            
+                        // Amount input using GlassyInputField
+                        GlassyInputField(
+                            icon: "dollarsign.circle.fill",
+                            title: "CASH OUT AMOUNT",
+                            labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
+                        ) {
                             HStack {
                                 Text("$")
                                     .foregroundColor(.white)
@@ -2098,29 +2211,8 @@ struct GameEventRow: View {
                                     .foregroundColor(.white)
                                     .keyboardType(.numberPad)
                             }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(
-                                        LinearGradient(
-                                            gradient: Gradient(colors: [
-                                                Color.white.opacity(0.1),
-                                                Color.clear,
-                                                Color.clear,
-                                                Color.clear
-                                            ]),
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1
-                                    )
-                            )
+                            .padding(.vertical, 8)
                         }
-                        
                         
                         Text("Your cash-out request will be sent to the host for processing.")
                             .font(.system(size: 14))
@@ -2130,7 +2222,7 @@ struct GameEventRow: View {
                         
                         Spacer()
                         
-                        // Submit button
+                        // Submit button with bottom padding
                         Button(action: submitCashOut) {
                             HStack {
                                 if isProcessing {
@@ -2155,6 +2247,7 @@ struct GameEventRow: View {
                             .cornerRadius(16)
                         }
                         .disabled(!isValidAmount() || isProcessing)
+                        .padding(.bottom, 60) // Added more bottom padding
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 16)
@@ -2176,6 +2269,12 @@ struct GameEventRow: View {
                         dismissButton: .default(Text("OK"))
                     )
                 }
+                // Add tap to dismiss keyboard
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                // Fix keyboard movement issues
+                .ignoresSafeArea(.keyboard)
             }
         }
         
@@ -2229,17 +2328,15 @@ struct GameEventRow: View {
                         .ignoresSafeArea()
                     
                     VStack(spacing: 24) {
-                        Text("Request Host Rebuy")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundColor(.white)
+                        // Add top spacing for navigation bar clearance
+                        Color.clear.frame(height: 60)
                         
-                        // Amount input
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("REBUY AMOUNT")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                .padding(.leading, 4)
-                            
+                        // Amount input using GlassyInputField
+                        GlassyInputField(
+                            icon: "dollarsign.circle.fill",
+                            title: "REBUY AMOUNT",
+                            labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
+                        ) {
                             HStack {
                                 Text("$")
                                     .foregroundColor(.white)
@@ -2253,27 +2350,7 @@ struct GameEventRow: View {
                                     .foregroundColor(.white)
                                     .keyboardType(.numberPad)
                             }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(
-                                        LinearGradient(
-                                            gradient: Gradient(colors: [
-                                                Color.white.opacity(0.1),
-                                                Color.clear,
-                                                Color.clear,
-                                                Color.clear
-                                            ]),
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1
-                                    )
-                            )
+                            .padding(.vertical, 8)
                         }
                         
                         Text("Your host rebuy request will be sent for approval.")
@@ -2284,7 +2361,7 @@ struct GameEventRow: View {
                         
                         Spacer()
                         
-                        // Submit button
+                        // Submit button with bottom padding
                         Button(action: submitHostRebuy) {
                             HStack {
                                 if isProcessing {
@@ -2309,12 +2386,13 @@ struct GameEventRow: View {
                             .cornerRadius(16)
                         }
                         .disabled(!isValidAmount() || isProcessing)
+                        .padding(.bottom, 60) // Added more bottom padding
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 16)
                     .padding(.bottom, 40)
                 }
-                .navigationBarTitle("Request Host Rebuy", displayMode: .inline)
+                .navigationBarTitle("Host Rebuy", displayMode: .inline)
                 .navigationBarItems(
                     leading: Button(action: {
                         presentationMode.wrappedValue.dismiss()
@@ -2330,6 +2408,12 @@ struct GameEventRow: View {
                         dismissButton: .default(Text("OK"))
                     )
                 }
+                // Add tap to dismiss keyboard
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                // Fix keyboard movement issues
+                .ignoresSafeArea(.keyboard)
             }
         }
         
@@ -2395,6 +2479,9 @@ struct GameEventRow: View {
                     } else {
                         ScrollView {
                             VStack(spacing: 24) {
+                                // Add top spacing for navigation bar clearance
+                                Color.clear.frame(height: 60)
+                                
                                 Text("End Game")
                                     .font(.system(size: 24, weight: .bold))
                                     .foregroundColor(.white)
@@ -2404,7 +2491,7 @@ struct GameEventRow: View {
                                     .foregroundColor(.gray)
                                     .multilineTextAlignment(.center)
                                 
-                                // Active players
+                                // Active players with GlassyInputField
                                 if let game = game, !game.players.filter({ $0.status == .active }).isEmpty {
                                     VStack(alignment: .leading, spacing: 16) {
                                         Text("Active Players")
@@ -2413,7 +2500,7 @@ struct GameEventRow: View {
                                         
                                         // Player cashout form rows
                                         ForEach(game.players.filter { $0.status == .active }) { player in
-                                            PlayerCashoutRow(
+                                            PlayerCashoutRowWithGlassy(
                                                 player: player,
                                                 cashoutAmount: Binding(
                                                     get: { self.playerCashouts[player.userId] ?? "\(Int(player.currentStack))" },
@@ -2445,7 +2532,7 @@ struct GameEventRow: View {
                                 
                                 Spacer()
                                 
-                                // End game button
+                                // End game button with bottom padding
                                 Button(action: confirmEndGame) {
                                     HStack {
                                         if isProcessing {
@@ -2469,7 +2556,7 @@ struct GameEventRow: View {
                                 }
                                 .disabled(isProcessing)
                                 .padding(.horizontal, 16)
-                                .padding(.bottom, 20)
+                                .padding(.bottom, 60) // Added more bottom padding
                             }
                         }
                     }
@@ -2493,6 +2580,12 @@ struct GameEventRow: View {
                 .onAppear {
                     fetchGame()
                 }
+                // Add tap to dismiss keyboard
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                // Fix keyboard movement issues
+                .ignoresSafeArea(.keyboard)
             }
         }
         
@@ -2573,7 +2666,7 @@ struct GameEventRow: View {
     }
     
     // Row for player cashout in the end game view
-    struct PlayerCashoutRow: View {
+    struct PlayerCashoutRowWithGlassy: View {
         let player: HomeGame.Player
         @Binding var cashoutAmount: String
         
@@ -2593,28 +2686,31 @@ struct GameEventRow: View {
                     
                     Spacer()
                     
-                    // Cashout amount input
-                    HStack {
-                        Text("$")
-                            .foregroundColor(.white)
-                            .font(.system(size: 15))
-                        
-                        TextField("", text: $cashoutAmount)
-                            .placeholder(when: cashoutAmount.isEmpty) {
-                                Text("Amount").foregroundColor(.gray.opacity(0.7))
-                            }
-                            .font(.system(size: 15))
-                            .foregroundColor(.white)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.center)
-                            .frame(width: 80)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(UIColor(red: 50/255, green: 50/255, blue: 55/255, alpha: 1.0)))
-                            )
+                    // Cashout amount input using GlassyInputField
+                    GlassyInputField(
+                        icon: "dollarsign.circle",
+                        title: "",
+                        glassOpacity: 0.05,
+                        materialOpacity: 0.4
+                    ) {
+                        HStack {
+                            Text("$")
+                                .foregroundColor(.white)
+                                .font(.system(size: 15))
+                            
+                            TextField("", text: $cashoutAmount)
+                                .placeholder(when: cashoutAmount.isEmpty) {
+                                    Text("Amount").foregroundColor(.gray.opacity(0.7))
+                                }
+                                .font(.system(size: 15))
+                                .foregroundColor(.white)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.center)
+                                .frame(width: 60)
+                        }
+                        .padding(.vertical, 4)
                     }
+                    .frame(width: 120)
                 }
                 
                 if !isValidAmount(amount: cashoutAmount) {
@@ -2661,6 +2757,9 @@ struct GameEventRow: View {
                         .ignoresSafeArea()
                     
                     VStack(spacing: 24) {
+                        // Add top spacing for navigation bar clearance
+                        Color.clear.frame(height: 60)
+                        
                         Text("Cash Out")
                             .font(.system(size: 24, weight: .bold))
                             .foregroundColor(.white)
@@ -2738,6 +2837,13 @@ struct GameEventRow: View {
                         presentationMode.wrappedValue.dismiss()
                     })
                 }
+                .navigationBarTitle("Cash Out", displayMode: .inline)
+                // Add tap to dismiss keyboard
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                // Fix keyboard movement issues
+                .ignoresSafeArea(.keyboard)
             }
         }
     }
@@ -2821,6 +2927,9 @@ struct SaveHomeGameSessionView: View {
                 
                 // Scroll content
                 ScrollView {
+                    // Add top spacing for navigation bar clearance
+                    Color.clear.frame(height: 60)
+                    
                     VStack(spacing: 24) {
                         // Session Details Card
                         VStack(spacing: 20) {
@@ -3032,6 +3141,12 @@ struct SaveHomeGameSessionView: View {
             Text(error ?? "An unknown error occurred.")
         }
         .statusBar(hidden: false)
+        // Add tap to dismiss keyboard
+        .onTapGesture {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        // Fix keyboard movement issues
+        .ignoresSafeArea(.keyboard)
     }
     
     // Helper function to create consistent detail rows

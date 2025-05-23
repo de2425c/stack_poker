@@ -1,0 +1,50 @@
+import SwiftUI
+
+// New NoteCardView for displaying notes with better UI
+struct NoteCardView: View {
+    let noteText: String
+    // Attempt to get the current time for display, though this won't persist or update
+    // For real timestamping, the note model itself would need a Date property.
+    private var currentTime: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: Date())
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image("stack_logo") // Assuming you have a 'stack_logo' image in your assets
+                .resizable()
+                .scaledToFit()
+                .frame(width: 30, height: 30)
+                .colorInvert() // Makes the logo white if it's black, or vice-versa
+                .padding(8)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.1))
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(noteText)
+                    .font(.plusJakarta(.body, weight: .regular))
+                    .foregroundColor(.white)
+                    .lineLimit(3) // Limit lines for preview, full text in editor
+                
+                Text("Added around \(currentTime)") // Display a pseudo-timestamp
+                    .font(.plusJakarta(.caption2, weight: .medium))
+                    .foregroundColor(.gray)
+            }
+            
+            Spacer() // Pushes content to the left
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(red: 28/255, green: 30/255, blue: 34/255)) // Dark card background
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1) // Subtle border
+        )
+    }
+}

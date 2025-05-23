@@ -371,6 +371,7 @@ struct BasicPostCardView: View {
     @State private var isLiked: Bool
     @State private var animateLike = false
     @State private var showDeleteConfirm = false
+    @EnvironmentObject private var userService: UserService // Added to pass along to destination view
 
     init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, onDelete: @escaping () -> Void, isCurrentUser: Bool, openPostDetail: (() -> Void)? = nil, onReplay: (() -> Void)? = nil) {
         self.post = post
@@ -421,29 +422,33 @@ struct BasicPostCardView: View {
                 }
                 titleToShow = title
             // 2. Check for explicit SESSION_INFO or other session parsing
-            } else if let (_, stakes) = extractSessionInfo(from: post.content), !stakes.isEmpty {
-                var title = "Playing \(stakes)"
-                if let loc = post.location, !loc.isEmpty {
-                    title += " at \(loc)"
+            } else { // No more "if let" for the tuple itself
+                let sessionInfo = extractSessionInfo(from: post.content) // Assign directly
+                if let stakes = sessionInfo.1, !stakes.isEmpty { // Check the optional 'stakes'
+                    var title = "Playing \(stakes)"
+                    if let loc = post.location, !loc.isEmpty {
+                        title += " at \(loc)"
+                    }
+                    titleToShow = title
                 }
-                titleToShow = title
-            // 3. Live session posts (chip updates) identified by non-nil sessionId
-            } else if post.sessionId != nil {
-                // Attempt to parse stakes via parseSessionContent for live chip updates
-                if let parsed = parseSessionContent(from: post.content) {
-                    let primaryDisp = parsed.stakes.isEmpty ? parsed.gameName : "\(parsed.stakes) \(parsed.gameName)"
-                    var title = "Playing \(primaryDisp)"
-                    if let loc = post.location, !loc.isEmpty {
-                        title += " at \(loc)"
+                // 3. Live session posts (chip updates) identified by non-nil sessionId
+                else if post.sessionId != nil { // This 'else if' is for the case where 'stakes' was nil or empty
+                    // Attempt to parse stakes via parseSessionContent for live chip updates
+                    if let parsed = parseSessionContent(from: post.content) {
+                        let primaryDisp = parsed.stakes.isEmpty ? parsed.gameName : "\(parsed.stakes) \(parsed.gameName)"
+                        var title = "Playing \(primaryDisp)"
+                        if let loc = post.location, !loc.isEmpty {
+                            title += " at \(loc)"
+                        }
+                        titleToShow = title
+                    } else {
+                        // Fallback generic session tag
+                        var title = "Playing Session"
+                        if let loc = post.location, !loc.isEmpty {
+                            title += " at \(loc)"
+                        }
+                        titleToShow = title
                     }
-                    titleToShow = title
-                } else {
-                    // Fallback generic session tag
-                    var title = "Playing Session"
-                    if let loc = post.location, !loc.isEmpty {
-                        title += " at \(loc)"
-                    }
-                    titleToShow = title
                 }
             }
         }
@@ -466,8 +471,8 @@ struct BasicPostCardView: View {
                 
                 // Header with user info & optional delete button
                 HStack(alignment: .top, spacing: 10) {
-                    // Smaller profile image
-                    NavigationLink(destination: ProfileView(userId: post.userId)) {
+                    // Smaller profile image with navigation to public profile
+                    NavigationLink(destination: UserProfileView(userId: post.userId).environmentObject(userService)) {
                         Group {
                             if let profileImage = post.profileImage {
                                 KFImage(URL(string: profileImage))
@@ -476,7 +481,7 @@ struct BasicPostCardView: View {
                                     }
                                     .resizable()
                                     .scaledToFill()
-                                    .frame(width: 40, height: 40) 
+                                    .frame(width: 40, height: 40)
                                     .clipShape(Circle())
                                     .overlay(
                                         Circle()
@@ -485,7 +490,7 @@ struct BasicPostCardView: View {
                             } else {
                                 Circle()
                                     .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                    .frame(width: 40, height: 40) 
+                                    .frame(width: 40, height: 40)
                             }
                         }
                     }
@@ -553,13 +558,17 @@ struct BasicPostCardView: View {
                             .padding(.top, 6) // Adjusted padding
                             .padding(.bottom, 8)
                     }
-                } else if post.postType == .hand { // Handle hand posts specifically if NOT a completed session
+                } else if post.isNote { // Check for notes BEFORE session ID check for chip updates
+                    let cleanedContent = cleanContentForNoteDisplay(post.content)
+                    NoteCardView(noteText: cleanedContent)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                } else if post.postType == .hand {
                     if let hand = post.handHistory {
                         HandSummaryView(hand: hand, showReplayButton: false)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 4)
                     }
-                    // Now display the comment for the hand post
                     if let handComment = extractCommentContent(from: post.content), !handComment.isEmpty {
                         Text(handComment)
                             .font(.system(size: 16))
@@ -567,12 +576,27 @@ struct BasicPostCardView: View {
                             .lineSpacing(5)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
-                            .padding(.top, post.handHistory != nil ? 4 : 14) // Space between hand summary and comment, or top padding if no summary
+                            .padding(.top, post.handHistory != nil ? 4 : 14)
                             .padding(.bottom, 8)
                     }
-                } else {
-                    // Original content display for regular posts (not completed session, not hand)
-                    if !post.content.isEmpty {
+                } else if post.sessionId != nil { // Live session posts (chip updates or start)
+                    if let parsed = parseSessionContent(from: post.content) {
+                        if parsed.elapsedTime == 0 && parsed.buyIn > 0 { // Condition for "Session Started"
+                            SessionStartedCardView(
+                                gameName: parsed.gameName,
+                                stakes: parsed.stakes,
+                                location: post.location, // PostContextTagView also shows this, but card can too if desired
+                                buyIn: parsed.buyIn,
+                                userComment: parsed.actualContent
+                            )
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                        } else { // Regular chip update
+                            LiveStackUpdateCardView(parsedContent: parsed)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 8)
+                        }
+                    } else { // Fallback for session posts that don't parse with parseSessionContent
                         Text(post.content)
                             .font(.system(size: 16))
                             .foregroundColor(.white.opacity(0.95))
@@ -582,6 +606,15 @@ struct BasicPostCardView: View {
                             .padding(.top, 14)
                             .padding(.bottom, 8)
                     }
+                } else if !post.content.isEmpty { // Regular text posts
+                    Text(post.content)
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.95))
+                        .lineSpacing(5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 14)
+                        .padding(.bottom, 8)
                 }
                 
                 // Images
@@ -715,6 +748,7 @@ struct PostCardView: View {
     @State private var isLiked: Bool
     @State private var animateLike = false
     @State private var showDeleteConfirm = false
+    @EnvironmentObject private var userService: UserService // Added env object for navigation
     
     init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, onDelete: @escaping () -> Void, isCurrentUser: Bool, userId: String) {
         self.post = post
@@ -764,29 +798,33 @@ struct PostCardView: View {
                 }
                 titleToShow = title
             // 2. Check for explicit SESSION_INFO or other session parsing
-            } else if let (_, stakes) = extractSessionInfo(from: post.content), !stakes.isEmpty {
-                var title = "Playing \(stakes)"
-                if let loc = post.location, !loc.isEmpty {
-                    title += " at \(loc)"
+            } else {
+                let sessionInfo = extractSessionInfo(from: post.content) // Call the function and assign the tuple
+                if let stakes = sessionInfo.1, !stakes.isEmpty { // Then check the optional content
+                    var title = "Playing \(stakes)"
+                    if let loc = post.location, !loc.isEmpty {
+                        title += " at \(loc)"
+                    }
+                    titleToShow = title
                 }
-                titleToShow = title
-            // 3. Live session posts (chip updates) identified by non-nil sessionId
-            } else if post.sessionId != nil {
-                // Attempt to parse stakes via parseSessionContent for live chip updates
-                if let parsed = parseSessionContent(from: post.content) {
-                    let primaryDisp2 = parsed.stakes.isEmpty ? parsed.gameName : "\(parsed.stakes) \(parsed.gameName)"
-                    var title = "Playing \(primaryDisp2)"
-                    if let loc = post.location, !loc.isEmpty {
-                        title += " at \(loc)"
+                // 3. Live session posts (chip updates) identified by non-nil sessionId
+                else if post.sessionId != nil {
+                    // Attempt to parse stakes via parseSessionContent for live chip updates
+                    if let parsed = parseSessionContent(from: post.content) {
+                        let primaryDisp = parsed.stakes.isEmpty ? parsed.gameName : "\(parsed.stakes) \(parsed.gameName)"
+                        var title = "Playing \(primaryDisp)"
+                        if let loc = post.location, !loc.isEmpty {
+                            title += " at \(loc)"
+                        }
+                        titleToShow = title
+                    } else {
+                        // Fallback generic session tag
+                        var title = "Playing Session"
+                        if let loc = post.location, !loc.isEmpty {
+                            title += " at \(loc)"
+                        }
+                        titleToShow = title
                     }
-                    titleToShow = title
-                } else {
-                    // Fallback generic session tag
-                    var title = "Playing Session"
-                    if let loc = post.location, !loc.isEmpty {
-                        title += " at \(loc)"
-                    }
-                    titleToShow = title
                 }
             }
         }
@@ -808,25 +846,27 @@ struct PostCardView: View {
 
             // Header with user info & optional delete button
             HStack(alignment: .top, spacing: 10) {
-                // Smaller profile image
-                Group {
-                    if let profileImage = post.profileImage {
-                        KFImage(URL(string: profileImage))
-                            .placeholder {
-                                Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                            }
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 40, height: 40) 
-                            .clipShape(Circle())
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                            )
-                    } else {
-                        Circle()
-                            .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                            .frame(width: 40, height: 40) 
+                // Smaller profile image with navigation to public profile
+                NavigationLink(destination: UserProfileView(userId: post.userId).environmentObject(userService)) {
+                    Group {
+                        if let profileImage = post.profileImage {
+                            KFImage(URL(string: profileImage))
+                                .placeholder {
+                                    Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                }
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 40, height: 40)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                        } else {
+                            Circle()
+                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                .frame(width: 40, height: 40)
+                        }
                     }
                 }
                 
@@ -893,16 +933,19 @@ struct PostCardView: View {
                         .padding(.top, 6) // Adjusted padding
                         .padding(.bottom, 8)
                 }
-            } else if post.postType == .hand { // Handle hand posts specifically if NOT a completed session
+            } else if post.isNote { // Check for notes BEFORE session ID check for chip updates
+                let cleanedContent = cleanContentForNoteDisplay(post.content)
+                NoteCardView(noteText: cleanedContent)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            } else if post.postType == .hand {
                 if let hand = post.handHistory {
                      HandDisplayCardView(hand: hand,
                                          onReplayTap: { showingReplay = true },
                                          location: post.location,
                                          createdAt: post.createdAt,
                                          showReplayInFeed: true)
-                     // No specific padding here, HandDisplayCardView handles its own
                 }
-                // Now display the comment for the hand post
                 if let handComment = extractCommentContent(from: post.content), !handComment.isEmpty {
                     Text(handComment)
                         .font(.system(size: 16))
@@ -910,12 +953,27 @@ struct PostCardView: View {
                         .lineSpacing(5)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16)
-                        .padding(.top, post.handHistory != nil ? 8 : 14) // Space below HandDisplayCardView or top padding
+                        .padding(.top, post.handHistory != nil ? 8 : 14)
                         .padding(.bottom, 8)
                 }
-            } else {
-                 // Original content display for regular posts (not completed session, not hand)
-                if !post.content.isEmpty { // post.postType != .hand condition removed here
+            } else if post.sessionId != nil { // Live session posts (chip updates or start)
+                if let parsed = parseSessionContent(from: post.content) {
+                    if parsed.elapsedTime == 0 && parsed.buyIn > 0 { // Condition for "Session Started"
+                        SessionStartedCardView(
+                            gameName: parsed.gameName,
+                            stakes: parsed.stakes,
+                            location: post.location,
+                            buyIn: parsed.buyIn,
+                            userComment: parsed.actualContent
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                    } else { // Regular chip update
+                        LiveStackUpdateCardView(parsedContent: parsed)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                    }
+                } else { // Fallback for session posts that don't parse with parseSessionContent
                     Text(post.content)
                         .font(.system(size: 16))
                         .foregroundColor(.white.opacity(0.95))
@@ -925,6 +983,15 @@ struct PostCardView: View {
                         .padding(.top, 14)
                         .padding(.bottom, 8)
                 }
+            } else if !post.content.isEmpty { // Regular text posts
+                Text(post.content)
+                    .font(.system(size: 16))
+                    .foregroundColor(.white.opacity(0.95))
+                    .lineSpacing(5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 8)
             }
             
             // Images - Twitter-like layout
@@ -1164,72 +1231,70 @@ struct PostDetailView: View {
     }
     
     var body: some View {
-        NavigationView { 
-            GeometryReader { _ in
-                ZStack { 
-                    AppBackgroundView().ignoresSafeArea() 
+        // REMOVED NavigationView from here
+        GeometryReader { _ in
+            ZStack { 
+                AppBackgroundView().ignoresSafeArea() 
 
-                    // Main content layout (Header and ScrollView)
-                    VStack(spacing: 0) {
-                        // Top header bar - remains the same
-                        HStack {
-                            Button(action: { dismiss() }) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.white)
+                // Main content layout (Header and ScrollView)
+                VStack(spacing: 0) {
+                    // Top header bar
+                    HStack {
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(12)
+                                .background(Circle().fill(Color.black.opacity(0.25)))
+                        }
+                        Spacer()
+                        if post.userId == userId { // Keep delete button logic
+                            Button(action: { showDeleteConfirm = true }) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.white.opacity(0.7))
                                     .padding(12)
                                     .background(Circle().fill(Color.black.opacity(0.25)))
                             }
-                            Spacer()
-                            if post.userId == userId {
-                                Button(action: { showDeleteConfirm = true }) {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.white.opacity(0.7))
-                                        .padding(12)
-                                        .background(Circle().fill(Color.black.opacity(0.25)))
-                                }
-                            }
                         }
-                        .padding(.horizontal, 16)
-                        // .padding(.top, UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) // Previous attempt
-                        .padding(.top, (UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) - 10) // Move further up
-                        .padding(.bottom, 8) 
-                        .background(Color.clear) 
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, (UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) - 30) 
+                    .padding(.bottom, 8) 
+                    .background(Color.clear) 
 
-                        ScrollView(showsIndicators: false) {
-                            VStack(spacing: 20) { 
-                                postHeaderAndBody 
-                                postActionsAndComments 
-                            }
-                            .padding(.bottom, 70) 
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 20) { 
+                            postHeaderAndBody 
+                            postActionsAndComments 
                         }
+                        .padding(.bottom, 70) 
                     }
-                } // End ZStack
-                .overlay( // Reinstate the overlay for the commentInputView
-                    VStack(spacing:0) {
-                        Spacer() 
-                        commentInputView
-                            .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 45 : 75) // Added 35 to keyboardHeight
-                            .animation(.easeInOut(duration: 0.25), value: keyboardHeight)
-                    }
-                    .ignoresSafeArea(.keyboard, edges: .bottom)
-                    , alignment: .bottom
-                )
-            } // End GeometryReader
-            .ignoresSafeArea(.keyboard) // This is correct on GeometryReader
-            .confirmationDialog(
-                "Delete this post?",
-                isPresented: $showDeleteConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    deletePost()
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This action cannot be undone.")
+            } 
+            .overlay( 
+                VStack(spacing:0) {
+                    Spacer() 
+                    commentInputView
+                        .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 45 : 75) 
+                        .animation(.easeInOut(duration: 0.25), value: keyboardHeight)
+                }
+                .ignoresSafeArea(.keyboard, edges: .bottom)
+                , alignment: .bottom
+            )
+        } 
+        .ignoresSafeArea(.keyboard)
+        .confirmationDialog(
+            "Delete this post?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                deletePost()
             }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
         }
         .onTapGesture {
             isCommentFieldFocused = false
@@ -2076,7 +2141,7 @@ private func isNote(content: String) -> Bool {
     return false
 }
 
-private func extractSessionInfo(from content: String) -> (String, String)? {
+private func extractSessionInfo(from content: String) -> (String?, String?) {
     // First check for explicitly formatted session info
     if content.starts(with: "SESSION_INFO:") {
         let lines = content.components(separatedBy: "\n")
@@ -2095,8 +2160,8 @@ private func extractSessionInfo(from content: String) -> (String, String)? {
         return (parsed.gameName, parsed.stakes)
     }
     
-        return nil
-    }
+    return (nil, nil)
+}
 
 private func extractCommentContent(from content: String) -> String? {
     // Handle SESSION_INFO format
@@ -2173,114 +2238,50 @@ private struct PostBodyContentView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 8) // Add some space between card and comment
                 }
-            } else if !post.content.isEmpty {
-                // Original logic if not a completed session post
-                // Check for live session posts (SESSION_INFO prefix)
-                if post.sessionId != nil || post.content.starts(with: "SESSION_INFO:") {
-                    // Check if this is a note
-                    if isNote(content: post.content) {
-                        // Note post with session badge
-                        VStack(alignment: .leading, spacing: 12) {
-                            // Session badge at the top
-                            if let (gameName, stakes) = extractSessionInfo(from: post.content) {
-                                SessionBadgeView(
-                                    gameName: gameName,
-                                    stakes: stakes
-                                )
-                                .padding(.bottom, 8)
-                            }
-                            
-                            // Show comment if present
-                            if let commentText = extractCommentContent(from: post.content), !commentText.isEmpty {
-                                Text(commentText)
-                                    .font(.system(size: 17))
-                                    .foregroundColor(.white.opacity(0.95))
-                                    .lineSpacing(6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.bottom, 2)
-                            }
-                            
-                            // Note content using SharedNoteView
-                            SharedNoteView(note: extractNoteContent(from: post.content))
-                        }
-                        .padding(.horizontal, 16)
-                    }
-                    // Hand post with session badge
-                    else if post.postType == .hand {
-                        VStack(alignment: .leading, spacing: 12) {
-                            // Session badge at the top
-                            if let (gameName, stakes) = extractSessionInfo(from: post.content) {
-                                SessionBadgeView(
-                                    gameName: gameName,
-                                    stakes: stakes
-                                )
-                                .padding(.bottom, 8)
-                            }
-                            
-                            // Comment text for the hand (excluding SESSION_INFO)
-                            if let commentText = extractCommentContent(from: post.content), !commentText.isEmpty {
-                                Text(commentText)
-                                    .font(.system(size: 17))
-                                    .foregroundColor(.white.opacity(0.95))
-                                    .lineSpacing(6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                    }
-                    // Regular session post (chip update)
-                    else if let parsed = parseSessionContent(from: post.content) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            LiveSessionStatusView(
-                                gameName: parsed.gameName,
-                                stakes: parsed.stakes,
-                                chipAmount: parsed.chipAmount,
-                                buyIn: parsed.buyIn,
-                                elapsedTime: parsed.elapsedTime,
-                                isLive: true
-                            )
-                            .padding(.bottom, 12)
-                            
-                            if !parsed.actualContent.isEmpty {
-                                Text(parsed.actualContent)
-                                    .font(.system(size: 17))
-                                    .foregroundColor(.white.opacity(0.95))
-                                    .lineSpacing(6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                    }
-                    // Fallback for other session posts
-                    else {
-                        Text(post.content)
+            } else if post.isNote { // Check for notes BEFORE session ID check
+                 // Note post with session badge (PostContextTagView is handled by PostDetailView's header area usually)
+                VStack(alignment: .leading, spacing: 12) {
+                    // If there's a comment with the note, display it
+                    if let commentText = extractCommentContent(from: post.content), !commentText.isEmpty {
+                        Text(commentText)
                             .font(.system(size: 17))
                             .foregroundColor(.white.opacity(0.95))
                             .lineSpacing(6)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.bottom, 2)
+                    }
+                    NoteCardView(noteText: extractNoteContent(from: post.content)) // Note content itself
+                }
+                .padding(.horizontal, 16)
+            } else if post.postType == .hand {
+                 // Hand post content (HandDisplayCardView handles its own display)
+                 // The PostContextTagView is handled by PostDetailView header
+                 // Comment for hand:
+                if let commentText = extractCommentContent(from: post.content), !commentText.isEmpty {
+                    Text(commentText)
+                        .font(.system(size: 17))
+                        .foregroundColor(.white.opacity(0.95))
+                        .lineSpacing(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16) // Add padding for the comment
+                        .padding(.top, post.handHistory == nil ? 0 : 8) // Space below hand card if present
+                }
+            } else if post.sessionId != nil { // Live session posts (chip updates or start)
+                if let parsed = parseSessionContent(from: post.content) {
+                    if parsed.elapsedTime == 0 && parsed.buyIn > 0 { // Condition for "Session Started"
+                        SessionStartedCardView(
+                            gameName: parsed.gameName,
+                            stakes: parsed.stakes,
+                            location: post.location,
+                            buyIn: parsed.buyIn,
+                            userComment: parsed.actualContent
+                        )
+                        .padding(.horizontal, 16)
+                    } else { // Regular chip update
+                        LiveStackUpdateCardView(parsedContent: parsed)
                             .padding(.horizontal, 16)
                     }
-                }
-                // Check for non-session notes
-                else if isNote(content: post.content) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        // Comment text
-                        if let commentText = extractCommentContent(from: post.content), !commentText.isEmpty {
-                            Text(commentText)
-                                .font(.system(size: 17))
-                                .foregroundColor(.white.opacity(0.95))
-                                .lineSpacing(6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.bottom, 2)
-                        }
-                        
-                        // Note content
-                        SharedNoteView(note: extractNoteContent(from: post.content))
-                    }
-                    .padding(.horizontal, 16)
-                }
-                // Regular post
-                else {
+                } else { // Fallback for session posts that don't parse
                     Text(post.content)
                         .font(.system(size: 17))
                         .foregroundColor(.white.opacity(0.95))
@@ -2288,15 +2289,22 @@ private struct PostBodyContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16)
                 }
+            } else if !post.content.isEmpty { // Regular post
+                Text(post.content)
+                    .font(.system(size: 17))
+                    .foregroundColor(.white.opacity(0.95))
+                    .lineSpacing(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
             }
             
-            // Hand post content
+            // Hand history card for .hand posts (distinct from comment above)
             if post.postType == .hand, let hand = post.handHistory {
                 HandDisplayCardView(hand: hand, 
                                     onReplayTap: { showingReplay = true }, 
                                     location: post.location, 
                                     createdAt: post.createdAt,
-                                    showReplayInFeed: true) // Hide Replay button in feed post card
+                                    showReplayInFeed: true)
             }
             
             // Images with enhanced styling
@@ -2546,6 +2554,155 @@ private struct FeedStatDisplayView: View {
                 .foregroundColor(.gray)
         }
         .frame(maxWidth: isWide ? .infinity : nil, alignment: isWide ? .leading : .center)
+    }
+}
+
+// Add a helper function to clean content for note display (after the post card views)
+func cleanContentForNoteDisplay(_ content: String) -> String {
+    // If content starts with SESSION_INFO, remove that line
+    if content.starts(with: "SESSION_INFO:") {
+        let lines = content.components(separatedBy: "\n")
+        if lines.count > 1 {
+            return lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+    
+    // Otherwise return the original content
+    return content
+}
+
+// New View for Live Stack Updates
+private struct LiveStackUpdateCardView: View {
+    let parsedContent: ParsedSessionContent
+    // Location is handled by the PostContextTagView above this card.
+
+    private var profitOrLoss: Double {
+        return parsedContent.chipAmount - parsedContent.buyIn
+    }
+
+    private var profitLossString: String {
+        let value = profitOrLoss
+        return String(format: "%@$%.2f", value >= 0 ? "+" : "-", abs(value))
+    }
+
+    private var profitLossColor: Color {
+        profitOrLoss > 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : (profitOrLoss < 0 ? .red : .gray)
+    }
+    
+    private var durationString: String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute]
+        formatter.unitsStyle = .abbreviated
+        return formatter.string(from: parsedContent.elapsedTime) ?? "0m"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("\(parsedContent.gameName) - \(parsedContent.stakes)") // Corrected string interpolation
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+                Spacer()
+                Text("LIVE")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.red.opacity(0.8))
+                    .clipShape(Capsule())
+            }
+            .padding(.bottom, 4)
+
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("CURRENT STACK")
+                        .font(.system(size: 11, weight: .medium)).foregroundColor(.gray.opacity(0.8))
+                    Text(String(format: "$%.0f", parsedContent.chipAmount))
+                        .font(.system(size: 22, weight: .bold)).foregroundColor(.white)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("PROFIT / LOSS")
+                         .font(.system(size: 11, weight: .medium)).foregroundColor(.gray.opacity(0.8))
+                    Text(profitLossString)
+                        .font(.system(size: 22, weight: .bold)).foregroundColor(profitLossColor)
+                }
+            }
+
+            if parsedContent.elapsedTime > 0 {
+                Divider().background(Color.white.opacity(0.1))
+                HStack {
+                    Text("SESSION TIME")
+                        .font(.system(size: 11, weight: .medium)).foregroundColor(.gray.opacity(0.8))
+                    Spacer()
+                    Text(durationString)
+                        .font(.system(size: 14, weight: .semibold)).foregroundColor(.white.opacity(0.9))
+                }
+            }
+            
+            if !parsedContent.actualContent.isEmpty {
+                Divider().background(Color.white.opacity(0.1))
+                Text(parsedContent.actualContent)
+                    .font(.system(size: 15))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .background(Color.black.opacity(0.25))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+}
+
+// New View for "Session Started"
+private struct SessionStartedCardView: View {
+    let gameName: String
+    let stakes: String
+    let location: String?
+    let buyIn: Double
+    let userComment: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "figure.playing.poker")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                Text("Session Started!")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            .padding(.bottom, 4)
+            
+            HStack {
+                Text("INITIAL BUY-IN")
+                    .font(.system(size: 11, weight: .medium)).foregroundColor(.gray.opacity(0.8))
+                Spacer()
+                Text(String(format: "$%.0f", buyIn))
+                    .font(.system(size: 20, weight: .bold)).foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+            }
+
+            if let comment = userComment, !comment.isEmpty {
+                Divider().background(Color.white.opacity(0.1))
+                Text(comment)
+                    .font(.system(size: 15))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .background(Color.black.opacity(0.25))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
     }
 }
 

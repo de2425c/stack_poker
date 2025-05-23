@@ -25,6 +25,7 @@ struct HomePage: View {
     @StateObject private var postService = PostService()
     @StateObject private var tabBarVisibility = TabBarVisibilityManager()
     @EnvironmentObject private var userService: UserService
+    @EnvironmentObject private var authViewModel: AuthViewModel
     
     // Added for HomeGameDetailView presentation
     @StateObject private var pageLevelHomeGameService = HomeGameService()
@@ -69,8 +70,9 @@ struct HomePage: View {
                             self.gameForDetailView = hostedGame
                             self.showGameDetailView = true
                         })
+                        .padding(.top, (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0)
                     }
-                
+                    
                     // Live session bar (if active)
                     if sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && 
                        (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive) {
@@ -220,13 +222,18 @@ struct HomePage: View {
                         self.showGameDetailView = true
                     }
                 }
+                
+                // Force refresh active game bar on dismissal (whether from cancel or create)
+                print("⚡️ Force refreshing active games on sheet dismiss")
+                loadActiveHostedStandaloneGame()
             }) {
                 HomeGameView(groupId: nil, onGameCreated: { newGame in
                     self.gameForDetailView = newGame
                     self.showingOpenHomeGameFlow = false // Dismiss HomeGameView sheet
                     
                     // Set active hosted game for the banner immediately
-                    if newGame.status == .active && newGame.creatorId == self.userId && newGame.groupId == nil {
+                    if newGame.status == .active && newGame.creatorId == self.userId {
+                        print("⚡️ DIRECTLY setting active standalone game: \(newGame.title)")
                         self.activeHostedStandaloneGame = newGame
                     }
                 })
@@ -237,6 +244,15 @@ struct HomePage: View {
             }
             .onAppear {
                 loadActiveHostedStandaloneGame()
+                
+                // Add observer for standalone game bar refresh
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("RefreshStandaloneHomeGame"),
+                    object: nil,
+                    queue: .main
+                ) { [self] _ in
+                    loadActiveHostedStandaloneGame()
+                }
             }
             .onDisappear {
                 // Remove observer when view disappears
@@ -249,16 +265,41 @@ struct HomePage: View {
     }
     
     private func loadActiveHostedStandaloneGame() {
+        print("⚡️ Loading active hosted standalone games...")
         Task {
             do {
                 let allHostedGames = try await pageLevelHomeGameService.fetchActiveGames(createdBy: self.userId)
-                // Find the first active game hosted by the user that is standalone (no groupId)
-                self.activeHostedStandaloneGame = allHostedGames.first(where: { $0.groupId == nil && $0.status == .active })
+                print("⚡️ Found \(allHostedGames.count) active games hosted by user")
+                
+                // Get standalone games (no groupId) that are active and sort by creation date (newest first)
+                let standaloneGames = allHostedGames
+                    .filter { $0.groupId == nil && $0.status == .active }
+                    .sorted { $0.createdAt > $1.createdAt }
+                
+                print("⚡️ Filtered to \(standaloneGames.count) standalone active games")
+                
+                await MainActor.run {
+                    // Get the most recent one
+                    self.activeHostedStandaloneGame = standaloneGames.first
+                    
+                    if let game = self.activeHostedStandaloneGame {
+                        print("⚡️ Set active game: \(game.title) (created \(game.createdAt))")
+                    } else {
+                        print("⚡️ No active standalone games found")
+                    }
+                }
             } catch {
-                print("Error fetching active hosted standalone games: \(error.localizedDescription)")
-                self.activeHostedStandaloneGame = nil // Ensure it's nil on error
+                print("⚡️ Error fetching active hosted standalone games: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.activeHostedStandaloneGame = nil // Ensure it's nil on error
+                }
             }
         }
+    }
+    
+    private func signOut() {
+        // Use the AuthViewModel's signOut method for proper cleanup
+        authViewModel.signOut()
     }
 }
 
@@ -772,13 +813,8 @@ struct ProfileScreen: View {
     }
     
     private func signOut() {
-        do {
-            try Auth.auth().signOut()
-            userService.currentUserProfile = nil // Clear the profile before state change
-            authViewModel.checkAuthState()
-        } catch {
-            print("Error signing out: \(error)")
-        }
+        // Use the AuthViewModel's signOut method for proper cleanup
+        authViewModel.signOut()
     }
 }
 

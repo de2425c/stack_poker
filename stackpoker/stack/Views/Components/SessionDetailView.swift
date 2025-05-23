@@ -4,6 +4,30 @@ import PhotosUI
 import UIKit
 import FirebaseAuth
 
+// Simple Glassy Button Style for Edit Session
+private struct GlassyButtonStyling: ViewModifier {
+    var glassOpacity: Double = 0.02
+    var materialOpacity: Double = 0.25
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity) // Make it full width
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(materialOpacity)
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(glassOpacity))
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: Color.black.opacity(0.1), radius: 3, y: 2)
+    }
+}
+
 struct SessionDetailView: View {
     // Session data
     let session: Session
@@ -26,6 +50,10 @@ struct SessionDetailView: View {
     // State for navigating to HandReplayView
     @State private var selectedHandForReplay: ParsedHandHistory? = nil
     @State private var showingHandReplaySheet: Bool = false // Use a sheet for replay for now
+    
+    // State for presenting EditSessionSheetView
+    @State private var showingEditSheet = false // New state variable
+    @EnvironmentObject var sessionStore: SessionStore // Add SessionStore to environment
     
     // Formatting helpers
     private let dateFormatter: DateFormatter = {
@@ -56,151 +84,154 @@ struct SessionDetailView: View {
     }
     
     var body: some View {
-        ZStack {
-            // Use the unified app background
-            AppBackgroundView()
-                .ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack {
+                AppBackgroundView().ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .center, spacing: 20) {
-                    // Instruction text ABOVE card
-                    Text("Tap card to customize & share")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                        .padding(.top, 10)
+                ScrollView {
+                    VStack(alignment: .center, spacing: 15) { // Reduced spacing a bit
+                        Text("Tap card to customize & share")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                            .padding(.top, 10)
+                            .padding(.bottom, 5)
 
-                    FinishedSessionCardView(
-                        gameName: session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)",
-                        stakes: session.stakes,
+                        FinishedSessionCardView(
+                            gameName: session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)",
+                            stakes: session.stakes,
+                            location: session.gameName, // Assuming gameName can serve as a location string here
+                            date: session.startDate,
+                            duration: formatDuration(hours: session.hoursPlayed),
+                            buyIn: session.buyIn,
+                            cashOut: session.cashout
+                        )
+                        .padding(.horizontal)
+                        .onTapGesture {
+                            if #available(iOS 16.0, *) {
+                                showingImagePicker = true
+                            } else {
+                                print("Share functionality requires iOS 16+")
+                            }
+                        }
+                        
+                        // Edit Session Button - Placed here and styled
+                        Button(action: {
+                            showingEditSheet = true
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "pencil.line")
+                                Text("Edit Session Details")
+                            }
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white) // Text color for the button
+                        }
+                        .modifier(GlassyButtonStyling())
+                        .padding(.horizontal) // Padding for the button itself within the VStack
+                        .padding(.top, 5) // Space above the button
+                        
+                        handsSectionView()
+                        notesSectionView()
+                        
+                        Spacer(minLength: 30) // Keep some space at the bottom
+                    }
+                    .padding(.top, 20)
+                }
+            }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear {
+                fetchSessionDetails()
+            }
+            .sheet(isPresented: $showingImagePicker) {
+                ImagePicker(selectedImage: $selectedImageForComposer)
+            }
+            .onChange(of: selectedImageForComposer) { newValue in
+                if newValue != nil {
+                    showImageComposer = true
+                }
+            }
+            .fullScreenCover(isPresented: $showImageComposer) {
+                if let selectedImage = selectedImageForComposer, #available(iOS 16.0, *) {
+                    ImageCompositionView(session: session, backgroundImage: selectedImage)
+                } else {
+                    Text(selectedImageForComposer == nil ? "No image selected." : "Image composition requires iOS 16+")
+                        .onAppear {
+                            selectedImageForComposer = nil
+                            showImageComposer = false
+                        }
+                }
+            }
+            .sheet(isPresented: $showingHandReplaySheet) { 
+                if let handToReplay = selectedHandForReplay {
+                    HandReplayView(hand: handToReplay, userId: session.userId) 
+                } else {
+                    Text("No hand selected for replay.") 
+                }
+            }
+            .sheet(isPresented: $showingEditSheet) { 
+                EditSessionSheetView(session: session, sessionStore: sessionStore)
+                    .environmentObject(sessionStore)
+            }
+        }
+    }
+
+    // Extracted Hands Section
+    @ViewBuilder
+    private func handsSectionView() -> some View {
+        if isLoadingHands {
+            ProgressView()
+                .padding()
+        } else if !sessionHands.isEmpty {
+            VStack(alignment: .leading, spacing: 15) {
+                Text("Hands from this Session")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal)
+                
+                ForEach(sessionHands) { savedHand in
+                    HandDisplayCardView(
+                        hand: savedHand.hand, 
+                        onReplayTap: {
+                            self.selectedHandForReplay = savedHand.hand
+                            self.showingHandReplaySheet = true
+                        }, 
                         location: session.gameName,
-                        date: session.startDate,
-                        duration: formatDuration(hours: session.hoursPlayed),
-                        buyIn: session.buyIn,
-                        cashOut: session.cashout
-                        // Default card background and opacity will be used here
+                        createdAt: savedHand.timestamp,
+                        showReplayInFeed: false
                     )
                     .padding(.horizontal)
-                    .onTapGesture {
-                        if #available(iOS 16.0, *) {
-                            showingImagePicker = true
-                        } else {
-                            // Legacy share functionality was removed by the user.
-                            // Consider an alert or disabling for older OS if ImageCompositionView is core.
-                            print("Share functionality requires iOS 16+")
-                        }
-                    }
-                    
-                    // Hands Section
-                    if isLoadingHands {
-                        ProgressView()
-                            .padding()
-                    } else if !sessionHands.isEmpty {
-                        VStack(alignment: .leading, spacing: 15) {
-                            Text("Hands from this Session")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.white)
-                                .padding(.horizontal)
-                            
-                            ForEach(sessionHands) { savedHand in
-                                HandSummaryView(hand: savedHand.hand, 
-                                                onReplayTap: {
-                                                    print("Replay tapped for hand ID: \(savedHand.id). Attempting to show replay sheet.")
-                                                    self.selectedHandForReplay = savedHand.hand
-                                                    self.showingHandReplaySheet = true
-                                                }, 
-                                                showReplayButton: true)
-                                .padding(.horizontal)
-                            }
-                        }
-                    } else {
-                        Text("No hands recorded for this session.")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .padding()
-                    }
-                    
-                    // Notes Section - Now uses session.notes directly
-                    if let notes = session.notes, !notes.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Session Notes")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.white)
-                                .padding(.horizontal)
+                }
+            }
+        } else {
+            Text("No hands recorded for this session.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .padding()
+        }
+    }
 
-                            ForEach(notes, id: \.self) { noteText in
-                                SharedNoteView(note: noteText)
-                                    .padding(.horizontal)
-                            }
-                        }
-                    } else {
-                        Text("No notes for this session.")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .padding()
-                    }
-                    // Add a flexible spacer at the bottom of the VStack inside ScrollView
-                    // to ensure content can be scrolled fully if it's short but scrollable
-                    Spacer(minLength: 30) // Adjust minLength as needed
+    // Extracted Notes Section
+    @ViewBuilder
+    private func notesSectionView() -> some View {
+        if let notes = session.notes, !notes.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Session Notes")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal)
+
+                ForEach(notes, id: \.self) { noteText in
+                    NoteCardView(noteText: noteText)
+                        .padding(.horizontal)
                 }
-                .padding(.top, 60) // Extra top padding so content starts below close button
             }
-        }
-        // Close button overlay similar to HandReplayView
-        .overlay(
-            HStack {
-                Button(action: dismissView) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(12)
-                        .background(
-                            Circle()
-                                .fill(Color.black.opacity(0.5))
-                                .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                        )
-                }
-                .buttonStyle(BorderlessButtonStyle()) // Add this to ensure tap area is proper
-                .padding(8) // Increase tap area
-                Spacer()
-            }
-            .padding(.top, 8)
-            .padding(.leading, 16)
-            , alignment: .topLeading
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure ZStack is flexible
-        .onAppear {
-            fetchSessionDetails()
-        }
-        .sheet(isPresented: $showingImagePicker) {
-            ImagePicker(selectedImage: $selectedImageForComposer)
-        }
-        .onChange(of: selectedImageForComposer) { newValue in
-            if newValue != nil {
-                showImageComposer = true
-            }
-        }
-        .fullScreenCover(isPresented: $showImageComposer) {
-            if let selectedImage = selectedImageForComposer, #available(iOS 16.0, *) {
-                ImageCompositionView(session: session, backgroundImage: selectedImage)
-            } else {
-                // Fallback if no image or not iOS 16+
-                Text(selectedImageForComposer == nil ? "No image selected." : "Image composition requires iOS 16+")
-                    .onAppear {
-                        selectedImageForComposer = nil
-                        showImageComposer = false
-                    }
-            }
-        }
-        .sheet(isPresented: $showingHandReplaySheet) { // Sheet for Hand Replay
-            if let handToReplay = selectedHandForReplay {
-                // Assuming HandReplayView exists and can be initialized like this.
-                // You might need to pass other environment objects if HandReplayView needs them.
-                HandReplayView(hand: handToReplay, userId: session.userId) 
-            } else {
-                Text("No hand selected for replay.") // Fallback
-            }
+        } else {
+            Text("No notes for this session.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .padding()
         }
     }
 

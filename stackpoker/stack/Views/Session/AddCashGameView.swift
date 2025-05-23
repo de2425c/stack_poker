@@ -13,11 +13,11 @@ struct AddCashGameView: View {
     
     var body: some View {
         NavigationView {
-            ZStack {
-                AppBackgroundView()
-                    .ignoresSafeArea()
-                
-                GeometryReader { geometry in
+            GeometryReader { geometry in
+                ZStack {
+                    AppBackgroundView()
+                        .ignoresSafeArea()
+                    
                     ScrollView {
                         VStack(spacing: 24) {
                             // Add top padding for transparent navigation bar
@@ -37,14 +37,7 @@ struct AddCashGameView: View {
                                     }
                                     .foregroundColor(.white)
                                     .padding()
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                    )
+                                    .background(glassyBackground())
                             }
                             
                             // Stakes Fields
@@ -72,14 +65,7 @@ struct AddCashGameView: View {
                                         }
                                         .foregroundColor(.white)
                                         .padding()
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                        )
+                                        .background(glassyBackground())
                                     }
                                     .frame(maxWidth: .infinity)
                                     
@@ -101,14 +87,7 @@ struct AddCashGameView: View {
                                         }
                                         .foregroundColor(.white)
                                         .padding()
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                        )
+                                        .background(glassyBackground())
                                     }
                                     .frame(maxWidth: .infinity)
                                 }
@@ -132,14 +111,7 @@ struct AddCashGameView: View {
                                     }
                                     .foregroundColor(.white)
                                     .padding()
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                    )
+                                    .background(glassyBackground())
                                 }
                             }
                             
@@ -169,11 +141,11 @@ struct AddCashGameView: View {
                         .padding(24)
                         .frame(maxWidth: 500) // Limit the maximum width
                         .frame(maxWidth: .infinity) // Center in available space
-                        .frame(minHeight: geometry.size.height) // Ensure full height
+                        .frame(minHeight: geometry.size.height, alignment: .top) // Ensure content starts from top
                     }
-                    .scrollDismissesKeyboard(.interactively)
-                    .ignoresSafeArea(.keyboard) // Prevent keyboard from pushing content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) // Position ScrollView at top
                 }
+                .frame(width: geometry.size.width, height: .infinity, alignment: .top) // Position ZStack at top
             }
             .navigationTitle("Add New Game")
             .navigationBarTitleDisplayMode(.inline)
@@ -185,6 +157,7 @@ struct AddCashGameView: View {
                     }
                 }
             }
+            .ignoresSafeArea(.keyboard)
         }
     }
     
@@ -237,6 +210,17 @@ struct AddCashGameView: View {
                     // Could show an alert here
                 }
             }
+        }
+    }
+    
+    // Helper for glassy background styling
+    private func glassyBackground(glassOpacity: Double = 0.01, materialOpacity: Double = 0.2) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Material.ultraThinMaterial)
+                .opacity(materialOpacity)
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(glassOpacity))
         }
     }
 }

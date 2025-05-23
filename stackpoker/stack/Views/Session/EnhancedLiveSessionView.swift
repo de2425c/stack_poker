@@ -76,6 +76,12 @@ struct EnhancedLiveSessionView: View {
     // Add new state variables
     @State private var shareToFeedIsNote = false
     @State private var shareToFeedIsChipUpdate = false
+    @State private var shareToFeedIsSessionStart = false // New state for session start sharing
+    
+    // State variables for new sharing options
+    @State private var showingShareHandSelector = false
+    @State private var showingShareNoteSelector = false
+    @State private var showingShareChipUpdateSelector = false
     
     // Add state for tracking selected post
     @State private var selectedPost: Post? = nil
@@ -83,6 +89,7 @@ struct EnhancedLiveSessionView: View {
     // Add state variable for tracking whether the edit buy-in section is expanded
     @State private var showEditBuyIn = false
     @State private var editBuyInAmount = ""
+    @State private var showingEditBuyInSheet = false
     
     // New states
     @State private var showingShareToFeedPrompt = false
@@ -91,6 +98,14 @@ struct EnhancedLiveSessionView: View {
     @State private var showingNewHandEntry = false // New state for presenting NewHandEntryView
     @State private var completedSessionToShowInSheet: Session? = nil // For sheet presentation
     @State private var showSessionDetailSheet = false // Controls sheet presentation
+    
+    // States for editing notes
+    @State private var noteToEdit: String? = nil
+    @State private var noteToEditId: String? = nil // Assuming notes will have IDs for reliable editing
+    @State private var showingEditNoteSheet = false
+    
+    // State for Post Tab sharing options
+    @State private var showingPostShareOptions = false
     
     // MARK: - Enum Definitions
     enum LiveSessionTab {
@@ -155,7 +170,11 @@ struct EnhancedLiveSessionView: View {
     
     var body: some View {
         NavigationView {
+            GeometryReader { geometry in
             mainContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .ignoresSafeArea(.keyboard)
         }
     }
     
@@ -182,26 +201,24 @@ struct EnhancedLiveSessionView: View {
                 minimizedControl
             }
         }
+        // Prevent the keyboard from pushing the whole view up
+        .ignoresSafeArea(.keyboard, edges: .all)
+        // Restore the original view modifiers that were accidentally removed
         .navigationTitle(sessionTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar { toolbarContent }
         .accentColor(.white)
         .onAppear(perform: handleOnAppear)
-        .sheet(isPresented: $showingStackUpdateSheet) {
-            stackUpdateSheet
-        }
-        .sheet(isPresented: $showingHandHistorySheet) {
-            handHistorySheet
-        }
+        // Sheets and alerts
+        .sheet(isPresented: $showingStackUpdateSheet) { stackUpdateSheet }
+        .sheet(isPresented: $showingHandHistorySheet) { handHistorySheet }
+        .sheet(isPresented: $showingRebuySheet) { rebuyView }
+        .sheet(isPresented: $showingEditBuyInSheet) { editBuyInView }
         .alert("Exit Session?", isPresented: $showingExitAlert) {
             Button("Cancel", role: .cancel) { }
-            Button("Exit Without Saving", role: .destructive) {
-                dismiss()
-            }
-            Button("End & Cashout") {
-                showingCashoutPrompt = true
-            }
+            Button("Exit Without Saving", role: .destructive) { dismiss() }
+            Button("End & Cashout") { showingCashoutPrompt = true }
         } message: {
             Text("What would you like to do with your active session?")
         }
@@ -219,12 +236,9 @@ struct EnhancedLiveSessionView: View {
             Text("Enter your final chip count to end the session")
         }
         .alert("Share Session Result", isPresented: $showingShareToFeedPrompt) {
-            Button("Not Now", role: .cancel) {
-                dismiss()
-            }
+            Button("Not Now", role: .cancel) { dismiss() }
             Button("Share to Feed") {
                 if let details = sessionDetails, userService.currentUserProfile != nil {
-                    // Create session summary content
                     let profitText = details.profit >= 0 ? "+$\(Int(details.profit))" : "-$\(Int(abs(details.profit)))"
                     let content = """
                     Session at \(details.gameName) (\(details.stakes))
@@ -233,8 +247,6 @@ struct EnhancedLiveSessionView: View {
                     Cashout: $\(Int(details.cashout))
                     Profit: \(profitText)
                     """
-                    
-                    // Show the post editor with session details
                     shareToFeedContent = content
                     shareToFeedIsHand = false
                     shareToFeedHandData = nil
@@ -254,39 +266,28 @@ struct EnhancedLiveSessionView: View {
                 Text("Would you like to share your session result?")
             }
         }
-        .sheet(isPresented: $showingPostEditor, onDismiss: {
-            // When the post editor dismisses, also dismiss this view
-            dismiss()
-        }) {
-            postEditorSheet
-        }
-        .sheet(isPresented: $showingRebuySheet) {
-            rebuyView
-        }
+        .sheet(isPresented: $showingPostEditor, onDismiss: { dismiss() }) { postEditorSheet }
         .sheet(isPresented: $showingHandWizard) {
             NavigationView {
                 NewHandEntryView(sessionId: sessionStore.liveSession.id)
                     .environmentObject(handStore)
             }
-            .onDisappear {
-                checkForNewHands()
-            }
+            .onDisappear { checkForNewHands() }
         }
         .alert("Sign In Required", isPresented: $showingNoProfileAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text("You need to sign in to share content to the feed.")
         }
-        .sheet(isPresented: $showSessionDetailSheet) { // Sheet for SessionDetailView
+        .sheet(isPresented: $showSessionDetailSheet) {
             if let session = completedSessionToShowInSheet {
-                NavigationView { // Embed in NavigationView for title and dismiss button
+                NavigationView {
                     SessionDetailView(session: session)
                         .navigationBarBackButtonHidden(true)
-                        .toolbar { // Add a dismiss button to the SessionDetailView sheet
+                        .toolbar {
                             ToolbarItem(placement: .navigationBarLeading) {
                                 Button("Done") {
                                     showSessionDetailSheet = false
-                                    // Now dismiss EnhancedLiveSessionView after detail sheet is closed
                                     self.dismiss() 
                                 }
                                 .foregroundColor(.white)
@@ -298,6 +299,15 @@ struct EnhancedLiveSessionView: View {
     }
     
     private var activeSessionView: some View {
+        activeSessionContent // Call the new extracted view
+            .sheet(isPresented: $showingPostShareOptions) { postShareOptionsSheet }
+            .sheet(isPresented: $showingShareHandSelector) { shareHandSelectorSheet }
+            .sheet(isPresented: $showingShareNoteSelector) { shareNoteSelectorSheet }
+            .sheet(isPresented: $showingShareChipUpdateSelector) { shareChipUpdateSelectorSheet }
+    }
+    
+    // New extracted view for the core content of activeSessionView
+    private var activeSessionContent: some View {
         ZStack(alignment: .bottom) { // Align content to the bottom for the tab bar
             // TabView takes up the main space
             TabView(selection: $selectedTab) {
@@ -325,8 +335,13 @@ struct EnhancedLiveSessionView: View {
             // Container for the floating tab bar
             customTabBar
                 .padding(.horizontal, 20) // Padding from screen edges
-                .padding(.bottom, 50) // Padding from the very bottom of the screen (adjust for safe area if needed)
+                .padding(.bottom, 120) // Increased padding from the very bottom of the screen
         }
+        // REMOVE these sheets from here as they are now on activeSessionView
+        // .sheet(isPresented: $showingPostShareOptions) { postShareOptionsSheet }
+        // .sheet(isPresented: $showingShareHandSelector) { shareHandSelectorSheet }
+        // .sheet(isPresented: $showingShareNoteSelector) { shareNoteSelectorSheet }
+        // .sheet(isPresented: $showingShareChipUpdateSelector) { shareChipUpdateSelectorSheet }
     }
     
     private var customTabBar: some View {
@@ -360,12 +375,92 @@ struct EnhancedLiveSessionView: View {
     }
     
     private var stackUpdateSheet: some View {
-        StackUpdateSheet(
-            isPresented: $showingStackUpdateSheet,
-            chipAmount: $chipAmount,
-            noteText: $noteText,
-            onSubmit: handleStackUpdate
-        )
+        // Enhanced StackUpdateSheet with glassy style
+        GeometryReader { geometry in
+            ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                
+                VStack(spacing: 24) {
+                    // Header
+                    HStack {
+                        Text("Update Stack")
+                            .font(.plusJakarta(.title3, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        Button(action: { showingStackUpdateSheet = false }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    
+                    // Current Chips Field using GlassyInputField
+                    VStack(alignment: .leading, spacing: 16) {
+                        GlassyInputField(
+                            icon: "dollarsign.circle",
+                            title: "Current Chips",
+                            content: AnyGlassyContent(TextFieldContent(
+                                text: $chipAmount,
+                                keyboardType: .decimalPad,
+                                prefix: "$",
+                                textColor: .white,
+                                prefixColor: .gray
+                            )),
+                            glassOpacity: 0.01,
+                            labelColor: .gray,
+                            materialOpacity: 0.2
+                        )
+                        
+                        // Optional Note Field
+                        GlassyInputField(
+                            icon: "note.text",
+                            title: "Note (Optional)",
+                            content: AnyGlassyContent(TextFieldContent(
+                                text: $noteText,
+                                keyboardType: .default,
+                                textColor: .white
+                            )),
+                            glassOpacity: 0.01,
+                            labelColor: .gray,
+                            materialOpacity: 0.2
+                        )
+                    }
+                    
+                    Spacer()
+                    
+                    // Save Button
+                    Button(action: {
+                        handleStackUpdate(amount: chipAmount, note: noteText)
+                        showingStackUpdateSheet = false
+                        chipAmount = ""
+                        noteText = ""
+                    }) {
+                        Text("Update Stack")
+                            .font(.plusJakarta(.body, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(chipAmount.isEmpty ? Color.white.opacity(0.5) : Color.white)
+                            )
+                    }
+                    .disabled(chipAmount.isEmpty)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: geometry.size.height, alignment: .top)
+            }
+            .ignoresSafeArea(.keyboard)
+            .onTapGesture {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
+        }
     }
     
     private var handHistorySheet: some View {
@@ -374,6 +469,10 @@ struct EnhancedLiveSessionView: View {
             handText: $handHistoryText,
             onSubmit: handleHandHistoryInput
         )
+        .ignoresSafeArea(.keyboard)
+        .onTapGesture {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
     }
     
     // MARK: - Toolbar Content
@@ -382,27 +481,26 @@ struct EnhancedLiveSessionView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) { titleView }
         ToolbarItem(placement: .navigationBarLeading) { leadingButton }
-        
+        ToolbarItem(placement: .navigationBarTrailing) { trailingToolbarButton }
+    }
+    
+    // Extracted trailing button to reduce complexity
+    @ViewBuilder
+    private var trailingToolbarButton: some View {
         if selectedTab == .notes {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showingSimpleNoteEditor = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(accentColor)
-                }
-            }
+            plusButton(action: { showingSimpleNoteEditor = true })
         } else if selectedTab == .hands {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showingNewHandEntry = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(accentColor)
-                }
-            }
+            plusButton(action: { showingNewHandEntry = true })
+        } else if selectedTab == .posts {
+            plusButton(action: { showingPostShareOptions = true })
+        }
+    }
+    
+    private func plusButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 20))
+                .foregroundColor(accentColor)
         }
     }
     
@@ -501,135 +599,130 @@ struct EnhancedLiveSessionView: View {
     
     // View for setting up a new session
     private var setupView: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Use AppBackgroundView as background
-                AppBackgroundView()
-                    .ignoresSafeArea()
+        ZStack {
+            // Use AppBackgroundView as background
+            AppBackgroundView()
+                .ignoresSafeArea()
+                
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Add top padding for transparent navigation bar
+                    Spacer()
+                        .frame(height: 64)
                     
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Add top padding for transparent navigation bar
-                        Spacer()
-                            .frame(height: 64)
+                    // Game Selection Section
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Select Game")
+                            .font(.plusJakarta(.headline, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.leading, 6)
+                            .padding(.bottom, 2)
                         
-                        // Game Selection Section
+                        if cashGameService.cashGames.isEmpty {
+                            HStack {
+                                Text("No games added. Tap to add a new game.")
+                                    .font(.plusJakarta(.caption, weight: .medium))
+                                    .foregroundColor(.gray)
+                                
+                                Spacer()
+                                
+                                Button(action: { showingAddGame = true }) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(.white)
+                                        .padding(10)
+                                        .background(Circle().fill(Color.gray.opacity(0.3)))
+                                }
+                            }
+                            .padding(.vertical, 20)
+                        } else {
+                            // Game selection horizontal scroll
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                ForEach(cashGameService.cashGames) { game in
+                                        let stakes = formatStakes(game: game)
+                                    GameCard(
+                                            stakes: stakes,
+                                            name: game.name,
+                                            isSelected: selectedGame?.id == game.id,
+                                            titleColor: .white,
+                                            subtitleColor: Color.white.opacity(0.7),
+                                            glassOpacity: 0.01,
+                                            materialOpacity: 0.2
+                                    )
+                                    .onTapGesture {
+                                        selectedGame = game
+                                    }
+                                }
+                                
+                                    // Add Game Button with glassy style
+                                    AddGameButton(
+                                        textColor: .white,
+                                        glassOpacity: 0.01,
+                                        materialOpacity: 0.2
+                                    )
+                                    .onTapGesture {
+                                        showingAddGame = true
+                                    }
+                                }
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    
+                    // Buy-in Section
+                    if selectedGame != nil {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Select Game")
+                            Text("Buy-in Amount")
                                 .font(.plusJakarta(.headline, weight: .medium))
                                 .foregroundColor(.white)
                                 .padding(.leading, 6)
                                 .padding(.bottom, 2)
                             
-                            if cashGameService.cashGames.isEmpty {
-                                HStack {
-                                    Text("No games added. Tap to add a new game.")
-                                        .font(.plusJakarta(.caption, weight: .medium))
-                                        .foregroundColor(.gray)
-                                    
-                                    Spacer()
-                                    
-                                    Button(action: { showingAddGame = true }) {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 18))
-                                            .foregroundColor(.white)
-                                            .padding(10)
-                                            .background(Circle().fill(Color.gray.opacity(0.3)))
-                                    }
-                                }
-                                .padding(.vertical, 20)
-                            } else {
-                                // Game selection horizontal scroll
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 12) {
-                                        ForEach(cashGameService.cashGames) { game in
-                                            let stakes = formatStakes(game: game)
-                                            GameCard(
-                                                stakes: stakes,
-                                                name: game.name,
-                                                isSelected: selectedGame?.id == game.id,
-                                                titleColor: .white,
-                                                subtitleColor: Color.white.opacity(0.7),
-                                                glassOpacity: 0.01,
-                                                materialOpacity: 0.2
-                                            )
-                                            .onTapGesture {
-                                                selectedGame = game
-                                            }
-                                        }
-                                        
-                                        // Add Game Button with glassy style
-                                        AddGameButton(
-                                            textColor: .white,
-                                            glassOpacity: 0.01,
-                                            materialOpacity: 0.2
-                                        )
-                                        .onTapGesture {
-                                            showingAddGame = true
-                                        }
-                                    }
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 2)
-                                }
-                            }
+                            // Glassy Buy-in field
+                            GlassyInputField(
+                                icon: "dollarsign.circle",
+                                title: "Buy in",
+                                content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
+                                glassOpacity: 0.01,
+                                labelColor: .gray,
+                                materialOpacity: 0.2
+                            )
                         }
                         .padding(.horizontal)
-                        
-                        // Buy-in Section
-                        if selectedGame != nil {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Buy-in Amount")
-                                    .font(.plusJakarta(.headline, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.leading, 6)
-                                    .padding(.bottom, 2)
-                                
-                                // Glassy Buy-in field
-                                GlassyInputField(
-                                    icon: "dollarsign.circle",
-                                    title: "Buy in",
-                                    content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
-                                    glassOpacity: 0.01,
-                                    labelColor: .gray,
-                                    materialOpacity: 0.2
-                                )
-                            }
-                            .padding(.horizontal)
-                        }
-                        
-                        // Start Button
-                        if selectedGame != nil {
-                            Button(action: startSession) {
-                                Text("Start Session")
-                                    .font(.plusJakarta(.body, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 54)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 27)
-                                            .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
-                                            .background(.ultraThinMaterial)
-                                            .clipShape(RoundedRectangle(cornerRadius: 27))
-                                    )
-                            }
-                            .disabled(buyIn.isEmpty)
-                            .padding(.horizontal, 20)
-                            .padding(.top, 16)
-                        }
-                        
-                        Spacer()
                     }
-                    .padding(.top, 16)
-                    .padding(.bottom, 40)
-                    .frame(minHeight: geometry.size.height) // Ensure full height
+                    
+                    // Start Button
+                    if selectedGame != nil {
+                        Button(action: startSession) {
+                            Text("Start Session")
+                                .font(.plusJakarta(.body, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 54)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 27)
+                                        .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
+                                        .background(.ultraThinMaterial)
+                                        .clipShape(RoundedRectangle(cornerRadius: 27))
+                                )
+                        }
+                        .disabled(buyIn.isEmpty)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+                    }
+                    
+                    Spacer()
                 }
+                .padding(.top, 16)
+                .padding(.bottom, 40)
             }
         }
         .sheet(isPresented: $showingAddGame) {
             AddCashGameView(cashGameService: cashGameService)
         }
-        .scrollDismissesKeyboard(.interactively)
-        .ignoresSafeArea(.keyboard) // Prevent keyboard from pushing content
     }
     
     // Helper function to format stakes
@@ -764,6 +857,14 @@ struct EnhancedLiveSessionView: View {
                         .keyboardType(keyboardType)
                         .font(.plusJakarta(.body, weight: .regular))
                         .foregroundColor(textColor)
+                        .toolbar {
+                            ToolbarItemGroup(placement: .keyboard) {
+                                Spacer()
+                                Button("Done") {
+                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                }
+                            }
+                        }
                 }
             }
             .frame(height: 35)
@@ -882,7 +983,7 @@ struct EnhancedLiveSessionView: View {
             if item.kind == .chip {
                 if let update = self.chipUpdates.first(where: { $0.id == item.id }) {
                     let updateContent = "Stack update: $\(Int(update.amount))\(update.note != nil ? "\nNote: \(update.note!)" : "")"
-                    self.showShareToFeedDialog(content: updateContent, isHand: false, handData: nil, updateId: update.id)
+                    self.showShareToFeedDialog(content: updateContent, isHand: false, handData: nil, updateId: update.id, isSharingChipUpdate: true)
                 }
             } else if item.kind == .hand {
                 // Directly find the SavedHand using item.id from handStore
@@ -897,8 +998,9 @@ struct EnhancedLiveSessionView: View {
                 }
             } else if item.kind == .sessionStart {
                 // For session start updates, share basic session info
-                let sessionInfo = self.getSessionDetailsText()
-                self.showShareToFeedDialog(content: "Started a new session", isHand: false)
+                let sessionInfo = self.getSessionDetailsText() // This text is more for the card background
+                let postContent = "Started a new session at \(sessionStore.liveSession.gameName) (\(sessionStore.liveSession.stakes))"
+                self.showShareToFeedDialog(content: postContent, isHand: false, isSharingSessionStart: true)
             }
         }
     }
@@ -913,15 +1015,21 @@ struct EnhancedLiveSessionView: View {
                 ScrollView {
                     LazyVStack(spacing: 16) {
                         ForEach(notes.indices, id: \.self) { index in
+                            // Safely access notes, ensuring reverse chronological order for display
                             let noteIndex = notes.count - 1 - index
-                            let note = notes[noteIndex]
-                            NoteCard(
-                                text: note,
-                                timestamp: Date() // In a real app, would store timestamps with notes
-                            )
+                            if notes.indices.contains(noteIndex) {
+                                let note = notes[noteIndex]
+                                NoteCardView(noteText: note) // Use the new NoteCardView
+                                    .onTapGesture {
+                                        self.noteToEditId = String(noteIndex) // Store index as ID for editing
+                                        self.noteToEdit = note
+                                        self.showingEditNoteSheet = true
+                                    }
+                            }
                         }
                     }
-                    .padding(16)
+                    .padding(.horizontal, 16) // Apply horizontal padding to the LazyVStack
+                    .padding(.top, 16) // Add some top padding as well
                 }
             }
         }
@@ -929,6 +1037,18 @@ struct EnhancedLiveSessionView: View {
             updateLocalDataFromStore() // Refresh local notes data when editor dismisses
         }) { 
             SimpleNoteEditorView(sessionStore: sessionStore, sessionId: sessionStore.liveSession.id)
+        }
+        .sheet(isPresented: $showingEditNoteSheet) {
+            if let noteToEdit = noteToEdit, let noteIdStr = noteToEditId, let noteIndex = Int(noteIdStr) {
+                EditNoteView(sessionStore: sessionStore, noteIndex: noteIndex, initialText: noteToEdit)
+                    .onDisappear {
+                        updateLocalDataFromStore()
+                        self.noteToEdit = nil
+                        self.noteToEditId = nil
+                    }
+            } else {
+                Text("Error loading note for editing.") // Fallback view
+            }
         }
     }
     
@@ -1193,31 +1313,57 @@ struct EnhancedLiveSessionView: View {
     
     // Chip stack graph section
     private var chipStackSection: some View {
-        VStack(spacing: 16) {
-            // Header
-            HStack {
-                Text("Chip Stack")
+        VStack(spacing: 20) {
+            // Current Chip Stack Display
+            VStack(spacing: 8) {
+                Text("Current Chip Stack")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray)
+                
+                Text("$\(Int(sessionStore.enhancedLiveSession.currentChipAmount))")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(red: 32/255, green: 34/255, blue: 38/255))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            )
+            
+            // Quick Update Buttons
+            VStack(spacing: 12) {
+                Text("Quick Update")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 
-                Spacer()
+                // First row: +5, -5, +25, -25
+                HStack(spacing: 10) {
+                    QuickUpdateButton(amount: 5, isPositive: true, action: { quickUpdateChipStack(amount: 5) })
+                    QuickUpdateButton(amount: 5, isPositive: false, action: { quickUpdateChipStack(amount: -5) })
+                    QuickUpdateButton(amount: 25, isPositive: true, action: { quickUpdateChipStack(amount: 25) })
+                    QuickUpdateButton(amount: 25, isPositive: false, action: { quickUpdateChipStack(amount: -25) })
+                }
                 
-                if let lastUpdate = chipUpdates.sorted(by: { $0.timestamp > $1.timestamp }).first {
-                    Text("Last update: \(formattedTime(lastUpdate.timestamp))")
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray)
+                // Second row: +100, -100
+                HStack(spacing: 10) {
+                    QuickUpdateButton(amount: 100, isPositive: true, action: { quickUpdateChipStack(amount: 100) })
+                    QuickUpdateButton(amount: 100, isPositive: false, action: { quickUpdateChipStack(amount: -100) })
                 }
             }
             
-            // Chip Stack Graph
-            ChipStackGraph(
-                amounts: allChipAmounts,
-                startAmount: sessionStore.liveSession.buyIn
-            )
-            .frame(height: 240)
-            .padding(.vertical, 8)
-            
-            // Buttons row
+            // Section Title
+            Text("Session Actions")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Top row of action buttons
             HStack(spacing: 12) {
                 Button(action: {
                     showingStackUpdateSheet = true
@@ -1263,16 +1409,86 @@ struct EnhancedLiveSessionView: View {
                     )
                 }
             }
+            
+            // Edit Buy-In button - styled differently to differentiate it
+            Button(action: {
+                // Prepare edit value and show the edit buy-in sheet
+                editBuyInAmount = String(sessionStore.liveSession.buyIn)
+                showingEditBuyInSheet = true
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "pencil.circle")
+                        .font(.system(size: 18))
+                    Text("Edit Buy-in")
+                        .font(.system(size: 15, weight: .medium))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(red: 35/255, green: 38/255, blue: 42/255))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                )
+            }
         }
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 20)
                 .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 20)
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
+    }
+    
+    // Quick Update Button Component
+    private struct QuickUpdateButton: View {
+        let amount: Int
+        let isPositive: Bool
+        let action: () -> Void
+        
+        var body: some View {
+            Button(action: action) {
+                Text("\(isPositive ? "+" : "-")$\(amount)")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(isPositive ? .green : .red)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(red: 32/255, green: 34/255, blue: 38/255))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isPositive ? Color.green.opacity(0.5) : Color.red.opacity(0.5), lineWidth: 1)
+                    )
+            }
+        }
+    }
+    
+    // Quick Update Chip Stack Function
+    private func quickUpdateChipStack(amount: Double) {
+        let currentAmount = sessionStore.enhancedLiveSession.currentChipAmount
+        let newAmount = currentAmount + amount
+        
+        // Generate appropriate note based on amount
+        let note: String
+        if amount > 0 {
+            note = "Quick add: +$\(Int(amount))"
+        } else {
+            note = "Quick subtract: -$\(Int(abs(amount)))"
+        }
+        
+        // Update the chip stack
+        sessionStore.updateChipStack(amount: newAmount, note: note)
+        
+        // Update local data
+        updateLocalDataFromStore()
     }
     
     // MARK: - Helper Functions
@@ -1353,21 +1569,29 @@ struct EnhancedLiveSessionView: View {
     }
     
     // Share update to feed
-    private func showShareToFeedDialog(content: String, isHand: Bool, handData: ParsedHandHistory? = nil, updateId: String? = nil) {
+    private func showShareToFeedDialog(
+        content: String,
+        isHand: Bool,
+        handData: ParsedHandHistory? = nil,
+        updateId: String? = nil,
+        isSharingNote: Bool = false,
+        isSharingChipUpdate: Bool = false,
+        isSharingSessionStart: Bool = false
+    ) {
         // First store what's being shared
-        // For hand posts, we don't want the text description, just an empty string
-        shareToFeedContent = isHand ? "" : content
-        shareToFeedIsHand = isHand
-        shareToFeedHandData = handData
-        shareToFeedUpdateId = updateId
-        
-        // Now determine the type of content
-        let isNote = !isHand && !content.starts(with: "Stack update:") && !content.starts(with: "Session at")
-        let isChipUpdate = !isHand && content.starts(with: "Stack update:")
+        if isSharingNote {
+            self.shareToFeedContent = content // Keep the original note content without prefixing
+        } else {
+            self.shareToFeedContent = isHand ? "" : content
+        }
+        self.shareToFeedIsHand = isHand
+        self.shareToFeedHandData = handData
+        self.shareToFeedUpdateId = updateId
         
         // Store the content type for use in the editor
-        shareToFeedIsNote = isNote
-        shareToFeedIsChipUpdate = isChipUpdate
+        self.shareToFeedIsNote = isSharingNote
+        self.shareToFeedIsChipUpdate = isSharingChipUpdate
+        self.shareToFeedIsSessionStart = isSharingSessionStart
         
         // Show the post editor dialog
         if userService.currentUserProfile != nil {
@@ -1732,7 +1956,7 @@ struct EnhancedLiveSessionView: View {
                 initialHand: nil,
                 sessionId: details.sessionId,
                 isSessionPost: true,
-                isNote: false,
+                isNote: false, // session result is not a 'note'
                 showFullSessionCard: true,
                 sessionGameName: details.gameName,
                 sessionStakes: details.stakes
@@ -1764,7 +1988,27 @@ struct EnhancedLiveSessionView: View {
             .onDisappear {
                 handlePostEditorDisappear()
             }
-        } 
+        }
+        // For session start posts
+        else if shareToFeedIsSessionStart {
+            return PostEditorView(
+                userId: userId,
+                initialText: shareToFeedContent, // This is the "Started session..." message
+                initialHand: nil,
+                sessionId: sessionStore.liveSession.id,
+                isSessionPost: true,
+                isNote: false,
+                showFullSessionCard: true, // Show full card for session start
+                sessionGameName: gameName,
+                sessionStakes: stakes
+            )
+            .environmentObject(postService)
+            .environmentObject(userService)
+            .environmentObject(handStore)
+            .onDisappear {
+                handlePostEditorDisappear()
+            }
+        }
         // For chip updates, show the FULL session card
         else if shareToFeedIsChipUpdate {
             return PostEditorView(
@@ -1837,21 +2081,24 @@ struct EnhancedLiveSessionView: View {
     
     // Add new sheet for rebuy amount
     private var rebuyView: some View {
-        NavigationView {
+        GeometryReader { geometry in
             ZStack {
-                Color(red: 18/255, green: 20/255, blue: 24/255)
+                AppBackgroundView()
                     .ignoresSafeArea()
                 
-                VStack(spacing: 20) {
+                VStack(spacing: 24) {
                     // Header
                     HStack {
                         Text("Add Rebuy")
-                            .font(.system(size: 22, weight: .bold))
+                            .font(.plusJakarta(.title3, weight: .bold))
                             .foregroundColor(.white)
                         
                         Spacer()
                         
-                        Button(action: { showingRebuySheet = false }) {
+                        Button(action: { 
+                            showingRebuySheet = false
+                            showEditBuyIn = false
+                        }) {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 24))
                                 .foregroundColor(.gray)
@@ -1859,147 +2106,147 @@ struct EnhancedLiveSessionView: View {
                     }
                     
                     // Rebuy amount field
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("REBUY AMOUNT")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.white.opacity(0.7))
-                        
-                        HStack {
-                            Text("$")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.gray)
-                            
-                            TextField("Amount", text: $rebuyAmount)
-                                .keyboardType(.decimalPad)
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
-                        .padding()
+                     GlassyInputField(
+                         icon: "plus.circle",
+                         title: "Rebuy Amount",
+                         content: AnyGlassyContent(TextFieldContent(
+                             text: $rebuyAmount,
+                             keyboardType: .decimalPad,
+                             prefix: "$",
+                             textColor: .white,
+                             prefixColor: .gray
+                         )),
+                         glassOpacity: 0.01,
+                         labelColor: .gray,
+                         materialOpacity: 0.2
+                     )
+                     
+                     Spacer()
+                     
+                     // Submit button
+                     Button(action: {
+                         handleRebuy()
+                         showingRebuySheet = false
+                     }) {
+                         Text("Add Rebuy")
+                             .font(.plusJakarta(.body, weight: .bold))
+                             .foregroundColor(.black)
+                             .frame(maxWidth: .infinity)
+                             .padding(.vertical, 16)
                         .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(red: 25/255, green: 28/255, blue: 32/255))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                        )
-                    }
-                    
-                    // Edit Buy-in Section
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("EDIT TOTAL BUY-IN")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.white.opacity(0.7))
-                        
-                        // Edit Buy-in button/expandable section
-                        VStack(spacing: 12) {
-                            Button(action: {
-                                withAnimation {
-                                    showEditBuyIn.toggle()
-                                    if showEditBuyIn {
-                                        editBuyInAmount = String(sessionStore.liveSession.buyIn)
-                                    }
-                                }
-                            }) {
+                                 RoundedRectangle(cornerRadius: 20)
+                                     .fill(isValidRebuyAmount() ? Color.white : Color.white.opacity(0.5))
+                             )
+                     }
+                     .disabled(!isValidRebuyAmount())
+                 }
+                 .padding(24)
+                 .frame(maxWidth: .infinity, maxHeight: geometry.size.height, alignment: .top)
+             }
+             .ignoresSafeArea(.keyboard)
+             .onTapGesture {
+                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+             }
+         }
+     }
+     
+     // New view for editing buy-in amount
+     
+     private var editBuyInView: some View {
+         GeometryReader { geometry in
+             ZStack {
+                 AppBackgroundView()
+                     .ignoresSafeArea()
+                     .onTapGesture {
+                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                     }
+                 
+                 VStack(spacing: 24) {
+                     // Header
                                 HStack {
                                     Text("Edit Buy-in")
-                                        .font(.system(size: 16, weight: .medium))
+                             .font(.plusJakarta(.title3, weight: .bold))
                                         .foregroundColor(.white)
                                     
                                     Spacer()
                                     
-                                    Image(systemName: showEditBuyIn ? "chevron.up" : "chevron.down")
-                                        .font(.system(size: 14))
+                         Button(action: { showingEditBuyInSheet = false }) {
+                             Image(systemName: "xmark.circle.fill")
+                                 .font(.system(size: 24))
                                         .foregroundColor(.gray)
                                 }
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(red: 25/255, green: 28/255, blue: 32/255))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                )
-                            }
-                            
-                            // Expanded edit section
-                            if showEditBuyIn {
-                                VStack(spacing: 12) {
-                                    HStack {
-                                        Text("$")
-                                            .font(.system(size: 18, weight: .semibold))
+                     }
+                     
+                     // Total Buy-in amount field
+                     VStack(alignment: .leading, spacing: 16) {
+                         Text("Current total buy-in: $\(Int(sessionStore.liveSession.buyIn))")
+                             .font(.plusJakarta(.subheadline, weight: .medium))
                                             .foregroundColor(.gray)
-                                        
-                                        TextField("Total Buy-in Amount", text: $editBuyInAmount)
-                                            .keyboardType(.decimalPad)
-                                            .font(.system(size: 18, weight: .semibold))
-                                            .foregroundColor(.white)
-                                    }
-                                    .padding()
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(red: 25/255, green: 28/255, blue: 32/255).opacity(0.7))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                    )
-                                    
+                             .padding(.leading, 4)
+                         
+                         GlassyInputField(
+                             icon: "dollarsign.square",
+                             title: "New Total Buy-in Amount",
+                             content: AnyGlassyContent(TextFieldContent(
+                                 text: $editBuyInAmount,
+                                 keyboardType: .decimalPad,
+                                 prefix: "$",
+                                 textColor: .white,
+                                 prefixColor: .gray
+                             )),
+                             glassOpacity: 0.01,
+                             labelColor: .gray,
+                             materialOpacity: 0.2
+                         )
+                         
+                         Text("This will update your session's total buy-in amount.")
+                             .font(.plusJakarta(.caption, weight: .regular))
+                             .foregroundColor(.gray)
+                             .padding(.leading, 4)
+                     }
+                     
+                     Spacer()
+                     
+                     // Submit button
                                     Button(action: {
-                                        // Update the total buy-in amount
                                         if let amount = Double(editBuyInAmount.trimmingCharacters(in: .whitespacesAndNewlines)), amount > 0 {
                                             sessionStore.setTotalBuyIn(amount: amount)
                                             updateLocalDataFromStore()
-                                            withAnimation {
-                                                showEditBuyIn = false
-                                            }
+                             showingEditBuyInSheet = false
                                         }
                                     }) {
                                         Text("Update Buy-in")
-                                            .font(.system(size: 16, weight: .medium))
+                             .font(.plusJakarta(.body, weight: .bold))
                                             .foregroundColor(.black)
                                             .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 12)
+                             .padding(.vertical, 16)
                                             .background(
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .fill(Color.white)
-                                            )
-                                    }
-                                }
-                                .padding(.horizontal, 4)
-                                .padding(.top, 4)
-                                .transition(.opacity)
-                            }
-                        }
-                    }
-                    
-                    Spacer()
-                    
-                    // Submit button
-                    Button(action: {
-                        handleRebuy()
-                        showingRebuySheet = false
-                    }) {
-                        Text("Add Rebuy")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(Color(red: 25/255, green: 28/255, blue: 32/255))
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(isValidRebuyAmount() ? Color.white : Color.white.opacity(0.5))
-                            )
-                    }
-                    .disabled(!isValidRebuyAmount())
-                }
-                .padding(24)
-            }
-            .navigationBarHidden(true)
-        }
-    }
-    
-    // Add helper methods below the other methods
+                                 RoundedRectangle(cornerRadius: 20)
+                                     .fill(isValidEditBuyInAmount() ? Color.white : Color.white.opacity(0.5))
+                             )
+                     }
+                     .disabled(!isValidEditBuyInAmount())
+                 }
+                 .padding(24)
+                 .frame(maxWidth: .infinity, maxHeight: geometry.size.height, alignment: .top)
+             }
+             .ignoresSafeArea(.keyboard)
+             .onTapGesture {
+                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+             }
+         }
+     }
+     
+     // Helper method for edit buy-in validation
+     private func isValidEditBuyInAmount() -> Bool {
+         guard let amount = Double(editBuyInAmount.trimmingCharacters(in: .whitespacesAndNewlines)),
+               amount > 0 else {
+             return false
+         }
+         return true
+     }
+     
+     // Add helper methods that were accidentally removed
     private func isValidRebuyAmount() -> Bool {
         guard let amount = Double(rebuyAmount.trimmingCharacters(in: .whitespacesAndNewlines)),
               amount > 0 else {
@@ -2079,6 +2326,288 @@ struct EnhancedLiveSessionView: View {
     private func showPostDetail(_ post: Post) {
         selectedPost = post
     }
+    
+    // MARK: - New Sharing Options Views
+    
+    // MARK: - Glassy Action Button
+    struct GlassyActionButton: View {
+        let title: String
+        let systemImage: String
+        let action: () -> Void
+        
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: 12) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(title)
+                        .font(.plusJakarta(.headline, weight: .bold))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .background(
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Material.ultraThinMaterial)
+                            .opacity(0.25)
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.white.opacity(0.05))
+                    }
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                )
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // Update postShareOptionsSheet
+    private var postShareOptionsSheet: some View {
+        NavigationView {
+            ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea()
+
+                VStack(spacing: 24) {
+                    Spacer()
+
+                    GlassyActionButton(title: "Share Session Start", systemImage: "figure.play") {
+                        let postContent = "Started a new session at \(sessionStore.liveSession.gameName) (\(sessionStore.liveSession.stakes))"
+                        showShareToFeedDialog(
+                            content: postContent,
+                            isHand: false,
+                            isSharingSessionStart: true
+                        )
+                        showingPostShareOptions = false
+                    }
+
+                    GlassyActionButton(title: "Share a Hand", systemImage: "suit.spade.fill") {
+                        showingShareHandSelector = true
+                        showingPostShareOptions = false
+                    }
+
+                    GlassyActionButton(title: "Share a Note", systemImage: "note.text") {
+                        showingShareNoteSelector = true
+                        showingPostShareOptions = false
+                    }
+
+                    GlassyActionButton(title: "Share Rebuy / Chip Update", systemImage: "dollarsign.circle.fill") {
+                        showingShareChipUpdateSelector = true
+                        showingPostShareOptions = false
+                    }
+
+                    Spacer()
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { showingPostShareOptions = false }
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .accentColor(.white)
+    }
+
+    // Update shareNoteSelectorSheet to use NoteCardView
+    private var shareNoteSelectorSheet: some View {
+        NavigationView {
+            ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        // Add explanation text at the top
+                        Text("Select a note to share. Notes will be posted with your current session tag.")
+                            .font(.plusJakarta(.subheadline, weight: .medium))
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                            .padding(.bottom, 16)
+                        
+                        if notes.isEmpty {
+                            VStack {
+                                Spacer()
+                                Text("No notes recorded for this session yet.")
+                                    .foregroundColor(.gray)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                                Spacer()
+                            }
+                            .frame(height: 300)
+                        } else {
+                            ForEach(notes.indices.reversed(), id: \.self) { index in
+                                let note = notes[index]
+                                Button(action: {
+                                    showShareToFeedDialog(
+                                        content: note,
+                                        isHand: false,
+                                        updateId: "note_\(index)",
+                                        isSharingNote: true
+                                    )
+                                    showingShareNoteSelector = false
+                                }) {
+                                    NoteCardView(noteText: note)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 120)
+                }
+            }
+            .navigationTitle("Select Note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { showingShareNoteSelector = false }
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .accentColor(.white)
+    }
+
+    // Update shareHandSelectorSheet to use HandDisplayCardView
+    private var shareHandSelectorSheet: some View {
+        NavigationView {
+            ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        let sessionHands = handStore.savedHands
+                            .filter { $0.sessionId == sessionStore.liveSession.id }
+                            .sorted(by: { $0.timestamp > $1.timestamp })
+
+                        if sessionHands.isEmpty {
+                            VStack {
+                                Spacer()
+                                Text("No hands recorded for this session yet.")
+                                    .foregroundColor(.gray)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                                Spacer()
+                            }
+                            .frame(height: 300)
+                        } else {
+                            ForEach(sessionHands) { savedHand in
+                                Button(action: {
+                                    showShareToFeedDialog(
+                                        content: "",
+                                        isHand: true,
+                                        handData: savedHand.hand,
+                                        updateId: savedHand.id
+                                    )
+                                    showingShareHandSelector = false
+                                }) {
+                                    HandDisplayCardView(
+                                        hand: savedHand.hand,
+                                        onReplayTap: {},
+                                        location: "$\(Int(savedHand.hand.raw.gameInfo.smallBlind))/$(Int(savedHand.hand.raw.gameInfo.bigBlind))",
+                                        createdAt: savedHand.timestamp,
+                                        showReplayInFeed: false
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 120)
+                }
+            }
+            .navigationTitle("Select Hand")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { showingShareHandSelector = false }
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .accentColor(.white)
+    }
+
+    // Update shareChipUpdateSelectorSheet to use SessionUpdateCard style
+    private var shareChipUpdateSelectorSheet: some View {
+        NavigationView {
+            ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        let relevantChipUpdates = chipUpdates
+                            .filter { chipUpdate in
+                                let isRebuy = chipUpdate.note?.lowercased().contains("rebuy") == true
+                                let previousAmount: Double
+                                if let index = chipUpdates.firstIndex(where: { $0.id == chipUpdate.id }), index > 0 {
+                                    previousAmount = chipUpdates[index - 1].amount
+                                } else {
+                                    previousAmount = sessionStore.liveSession.buyIn
+                                }
+                                let isSignificantChange = abs(chipUpdate.amount - previousAmount) > 50
+                                return isRebuy || isSignificantChange
+                            }
+                            .sorted(by: { $0.timestamp > $1.timestamp })
+
+                        if relevantChipUpdates.isEmpty {
+                            VStack {
+                                Spacer()
+                                Text("No rebuys or significant chip updates recorded yet.")
+                                    .foregroundColor(.gray)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                                Spacer()
+                            }
+                            .frame(height: 300)
+                        } else {
+                            ForEach(relevantChipUpdates) { update in
+                                Button(action: {
+                                    let updateContent = "Stack update: $\(Int(update.amount))\(update.note != nil ? "\nNote: \(update.note!)" : "")"
+                                    showShareToFeedDialog(
+                                        content: updateContent,
+                                        isHand: false,
+                                        updateId: update.id,
+                                        isSharingChipUpdate: true
+                                    )
+                                    showingShareChipUpdateSelector = false
+                                }) {
+                                    SessionUpdateCard(
+                                        title: "Stack: $\(Int(update.amount))",
+                                        description: update.note ?? "Chip update",
+                                        timestamp: update.timestamp,
+                                        isPosted: false,
+                                        onPost: nil
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 120)
+                }
+            }
+            .navigationTitle("Select Chip Update")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { showingShareChipUpdateSelector = false }
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .accentColor(.white)
+    }
 }
 
 // Define the minimized floating control as a separate view
@@ -2157,4 +2686,81 @@ private struct SessionMinimizedFloatingControl: View {
         }()
     )
 } 
+
+
+// View for editing an existing note
+struct EditNoteView: View {
+    @Environment(\.dismiss) var dismiss
+    @ObservedObject var sessionStore: SessionStore
+    let noteIndex: Int
+    @State private var editText: String
+
+    init(sessionStore: SessionStore, noteIndex: Int, initialText: String) {
+        self.sessionStore = sessionStore
+        self.noteIndex = noteIndex
+        _editText = State(initialValue: initialText)
+    }
+
+    var body: some View {
+        NavigationView {
+            GeometryReader { geometry in // Wrap in GeometryReader
+                ZStack {
+                    AppBackgroundView()
+                        .ignoresSafeArea()
+
+                    VStack(spacing: 20) {
+                        TextEditor(text: $editText)
+                            // Set a specific height, e.g., 1/3 of the available height or a fixed value
+                            .frame(height: geometry.size.height * 0.35) 
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Material.ultraThinMaterial)
+                                    .opacity(0.2)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .foregroundColor(.white)
+                            .accentColor(.white) // Cursor color
+                            .scrollContentBackground(.hidden) // To make TextEditor background transparent on iOS 16+
+                            .padding(.horizontal)
+
+                        Button(action: {
+                            sessionStore.updateNote(at: noteIndex, with: editText)
+                            dismiss()
+                        }) {
+                            Text("Save Note")
+                                .font(.plusJakarta(.body, weight: .bold))
+                                .foregroundColor(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .fill(Color.white)
+                                )
+                        }
+                        .padding(.horizontal)
+                        
+                        Spacer() // Pushes content to the top
+                    }
+                    .padding(.top, 20)
+                }
+                .navigationTitle("Edit Note")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Cancel") {
+                            dismiss()
+                        }
+                        .foregroundColor(.white)
+                    }
+                }
+                .onTapGesture {
+                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                .ignoresSafeArea(.keyboard) // Ignore keyboard safe area for the ZStack
+            }
+        }
+    }
+}
 

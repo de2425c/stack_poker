@@ -27,6 +27,7 @@ struct PostEditorView: View {
     var showFullSessionCard: Bool // New property to control session card display
     var sessionGameName: String // Direct game name for badge
     var sessionStakes: String // Direct stakes for badge
+    @State private var currentSessionLocation: String? // Added for location propagation
 
     // View state
     @State private var postText = ""
@@ -51,7 +52,8 @@ struct PostEditorView: View {
          isNote: Bool = false,
          showFullSessionCard: Bool = false,
          sessionGameName: String = "",
-         sessionStakes: String = "") {
+         sessionStakes: String = "",
+         sessionLocation: String? = nil) { // Added sessionLocation parameter
         self.userId = userId
         self.initialText = initialText
         _hand = State(initialValue: initialHand) // Initialize @State hand
@@ -61,6 +63,7 @@ struct PostEditorView: View {
         self.showFullSessionCard = showFullSessionCard
         self.sessionGameName = sessionGameName
         self.sessionStakes = sessionStakes
+        _currentSessionLocation = State(initialValue: sessionLocation) // Initialize currentSessionLocation
     }
 
     // Determines if this is a hand post
@@ -190,7 +193,7 @@ struct PostEditorView: View {
 
                         // Note view (only for note posts)
                         if isNote {
-                            SharedNoteView(note: initialText)
+                            NoteCardView(noteText: initialText)
                                 .padding(.horizontal)
                         }
 
@@ -482,6 +485,7 @@ struct PostEditorView: View {
 
         // Handle different content types:
         var content: String
+        var postTypeToUse: Post.PostType = .text // Default to text
 
         // Prepend completed session details if selected
         if let session = selectedCompletedSession {
@@ -505,9 +509,13 @@ struct PostEditorView: View {
                 else if isNote && !postText.isEmpty {
                     content = sessionInfo + postText + "\n\nNote: " + initialText
                 }
-                // For hand posts
+                // For hand posts - content is set in shareHand()
                 else if isHandPost {
-                    content = sessionInfo + postText
+                    // Content for hand posts is primarily the comment, session info prepended in shareHand if needed
+                    // For createPost context, if it's a hand, this branch shouldn't be primary path for hand content creation.
+                    // However, if isHandPost is true, set postType to .hand.
+                    postTypeToUse = .hand // Set post type for hand
+                    content = postText // Comment for the hand
                 }
                 // Default case - should not happen for notes/hands
                 else {
@@ -518,13 +526,17 @@ struct PostEditorView: View {
             else {
                 if isNote && postText.isEmpty {
                     content = initialText
-                } else if isNote && !postText.isEmpty {
+                }
+                else if isNote && !postText.isEmpty {
                     content = postText + "\n\nNote: " + initialText
-                } else if showFullSessionCard && postText.isEmpty {
+                }
+                else if showFullSessionCard && postText.isEmpty {
                     content = initialText
-                } else if showFullSessionCard && !postText.isEmpty {
+                }
+                else if showFullSessionCard && !postText.isEmpty {
                     content = initialText + "\n\n" + postText
-                } else {
+                }
+                else {
                     content = postText
                 }
             }
@@ -533,15 +545,32 @@ struct PostEditorView: View {
         isLoading = true
 
         Task {
+            var finalImageURLs: [String]? = nil
+            if !selectedImages.isEmpty {
+                do {
+                    finalImageURLs = try await postService.uploadImages(images: selectedImages, userId: userId)
+                } catch {
+                    print("Error uploading images: \(error)")
+                    isLoading = false
+                    // Optionally show an error to the user
+                    return
+                }
+            }
+            
             do {
+                // Use the main createPost method from PostService directly
                 try await postService.createPost(
                     content: content,
                     userId: userId,
                     username: username,
                     displayName: displayName,
                     profileImage: profileImage,
-                    images: selectedImages.isEmpty ? nil : selectedImages,
-                    sessionId: sessionId
+                    imageURLs: finalImageURLs, // Pass the uploaded image URLs
+                    postType: postTypeToUse, // This will be .text or .hand based on logic above
+                    handHistory: self.hand, // Pass hand if it's a hand post (set in shareHand or if initialHand was provided)
+                    sessionId: sessionId,
+                    location: currentSessionLocation, // Pass the session location
+                    isNote: isNote
                 )
                 try await postService.fetchPosts()
                 DispatchQueue.main.async {
@@ -559,9 +588,19 @@ struct PostEditorView: View {
 
     // Share a hand post
     private func shareHand() {
-        guard !postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let hand = hand,
-              let username = userService.currentUserProfile?.username else { return }
+        // Ensure username is available
+        guard let username = userService.currentUserProfile?.username else {
+            print("Error: Username not available for sharing hand.")
+            // Optionally show an alert to the user or handle this case appropriately
+            return
+        }
+        // The hand object should be set if this is a hand post
+        guard let handToShare = self.hand else {
+            print("Error: Hand data is missing for sharing hand.")
+            return
+        }
+        // Comment for the hand (postText) can be empty if the user doesn't add one
+        // but if it's empty and not a session post, it might look odd. However, allow it.
 
         let profileImage = userService.currentUserProfile?.avatarURL
         let displayName = userService.currentUserProfile?.displayName
@@ -569,7 +608,6 @@ struct PostEditorView: View {
         // Add session info for hands if available
         var handPostContent = postText
         if isSessionPost && !sessionGameName.isEmpty && !sessionStakes.isEmpty {
-            // Add session info in a format that can be parsed in the feed
             let sessionInfo = "SESSION_INFO:\(sessionGameName):\(sessionStakes)\n"
             handPostContent = sessionInfo + postText
         }
@@ -578,15 +616,16 @@ struct PostEditorView: View {
 
         Task {
             do {
+                // Call the main createHandPost which now internally uses the comprehensive createPost
                 try await postService.createHandPost(
-                    content: handPostContent,
+                    content: handPostContent, // This is the comment + any prepended SESSION_INFO
                     userId: userId,
                     username: username,
                     displayName: displayName,
                     profileImage: profileImage,
-                    hand: hand,
+                    hand: handToShare,
                     sessionId: sessionId,
-                    location: location
+                    location: self.location // Use the @State location for hand posts
                 )
                 try await postService.fetchPosts()
                 DispatchQueue.main.async {
@@ -676,47 +715,14 @@ struct PostEditorView: View {
 
     @ViewBuilder
     private var sessionDisplayView: some View {
-        if isSessionPost && sessionId != nil {
-            if showFullSessionCard {
-                // For chip updates: full session card
-                SessionCard(text: extractSessionDetails())
-                    .padding(.horizontal)
-                    .padding(.bottom, 16)
-            } else {
-                sessionBadgeView
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var sessionBadgeView: some View {
-        if !sessionGameName.isEmpty && !sessionStakes.isEmpty {
-            SessionBadgeView(gameName: sessionGameName, stakes: sessionStakes)
+        if isSessionPost && sessionId != nil && showFullSessionCard {
+            // Only show SessionCard if it's a session post AND showFullSessionCard is true
+            SessionCard(text: extractSessionDetails())
                 .padding(.horizontal)
-                .padding(.bottom, 8)
-        } else if let sessionInfo = parseSessionInfo() {
-            SessionBadgeView(gameName: sessionInfo.gameName, stakes: sessionInfo.stakes)
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-        } else {
-            genericSessionBadge
+                .padding(.bottom, 16)
         }
-    }
-
-    @ViewBuilder
-    private var genericSessionBadge: some View {
-        HStack {
-            Image(systemName: "gamecontroller.fill")
-                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
-
-            Text("Live Poker Session")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
-
-            Spacer()
-        }
-        .padding(.horizontal)
-        .padding(.bottom, 8)
+        // No else, so no badge is shown here if showFullSessionCard is false.
+        // The main editor UI will be used, and context will be shown in the feed via PostContextTagView.
     }
 
     @ViewBuilder

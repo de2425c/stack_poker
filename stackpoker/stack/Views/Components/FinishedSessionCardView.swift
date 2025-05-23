@@ -91,12 +91,6 @@ struct FinishedSessionCardView: View {
     private var detailsView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: "location.fill")
-                    .foregroundColor(effectiveSubTextColor)
-                Text(location)
-                    .foregroundColor(effectiveTextColor)
-            }
-            HStack {
                 Image(systemName: "calendar")
                     .foregroundColor(effectiveSubTextColor)
                 Text(date, style: .date)

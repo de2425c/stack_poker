@@ -17,7 +17,6 @@ struct GroupsView: View {
     @State private var error: String?
     @State private var showError = false
     @State private var isRefreshing = false
-    @State private var searchText = ""
     
     var body: some View {
         NavigationView {
@@ -40,11 +39,12 @@ struct GroupsView: View {
                         }
                     )
                     
-                    // Optional search bar
-                    AppSearchBarView(searchText: $searchText)
-                    
                     // Content
                     ScrollView {
+                        // Added top padding to push content down
+                        Spacer()
+                            .frame(height: 20)
+                            
                         RefreshControls(isRefreshing: $isRefreshing) {
                             Task {
                                 await refreshGroups()
@@ -68,12 +68,9 @@ struct GroupsView: View {
                                 showingCreateGroup = true
                             })
                         } else {
-                            // Filtered groups list
-                            let filteredGroups = searchText.isEmpty ? groupService.userGroups : 
-                                groupService.userGroups.filter { $0.name.lowercased().contains(searchText.lowercased()) }
-                            
-                            LazyVStack(spacing: 12) {
-                                ForEach(Array(filteredGroups.enumerated()), id: \.element.id) { index, group in
+                            // Groups list - removed filtering by search text
+                            LazyVStack(spacing: 16) {
+                                ForEach(Array(groupService.userGroups.enumerated()), id: \.element.id) { index, group in
                                     NavigationLink(
                                         destination: GroupChatView(group: group)
                                             .environmentObject(userService)
@@ -266,7 +263,7 @@ struct EmptyGroupsView: View {
     }
 }
 
-// Update the GroupCard to use real last message instead of description
+// Update the GroupCard to use a glassy effect without relying on Material. Use a combination of colors and gradient overlays instead.
 struct GroupCard: View {
     let group: UserGroup
     let onTap: () -> Void
@@ -353,15 +350,45 @@ struct GroupCard: View {
             .padding(.leading, 4)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 14)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
+            ZStack {
+                // Dark base for the glass effect
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(red: 25/255, green: 27/255, blue: 30/255))
+                
+                // Subtle highlight overlay for the glass effect
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.08),
+                                Color.white.opacity(0.05),
+                                Color.white.opacity(0.02)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                
+                // Subtle gradient border
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.3),
+                                Color.white.opacity(0.1),
+                                Color.clear
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(0.06), lineWidth: 1)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
         .offset(y: cardOffset)
         .opacity(cardOpacity)
         .onAppear {

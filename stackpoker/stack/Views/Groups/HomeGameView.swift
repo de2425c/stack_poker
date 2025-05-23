@@ -114,187 +114,192 @@ struct HomeGameView: View {
                     }
                 } else if let activeGame = existingActiveGame {
                     // Show existing active game message
-                    VStack(spacing: 24) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 40))
-                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                            .padding(.top, 40)
-                        
-                        Text("Active Game Exists")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundColor(.white)
-                        
-                        Text("There is already an active game in this group: \"\(activeGame.title)\"")
-                            .font(.system(size: 16))
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                        
-                        Text("Only one active game can run at a time. Please wait until the current game is completed before creating a new one.")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                        
-                        Spacer()
-                        
-                        Button(action: {
-                            presentationMode.wrappedValue.dismiss()
-                        }) {
-                            Text("Go Back")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 20)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 54)
-                                .background(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                .cornerRadius(16)
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 40)
-                    }
-                } else {
-                    // Normal game creation view
-                    VStack(spacing: 24) {
-                        // Game title input
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("GAME TITLE")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                .padding(.leading, 4)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 24) {
+                            // Top spacer for navigation bar clearance
+                            Color.clear.frame(height: 30)
                             
-                            TextField("", text: $gameTitle)
-                                .placeholders(when: gameTitle.isEmpty) {
-                                    Text("Enter game title").foregroundColor(.gray.opacity(0.7))
-                                }
-                                .font(.system(size: 17))
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(
-                                            LinearGradient(
-                                                gradient: Gradient(colors: [
-                                                    Color.white.opacity(0.1),
-                                                    Color.clear,
-                                                    Color.clear,
-                                                    Color.clear
-                                                ]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            ),
-                                            lineWidth: 1
-                                        )
-                                )
-                                .foregroundColor(.white)
-                        }
-                        
-                        // Game rules explanation
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Home Game Rules")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                            
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "1.circle.fill")
+                            VStack(spacing: 24) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .font(.system(size: 40))
                                     .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                    .font(.system(size: 20))
+                                    .frame(maxWidth: .infinity, alignment: .center)
                                 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Create the game")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("Give your game a descriptive title")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray)
-                                }
-                            }
-                            
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "2.circle.fill")
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                    .font(.system(size: 20))
+                                Text("Active Game Exists")
+                                    .font(.system(size: 24, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity, alignment: .center)
                                 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Players join")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("Group members can request to join and buy in")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray)
-                                }
-                            }
-                            
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "3.circle.fill")
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                    .font(.system(size: 20))
+                                Text("There is already an active game in this group: \"\(activeGame.title)\"")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 24)
+                                    .frame(maxWidth: .infinity, alignment: .center)
                                 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Track chips and cashouts")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("Manage buy-ins and cashouts for each player")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray)
-                                }
-                            }
-                            
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "4.circle.fill")
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                    .font(.system(size: 20))
+                                Text("Only one active game can run at a time. Please wait until the current game is completed before creating a new one.")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 24)
+                                    .frame(maxWidth: .infinity, alignment: .center)
                                 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Game summary")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("When everyone cashes out, a summary is posted")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 8)
-                        
-                        Spacer()
-                        
-                        // Create button
-                        Button(action: createGame) {
-                            HStack {
-                                if isCreating {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .black))
-                                        .frame(width: 20, height: 20)
-                                        .padding(.horizontal, 10)
-                                } else {
-                                    Text("Create Game")
+                                Spacer()
+                                
+                                Button(action: {
+                                    presentationMode.wrappedValue.dismiss()
+                                }) {
+                                    Text("Go Back")
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundColor(.black)
                                         .padding(.horizontal, 20)
                                         .frame(maxWidth: .infinity)
+                                        .frame(height: 54)
+                                        .background(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                        .cornerRadius(16)
                                 }
+                                .padding(.horizontal, 24)
+                                .padding(.bottom, 40)
                             }
-                            .frame(height: 54)
-                            .background(
-                                gameTitle.isEmpty || isCreating
-                                    ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5)
-                                    : Color(red: 123/255, green: 255/255, blue: 99/255)
-                            )
-                            .cornerRadius(16)
                         }
-                        .disabled(gameTitle.isEmpty || isCreating)
+                        .padding(.top, 16)
+                        .frame(minHeight: UIScreen.main.bounds.height - 100)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 16)
-                    .padding(.bottom, 40)
+                } else {
+                    // Normal game creation view
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            // Top spacer for navigation bar clearance - ADD MORE PADDING
+                            Color.clear.frame(height: 80)
+                            
+                            VStack(alignment: .leading, spacing: 24) {
+                                // Game title input using GlassyInputField
+                                GlassyInputField(
+                                    icon: "gamecontroller.fill",
+                                    title: "GAME TITLE",
+                                    labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
+                                ) {
+                                    TextField("", text: $gameTitle)
+                                        .placeholders(when: gameTitle.isEmpty) {
+                                            Text("Enter game title").foregroundColor(.gray.opacity(0.7))
+                                        }
+                                        .font(.system(size: 17))
+                                        .padding(.vertical, 10)
+                                        .foregroundColor(.white)
+                                }
+                                
+                                // Game rules explanation
+                                VStack(alignment: .leading, spacing: 16) {
+                                    Text("Home Game Rules")
+                                        .font(.system(size: 18, weight: .bold))
+                                        .foregroundColor(.white)
+                                    
+                                    HStack(alignment: .top, spacing: 12) {
+                                        Image(systemName: "1.circle.fill")
+                                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                            .font(.system(size: 20))
+                                        
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Create the game")
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundColor(.white)
+                                            
+                                            Text("Give your game a descriptive title")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.gray)
+                                        }
+                                    }
+                                    
+                                    HStack(alignment: .top, spacing: 12) {
+                                        Image(systemName: "2.circle.fill")
+                                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                            .font(.system(size: 20))
+                                        
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Players join")
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundColor(.white)
+                                            
+                                            Text("Group members can request to join and buy in")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.gray)
+                                        }
+                                    }
+                                    
+                                    HStack(alignment: .top, spacing: 12) {
+                                        Image(systemName: "3.circle.fill")
+                                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                            .font(.system(size: 20))
+                                        
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Track chips and cashouts")
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundColor(.white)
+                                            
+                                            Text("Manage buy-ins and cashouts for each player")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.gray)
+                                        }
+                                    }
+                                    
+                                    HStack(alignment: .top, spacing: 12) {
+                                        Image(systemName: "4.circle.fill")
+                                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                            .font(.system(size: 20))
+                                        
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Game summary")
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundColor(.white)
+                                            
+                                            Text("When everyone cashes out, a summary is posted")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.gray)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                                
+                                Spacer(minLength: 40)
+                                
+                                // Create button
+                                Button(action: createGame) {
+                                    HStack {
+                                        if isCreating {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                                .frame(width: 20, height: 20)
+                                                .padding(.horizontal, 10)
+                                        } else {
+                                            Text("Create Game")
+                                                .font(.system(size: 17, weight: .semibold))
+                                                .foregroundColor(.black)
+                                                .padding(.horizontal, 20)
+                                                .frame(maxWidth: .infinity)
+                                        }
+                                    }
+                                    .frame(height: 54)
+                                    .background(
+                                        gameTitle.isEmpty || isCreating
+                                            ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5)
+                                            : Color(red: 123/255, green: 255/255, blue: 99/255)
+                                    )
+                                    .cornerRadius(16)
+                                }
+                                .disabled(gameTitle.isEmpty || isCreating)
+                                .frame(maxWidth: .infinity)
+                                .padding(.bottom, 60)  // Add bottom padding to button
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 40)
+                        }
+                        .padding(.top, 16)
+                        .frame(minHeight: UIScreen.main.bounds.height - 100)
+                    }
+                    .ignoresSafeArea(.keyboard)  // Ensure keyboard doesn't push content
+                    .onTapGesture {  // Add tap to dismiss keyboard
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
                 }
             }
             .navigationBarTitle("Create Home Game", displayMode: .inline)
@@ -378,6 +383,13 @@ struct HomeGameView: View {
                 // Call the completion handler with the new game if provided
                 await MainActor.run {
                     onGameCreated?(newGame)
+                    
+                    // Post a notification to update the standalone game bar
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("RefreshStandaloneHomeGame"),
+                        object: nil
+                    )
+                    
                     presentationMode.wrappedValue.dismiss()
                 }
             } catch {

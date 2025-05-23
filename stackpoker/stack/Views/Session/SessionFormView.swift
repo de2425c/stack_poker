@@ -345,50 +345,48 @@ struct SessionFormView: View {
                                     
                                     // Date and Time Grid
                                     VStack(spacing: 12) {
-                                        // First row
                                         HStack(spacing: 12) {
-                                            // Start Date
                                             GlassyInputField(
                                                 icon: "calendar",
                                                 title: "Start Date",
-                                                content: AnyGlassyContent(DatePickerContent(date: $startDate, displayMode: .date)),
                                                 glassOpacity: glassOpacity,
                                                 labelColor: secondaryTextColor,
                                                 materialOpacity: materialOpacity
-                                            )
+                                            ) {
+                                                DatePickerContent(date: $startDate, displayMode: .date)
+                                            }
                                             
-                                            // Start Time
                                             GlassyInputField(
                                                 icon: "clock",
                                                 title: "Start Time",
-                                                content: AnyGlassyContent(DatePickerContent(date: $startTime, displayMode: .hourAndMinute)),
                                                 glassOpacity: glassOpacity,
                                                 labelColor: secondaryTextColor,
                                                 materialOpacity: materialOpacity
-                                            )
+                                            ) {
+                                                DatePickerContent(date: $startTime, displayMode: .hourAndMinute)
+                                            }
                                         }
                                         
-                                        // Second row
                                         HStack(spacing: 12) {
-                                            // Hours Played
                                             GlassyInputField(
                                                 icon: "timer",
                                                 title: "Hours Played",
-                                                content: AnyGlassyContent(TextFieldContent(text: Binding.constant(calculatedHoursPlayed), keyboardType: .decimalPad, isReadOnly: true, textColor: primaryTextColor)),
                                                 glassOpacity: glassOpacity,
                                                 labelColor: secondaryTextColor,
                                                 materialOpacity: materialOpacity
-                                            )
+                                            ) {
+                                                TextFieldContent(text: .constant(calculatedHoursPlayed), placeholder: "", isReadOnly: true, textColor: primaryTextColor)
+                                            }
                                             
-                                            // End Time
                                             GlassyInputField(
                                                 icon: "clock",
                                                 title: "End Time",
-                                                content: AnyGlassyContent(DatePickerContent(date: $endTime, displayMode: .hourAndMinute)),
                                                 glassOpacity: glassOpacity,
                                                 labelColor: secondaryTextColor,
                                                 materialOpacity: materialOpacity
-                                            )
+                                            ) {
+                                                DatePickerContent(date: $endTime, displayMode: .hourAndMinute)
+                                            }
                                         }
                                     }
                                 }
@@ -403,25 +401,25 @@ struct SessionFormView: View {
                                         .padding(.bottom, 2)
                                     
                                     VStack(spacing: 12) {
-                                        // Buy In
                                         GlassyInputField(
                                             icon: "dollarsign.circle",
                                             title: "Buy in",
-                                            content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: primaryTextColor, prefixColor: secondaryTextColor)),
                                             glassOpacity: glassOpacity,
                                             labelColor: secondaryTextColor,
                                             materialOpacity: materialOpacity
-                                        )
+                                        ) {
+                                            TextFieldContent(text: $buyIn, placeholder: "0.00", keyboardType: .decimalPad, prefix: "$", textColor: primaryTextColor, prefixColor: secondaryTextColor)
+                                        }
                                         
-                                        // Cashout
                                         GlassyInputField(
                                             icon: "dollarsign.circle",
                                             title: "Cashout",
-                                            content: AnyGlassyContent(TextFieldContent(text: $cashout, keyboardType: .decimalPad, prefix: "$", textColor: primaryTextColor, prefixColor: secondaryTextColor)),
                                             glassOpacity: glassOpacity,
                                             labelColor: secondaryTextColor,
                                             materialOpacity: materialOpacity
-                                        )
+                                        ) {
+                                            TextFieldContent(text: $cashout, placeholder: "0.00", keyboardType: .decimalPad, prefix: "$", textColor: primaryTextColor, prefixColor: secondaryTextColor)
+                                        }
                                     }
                                 }
                                 .padding(.horizontal)
@@ -618,26 +616,7 @@ struct AddGameButton: View {
     }
 }
 
-// Protocol for glass content
-protocol GlassyContent {
-    associatedtype ContentView: View
-    @ViewBuilder var body: ContentView { get }
-}
-
-// Type-erased wrapper for GlassyContent
-struct AnyGlassyContent: View {
-    private let content: AnyView
-    
-    init<T: GlassyContent>(_ content: T) {
-        self.content = AnyView(content.body)
-    }
-    
-    var body: some View {
-        content
-    }
-}
-
-struct DatePickerContent: GlassyContent {
+struct DatePickerContent: View {
     @Binding var date: Date
     let displayMode: DatePickerComponents
     
@@ -650,13 +629,14 @@ struct DatePickerContent: GlassyContent {
     }
 }
 
-struct TextFieldContent: GlassyContent {
+struct TextFieldContent: View {
     @Binding var text: String
+    var placeholder: String = ""
     var keyboardType: UIKeyboardType = .default
     var prefix: String? = nil
     var isReadOnly: Bool = false
-    var textColor: Color = Color(white: 0.25)
-    var prefixColor: Color = Color(white: 0.4)
+    var textColor: Color = .white
+    var prefixColor: Color = .gray
     
     var body: some View {
         HStack {
@@ -671,54 +651,13 @@ struct TextFieldContent: GlassyContent {
                     .font(.plusJakarta(.body, weight: .regular))
                     .foregroundColor(textColor)
             } else {
-                TextField("", text: $text)
+                TextField(placeholder, text: $text)
                     .keyboardType(keyboardType)
                     .font(.plusJakarta(.body, weight: .regular))
                     .foregroundColor(textColor)
             }
         }
         .frame(height: 35)
-    }
-}
-
-// Glassy input field with consistent styling
-struct GlassyInputField<Content: View>: View {
-    let icon: String
-    let title: String
-    let content: Content
-    var glassOpacity: Double = 0.01
-    var labelColor: Color = Color(white: 0.4)
-    var materialOpacity: Double = 0.2
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 14)) // System font for icon
-                    .foregroundColor(labelColor)
-                Text(title)
-                    .font(.plusJakarta(.caption, weight: .medium))
-                    .foregroundColor(labelColor)
-            }
-            
-            content
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(
-            ZStack {
-                // Ultra-transparent glass effect
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Material.ultraThinMaterial)
-                    .opacity(materialOpacity)
-                
-                // Almost invisible white overlay
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white.opacity(glassOpacity))
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

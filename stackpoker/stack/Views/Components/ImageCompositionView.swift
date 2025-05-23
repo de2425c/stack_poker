@@ -31,13 +31,17 @@ struct ImageCompositionView: View {
     let backgroundImage: UIImage
 
     // State for card manipulation
-    @State private var cardScale: CGFloat = 0.7 // Initial scale for the card
-    @State private var cardOffset: CGSize = .zero
+    @State private var interactiveCardScale: CGFloat = 0.8 // Renamed for clarity, for user interaction
+    @State private var interactiveCardOffset: CGSize = .zero // Renamed for clarity
 
     // Gesture states
     @State private var currentMagnification: CGFloat = 0
     @State private var currentDragOffset: CGSize = .zero
     
+    // Define a fixed scale and offset for the actual shared image
+    private let sharedCardRenderScale: CGFloat = 0.9 // Example: card takes 90% of image width
+    private let sharedCardRenderOffset: CGSize = .zero // Centered
+
     // Card Customization States
     struct ColorOption: Identifiable, Hashable {
         let id = UUID()
@@ -85,12 +89,13 @@ struct ImageCompositionView: View {
         ZStack {
             Image(uiImage: backgroundImage)
                 .resizable()
-                .scaledToFit() // Changed from .scaledToFill()
+                .scaledToFill()
+                .clipped()
 
             FinishedSessionCardView(
                 gameName: session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)",
                 stakes: session.stakes,
-                location: session.gameName,
+                location: session.gameName, // location is already removed from its visual display
                 date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,
@@ -98,27 +103,29 @@ struct ImageCompositionView: View {
                 cardBackgroundColor: selectedCardColor,
                 cardOpacity: cardOpacity
             )
-            .scaleEffect(cardScale + currentMagnification)
-            .offset(x: cardOffset.width + currentDragOffset.width, y: cardOffset.height + currentDragOffset.height)
+            // Use fixed scale and offset for rendering the shared image
+            .scaleEffect(sharedCardRenderScale) 
+            .offset(sharedCardRenderOffset)
+            // Add a fixed width to the card for consistent rendering if needed, 
+            // or ensure it's centered within the ZStack. 
+            // For now, ZStack centers it, and scaleEffect handles size.
         }
     }
 
     var body: some View {
         ZStack {
-            Color.black.edgesIgnoringSafeArea(.all) // Base background to avoid white flash
+            Color.black.edgesIgnoringSafeArea(.all)
 
-            // Background image, scaled to fill the screen
             Image(uiImage: backgroundImage)
                 .resizable()
-                .scaledToFit() // Changed from .scaledToFill()
+                .scaledToFill()
                 .edgesIgnoringSafeArea(.all)
-                // .overlay(Color.black.opacity(0.1)) // Opacity overlay might not be needed if image doesn't fill screen
+                .clipped()
 
-            // The session card, movable and scalable
             FinishedSessionCardView(
                 gameName: session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)",
                 stakes: session.stakes,
-                location: session.gameName,
+                location: session.gameName, // location is already removed from its visual display
                 date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,
@@ -126,28 +133,29 @@ struct ImageCompositionView: View {
                 cardBackgroundColor: selectedCardColor,
                 cardOpacity: cardOpacity
             )
-            .scaleEffect(cardScale + currentMagnification)
-            .offset(x: cardOffset.width + currentDragOffset.width, y: cardOffset.height + currentDragOffset.height)
+            // Use interactive scale and offset for the live preview
+            .scaleEffect(interactiveCardScale + currentMagnification) 
+            .offset(x: interactiveCardOffset.width + currentDragOffset.width, y: interactiveCardOffset.height + currentDragOffset.height)
             .gesture(
                 DragGesture()
                     .onChanged { value in
                         currentDragOffset = value.translation
                     }
                     .onEnded { value in
-                        cardOffset.width += value.translation.width
-                        cardOffset.height += value.translation.height
+                        interactiveCardOffset.width += value.translation.width
+                        interactiveCardOffset.height += value.translation.height
                         currentDragOffset = .zero
                     }
             )
             .gesture(
                 MagnificationGesture()
                     .onChanged { value in
-                        currentMagnification = value - 1
+                        currentMagnification = value - 1 
                     }
                     .onEnded { value in
-                        cardScale += value - 1
+                        interactiveCardScale += value - 1
                         currentMagnification = 0
-                        cardScale = max(0.3, min(cardScale, 2.0))
+                        interactiveCardScale = max(0.3, min(interactiveCardScale, 2.0)) // Clamp scale
                     }
             )
 

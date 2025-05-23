@@ -11,6 +11,36 @@ class UserService: ObservableObject {
     
     private let userFollowsCollection = "userFollows"
 
+    init() {
+        // Set up a notification observer for sign out events
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clearUserData),
+            name: NSNotification.Name("UserWillSignOut"),
+            object: nil
+        )
+    }
+    
+    deinit {
+        // Remove observer when this service is deallocated
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    // Method to completely clear all user data from memory
+    @objc func clearUserData() {
+        print("🧹 Clearing all cached user data")
+        DispatchQueue.main.async {
+            // Clear the current profile
+            self.currentUserProfile = nil
+            
+            // Clear all loaded users data
+            self.loadedUsers.removeAll()
+            
+            // Clear any other cached data that might be stored
+            // (Add additional cache clearing here if needed)
+        }
+    }
+
     // Helper method to get follower counts
     private func getFollowerCounts(for userId: String) async throws -> (followers: Int, following: Int) {
         async let followersCount = db.collection("users")
@@ -60,7 +90,7 @@ class UserService: ObservableObject {
             print("✅ Successfully fetched profile data")
             let avatarURL = data["avatarURL"] as? String
             print("[DEBUG] Profile avatarURL from Firestore: \(avatarURL ?? "nil")")
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.currentUserProfile = UserProfile(
                     id: userId,
                     username: data["username"] as? String ?? "",
@@ -81,13 +111,19 @@ class UserService: ObservableObject {
         }
     }
     
-    func createUserProfile(username: String, displayName: String?) async throws {
+    func createUserProfile(userData: [String: Any]) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
             print("⛔️ createUserProfile: No authenticated user")
             throw UserServiceError.notAuthenticated
         }
         
-        print("📝 Creating profile for user: \(userId)")
+        print("📝 Creating profile for user: \(userId) with data")
+        
+        // Extract username for availability check
+        guard let username = userData["username"] as? String, !username.isEmpty else {
+            print("⚠️ Username is required")
+            throw NSError(domain: "UserServiceError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Username is required"])
+        }
         
         // Check if username is already taken
         do {
@@ -100,25 +136,39 @@ class UserService: ObservableObject {
                 throw UserServiceError.usernameAlreadyExists
             }
             
+            // Create a mutable copy of userData and add required fields
+            var profileData = userData
+            profileData["id"] = userId
+            profileData["createdAt"] = Timestamp(date: Date())
+            
+            let docRef = db.collection("users").document(userId)
+            try await docRef.setData(profileData)
+            
+            print("✅ Successfully created profile with complete data")
+            
+            // Create a profile object from the data
+            let displayName = userData["displayName"] as? String
+            let bio = userData["bio"] as? String
+            let location = userData["location"] as? String
+            let avatarURL = userData["avatarURL"] as? String
+            let favoriteGame = userData["favoriteGame"] as? String
+            let favoriteGames = userData["favoriteGames"] as? [String]
+            
             let newProfile = UserProfile(
                 id: userId,
                 username: username,
                 displayName: displayName,
                 createdAt: Date(),
+                favoriteGames: favoriteGames,
+                bio: bio,
+                avatarURL: avatarURL,
+                location: location,
+                favoriteGame: favoriteGame,
                 followersCount: 0,
                 followingCount: 0
             )
             
-            let docRef = db.collection("users").document(userId)
-            try await docRef.setData([
-                "id": newProfile.id,
-                "username": newProfile.username,
-                "displayName": newProfile.displayName ?? "",
-                "createdAt": Timestamp(date: newProfile.createdAt),
-            ])
-            
-            print("✅ Successfully created profile")
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.currentUserProfile = newProfile
             }
             

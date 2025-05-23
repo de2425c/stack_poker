@@ -17,6 +17,7 @@ struct Post: Identifiable, Codable {
     let handHistory: ParsedHandHistory?
     let sessionId: String?
     let location: String?
+    var isNote: Bool = false
     
     enum PostType: String, Codable {
         case text
@@ -39,9 +40,10 @@ struct Post: Identifiable, Codable {
         case handHistory
         case sessionId
         case location
+        case isNote
     }
     
-    init(id: String, userId: String, content: String, createdAt: Date, username: String, displayName: String? = nil, profileImage: String? = nil, imageURLs: [String]? = nil, likes: Int = 0, comments: Int = 0, postType: PostType = .text, handHistory: ParsedHandHistory? = nil, sessionId: String? = nil, location: String? = nil) {
+    init(id: String, userId: String, content: String, createdAt: Date, username: String, displayName: String? = nil, profileImage: String? = nil, imageURLs: [String]? = nil, likes: Int = 0, comments: Int = 0, postType: PostType = .text, handHistory: ParsedHandHistory? = nil, sessionId: String? = nil, location: String? = nil, isNote: Bool = false) {
         self.id = id
         self.userId = userId
         self.content = content
@@ -56,6 +58,7 @@ struct Post: Identifiable, Codable {
         self.handHistory = handHistory
         self.sessionId = sessionId
         self.location = location
+        self.isNote = isNote
     }
     
     init(from decoder: Decoder) throws {
@@ -71,6 +74,7 @@ struct Post: Identifiable, Codable {
         comments = try container.decodeIfPresent(Int.self, forKey: .comments) ?? 0
         profileImage = try container.decodeIfPresent(String.self, forKey: .profileImage)
         imageURLs = try container.decodeIfPresent([String].self, forKey: .imageURLs)
+        isNote = try container.decodeIfPresent(Bool.self, forKey: .isNote) ?? false
         
         // Handle postType with a default value of .text if not present
         if let postTypeString = try container.decodeIfPresent(String.self, forKey: .postType),
@@ -108,6 +112,7 @@ struct Post: Identifiable, Codable {
         self.imageURLs = data["imageURLs"] as? [String]
         self.likes = (data["likes"] as? Int) ?? 0
         self.comments = (data["comments"] as? Int) ?? 0
+        self.isNote = (data["isNote"] as? Bool) ?? false
         
         // Handle postType with a default value of .text if not present
         if let postTypeString = data["postType"] as? String,
@@ -141,7 +146,8 @@ struct Post: Identifiable, Codable {
             "imageURLs": imageURLs as Any,
             "likes": likes,
             "comments": comments,
-            "postType": postType.rawValue
+            "postType": postType.rawValue,
+            "isNote": isNote
         ]
         
         // Add displayName if present

@@ -257,20 +257,43 @@ class PostService: ObservableObject {
         return downloadURL.absoluteString
     }
     
-    func createPost(content: String, userId: String, username: String, displayName: String? = nil, profileImage: String?, images: [UIImage]? = nil, sessionId: String? = nil) async throws {
-        let documentRef = db.collection("posts").document()
-        
+    func uploadImages(images: [UIImage], userId: String) async throws -> [String] {
+        return try await withThrowingTaskGroup(of: String.self) { group in
+            for image in images {
+                group.addTask {
+                    try await self.uploadImage(image)
+                }
+            }
+            return try await group.reduce(into: []) { $0.append($1) }
+        }
+    }
+    
+    // Keep this compatibility method for old code that still uses it
+    func createPost(content: String, userId: String, username: String, displayName: String? = nil, profileImage: String?, images: [UIImage]? = nil, sessionId: String? = nil, isNote: Bool = false) async throws {
+        // Upload images if present
         var imageURLs: [String]? = nil
         if let images = images {
-            imageURLs = try await withThrowingTaskGroup(of: String.self) { group in
-                for image in images {
-                    group.addTask {
-                        try await self.uploadImage(image)
-                    }
-                }
-                return try await group.reduce(into: []) { $0.append($1) }
-            }
+            imageURLs = try await uploadImages(images: images, userId: userId)
         }
+        
+        // Call the main createPost method
+        try await createPost(
+            content: content,
+            userId: userId,
+            username: username,
+            displayName: displayName,
+            profileImage: profileImage,
+            imageURLs: imageURLs,
+            postType: .text,
+            handHistory: nil,
+            sessionId: sessionId,
+            location: nil,
+            isNote: isNote // Pass the provided isNote value
+        )
+    }
+    
+    func createPost(content: String, userId: String, username: String, displayName: String? = nil, profileImage: String?, imageURLs: [String]? = nil, postType: Post.PostType = .text, handHistory: ParsedHandHistory? = nil, sessionId: String? = nil, location: String? = nil, isNote: Bool = false) async throws {
+        let documentRef = db.collection("posts").document()
         
         let post = Post(
             id: documentRef.documentID,
@@ -283,9 +306,11 @@ class PostService: ObservableObject {
             imageURLs: imageURLs,
             likes: 0,
             comments: 0,
-            postType: .text,
-            handHistory: nil,
-            sessionId: sessionId
+            postType: postType,
+            handHistory: handHistory,
+            sessionId: sessionId,
+            location: location,
+            isNote: isNote
         )
         
         try await documentRef.setData(from: post)
@@ -296,42 +321,19 @@ class PostService: ObservableObject {
     }
     
     func createHandPost(content: String, userId: String, username: String, displayName: String?, profileImage: String?, hand: ParsedHandHistory, sessionId: String?, location: String?) async throws {
-        let documentRef = db.collection("posts").document()
-        
-        let post = Post(
-            id: documentRef.documentID,
-            userId: userId,
+        try await createPost(
             content: content,
-            createdAt: Date(),
+            userId: userId,
             username: username,
             displayName: displayName,
             profileImage: profileImage,
             imageURLs: nil,
-            likes: 0,
-            comments: 0,
             postType: .hand,
             handHistory: hand,
             sessionId: sessionId,
-            location: location
+            location: location,
+            isNote: false
         )
-        
-        try await documentRef.setData(from: post)
-        
-        // Fetch the newly created post to include its full data (like server timestamp for createdAt)
-        // and then insert it locally to ensure UI consistency.
-        if let newPost = try await fetchSinglePost(byId: documentRef.documentID) {
-            await MainActor.run {
-                // Add to the beginning of the posts array if it's relevant to the current feed view
-                // This logic might need adjustment based on how/if PostService filters posts
-                posts.insert(newPost, at: 0)
-            }
-        } else {
-            // Fallback or error handling if the new post couldn't be fetched
-            // For now, we'll print an error. Consider more robust error handling.
-            print("Error: Newly created hand post (\\(documentRef.documentID)) could not be fetched after creation.")
-            // As a minimal fallback, we could try to insert the locally created `post` object,
-            // but it might lack server-generated fields like the precise `createdAt` timestamp.
-        }
     }
     
     func toggleLike(postId: String, userId: String) async throws {

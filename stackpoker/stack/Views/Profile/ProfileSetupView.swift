@@ -1,5 +1,7 @@
 import SwiftUI
 import FirebaseFirestore
+import PhotosUI
+import FirebaseAuth
 
 struct ProfileSetupView: View {
     @Environment(\.dismiss) var dismiss
@@ -7,145 +9,286 @@ struct ProfileSetupView: View {
     @StateObject private var userService = UserService()
     @State private var username = ""
     @State private var displayName = ""
+    @State private var bio = ""
+    @State private var location = ""
     @State private var isLoading = false
     @State private var showingError = false
     @State private var errorMessage = ""
-    // New states for real-time username checking
     @State private var isCheckingUsername = false
     @State private var usernameAvailable: Bool? = nil
     @State private var lastCheckedUsername = ""
+    @State private var currentStep = 1 // Track which step we're on (1 or 2)
     let isNewUser: Bool
+    
+    // Profile image
+    @State private var selectedImage: UIImage? = nil
+    @State private var imagePickerItem: PhotosPickerItem? = nil
+    @State private var isUploadingImage = false
     
     // Debounce timer for username checks
     @State private var usernameCheckTask: Task<Void, Never>?
     
     var body: some View {
-        NavigationView {
+        GeometryReader { geometry in
             ZStack {
-                Color(UIColor(red: 22/255, green: 23/255, blue: 26/255, alpha: 1.0))
+                // Use AppBackgroundView
+                AppBackgroundView()
                     .ignoresSafeArea()
                 
                 ScrollView {
-                    VStack(spacing: 24) {
+                    VStack(alignment: .leading, spacing: 12) {
                         // Header
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Complete Your Profile")
-                                .font(.system(size: 32, weight: .bold))
-                                .foregroundColor(.white)
-                            
-                            Text("Tell us a bit about yourself")
-                                .font(.system(size: 16))
-                                .foregroundColor(.gray)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 40)
+                        Text(currentStep == 1 ? "Create Profile" : "Complete Profile")
+                            .font(.custom("PlusJakartaSans-Bold", size: 32))
+                            .foregroundColor(.white)
+                            .padding(.top, 85)
                         
-                        // Form Fields
-                        VStack(spacing: 16) {
-                            // Username field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Username")
-                                    .foregroundColor(.gray)
-                                    .font(.system(size: 14))
-                                
-                                HStack {
-                                    TextField("", text: $username)
-                                        .textFieldStyle(CustomTextFieldStyle())
-                                        .autocapitalization(.none)
-                                        .disableAutocorrection(true)
-                                        .onChange(of: username) { newValue in
-                                            checkUsername(newValue)
-                                        }
-                                    
-                                    // Username availability indicator
-                                    if !username.isEmpty {
-                                        if isCheckingUsername {
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                                .frame(width: 20, height: 20)
-                                        } else if let isAvailable = usernameAvailable {
-                                            Image(systemName: isAvailable ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                                .foregroundColor(isAvailable ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
-                                                .frame(width: 20, height: 20)
-                                        }
-                                    }
+                        Text(currentStep == 1 ? "Step 1/2: Set your display name and username" : "Step 2/2: Tell us about yourself")
+                            .font(.custom("PlusJakartaSans-Regular", size: 16))
+                            .foregroundColor(.white.opacity(0.7))
+                            .padding(.bottom, 12)
+                        
+                        // Form content based on step
+                        if currentStep == 1 {
+                            // Step 1: Display Name and Username
+                            VStack(spacing: 16) {
+                                // Display Name field
+                                GlassyInputField(icon: "person", title: "DISPLAY NAME", labelColor: Color.white.opacity(0.6)) {
+                                    TextField("", text: $displayName)
+                                        .font(.plusJakarta(.body))
+                                        .foregroundColor(.white)
                                 }
                                 
-                                // Username availability message
-                                if !username.isEmpty && !isCheckingUsername {
-                                    if username == lastCheckedUsername {
+                                // Username field with availability check
+                                VStack(spacing: 4) {
+                                    GlassyInputField(icon: "at", title: "USERNAME", labelColor: Color.white.opacity(0.6)) {
+                                        HStack {
+                                            TextField("", text: $username)
+                                                .font(.plusJakarta(.body))
+                                                .foregroundColor(.white)
+                                                .autocapitalization(.none)
+                                                .disableAutocorrection(true)
+                                                .onChange(of: username) { newValue in
+                                                    checkUsername(newValue)
+                                                }
+                                            
+                                            // Username availability indicator
+                                            if !username.isEmpty {
+                                                if isCheckingUsername {
+                                                    ProgressView()
+                                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                        .frame(width: 20, height: 20)
+                                                } else if let isAvailable = usernameAvailable {
+                                                    Image(systemName: isAvailable ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                                        .foregroundColor(isAvailable ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
+                                                        .frame(width: 20, height: 20)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Username availability message
+                                    if !username.isEmpty && !isCheckingUsername && username == lastCheckedUsername {
                                         if let isAvailable = usernameAvailable {
                                             Text(isAvailable ? "Username available!" : "Username already taken")
-                                                .font(.system(size: 12))
+                                                .font(.custom("PlusJakartaSans-Regular", size: 12))
                                                 .foregroundColor(isAvailable ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
+                                                .padding(.leading, 8)
                                         }
                                     }
                                 }
-                            }
-                            
-                            // Display Name field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Display Name")
-                                    .foregroundColor(.gray)
-                                    .font(.system(size: 14))
                                 
-                                TextField("", text: $displayName)
-                                    .textFieldStyle(CustomTextFieldStyle())
-                                
-                                if displayName.isEmpty {
-                                    Text("Display name is required")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.red)
-                                        .padding(.top, 4)
+                                // Next button
+                                Button(action: {
+                                    currentStep = 2
+                                }) {
+                                    Text("Next")
+                                        .font(.custom("PlusJakartaSans-SemiBold", size: 18))
                                 }
+                                .frame(maxWidth: .infinity, minHeight: 56)
+                                .background(step1ButtonBackgroundColor)
+                                .foregroundColor(.black)
+                                .cornerRadius(12)
+                                .disabled(isStep1ButtonDisabled)
+                                .padding(.top, 24)
+                            }
+                        } else {
+                            // Step 2: Profile Photo, Bio and Location
+                            VStack(spacing: 16) {
+                                // Profile Photo Section
+                                VStack(spacing: 12) {
+                                    Text("PROFILE PHOTO")
+                                        .font(.custom("PlusJakartaSans-Medium", size: 12))
+                                        .foregroundColor(Color.white.opacity(0.6))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.leading, 8)
+                                        
+                                    ZStack {
+                                        // Photo background circle
+                                        Circle()
+                                            .fill(Color.black.opacity(0.3))
+                                            .frame(width: 100, height: 100)
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                            )
+                                        
+                                        // Selected image or placeholder
+                                        if let selectedImage = selectedImage {
+                                            Image(uiImage: selectedImage)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 90, height: 90)
+                                                .clipShape(Circle())
+                                        } else {
+                                            Image(systemName: "person.fill")
+                                                .font(.system(size: 40))
+                                                .foregroundColor(.white.opacity(0.5))
+                                        }
+                                        
+                                        // Upload indicator if uploading
+                                        if isUploadingImage {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                .scaleEffect(1.5)
+                                        }
+                                        
+                                        // Camera button overlay
+                                        PhotosPicker(selection: $imagePickerItem, matching: .images) {
+                                            ZStack {
+                                                Circle()
+                                                    .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                                    .frame(width: 32, height: 32)
+                                                
+                                                Image(systemName: "camera.fill")
+                                                    .font(.system(size: 14))
+                                                    .foregroundColor(.black)
+                                            }
+                                        }
+                                        .onChange(of: imagePickerItem) { newItem in
+                                            loadTransferableImage(from: newItem)
+                                        }
+                                        .position(x: 70, y: 70)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.bottom, 8)
+                                }
+                                
+                                // Bio field
+                                GlassyInputField(icon: "text.quote", title: "BIO", labelColor: Color.white.opacity(0.6)) {
+                                    TextEditor(text: $bio)
+                                        .font(.plusJakarta(.body))
+                                        .foregroundColor(.white)
+                                        .frame(minHeight: 100)
+                                        .scrollContentBackground(.hidden)
+                                        .background(Color.clear)
+                                }
+                                .frame(height: 130)
+                                
+                                // Location field
+                                GlassyInputField(icon: "location", title: "LOCATION", labelColor: Color.white.opacity(0.6)) {
+                                    TextField("", text: $location)
+                                        .font(.plusJakarta(.body))
+                                        .foregroundColor(.white)
+                                }
+                                
+                                // Buttons row
+                                HStack(spacing: 16) {
+                                    // Back button
+                                    Button(action: {
+                                        currentStep = 1
+                                    }) {
+                                        Text("Back")
+                                            .font(.custom("PlusJakartaSans-SemiBold", size: 18))
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 56)
+                                    .background(Color.white.opacity(0.15))
+                                    .foregroundColor(.white)
+                                    .cornerRadius(12)
+                                    
+                                    // Complete setup button
+                                    Button(action: createProfile) {
+                                        if isLoading {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                                .scaleEffect(0.8)
+                                        } else {
+                                            Text("Complete Setup")
+                                                .font(.custom("PlusJakartaSans-SemiBold", size: 18))
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 56)
+                                    .background(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                    .foregroundColor(.black)
+                                    .cornerRadius(12)
+                                    .disabled(isLoading)
+                                }
+                                .padding(.top, 24)
                             }
                         }
-                        .padding(.top, 32)
-                        
-                        Spacer()
-                        
-                        // Submit Button
-                        Button(action: createProfile) {
-                            if isLoading {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .black))
-                            } else {
-                                Text("Complete Setup")
-                                    .font(.system(size: 17, weight: .semibold))
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .background(buttonBackgroundColor)
-                        .foregroundColor(.black)
-                        .cornerRadius(12)
-                        .disabled(isButtonDisabled)
-                        .padding(.bottom, 16)
                     }
                     .padding(.horizontal, 24)
                 }
-                .ignoresSafeArea(.keyboard, edges: .bottom)
+                
+                // Close button
+                VStack {
+                    HStack {
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.white)
+                                .padding(10)
+                                .background(Color.black.opacity(0.3))
+                                .clipShape(Circle())
+                        }
+                        .padding(.leading, 16)
+                        .padding(.top, 25)
+                        
+                        Spacer()
+                    }
+                    Spacer()
+                }
             }
-            .navigationBarHidden(true)
+            .ignoresSafeArea()
         }
+        .navigationBarHidden(true)
         .alert("Error", isPresented: $showingError) {
             Button("OK") { }
         } message: {
             Text(errorMessage)
+                .font(.custom("PlusJakartaSans-Medium", size: 16))
         }
     }
     
-    // Dynamic button background color based on validation
-    private var buttonBackgroundColor: Color {
-        if isButtonDisabled {
+    // Dynamic button background color for step 1
+    private var step1ButtonBackgroundColor: Color {
+        if isStep1ButtonDisabled {
             return Color.gray
         }
         return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
     }
     
-    // Button disabled state
-    private var isButtonDisabled: Bool {
-        username.isEmpty || displayName.isEmpty || isLoading || isCheckingUsername || usernameAvailable == false
+    // Button disabled state for step 1
+    private var isStep1ButtonDisabled: Bool {
+        username.isEmpty || displayName.isEmpty || isCheckingUsername || usernameAvailable == false
+    }
+    
+    // Load image from picker
+    private func loadTransferableImage(from imageSelection: PhotosPickerItem?) {
+        guard let imageSelection = imageSelection else { return }
+        
+        Task {
+            do {
+                if let data = try await imageSelection.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+                    await MainActor.run {
+                        selectedImage = image
+                    }
+                }
+            } catch {
+                print("Error loading image: \(error)")
+            }
+        }
     }
     
     // Check username availability in real-time
@@ -207,23 +350,88 @@ struct ProfileSetupView: View {
         guard !username.isEmpty && !displayName.isEmpty else { return }
         
         isLoading = true
+        
         Task {
             do {
-                try await userService.createUserProfile(
-                    username: username,
-                    displayName: displayName
-                )
-                DispatchQueue.main.async {
-                    if isNewUser {
-                        authViewModel.authState = .signedIn
+                // First upload the image if selected
+                var avatarURL: String? = nil
+                
+                if let selectedImage = selectedImage {
+                    isUploadingImage = true
+                    
+                    // Get userId from Firebase Auth directly
+                    let userId = Auth.auth().currentUser?.uid ?? ""
+                    let uploadResult = await withCheckedContinuation { continuation in
+                        userService.uploadProfileImage(selectedImage, userId: userId) { result in
+                            continuation.resume(returning: result)
+                        }
                     }
+                    
+                    isUploadingImage = false
+                    
+                    switch uploadResult {
+                    case .success(let url):
+                        avatarURL = url
+                    case .failure(let error):
+                        print("Warning: Failed to upload profile image: \(error.localizedDescription)")
+                        // Continue without image if upload fails
+                    }
+                }
+                
+                // Create a profile with all the collected data
+                var profileData: [String: Any] = [
+                    "username": username,
+                    "displayName": displayName
+                ]
+                
+                // Add optional fields if provided
+                if !bio.isEmpty {
+                    profileData["bio"] = bio
+                }
+                
+                if !location.isEmpty {
+                    profileData["location"] = location
+                }
+                
+                // Add avatar URL if available
+                if let avatarURL = avatarURL {
+                    profileData["avatarURL"] = avatarURL
+                }
+                
+                try await userService.createUserProfile(userData: profileData)
+                
+                // CRITICAL FIX: Explicitly reload the Firebase user to ensure we have the latest verification status
+                guard let user = Auth.auth().currentUser else {
+                    throw NSError(domain: "ProfileSetup", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not available"])
+                }
+                
+                // Force reload the user
+                try await user.reload()
+                
+                // Get the latest user object and email verification status
+                let currentUser = Auth.auth().currentUser
+                let isEmailVerified = currentUser?.isEmailVerified ?? false
+                
+                print("🔑 User verification status after profile creation: \(isEmailVerified)")
+                
+                // Dismiss on main thread
+                await MainActor.run {
+                    print("📱 Completing profile setup with verified email: \(isEmailVerified)")
                     dismiss()
                 }
+
+                // Wait for dismissal animation to complete
+                try await Task.sleep(nanoseconds: 500_000_000)
+
+                // Regardless of email status, enter main flow
+                print("🚀 Forcing main flow after profile setup")
+                await authViewModel.enterMainFlow()
             } catch {
-                DispatchQueue.main.async {
+                await MainActor.run {
                     errorMessage = (error as? UserServiceError)?.message ?? "An unexpected error occurred"
                     showingError = true
                     isLoading = false
+                    print("❌ Profile creation error: \(error.localizedDescription)")
                 }
             }
         }
