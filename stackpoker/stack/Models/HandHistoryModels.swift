@@ -121,4 +121,34 @@ struct SavedHand: Identifiable {
     var heroPnL: Double {
         return hand.accurateHeroPnL
     }
+
+    /// Computed property for a brief hand summary string (e.g., "AsKc vs QdJd" or "AsKc vs ??")
+    var handSummary: String {
+        guard let heroPlayer = hand.raw.players.first(where: { $0.isHero }),
+              let heroCards = heroPlayer.cards, !heroCards.isEmpty else {
+            return "Hand vs ??" // Fallback if hero cards are missing
+        }
+        let heroCardsString = heroCards.joined(separator: "")
+
+        // Check for showdown scenario first
+        if let showdown = hand.raw.showdown, showdown {
+            // Try to find an opponent in the pot distribution who won or chopped and showed cards
+            if let opponentInPot = hand.raw.pot.distribution?.first(where: { $0.playerName != heroPlayer.name && $0.amount > 0 && !$0.cards.isEmpty }) {
+                let opponentCardsString = opponentInPot.cards.joined(separator: "")
+                return "\(heroCardsString) vs \(opponentCardsString)"
+            } 
+            // If not found in pot distribution, check players array for shown final cards
+            else if let opponentPlayer = hand.raw.players.first(where: { !$0.isHero && $0.finalCards != nil && !($0.finalCards?.isEmpty ?? true) }) {
+                if let opponentCards = opponentPlayer.finalCards, !opponentCards.isEmpty {
+                    let opponentCardsString = opponentCards.joined(separator: "")
+                    return "\(heroCardsString) vs \(opponentCardsString)"
+                }
+            }
+            // If still no opponent cards found in showdown, show ??
+            return "\(heroCardsString) vs ??"
+        }
+        
+        // If not a showdown, or if we couldn't determine opponent cards in showdown
+        return "\(heroCardsString) vs ??" 
+    }
 } 

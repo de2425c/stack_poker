@@ -94,6 +94,11 @@ class SessionStore: ObservableObject {
     @Published var liveSession = LiveSessionData()
     @Published var showLiveSessionBar = false
     
+    // Computed property to get the most recent session
+    var mostRecentSession: Session? {
+        return sessions.first // sessions is already sorted by date descending
+    }
+    
     // Enhanced live session data
     @Published var enhancedLiveSession = LiveSessionData_Enhanced(basicSession: LiveSessionData())
     

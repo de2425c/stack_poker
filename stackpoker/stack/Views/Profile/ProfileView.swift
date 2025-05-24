@@ -132,7 +132,7 @@ struct ProfileView: View {
                             action: { showActivityDetailView = true }
                         ) {
                             Text("View your latest posts and interactions.")
-                                .font(.system(size: 13))
+                                .font(.plusJakarta(.subheadline)) // Apply Jakarta font
                                 .foregroundColor(.white.opacity(0.85))
                         }
 
@@ -144,7 +144,7 @@ struct ProfileView: View {
                             action: { showAnalyticsDetailView = true }
                         ) {
                             Text("Track your performance stats.")
-                                .font(.system(size: 13))
+                                .font(.plusJakarta(.subheadline)) // Apply Jakarta font
                                 .foregroundColor(.white.opacity(0.85))
                         }
 
@@ -155,9 +155,34 @@ struct ProfileView: View {
                             baseColor: Color.purple, 
                             action: { showHandsDetailView = true }
                         ) {
-                             Text("Review your logged poker hands.")
-                                .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.85))
+                            if let recentHand = handStore.mostRecentHand {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Capsule()
+                                        .fill(Color.purple.opacity(0.7))
+                                        .frame(width: 3)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack(spacing: 6) {
+                                            Text(recentHand.heroPnL >= 0 ? "Won $\(Int(recentHand.heroPnL))" : "Lost $\(Int(abs(recentHand.heroPnL)))")
+                                                .font(.plusJakarta(.callout, weight: .semibold))
+                                                .foregroundColor(recentHand.heroPnL >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
+                                            Text("•")
+                                                .font(.plusJakarta(.caption2, weight: .light))
+                                                .foregroundColor(.gray)
+                                            Text(relativeDateFormatter(from: recentHand.timestamp))
+                                                .font(.plusJakarta(.caption2, weight: .medium))
+                                                .foregroundColor(.gray)
+                                        }
+                                        Text(recentHand.handSummary)
+                                            .font(.plusJakarta(.footnote))
+                                            .foregroundColor(.white.opacity(0.8))
+                                            .lineLimit(1)
+                                    }
+                                }
+                            } else {
+                                Text("Review your logged poker hands.")
+                                    .font(.plusJakarta(.subheadline))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
                         }
                         
                         // Sessions Card
@@ -167,9 +192,43 @@ struct ProfileView: View {
                             baseColor: Color.orange, 
                             action: { showSessionsDetailView = true }
                         ) {
-                            Text("Manage and analyze your game sessions.")
-                                .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.85))
+                            if let recentSession = sessionStore.mostRecentSession {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Capsule()
+                                        .fill(Color.orange.opacity(0.7))
+                                        .frame(width: 3)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack(spacing: 6) {
+                                            Text(recentSession.stakes)
+                                                .font(.plusJakarta(.callout, weight: .semibold))
+                                                .foregroundColor(.white.opacity(0.9))
+                                            Text("•")
+                                                .font(.plusJakarta(.caption2, weight: .light))
+                                                .foregroundColor(.gray)
+                                            Text(relativeDateFormatter(from: recentSession.startTime))
+                                                .font(.plusJakarta(.caption2, weight: .medium))
+                                                .foregroundColor(.gray)
+                                        }
+                                        HStack(spacing: 4) {
+                                            if !recentSession.gameName.isEmpty {
+                                                Text(recentSession.gameName)
+                                                    .font(.plusJakarta(.footnote))
+                                                    .foregroundColor(.white.opacity(0.7))
+                                                Text("•")
+                                                    .font(.plusJakarta(.footnote))
+                                                    .foregroundColor(.white.opacity(0.5))
+                                            }
+                                            Text(recentSession.profit >= 0 ? "+\(formatCurrency(recentSession.profit))" : "\(formatCurrency(recentSession.profit))")
+                                                .font(.plusJakarta(.footnote, weight: .semibold))
+                                                .foregroundColor(recentSession.profit >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text("Manage and analyze your game sessions.")
+                                    .font(.plusJakarta(.subheadline))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -797,6 +856,22 @@ struct ProfileView: View {
             case "All": return "All time"
             default: return "Selected period"
         }
+    }
+
+    private func formatCurrency(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencySymbol = "$"
+        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: amount)) ?? "$\(Int(amount))"
+    }
+
+    // Helper function to format date relatively
+    private func relativeDateFormatter(from date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated // e.g., "1h ago", "2d ago"
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

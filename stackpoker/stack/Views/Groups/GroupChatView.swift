@@ -225,7 +225,7 @@ struct GroupChatView: View {
                                                             endPoint: .bottomTrailing
                                                         ),
                                                         lineWidth: 0.8
-                                                    ),
+                                                    )
                                             )
                                     )
                                 }

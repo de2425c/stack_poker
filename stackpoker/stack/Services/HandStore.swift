@@ -7,6 +7,11 @@ class HandStore: ObservableObject {
     let userId: String
     private let db = Firestore.firestore()
     
+    // Computed property to get the most recent hand
+    var mostRecentHand: SavedHand? {
+        return savedHands.first // savedHands is already sorted by timestamp descending
+    }
+    
     init(userId: String) {
         self.userId = userId
         loadSavedHands()

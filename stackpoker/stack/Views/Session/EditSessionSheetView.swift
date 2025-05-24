@@ -23,73 +23,84 @@ struct EditSessionSheetView: View {
     }
 
     var body: some View {
-        ZStack {
-            AppBackgroundView().ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack {
+                AppBackgroundView().ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Custom Header
-                HStack {
-                    Button("Cancel") { dismiss() }
-                        .foregroundColor(.white)
-                        .padding()
-                    Spacer()
-                    Text("Edit Session")
-                        .font(.plusJakarta(.headline, weight: .semibold))
-                        .foregroundColor(.white)
-                    Spacer()
-                    Button("Save") { saveChanges() }
+                VStack(spacing: 0) {
+                    // Custom Header
+                    HStack {
+                        Button("Cancel") { dismiss() }
+                            .foregroundColor(.white)
+                            .padding()
+                        Spacer()
+                        Text("Edit Session")
+                            .font(.plusJakarta(.headline, weight: .semibold))
+                            .foregroundColor(.white)
+                        Spacer()
+                        Button("Save") {
+                            saveChanges()
+                        }
                         .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                         .padding()
-                }
-                .padding(.horizontal) // Padding for the HStack itself
-                .frame(height: 50) // Give header a defined height
-                .background(Color.black.opacity(0.2)) // Subtle header background
-
-                // Form Content
-                ScrollView {
-                    VStack(spacing: 0) { // Outer VStack for Spacers
-                        Spacer(minLength: 20) // Pushes content down a bit from the header
-                        
-                        VStack(spacing: 25) { // VStack for the input fields
-                            GlassyInputField(icon: "dollarsign.circle", title: "Buy-in Amount") {
-                                TextField("e.g., 300", text: $buyInText)
-                                    .keyboardType(.decimalPad)
-                                    .font(.plusJakarta(.title2, weight: .bold))
-                                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                    .padding(.vertical, 8)
-                            }
-                            
-                            GlassyInputField(icon: "dollarsign.circle.fill", title: "Cash-out Amount") {
-                                TextField("e.g., 550", text: $cashOutText)
-                                    .keyboardType(.decimalPad)
-                                    .font(.plusJakarta(.title2, weight: .bold))
-                                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                    .padding(.vertical, 8)
-                            }
-                            
-                            GlassyInputField(icon: "clock", title: "Session Duration (Hours)") {
-                                TextField("e.g., 4.5", text: $hoursText)
-                                    .keyboardType(.decimalPad)
-                                    .font(.plusJakarta(.title2, weight: .bold))
-                                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                    .padding(.vertical, 8)
-                            }
-                        }
-                        .padding() // Padding for the group of input fields
-                        
-                        Spacer() // Pushes the input fields group towards the vertical center/bottom if content is short
                     }
-                    // Apply a minHeight to the ScrollView's content to ensure Spacers work effectively
-                    // even if the input fields themselves don't take up much space.
-                    // This is a bit of a trick to help with vertical centering when keyboard is not present.
-                    .frame(minHeight: UIScreen.main.bounds.height * 0.6) // Example: 60% of screen height
+                    .padding(.horizontal) // Padding for the HStack itself
+                    .frame(height: 50) // Give header a defined height
+                    .background(Color.black.opacity(0.2)) // Subtle header background
+
+                    // Form Content
+                    ScrollView {
+                        VStack(spacing: 0) { // Outer VStack for Spacers
+                            Spacer(minLength: 20) // Pushes content down a bit from the header
+                            
+                            VStack(spacing: 25) { // VStack for the input fields
+                                GlassyInputField(icon: "dollarsign.circle", title: "Buy-in Amount") {
+                                    TextField("e.g., 300", text: $buyInText)
+                                        .keyboardType(.decimalPad)
+                                        .font(.plusJakarta(.title2, weight: .bold))
+                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                        .padding(.vertical, 8)
+                                        .onSubmit { resignFirstResponder() }
+                                }
+                                
+                                GlassyInputField(icon: "dollarsign.circle.fill", title: "Cash-out Amount") {
+                                    TextField("e.g., 550", text: $cashOutText)
+                                        .keyboardType(.decimalPad)
+                                        .font(.plusJakarta(.title2, weight: .bold))
+                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                        .padding(.vertical, 8)
+                                        .onSubmit { resignFirstResponder() }
+                                }
+                                
+                                GlassyInputField(icon: "clock", title: "Session Duration (Hours)") {
+                                    TextField("e.g., 4.5", text: $hoursText)
+                                        .keyboardType(.decimalPad)
+                                        .font(.plusJakarta(.title2, weight: .bold))
+                                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                        .padding(.vertical, 8)
+                                        .onSubmit { resignFirstResponder() }
+                                }
+                            }
+                            .padding() // Padding for the group of input fields
+                            
+                            Spacer() // Pushes the input fields group towards the vertical center/bottom if content is short
+                        }
+                        // Apply a minHeight to the ScrollView's content to ensure Spacers work effectively
+                        // even if the input fields themselves don't take up much space.
+                        // This is a bit of a trick to help with vertical centering when keyboard is not present.
+                        .frame(minHeight: UIScreen.main.bounds.height * 0.6) // Example: 60% of screen height
+                    }
                 }
-            }
-            .alert(isPresented: $showAlert) {
-                Alert(title: Text(alertTitle), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+                .alert(isPresented: $showAlert) {
+                    Alert(title: Text(alertTitle), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+                }
             }
         }
-        // .ignoresSafeArea(.keyboard, edges: .bottom) // This can be added to the ZStack if needed
+        .ignoresSafeArea(.keyboard)
+    }
+
+    private func resignFirstResponder() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     private func saveChanges() {

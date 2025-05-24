@@ -1435,8 +1435,9 @@ struct LuxuryCalendarView: View {
                 }
                 .buttonStyle(PlainButtonStyle()) 
             }
+            .padding(.top, 5)
             .padding(.horizontal, 15) 
-            .padding(.top, 2)      
+            .padding(.top, 2)      // Keep the original 2 points for header spacing
 
             if isExpanded { 
                 Divider()
@@ -1508,6 +1509,7 @@ struct LuxuryCalendarView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top))) 
             }
         }
+        .padding(.top, 5) // Add 5 points of top padding to move the entire calendar down
         .frame(height: isExpanded ? calendarExpandedHeight : calendarCollapsedHeight) 
         .background(
             ZStack { 
