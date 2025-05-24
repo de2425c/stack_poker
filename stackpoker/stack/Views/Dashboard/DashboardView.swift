@@ -982,12 +982,9 @@ struct SessionsTab: View {
     @State private var editBuyIn = ""
     @State private var editCashout = ""
     @State private var editHours = ""
-    @State private var showCalendarView = true
+    @State private var isCalendarExpanded: Bool = true // Calendar starts expanded
     @State private var selectedDate: Date? = nil
     @State private var currentMonth = Date()
-    @State private var calendarAppearAnimation = false
-    // NEW: State to present full-screen session detail
-    @State private var showingSessionDetail = false
     
     // Group sessions by time periods
     private var groupedSessions: (today: [Session], lastWeek: [Session], older: [Session]) {
@@ -1039,88 +1036,20 @@ struct SessionsTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { // Root VStack of SessionsTab
-            // Calendar toggle button
-            HStack {
-                Button(action: {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                        showCalendarView.toggle()
-                        calendarAppearAnimation = false
-                        if showCalendarView {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                withAnimation(.easeOut(duration: 0.6)) {
-                                    calendarAppearAnimation = true
-                                }
-                            }
-                        }
-                    }
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                        
-                        Text(showCalendarView ? "Hide Calendar" : "Show Calendar")
-                            .font(.system(size: 16, weight: .medium, design: .rounded))
-                            .foregroundColor(.white)
-                        
-                        Spacer()
-                        
-                        Image(systemName: showCalendarView ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.7)))
-                            .rotationEffect(Angle(degrees: showCalendarView ? 0 : 0)) // Keep chevron always pointing down or based on actual state
-                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showCalendarView)
-                    }
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 16)
-                    .background(
-                        ZStack { // Applying GlassyInputField style
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Material.ultraThinMaterial)
-                                .opacity(0.2) // materialOpacity from GlassyInputField
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.white.opacity(0.01)) // glassOpacity from GlassyInputField
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
-                        }
-                    )
-                    // .shadow(color: Color.black.opacity(0.1), radius: 3, y: 1) // Remove or make very subtle if needed
-                }
-                .buttonStyle(ScalePressButtonStyle())
-                
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            // .padding(.top, 16) // Remove this, top padding will be on the root VStack
-            .padding(.bottom, 8)
+            // The old compact calendar toggle button is removed from here.
             
-        ScrollView {
+            ScrollView {
                 VStack(spacing: 22) {
-                    // Calendar View
-                    if showCalendarView {
-                        LuxuryCalendarView(
-                            sessions: sessionStore.sessions,
-                            currentMonth: $currentMonth,
-                            selectedDate: $selectedDate,
-                            monthlyProfit: monthlyProfit(currentMonth),
-                            isAnimated: calendarAppearAnimation
-                        )
-                        .padding(.top, 8)
-                        .padding(.horizontal, 16)
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.95)),
-                                removal: .opacity.combined(with: .scale(scale: 0.97))
-                            )
-                        )
-                        .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                withAnimation(.easeOut(duration: 0.6)) {
-                                    calendarAppearAnimation = true
-                                }
-                            }
-                        }
-                    }
+                    // Calendar View - always part of the layout, its content visibility is handled internally
+                    LuxuryCalendarView(
+                        sessions: sessionStore.sessions,
+                        currentMonth: $currentMonth,
+                        selectedDate: $selectedDate,
+                        monthlyProfit: monthlyProfit(currentMonth),
+                        isExpanded: $isCalendarExpanded // Pass binding
+                    )
+                    .padding(.top, 20) // Increased top padding for LuxuryCalendarView component
+                    .padding(.horizontal, 8) 
                     
                     // Selected Date Sessions
                     if let selectedDate = selectedDate, !sessionsForDate(selectedDate).isEmpty {
@@ -1411,13 +1340,39 @@ struct LuxuryCalendarView: View {
     @Binding var currentMonth: Date
     @Binding var selectedDate: Date?
     let monthlyProfit: Double
-    var isAnimated: Bool
+    @Binding var isExpanded: Bool // Binding to control expanded/collapsed state
     
     // Animation states
-    @State private var isChangingMonth = false
-    @State private var monthTransitionDirection: Double = 1 // 1 for next, -1 for prev
-    @State private var isGridAnimated = false
+    @State private var isChangingMonth = false // Used for brief header animations
+    @State private var monthTransitionDirection: Double = 1 
+    @State private var isGridAnimated = true // Grid is initially visible, then animated for changes
+    @State private var swipeOffset: CGFloat = 0 
+
+    // New states for premium swipe animation
+    @State private var gridContentOffset: CGFloat = 0
+    @State private var gridContentOpacity: Double = 1.0
+
+    private let calendarCollapsedHeight: CGFloat = 55  
     
+    private var calendarExpandedHeight: CGFloat {
+        let rows = numberOfWeeksInCurrentMonthGrid()
+        var height: CGFloat = 0
+        height += 25 // Approx for Header (font + vPadding)
+        height += 5  // Approx for Divider area (divider height + its vPadding)
+        height += 30 // Approx for Weekday symbols (font + its vPadding .bottom(8))
+        height += 6  // Approx for main VStack spacing (2*2) and spacing around weekday list (2)
+        if rows == 5 { 
+            height += 25 // INCREASED Conditional extra top padding for 5-row months
+        }
+        
+        height += CGFloat(rows) * 40.0 + CGFloat(max(0, rows - 1)) * 1.0 
+        return max(calendarCollapsedHeight, height) 
+    }
+
+    private func numberOfWeeksInCurrentMonthGrid() -> Int {
+        return (daysInMonth().count + 6) / 7 // Standard way to calculate rows in a 7-column grid
+    }
+
     private let columns = Array(repeating: GridItem(.flexible()), count: 7)
     private let weekdaySymbols = [
         ("M", "Monday"),
@@ -1445,179 +1400,147 @@ struct LuxuryCalendarView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            // Month header with animated arrows
+        VStack(spacing: 3) { // Cell internal spacing, increased from 2 to 3 for a bit more room
+            // Month header: Month Year + Profit | Spacer | Chevron Button
             HStack {
                 Text("\(monthHeader)")
-                    .luxuryText(fontSize: 16, weight: .bold)
+                    .font(.plusJakarta(.headline, weight: .bold)) 
                     .foregroundColor(.white)
-                    .opacity(isAnimated ? 1 : 0)
-                    .animation(.easeOut(duration: 0.5).delay(0.1), value: isAnimated)
-                    .offset(x: isChangingMonth ? monthTransitionDirection * -30 : 0)
-                    .opacity(isChangingMonth ? 0 : 1)
-                    .animation(.easeInOut(duration: 0.3), value: isChangingMonth)
                 
-                Spacer()
-                
-                if monthlyProfit != 0 {
+                if monthlyProfit != 0 && isExpanded { 
                     Text(formatCurrency(monthlyProfit))
-                        .luxuryText(fontSize: 16, weight: .bold)
+                        .font(.plusJakarta(.subheadline, weight: .semibold)) 
                         .foregroundColor(monthlyProfit > 0 ? 
                                       Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
                                       Color.red)
-                        .opacity(isAnimated ? 1 : 0)
-                        .animation(.easeOut(duration: 0.5).delay(0.2), value: isAnimated)
-                        .offset(x: isChangingMonth ? monthTransitionDirection * -30 : 0)
-                        .opacity(isChangingMonth ? 0 : 1)
-                        .animation(.easeInOut(duration: 0.3), value: isChangingMonth)
+                        .padding(.leading, 8) // Space between month and profit
                 }
                 
-                // Removed Spacer() here to let arrow buttons group naturally at the end
-                
-                HStack(spacing: 18) { // Slightly increased spacing for arrows if needed
-                    // Previous month button
-                    Button(action: {
-                        hapticFeedback(style: .light)
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isChangingMonth = true
-                            monthTransitionDirection = -1
-                            isGridAnimated = false
-                        }
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                                currentMonth = Calendar.current.date(byAdding: .month, value: -1, to: currentMonth) ?? currentMonth
-                            }
-                            
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    isChangingMonth = false
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                    withAnimation(.easeOut(duration: 0.4)) {
-                                        isGridAnimated = true
-                                    }
-                                }
+                Spacer()
+
+                Button(action: {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                        isExpanded.toggle()
+                        if isExpanded {
+                            isGridAnimated = false 
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { 
+                                isGridAnimated = true
                             }
                         }
-                    }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 17, weight: .semibold)) // Slightly larger/bolder
-                            .foregroundColor(.white.opacity(0.8))
-                            // Removed .frame, .background, .clipShape for a minimal look
                     }
-                    .buttonStyle(ScalePressButtonStyle()) // Keep for tap feedback
+                }) {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down") // Changed to plain chevron
+                        .font(.system(size: 20, weight: .medium)) // Adjusted size for plain chevron
+                        .foregroundColor(.white.opacity(0.9)) 
+                }
+                .buttonStyle(PlainButtonStyle()) 
+            }
+            .padding(.horizontal, 15) 
+            .padding(.top, 2)      
+
+            if isExpanded { 
+                Divider()
+                    .background(Color.gray.opacity(0.25))
+                    .padding(.horizontal, 15) 
+                    .padding(.bottom, 2) // Divider bottom padding
+            }
+
+            if isExpanded {
+                VStack(spacing: 2) { // VStack for weekdays and grid spacing
+                    // Days of the week header
+                    HStack(spacing: 0) {
+                        ForEach(weekdaySymbols, id: \.1) { day in
+                            Text(day.0)
+                                .font(.plusJakarta(.caption, weight: .bold)) 
+                                .foregroundColor(.white) 
+                                .frame(maxWidth: .infinity)
+                                .opacity(isGridAnimated ? 1 : 0) // Keep this for initial appear and expand/collapse
+                                .animation(.easeOut(duration: 0.3).delay(isGridAnimated ? 0.2 : 0), value: isGridAnimated)
+                        }
+                    }
+                    .padding(.bottom, 8) 
+                    .padding(.top, numberOfWeeksInCurrentMonthGrid() == 5 ? 25 : 0) // INCREASED Conditional top padding
                     
-                    // Next month button
-                    Button(action: {
-                        hapticFeedback(style: .light)
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isChangingMonth = true
-                            monthTransitionDirection = 1
-                            isGridAnimated = false
-                        }
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                                currentMonth = Calendar.current.date(byAdding: .month, value: 1, to: currentMonth) ?? currentMonth
-                            }
-                            
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    isChangingMonth = false
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                    withAnimation(.easeOut(duration: 0.4)) {
-                                        isGridAnimated = true
+                    // Calendar grid container for offset and opacity animations
+                    Group {
+                        LazyVGrid(columns: columns, spacing: 1) { 
+                            ForEach(Array(0..<daysInMonth().count), id: \.self) { index in
+                                if let date = daysInMonth()[index] {
+                                    let dailyProfit = profitForDate(date)
+                                    let hasSession = sessionsForDate(date).count > 0
+                                    
+                                    MinimalistCalendarCell(
+                                        date: date,
+                                        dailyProfit: dailyProfit,
+                                        isSelected: selectedDate != nil && Calendar.current.isDate(date, inSameDayAs: selectedDate!),
+                                        hasSession: hasSession,
+                                        // isAnimated controls individual cell pop-in, tied to grid visibility
+                                        isAnimated: gridContentOpacity == 1.0 && isExpanded, 
+                                        animationDelay: Double(index % 7) * 0.02 + Double(index / 7) * 0.04 
+                                    )
+                                    .onTapGesture {
+                                        hapticFeedback(style: .light)
+                                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                            if selectedDate != nil && Calendar.current.isDate(date, inSameDayAs: selectedDate!) {
+                                                selectedDate = nil
+                                            } else if hasSession {
+                                                selectedDate = date
+                                            }
+                                        }
                                     }
+                                    // Removed old per-cell offset/opacity tied to isChangingMonth
+                                } else {
+                                    Color.clear
+                                        .aspectRatio(1, contentMode: .fit) 
+                                        .frame(minHeight: 34) // Match cell minHeight
                                 }
                             }
                         }
-                    }) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 17, weight: .semibold)) // Slightly larger/bolder
-                            .foregroundColor(.white.opacity(0.8))
-                            // Removed .frame, .background, .clipShape for a minimal look
                     }
-                    .buttonStyle(ScalePressButtonStyle()) // Keep for tap feedback
+                    .offset(x: gridContentOffset)
+                    .opacity(gridContentOpacity)
+                    // .animation on this group might conflict with withAnimation in changeMonth
                 }
-                .opacity(isAnimated ? 1 : 0)
-                .animation(.easeOut(duration: 0.4).delay(0.15), value: isAnimated)
+                .padding(.horizontal, 6)
+                .opacity(isExpanded ? (isGridAnimated && gridContentOpacity == 1.0 ? 1 : 0) : 0) // Overall visibility for expand/collapse
+                .animation(.easeInOut(duration: 0.4), value: isGridAnimated) 
+                .animation(.easeInOut(duration: 0.4), value: gridContentOpacity)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top))) 
             }
-            .padding(.horizontal, 8)
-            
-            VStack(spacing: 10) { // Adjusted spacing for weekday symbols
-                // Days of the week header
-                HStack(spacing: 0) {
-                    ForEach(weekdaySymbols, id: \.1) { day in
-                        Text(day.0)
-                            .font(.system(size: 11, weight: .medium, design: .rounded)) // Slightly adjusted font
-                            .foregroundColor(Color.gray.opacity(0.75)) // Ensured good contrast
-                            .frame(maxWidth: .infinity)
-                            .opacity(isAnimated ? 1 : 0)
-                            .animation(.easeOut(duration: 0.3).delay(0.2), value: isAnimated)
-                    }
-                }
-                
-                // Calendar grid with staggered animation
-                LazyVGrid(columns: columns, spacing: 6) { // Reduced spacing
-                    ForEach(Array(0..<daysInMonth().count), id: \.self) { index in
-                        if let date = daysInMonth()[index] {
-                            let dailyProfit = profitForDate(date)
-                            let hasSession = sessionsForDate(date).count > 0
-                            
-                            MinimalistCalendarCell(
-                                date: date,
-                                dailyProfit: dailyProfit,
-                                isSelected: selectedDate != nil && Calendar.current.isDate(date, inSameDayAs: selectedDate!),
-                                hasSession: hasSession,
-                                isAnimated: isAnimated && isGridAnimated,
-                                animationDelay: Double(index % 7) * 0.03 + Double(index / 7) * 0.05
-                            )
-                            .onTapGesture {
-                                hapticFeedback(style: .light)
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                                    // Deselect if already selected
-                                    if selectedDate != nil && Calendar.current.isDate(date, inSameDayAs: selectedDate!) {
-                                        selectedDate = nil
-                                    } else if hasSession {
-                                        selectedDate = date
-                                    }
-                                }
-                            }
-                            .offset(x: isChangingMonth ? monthTransitionDirection * 30 : 0)
-                            .opacity(isChangingMonth ? 0 : 1)
-                            .animation(
-                                .easeInOut(duration: 0.3)
-                                .delay(Double(index % 7) * 0.01),
-                                value: isChangingMonth
-                            )
-                        } else {
-                            // Empty cell with subtle animation
-                            Color.clear
-                                .aspectRatio(1, contentMode: .fit)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 6) // Reduced horizontal padding
-            .opacity(isChangingMonth ? 0.3 : 1)
-            .animation(.easeInOut(duration: 0.3), value: isChangingMonth)
         }
-        .padding(16) // Reduced padding
+        .frame(height: isExpanded ? calendarExpandedHeight : calendarCollapsedHeight) 
         .background(
-            ZStack { // Applying GlassyInputField style to calendar background
+            ZStack { 
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Material.ultraThinMaterial)
                     .opacity(0.2)
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color.white.opacity(0.01))
                 RoundedRectangle(cornerRadius: 20)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
+                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5) 
             }
-            // .shadow(color: Color.black.opacity(0.1), radius: 5, y: 2) // Remove or make very subtle
         )
-            .onAppear {
+        .offset(x: swipeOffset) 
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    // Make visual feedback even more subtle or disable if it causes issues
+                    let subtleTranslation = value.translation.width / 4 // Increased divisor more
+                    self.swipeOffset = max(-30, min(30, subtleTranslation)) // Clamped further
+                }
+                .onEnded { value in
+                    withAnimation(.easeInOut(duration: 0.2)) { self.swipeOffset = 0 } 
+                    let horizontalTranslation = value.translation.width
+                    let swipeThreshold: CGFloat = 50 // Minimum distance for a swipe to register
+
+                    if horizontalTranslation < -swipeThreshold { // Swiped left (next month)
+                        changeMonth(by: 1)
+                    } else if horizontalTranslation > swipeThreshold { // Swiped right (previous month)
+                        changeMonth(by: -1)
+                    }
+                }
+        )
+        .onAppear {
             // Initialize animation state
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 withAnimation(.easeOut(duration: 0.5)) {
@@ -1630,6 +1553,51 @@ struct LuxuryCalendarView: View {
     private func hapticFeedback(style: UIImpactFeedbackGenerator.FeedbackStyle) {
         let generator = UIImpactFeedbackGenerator(style: style)
         generator.impactOccurred()
+    }
+    
+    // Extracted month changing logic into a function for use by gestures
+    private func changeMonth(by amount: Int) {
+        hapticFeedback(style: .light)
+        let screenWidth = UIScreen.main.bounds.width // Get screen width for offset
+
+        let oldMonth = currentMonth
+        let newMonth = Calendar.current.date(byAdding: .month, value: amount, to: currentMonth) ?? currentMonth
+
+        if oldMonth != newMonth {
+            // 1. Animate old grid out
+            withAnimation(.easeInOut(duration: 0.25)) {
+                gridContentOpacity = 0
+                gridContentOffset = amount > 0 ? -screenWidth / 2 : screenWidth / 2 // Slide out in swipe direction
+                isChangingMonth = true // For header text effects if any
+                monthTransitionDirection = amount > 0 ? 1 : -1
+            }
+
+            // 2. After slide out, update data and prepare new grid for slide in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { // Match out-animation duration
+                currentMonth = newMonth
+                isChangingMonth = false // Reset header effect trigger
+                
+                // Instantly move new grid to the opposite side, off-screen, and keep it transparent
+                gridContentOffset = amount > 0 ? screenWidth / 2 : -screenWidth / 2
+                // gridContentOpacity is already 0
+
+                // 3. Animate new grid in
+                DispatchQueue.main.async { // Ensure this is in the next render pass
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        gridContentOpacity = 1.0
+                        gridContentOffset = 0
+                    }
+                }
+            }
+        } else {
+            // If month didn't change (e.g. boundary), ensure grid is visible
+            if gridContentOpacity == 0 {
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    gridContentOpacity = 1.0
+                    gridContentOffset = 0
+                }
+            }
+        }
     }
     
     // Generate array of dates for the calendar grid
@@ -1742,40 +1710,48 @@ struct MinimalistCalendarCell: View {
         return Color.gray.opacity(0.7) // Neutral for break-even sessions
     }
     
+    private func formattedProfitForCell(_ amount: Double) -> String {
+        let prefix = amount >= 0 ? "+" : "-"
+        let absAmount = abs(Int(amount))
+        return "\(prefix)$\(absAmount)"
+    }
+    
     var body: some View {
-        VStack(spacing: 3) { // Reduced spacing
-            // Day number
+        VStack(spacing: 3) { 
             Text(dayNumber)
-                .font(.system(size: 13, weight: isSelected ? .bold : (isToday ? .semibold : .medium), design: .rounded))
+                .font(.plusJakarta(.caption, weight: isSelected ? .bold : (isToday ? .semibold : .medium))) // Day number font
                 .foregroundColor(dayForegroundColor)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(maxWidth: .infinity)
             
-            // Profit indicator (dot below the number)
-            if let indicatorColor = profitIndicatorColor {
-                Circle()
-                    .fill(indicatorColor)
-                    .frame(width: 5, height: 5)
-                    .padding(.top, 1) // Small padding to separate from number
+            if hasSession {
+                Text(formattedProfitForCell(dailyProfit))
+                    .font(.plusJakarta(.caption2, weight: .semibold)) // Profit text font
+                    .foregroundColor(profitIndicatorColor ?? .clear) 
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                    .padding(.top, 0) // Reduced top padding for profit text
             } else {
-                // Placeholder to keep height consistent if no session
-                Circle().fill(Color.clear).frame(width: 5, height: 5).padding(.top, 1)
+                Text(" ") 
+                    .font(.plusJakarta(.caption2, weight: .semibold)) 
+                    .padding(.top, 0) // Match profit text top padding
+                    .hidden() 
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 40) // Ensure a minimum tap area and consistent height
-        .padding(.vertical, 6) // Adjusted padding
-        .background(cellColor) // cellColor is now mostly Color.clear
-        .cornerRadius(8)
+        .frame(maxWidth: .infinity, minHeight: 34) // Adjusted cell minHeight
+        .padding(.vertical, 1) // Adjusted cell vertical padding
+        .background(cellColor) 
+        .cornerRadius(6) // Cell corner radius
         .overlay(
             ZStack {
                 if isSelected {
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 6)
                         .stroke(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.7)), lineWidth: 1.5)
                 } else if isToday {
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 6)
                         .stroke(
                             Color.white.opacity(0.3),
-                            style: StrokeStyle(lineWidth: 1, dash: [3]) // Dashed line for today
+                            style: StrokeStyle(lineWidth: 1, dash: [2]) 
                         )
                 }
             }
@@ -1812,11 +1788,11 @@ struct EnhancedSessionSummaryRow: View {
                 // Game info with icon removed
                 VStack(alignment: .leading, spacing: 2) {
                     Text(session.gameName)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.plusJakarta(.body, weight: .bold)) // Using Plus Jakarta Sans
                         .foregroundColor(.white)
                     
                     Text(session.stakes)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.plusJakarta(.footnote, weight: .medium)) // Using Plus Jakarta Sans
                         .foregroundColor(Color.gray.opacity(0.8))
                 }
                 
@@ -1825,7 +1801,7 @@ struct EnhancedSessionSummaryRow: View {
                 // Profit amount
                 VStack(alignment: .trailing, spacing: 0) {
                     Text(formatMoney(session.profit))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .font(.plusJakarta(.title3, weight: .bold)) // Using Plus Jakarta Sans
                         .foregroundColor(session.profit >= 0 ? 
                                       Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
                                       Color.red)
@@ -1834,15 +1810,15 @@ struct EnhancedSessionSummaryRow: View {
                     // Date and hours in one line
                     HStack(spacing: 6) {
                         Text(formatDate(session.startDate))
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .font(.plusJakarta(.caption, weight: .medium)) // Using Plus Jakarta Sans
                             .foregroundColor(Color.gray.opacity(0.7))
                         
                         Text("•")
-                            .font(.system(size: 12))
+                            .font(.plusJakarta(.caption)) // Using Plus Jakarta Sans
                             .foregroundColor(Color.gray.opacity(0.5))
                         
                         Text("\(String(format: "%.1f", session.hoursPlayed))h")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .font(.plusJakarta(.caption, weight: .medium)) // Using Plus Jakarta Sans
                             .foregroundColor(Color.gray.opacity(0.7))
                     }
                 }
