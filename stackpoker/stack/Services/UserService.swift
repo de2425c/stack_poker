@@ -372,10 +372,21 @@ class UserService: ObservableObject {
 
         let followData = UserFollow(followerId: currentUserId, followeeId: userIdToFollow, createdAt: Date())
         
+        // Reference paths for legacy sub-collections (for backward compatibility)
+        let currentUserFollowingRef = db.collection("users").document(currentUserId)
+            .collection("following").document(userIdToFollow)
+        let targetUserFollowersRef = db.collection("users").document(userIdToFollow)
+            .collection("followers").document(currentUserId)
+        
         do {
-            // Use addDocument(from:) for Encodable types
+            // Store in the new top-level collection
             try await db.collection(userFollowsCollection).addDocument(from: followData)
-            print("User \(currentUserId) successfully followed \(userIdToFollow).")
+            
+            // ALSO store in legacy sub-collections so existing UI continues to work
+            try await currentUserFollowingRef.setData(["timestamp": FieldValue.serverTimestamp()])
+            try await targetUserFollowersRef.setData(["timestamp": FieldValue.serverTimestamp()])
+            
+            print("User \(currentUserId) successfully followed \(userIdToFollow) (both new + legacy collections).")
 
             // Optimistically update local counts and refresh profiles
             DispatchQueue.main.async {
@@ -419,7 +430,18 @@ class UserService: ObservableObject {
             for document in snapshot.documents {
                 try await db.collection(userFollowsCollection).document(document.documentID).delete()
             }
-            print("User \(currentUserId) successfully unfollowed \(userIdToUnfollow).")
+            
+            // References to legacy documents
+            let currentUserFollowingRef = db.collection("users").document(currentUserId)
+                .collection("following").document(userIdToUnfollow)
+            let targetUserFollowersRef = db.collection("users").document(userIdToUnfollow)
+                .collection("followers").document(currentUserId)
+            
+            // Delete legacy docs if they exist
+            try? await currentUserFollowingRef.delete()
+            try? await targetUserFollowersRef.delete()
+            
+            print("User \(currentUserId) successfully unfollowed \(userIdToUnfollow) (removed from new + legacy collections).")
 
             // Optimistically update local counts and refresh profiles
             DispatchQueue.main.async {

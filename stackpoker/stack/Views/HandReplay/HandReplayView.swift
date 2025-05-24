@@ -108,7 +108,7 @@ struct HandReplayView: View {
                     }
                     .padding(.bottom, 10)
                     
-                    Spacer()
+                    Spacer() // Flexible spacer above the table
                     
                     // Poker Table
                     ZStack {
@@ -120,14 +120,12 @@ struct HandReplayView: View {
                                     .stroke(Color(red: 91/255, green: 70/255, blue: 43/255), lineWidth: 10)
                             )
                             .frame(width: geometry.size.width * 0.93, height: geometry.size.height * 0.78)
-                            .position(x: geometry.size.width / 2, y: geometry.size.height * 0.4)
                             .shadow(color: .black.opacity(0.6), radius: 15)
                         
                         // Inner table accent 
                         Ellipse()
                             .stroke(Color.black.opacity(0.2), lineWidth: 2)
                             .frame(width: geometry.size.width * 0.80, height: geometry.size.height * 0.65)
-                            .position(x: geometry.size.width / 2, y: geometry.size.height * 0.4)
                         
                         // Stack Logo - positioned above pot
                         Text("STACK")
@@ -140,7 +138,7 @@ struct HandReplayView: View {
                         // Pot display - centered at middle of table
                         if potAmount > 0 {
                             ChipView(amount: potAmount)
-                                .scaleEffect(1.2) // Scale up for better visibility
+                                .scaleEffect(1.2)
                                 .transition(.scale.combined(with: .opacity))
                                 .animation(.spring(response: 0.4), value: potAmount)
                                 .offset(y: geometry.size.height * -0.08)
@@ -149,7 +147,7 @@ struct HandReplayView: View {
                         // Community Cards - positioned closer to hero
                         CommunityCardsView(cards: allCommunityCards)
                             .offset(y: geometry.size.height * 0.0)
-                            .scaleEffect(1.15) // Make it slightly larger overall
+                            .scaleEffect(1.15)
 
                         // Player Seats
                         ForEach(hand.raw.players, id: \.seat) { player in
@@ -204,13 +202,13 @@ struct HandReplayView: View {
                             )
                             .padding(40)
                             .transition(.scale.combined(with: .opacity))
-                            .zIndex(100) // Ensure it's on top
+                            .zIndex(100)
                         }
                     }
-                    .frame(height: geometry.size.height * 0.78)
+                    // No explicit offset needed here if PlayerSeatView positions correctly within the ZStack boundaries.
+                    // The overall ZStack is now influenced by the flexible Spacers around it.
                     
-                    Spacer()
-                        .frame(height: 0) // Collapse this spacer
+                    Spacer() // Flexible spacer below the table
                     
                     // Controls at the bottom
                     HStack(spacing: 20) {
@@ -235,6 +233,7 @@ struct HandReplayView: View {
                         .disabled(!isPlaying || (!hasMoreActions && !needsShowdownClick))
                     }
                     .padding(.vertical, 25)
+                    .padding(.bottom, 80)
                     .frame(maxWidth: .infinity)
                     .background(
                         Color.black.opacity(0)

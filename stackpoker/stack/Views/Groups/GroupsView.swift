@@ -12,7 +12,8 @@ struct GroupsView: View {
     @EnvironmentObject private var tabBarVisibility: TabBarVisibilityManager
     @State private var showingCreateGroup = false
     @State private var showingInvites = false
-    @State private var selectedGroup: UserGroup?
+    @State private var selectedGroupForDetail: UserGroup?
+    @State private var selectedGroupForChat: UserGroup?
     @State private var groupActionSheet: UserGroup?
     @State private var error: String?
     @State private var showError = false
@@ -25,71 +26,56 @@ struct GroupsView: View {
                 AppBackgroundView()
                     .ignoresSafeArea()
                 
-                VStack(spacing: 0) {
-                    // Clean, modern header
-                    AppHeaderView(
-                        title: "Groups",
-                        showNotificationBadge: !groupService.pendingInvites.isEmpty,
-                        actionButtonIcon: "plus",
-                        notificationAction: {
-                            showingInvites = true
-                        },
-                        actionButtonAction: {
-                            showingCreateGroup = true
-                        }
-                    )
-                    
-                    // Content
-                    ScrollView {
-                        // Added top padding to push content down
-                        Spacer()
-                            .frame(height: 20)
-                            
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        // Top spacer to account for safe area
+                        Spacer().frame(height: 45)
+
+                        // Header inside scroll content (behaves like FeedView)
+                        AppHeaderView(
+                            title: "Groups",
+                            showNotificationBadge: !groupService.pendingInvites.isEmpty,
+                            notificationAction: { showingInvites = true },
+                            actionButtonAction: { showingCreateGroup = true }
+                        )
+                        .padding(.bottom, 8)
+
+                        // Refresh controls
                         RefreshControls(isRefreshing: $isRefreshing) {
                             Task {
                                 await refreshGroups()
                                 isRefreshing = false
                             }
                         }
-                        
+                        .padding(.bottom, 8)
+
                         if groupService.isLoading && groupService.userGroups.isEmpty {
-                            // Centered loading indicator
                             VStack {
-                                Spacer()
-                                    .frame(height: 180)
-                                
+                                Spacer().frame(height: 180)
                                 ProgressView()
                                     .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.8)))
                                     .scaleEffect(1.5)
                             }
                         } else if groupService.userGroups.isEmpty {
-                            // Empty state (updated to be more minimalistic)
-                            EmptyGroupsView(onCreateTapped: {
-                                showingCreateGroup = true
-                            })
+                            EmptyGroupsView(onCreateTapped: { showingCreateGroup = true })
                         } else {
-                            // Groups list - removed filtering by search text
-                            LazyVStack(spacing: 16) {
-                                ForEach(Array(groupService.userGroups.enumerated()), id: \.element.id) { index, group in
-                                    NavigationLink(
-                                        destination: GroupChatView(group: group)
-                                            .environmentObject(userService)
-                                            .environmentObject(handStore)
-                                            .environmentObject(sessionStore)
-                                            .environmentObject(postService)
-                                            .environmentObject(tabBarVisibility)
-                                            .navigationBarHidden(true)
-                                    ) {
-                                        GroupCard(group: group, onTap: {}, onDetailsTap: {
-                                            selectedGroup = group
-                                        }, onOptionsTap: {
+                            VStack(spacing: 20) {
+                                ForEach(groupService.userGroups) { group in
+                                    GroupCard(
+                                        group: group,
+                                        onTap: {
+                                            selectedGroupForChat = group
+                                        },
+                                        onDetailsTap: {
+                                            selectedGroupForDetail = group
+                                        },
+                                        onOptionsTap: {
                                             groupActionSheet = group
-                                        })
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
+                                        }
+                                    )
                                 }
                             }
-                            .padding(.horizontal, 20)
+                            .padding(.horizontal, 24)
                             .padding(.bottom, 100)
                         }
                     }
@@ -97,86 +83,66 @@ struct GroupsView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
-        .alert(isPresented: $showError, content: {
-            Alert(
-                title: Text("Error"),
-                message: Text(error ?? "An unknown error occurred"),
-                dismissButton: .default(Text("OK"))
-            )
-        })
+        // MARK: Navigation destinations
+        .background(
+            Group {
+                // Group Chat navigation
+                NavigationLink(destination:
+                                selectedGroupForChat.map { grp in
+                    GroupChatView(group: grp)
+                        .environmentObject(userService)
+                        .environmentObject(handStore)
+                        .environmentObject(sessionStore)
+                        .environmentObject(postService)
+                        .environmentObject(tabBarVisibility)
+                        .navigationBarHidden(true)
+                }, isActive: Binding(
+                    get: { selectedGroupForChat != nil },
+                    set: { if !$0 { selectedGroupForChat = nil } }
+                )) { EmptyView() }
+                
+                // Group Detail navigation
+                NavigationLink(destination:
+                                selectedGroupForDetail.map { grp in
+                    GroupDetailView(group: grp)
+                        .navigationBarHidden(true)
+                        .onDisappear { Task { await refreshGroups() } }
+                }, isActive: Binding(
+                    get: { selectedGroupForDetail != nil },
+                    set: { if !$0 { selectedGroupForDetail = nil } }
+                )) { EmptyView() }
+            }
+        )
+        .alert(isPresented: $showError) {
+            Alert(title: Text("Error"), message: Text(error ?? "An unknown error occurred"), dismissButton: .default(Text("OK")))
+        }
         .sheet(isPresented: $showingCreateGroup) {
             CreateGroupView { success in
-                if success {
-                    Task {
-                        await refreshGroups()
-                    }
-                }
+                if success { Task { await refreshGroups() } }
             }
         }
         .sheet(isPresented: $showingInvites) {
-            GroupInvitesView {
-                Task {
-                    await refreshGroups()
-                }
-            }
+            GroupInvitesView { Task { await refreshGroups() } }
         }
-        .background(
-            NavigationLink(
-                destination: selectedGroup.map { group in
-                    GroupDetailView(group: group)
-                        .navigationBarHidden(true)
-                        .onDisappear {
-                            Task {
-                                await refreshGroups()
-                            }
-                        }
-                },
-                isActive: Binding(
-                    get: { selectedGroup != nil },
-                    set: { if !$0 { selectedGroup = nil } }
-                )
-            ) {
-                EmptyView()
-            }
-        )
-        .confirmationDialog("Group Options", isPresented: .init(
-            get: { groupActionSheet != nil },
-            set: { if !$0 { groupActionSheet = nil } }
-        ), titleVisibility: .visible) {
-            if let group = groupActionSheet {
-                Button("View Details") {
-                    selectedGroup = group
+        // Confirmation Dialog
+        .confirmationDialog("Group Options", isPresented: .init(get: { groupActionSheet != nil }, set: { if !$0 { groupActionSheet = nil } }), titleVisibility: .visible) {
+            if let grp = groupActionSheet {
+                Button("View Details") { selectedGroupForDetail = grp }
+                Button("Invite Members") { selectedGroupForDetail = grp }
+                if grp.ownerId != Auth.auth().currentUser?.uid {
+                    Button("Leave Group", role: .destructive) { Task { await leaveGroup(group: grp) } }
                 }
-                
-                Button("Invite Members") {
-                    selectedGroup = group
-                }
-                
-                if group.ownerId != Auth.auth().currentUser?.uid {
-                    Button("Leave Group", role: .destructive) {
-                        Task {
-                            await leaveGroup(group: group)
-                        }
-                    }
-                }
-                
-                Button("Cancel", role: .cancel) {
-                    groupActionSheet = nil
-                }
+                Button("Cancel", role: .cancel) { groupActionSheet = nil }
             }
         }
         .onAppear {
             setupNotificationObserver()
-            
-            Task {
-                await refreshGroups()
-            }
+            Task { await refreshGroups() }
         }
         .onDisappear {
             NotificationCenter.default.removeObserver(self)
         }
         .navigationBarHidden(true)
-        .edgesIgnoringSafeArea(.top)
     }
     
     // Set up notification observer for group data changes
@@ -346,49 +312,56 @@ struct GroupCard: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14))
                     .foregroundColor(.gray)
+                    .padding(8)
             }
+            .buttonStyle(PlainButtonStyle())
             .padding(.leading, 4)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.vertical, 16)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap()
+        }
         .background(
             ZStack {
-                // Dark base for the glass effect
+                // More transparent, beautiful dark blue background
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(red: 25/255, green: 27/255, blue: 30/255))
+                    .fill(Color(red: 22/255, green: 26/255, blue: 38/255).opacity(0.75))
                 
-                // Subtle highlight overlay for the glass effect
+                // Enhanced glassy effect with subtle gradient
                 RoundedRectangle(cornerRadius: 16)
                     .fill(
                         LinearGradient(
                             gradient: Gradient(colors: [
                                 Color.white.opacity(0.08),
-                                Color.white.opacity(0.05),
-                                Color.white.opacity(0.02)
+                                Color.white.opacity(0.04),
+                                Color.white.opacity(0.01)
                             ]),
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                 
-                // Subtle gradient border
+                // Refined subtle border glow
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(
                         LinearGradient(
                             gradient: Gradient(colors: [
-                                Color.white.opacity(0.3),
+                                Color.white.opacity(0.25),
                                 Color.white.opacity(0.1),
+                                Color.white.opacity(0.05),
                                 Color.clear
                             ]),
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
-                        lineWidth: 1
+                        lineWidth: 0.8
                     )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+        .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 6)
         .offset(y: cardOffset)
         .opacity(cardOpacity)
         .onAppear {
@@ -1168,7 +1141,7 @@ struct GroupDetailView: View {
                     Spacer()
                     
                     Text(group.name)
-                        .font(.system(size: 18, weight: .bold, design: .default))
+                        .font(.system(size: 20, weight: .bold, design: .default))
                         .foregroundColor(.white)
                     
                     Spacer()
@@ -1179,11 +1152,11 @@ struct GroupDetailView: View {
                         .frame(width: 32, height: 32)
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 16) // Add extra padding at top for status bar
+                .padding(.top, 50)
                 .padding(.bottom, 12)
             
-                // Group info header
-                VStack(spacing: 16) {
+                // Header section with avatar and basic info side-by-side
+                HStack(alignment: .center, spacing: 22) {
                     // Group avatar with edit capability
                     ZStack {
                         Circle()
@@ -1206,7 +1179,7 @@ struct GroupDetailView: View {
                                         .clipShape(Circle())
                                 } else if phase.error != nil {
                                     Image(systemName: "person.3.fill")
-                                        .font(.system(size: 40, design: .default))
+                                        .font(.system(size: 40, weight: .medium, design: .default))
                                         .foregroundColor(.gray)
                                 } else {
                                     ProgressView()
@@ -1216,7 +1189,7 @@ struct GroupDetailView: View {
                             }
                         } else {
                             Image(systemName: "person.3.fill")
-                                .font(.system(size: 40, design: .default))
+                                .font(.system(size: 40, weight: .medium, design: .default))
                                 .foregroundColor(.gray)
                         }
                         
@@ -1226,10 +1199,10 @@ struct GroupDetailView: View {
                                 ZStack {
                                     Circle()
                                         .fill(Color(red: 40/255, green: 40/255, blue: 45/255))
-                                        .frame(width: 32, height: 32)
+                                        .frame(width: 28, height: 28)
                                     
                                     Image(systemName: "camera.fill")
-                                        .font(.system(size: 14, design: .default))
+                                        .font(.system(size: 12, weight: .medium, design: .default))
                                         .foregroundColor(.white)
                                 }
                                 .overlay(
@@ -1240,7 +1213,7 @@ struct GroupDetailView: View {
                             .onChange(of: imagePickerItem) { newItem in
                                 loadTransferableImage(from: newItem)
                             }
-                            .position(x: 75, y: 75)
+                            .offset(x: 36, y: 36)
                         }
                         
                         // Show loading indicator when uploading
@@ -1257,31 +1230,32 @@ struct GroupDetailView: View {
                         }
                     }
                     
-                    Group {
+                    // Basic text info
+                    VStack(alignment: .leading, spacing: 10) {
                         Text(group.name)
+                            .font(.system(size: 24, weight: .bold, design: .default))
                             .foregroundColor(.white)
-                    }
-                    .font(.system(size: 24, weight: .bold))
-                    
-                    if let description = group.description, !description.isEmpty {
-                        Text(description)
-                            .font(.system(size: 16, design: .default))
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                    }
-                    
-                    HStack {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 14, design: .default))
-                            .foregroundColor(.gray)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if let description = group.description, !description.isEmpty {
+                            Text(description)
+                                .font(.system(size: 16, weight: .medium, design: .default))
+                                .foregroundColor(.white)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         
-                        Text("\(group.memberCount) member\(group.memberCount != 1 ? "s" : "")")
-                            .font(.system(size: 14, design: .default))
-                            .foregroundColor(.gray)
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 14, weight: .medium, design: .default))
+                                .foregroundColor(.gray)
+                            Text("\(group.memberCount) member\(group.memberCount != 1 ? "s" : "")")
+                                .font(.system(size: 14, weight: .medium, design: .default))
+                                .foregroundColor(.gray)
+                        }
                     }
                 }
-                .padding(.top, 12)
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
                 .padding(.bottom, 16)
                 
                 // Tab selector
@@ -1303,7 +1277,7 @@ struct GroupDetailView: View {
                 .background(Color(red: 30/255, green: 30/255, blue: 35/255))
                 .cornerRadius(10)
                 .padding(.horizontal, 24)
-                .padding(.bottom, 16)
+                .padding(.bottom, 20)
                 
                 // Content based on selected tab
                 ScrollView {
@@ -1477,16 +1451,18 @@ struct GroupInfoView: View {
             // Group Details section
             VStack(alignment: .leading, spacing: 8) {
                 Text("Group Details")
-                    .font(.system(size: 18, weight: .semibold, design: .default))
+                    .font(.system(size: 20, weight: .bold, design: .default))
                     .foregroundColor(.white)
                     .padding(.horizontal, 16)
                 
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text("Created")
+                            .font(.system(size: 16, weight: .medium, design: .default))
                             .foregroundColor(.gray)
                         Spacer()
                         Text(formattedDate(group.createdAt))
+                            .font(.system(size: 16, weight: .semibold, design: .default))
                             .foregroundColor(.white)
                     }
                     
@@ -1495,9 +1471,11 @@ struct GroupInfoView: View {
                     
                     HStack {
                         Text("Members")
+                            .font(.system(size: 16, weight: .medium, design: .default))
                             .foregroundColor(.gray)
                         Spacer()
                         Text("\(group.memberCount)")
+                            .font(.system(size: 16, weight: .semibold, design: .default))
                             .foregroundColor(.white)
                     }
                 }
@@ -1510,13 +1488,13 @@ struct GroupInfoView: View {
             if let description = group.description, !description.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("About")
-                        .font(.system(size: 18, weight: .semibold, design: .default))
+                        .font(.system(size: 20, weight: .bold, design: .default))
                         .foregroundColor(.white)
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                     
                     Text(description)
-                        .font(.system(size: 16, design: .default))
+                        .font(.system(size: 16, weight: .medium, design: .default))
                         .foregroundColor(.white)
                         .padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1528,7 +1506,7 @@ struct GroupInfoView: View {
             
             Spacer()
         }
-        .padding(.top, 16) // Add padding from the top
+        .padding(.top, 8) // Add padding from the top
     }
     
     private func formattedDate(_ date: Date) -> String {
@@ -1669,7 +1647,7 @@ struct InviteView: View {
     @State private var keyboardHeight: CGFloat = 0
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 24) {
             Text("Invite Members")
                 .font(.system(size: 18, weight: .semibold, design: .default))
                 .foregroundColor(.white)
@@ -1680,9 +1658,10 @@ struct InviteView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ZStack(alignment: .trailing) {
                     TextField("Search users...", text: $searchText)
-                        .padding()
+                        .padding(.vertical, 14)
+                        .padding(.horizontal, 16)
                         .background(Color(red: 40/255, green: 40/255, blue: 45/255))
-                        .cornerRadius(10)
+                        .cornerRadius(12)
                         .foregroundColor(.white)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
@@ -1779,7 +1758,7 @@ struct InviteView: View {
                         }
                     }
                     .background(Color(red: 30/255, green: 30/255, blue: 35/255))
-                    .frame(maxHeight: 200)
+                    .frame(maxHeight: 300)
                     .cornerRadius(10)
                     .padding(.top, 4)
                 }
@@ -1801,7 +1780,7 @@ struct InviteView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.vertical, 15)
+            .padding(.vertical, 18)
             .background(
                 selectedUser == nil || isInviting
                     ? Color(red: 123/255, green: 255/255, blue: 99/255)
@@ -1848,10 +1827,10 @@ struct GroupTabButton: View {
     var body: some View {
         Button(action: action) {
             Text(text)
-                .font(.system(size: 15, weight: isSelected ? .semibold : .regular, design: .default))
+                .font(.system(size: 16, weight: isSelected ? .bold : .medium, design: .default))
                 .foregroundColor(isSelected ? .white : .gray)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, 14)
                 .background(isSelected ? Color(red: 40/255, green: 40/255, blue: 45/255) : Color.clear)
                 .cornerRadius(8)
         }

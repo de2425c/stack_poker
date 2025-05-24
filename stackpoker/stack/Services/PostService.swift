@@ -82,15 +82,25 @@ class PostService: ObservableObject {
         }
         
         // Add current user ID to include their posts in the feed
-        var userIds = [currentUserId]
+        var userIds: Set<String> = [currentUserId]
         
-        let snapshot = try await db.collection("users").document(currentUserId).collection("following").getDocuments()
-        
-        for document in snapshot.documents {
-            userIds.append(document.documentID)
+        // --- Legacy sub-collection (still in use by some parts of the app) ---
+        let legacySnapshot = try await db.collection("users").document(currentUserId).collection("following").getDocuments()
+        for document in legacySnapshot.documents {
+            userIds.insert(document.documentID)
         }
         
-        return userIds
+        // --- New shared collection ---
+        let newSnapshot = try await db.collection("userFollows")
+            .whereField("followerId", isEqualTo: currentUserId)
+            .getDocuments()
+        for document in newSnapshot.documents {
+            if let followeeId = document.data()["followeeId"] as? String {
+                userIds.insert(followeeId)
+            }
+        }
+        
+        return Array(userIds)
     }
     
     func fetchPosts() async throws {

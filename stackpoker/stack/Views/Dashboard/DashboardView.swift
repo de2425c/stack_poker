@@ -801,125 +801,10 @@ struct ChartArea: View {
 }
 
 // MARK: - Hands Tab
-struct HandsTab: View {
-    @ObservedObject var handStore: HandStore
-    
-    // Group hands by time periods
-    private var groupedHands: (today: [SavedHand], lastWeek: [SavedHand], older: [SavedHand]) {
-        let calendar = Calendar.current
-        let now = Date()
-        let startOfToday = calendar.startOfDay(for: now)
-        let oneWeekAgo = calendar.date(byAdding: .day, value: -7, to: startOfToday)!
-        
-        var today: [SavedHand] = []
-        var lastWeek: [SavedHand] = []
-        var older: [SavedHand] = []
-        
-                for hand in handStore.savedHands {
-            if calendar.isDate(hand.timestamp, inSameDayAs: now) {
-                today.append(hand)
-            } else if hand.timestamp >= oneWeekAgo && hand.timestamp < startOfToday {
-                lastWeek.append(hand)
-            } else {
-                older.append(hand)
-            }
-        }
-        
-        return (today, lastWeek, older)
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                // Add top padding
-                Spacer()
-                    .frame(height: 16)
-                
-                LazyVStack(spacing: 16) {
-                    // Today's hands
-                    if !groupedHands.today.isEmpty {
-                        HandListSection(title: "Today", hands: groupedHands.today)
-                    }
-                    
-                    // Last week's hands
-                    if !groupedHands.lastWeek.isEmpty {
-                        HandListSection(title: "Last Week", hands: groupedHands.lastWeek)
-                    }
-                    
-                    // Older hands
-                    if !groupedHands.older.isEmpty {
-                        HandListSection(title: "All Time", hands: groupedHands.older)
-                    }
-                    
-                    // Empty state
-                    if handStore.savedHands.isEmpty {
-                        VStack(spacing: 16) {
-                            Image(systemName: "doc.text")
-                                .font(.system(size: 60))
-                                .foregroundColor(.gray)
-                                .padding(.top, 40)
-                            
-                            Text("No Hands Recorded")
-                                .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
-                            
-                            Text("Your hand histories will appear here")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(32)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 16)
-            }
-        }
-    }
-}
+
 
 // Section header with hands
-struct HandListSection: View {
-    let title: String
-    let hands: [SavedHand]
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Section header
-            HStack(alignment: .center) {
-                Text(title)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(Color.gray.opacity(0.85)) // Changed to greyish color
-                
-                Spacer()
-                
-                Text("\(hands.count) hands")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(Color.gray.opacity(0.7))
-            }
-            .padding(.horizontal, 4)
-            
-            // Hands in this section - keep original cards
-            VStack(spacing: 12) {
-                ForEach(hands) { savedHand in
-                    HandDisplayCardView(hand: savedHand.hand, 
-                                        onReplayTap: {
-                                            // Add action to show HandReplayView, likely involving a @State variable
-                                            // For now, this is a placeholder action
-                                            print("Replay tapped for hand ID: \(savedHand.id)")
-                                        },
-                                        location: savedHand.hand.raw.gameInfo.tableSize > 2 ? "Live Game" : "Online Game", // Example: derive from table size or pass nil
-                                        createdAt: savedHand.timestamp)
-                    .background(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                    .cornerRadius(12)
-                    .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
-                }
-            }
-        }
-        .padding(.vertical, 12)
-    }
-}
+
 
 // MARK: - Update HandSummaryRow
 struct HandSummaryRow: View {
@@ -1153,15 +1038,13 @@ struct SessionsTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) { // Root VStack of SessionsTab
             // Calendar toggle button
             HStack {
                 Button(action: {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                         showCalendarView.toggle()
-                        // Reset animation state when toggling
                         calendarAppearAnimation = false
-                        // Delayed animation for when showing
                         if showCalendarView {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                                 withAnimation(.easeOut(duration: 0.6)) {
@@ -1173,7 +1056,7 @@ struct SessionsTab: View {
                 }) {
                     HStack(spacing: 8) {
                         Image(systemName: "calendar")
-                    .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 16, weight: .medium))
                             .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                         
                         Text(showCalendarView ? "Hide Calendar" : "Show Calendar")
@@ -1185,24 +1068,31 @@ struct SessionsTab: View {
                         Image(systemName: showCalendarView ? "chevron.up" : "chevron.down")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.7)))
-                            .rotationEffect(Angle(degrees: showCalendarView ? 0 : -90))
+                            .rotationEffect(Angle(degrees: showCalendarView ? 0 : 0)) // Keep chevron always pointing down or based on actual state
                             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showCalendarView)
                     }
                     .padding(.vertical, 12)
                     .padding(.horizontal, 16)
                     .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 0.7)))
-                            .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
+                        ZStack { // Applying GlassyInputField style
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Material.ultraThinMaterial)
+                                .opacity(0.2) // materialOpacity from GlassyInputField
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.white.opacity(0.01)) // glassOpacity from GlassyInputField
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
+                        }
                     )
+                    // .shadow(color: Color.black.opacity(0.1), radius: 3, y: 1) // Remove or make very subtle if needed
                 }
                 .buttonStyle(ScalePressButtonStyle())
                 
                 Spacer()
             }
             .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 4)
+            // .padding(.top, 16) // Remove this, top padding will be on the root VStack
+            .padding(.bottom, 8)
             
         ScrollView {
                 VStack(spacing: 22) {
@@ -1224,7 +1114,6 @@ struct SessionsTab: View {
                             )
                         )
                         .onAppear {
-                            // Trigger animation when view appears
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                                 withAnimation(.easeOut(duration: 0.6)) {
                                     calendarAppearAnimation = true
@@ -1295,9 +1184,16 @@ struct SessionsTab: View {
                         }
                         .padding(.vertical, 8)
                         .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 0.6)))
-                                .shadow(color: Color.black.opacity(0.15), radius: 8, y: 4)
+                            ZStack { // Applying GlassyInputField style
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Material.ultraThinMaterial)
+                                    .opacity(0.2)
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.white.opacity(0.01))
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
+                            }
+                            // .shadow(color: Color.black.opacity(0.1), radius: 5, y: 2) // Remove or make very subtle
                         )
                         .padding(.horizontal, 16)
                         .transition(.asymmetric(
@@ -1353,7 +1249,9 @@ struct SessionsTab: View {
                 }
                 .padding(.bottom, 16)
             }
+            // .padding(.top, 40) // Remove this, top padding applied to root VStack
         }
+        .padding(.top, 50) // Apply 50 points of top padding to the root VStack of SessionsTab
         .alert(isPresented: $showingDeleteAlert) {
             Alert(
                 title: Text("Delete Session"),
@@ -1574,9 +1472,9 @@ struct LuxuryCalendarView: View {
                         .animation(.easeInOut(duration: 0.3), value: isChangingMonth)
                 }
                 
-                Spacer()
+                // Removed Spacer() here to let arrow buttons group naturally at the end
                 
-                HStack(spacing: 12) {
+                HStack(spacing: 18) { // Slightly increased spacing for arrows if needed
                     // Previous month button
                     Button(action: {
                         hapticFeedback(style: .light)
@@ -1604,13 +1502,11 @@ struct LuxuryCalendarView: View {
                         }
                     }) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 17, weight: .semibold)) // Slightly larger/bolder
                             .foregroundColor(.white.opacity(0.8))
-                            .frame(width: 28, height: 28)
-                            .background(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)))
-                            .clipShape(Circle())
+                            // Removed .frame, .background, .clipShape for a minimal look
                     }
-                    .buttonStyle(ScalePressButtonStyle())
+                    .buttonStyle(ScalePressButtonStyle()) // Keep for tap feedback
                     
                     // Next month button
                     Button(action: {
@@ -1639,33 +1535,31 @@ struct LuxuryCalendarView: View {
                         }
                     }) {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 17, weight: .semibold)) // Slightly larger/bolder
                             .foregroundColor(.white.opacity(0.8))
-                            .frame(width: 28, height: 28)
-                            .background(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)))
-                            .clipShape(Circle())
+                            // Removed .frame, .background, .clipShape for a minimal look
                     }
-                    .buttonStyle(ScalePressButtonStyle())
+                    .buttonStyle(ScalePressButtonStyle()) // Keep for tap feedback
                 }
                 .opacity(isAnimated ? 1 : 0)
                 .animation(.easeOut(duration: 0.4).delay(0.15), value: isAnimated)
             }
             .padding(.horizontal, 8)
             
-            VStack(spacing: 12) {
+            VStack(spacing: 10) { // Adjusted spacing for weekday symbols
                 // Days of the week header
                 HStack(spacing: 0) {
                     ForEach(weekdaySymbols, id: \.1) { day in
                         Text(day.0)
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundColor(Color.gray.opacity(0.7))
+                            .font(.system(size: 11, weight: .medium, design: .rounded)) // Slightly adjusted font
+                            .foregroundColor(Color.gray.opacity(0.75)) // Ensured good contrast
                             .frame(maxWidth: .infinity)
                             .opacity(isAnimated ? 1 : 0)
                             .animation(.easeOut(duration: 0.3).delay(0.2), value: isAnimated)
                     }
                 }
                 
-                // Calendar grid with staggered animation - FIX THE ERROR HERE
+                // Calendar grid with staggered animation
                 LazyVGrid(columns: columns, spacing: 6) { // Reduced spacing
                     ForEach(Array(0..<daysInMonth().count), id: \.self) { index in
                         if let date = daysInMonth()[index] {
@@ -1712,9 +1606,16 @@ struct LuxuryCalendarView: View {
         }
         .padding(16) // Reduced padding
         .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 1.0)))
-                .shadow(color: Color.black.opacity(0.15), radius: 10, y: 5)
+            ZStack { // Applying GlassyInputField style to calendar background
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(0.2)
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.white.opacity(0.01))
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
+            }
+            // .shadow(color: Color.black.opacity(0.1), radius: 5, y: 2) // Remove or make very subtle
         )
             .onAppear {
             // Initialize animation state
@@ -1816,53 +1717,65 @@ struct MinimalistCalendarCell: View {
     
     // Determine cell background color based on state and profit
     private var cellColor: Color {
+        // Cells will be mostly transparent; color cues come from text/indicators
+        return Color.clear // Base background is clear
+    }
+
+    private var dayForegroundColor: Color {
         if isSelected {
-            return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.3))
+            return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+        } else if isToday {
+            return .white
         } else if hasSession {
-            if dailyProfit > 0 {
-                return Color(UIColor(red: 22/255, green: 45/255, blue: 30/255, alpha: 0.7))
-            } else {
-                return Color(UIColor(red: 45/255, green: 22/255, blue: 22/255, alpha: 0.7))
-            }
-        } else {
-            return Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 0.5))
+            return .white.opacity(0.85)
         }
+        return .gray.opacity(0.6)
+    }
+
+    private var profitIndicatorColor: Color? {
+        guard hasSession else { return nil }
+        if dailyProfit > 0 {
+            return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+        } else if dailyProfit < 0 {
+            return .red
+        }
+        return Color.gray.opacity(0.7) // Neutral for break-even sessions
     }
     
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 3) { // Reduced spacing
             // Day number
             Text(dayNumber)
-                .font(.system(size: 12, weight: isSelected ? .bold : .medium, design: .rounded))
-                .foregroundColor(isSelected ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white)
-                .fixedSize(horizontal: true, vertical: false) // Prevent truncation
+                .font(.system(size: 13, weight: isSelected ? .bold : (isToday ? .semibold : .medium), design: .rounded))
+                .foregroundColor(dayForegroundColor)
+                .fixedSize(horizontal: true, vertical: false)
                 .frame(maxWidth: .infinity)
             
-            // Profit indicator (if has session)
-            if hasSession {
-                Text(formatAmount(dailyProfit))
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .foregroundColor(
-                        dailyProfit > 0 ? 
-                            Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
-                            Color.red
-                    )
-                    .fixedSize(horizontal: true, vertical: false) // Prevent truncation
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(1)
+            // Profit indicator (dot below the number)
+            if let indicatorColor = profitIndicatorColor {
+                Circle()
+                    .fill(indicatorColor)
+                    .frame(width: 5, height: 5)
+                    .padding(.top, 1) // Small padding to separate from number
+            } else {
+                // Placeholder to keep height consistent if no session
+                Circle().fill(Color.clear).frame(width: 5, height: 5).padding(.top, 1)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
-        .background(cellColor)
+        .frame(maxWidth: .infinity, minHeight: 40) // Ensure a minimum tap area and consistent height
+        .padding(.vertical, 6) // Adjusted padding
+        .background(cellColor) // cellColor is now mostly Color.clear
         .cornerRadius(8)
         .overlay(
-            Group {
-                if isToday {
+            ZStack {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.7)), lineWidth: 1.5)
+                } else if isToday {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(
-                            Color.white.opacity(0.2),
-                            style: StrokeStyle(lineWidth: 1, dash: [])
+                            Color.white.opacity(0.3),
+                            style: StrokeStyle(lineWidth: 1, dash: [3]) // Dashed line for today
                         )
                 }
             }
@@ -1870,8 +1783,7 @@ struct MinimalistCalendarCell: View {
         .scaleEffect(isAnimated ? 1.0 : 0.8)
         .opacity(isAnimated ? 1.0 : 0)
         .animation(.spring(response: 0.4, dampingFraction: 0.7).delay(0.1 + animationDelay), value: isAnimated)
-        // Add subtle hover effect for interactive feel
-        .scaleEffect(isSelected ? 1.05 : 1.0)
+        .scaleEffect(isSelected ? 1.03 : 1.0) // Keep subtle selection scale
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
     }
 }
@@ -1940,10 +1852,17 @@ struct EnhancedSessionSummaryRow: View {
             .padding(.vertical, 12)
         }
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 1.0)))
+            ZStack { // Applying GlassyInputField style to session rows
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(0.2)
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.01))
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
+            }
         )
-        .contentShape(Rectangle()) // Make entire row tappable
+        .contentShape(Rectangle()) 
         .onTapGesture {
             hapticFeedback(style: .light)
             onSelect()
@@ -1986,7 +1905,7 @@ struct LuxuryFormField: View {
                 
                 Text(title)
                     .font(.system(size: 16, weight: .medium, design: .rounded))
-                    .foregroundColor(.gray)
+                 .foregroundColor(.gray)
             }
             
             // Input field

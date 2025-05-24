@@ -36,27 +36,23 @@ struct TransparentNavigationView<Content: View>: UIViewControllerRepresentable {
 struct ProfileView: View {
     let userId: String
     @EnvironmentObject private var userService: UserService
-    @StateObject private var sessionStore: SessionStore // Keep for analytics data
-    @StateObject private var handStore: HandStore     // Keep for analytics data
-    @EnvironmentObject private var postService: PostService // Added for recent activity
-    @State private var showEdit = false // State for showing edit profile sheet
-    @State private var showSettings = false // State for showing settings sheet
-    @State private var selectedPostForNavigation: Post? = nil // For programmatic post navigation
-    @State private var showingPostDetailSheet: Bool = false // For showing post detail sheet
-    @State private var showingFollowersSheet: Bool = false // New: For showing followers sheet
-    @State private var showingFollowingSheet: Bool = false // New: For showing following sheet
+    @StateObject private var sessionStore: SessionStore
+    @StateObject private var handStore: HandStore
+    @EnvironmentObject private var postService: PostService
+    @State private var showEdit = false
+    @State private var showSettings = false
+    @State private var selectedPostForNavigation: Post? = nil
+    // @State private var showingPostDetailSheet: Bool = false // Kept if ActivityContentView still uses it, but focus is on NavigationLink
     
-    // Changed to reflect the new tab structure under profile
-    @State private var selectedTab: ProfileTab = .activity
+    // State for full-screen card views
+    @State private var showActivityDetailView = false
+    @State private var showAnalyticsDetailView = false
+    @State private var showHandsDetailView = false
+    @State private var showSessionsDetailView = false
+    
+    // Analytics specific state (remains for analyticsDetailContent)
     @State private var selectedTimeRange = 1 // Default to 1W (index 1) for Analytics
-    private let timeRanges = ["24H", "1W", "1M", "6M", "1Y", "All"]
-    
-    private let tabItems: [(title: String, tab: ProfileTab)] = [
-        (title: "Recent", tab: .activity),
-        (title: "Analytics", tab: .analytics),
-        (title: "Hands", tab: .hands),
-        (title: "Sessions", tab: .sessions)
-    ]
+    private let timeRanges = ["24H", "1W", "1M", "6M", "1Y", "All"] // Used by analyticsDetailContent
     
     init(userId: String) {
         self.userId = userId
@@ -64,140 +60,127 @@ struct ProfileView: View {
         _handStore = StateObject(wrappedValue: HandStore(userId: userId))
     }
     
-    // Changed from ProfileViewType to ProfileTab to better reflect the new structure
-    enum ProfileTab {
-        case activity
-        case analytics
-        case hands
-        case sessions
-    }
+    // Removed ProfileTab enum and tabItems
     
     var body: some View {
-        let selectedTabGreen = Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
-        let deselectedTabGray = Color.white.opacity(0.7)
-        let clearColor = Color.clear
+        // let selectedTabGreen = Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+        // let deselectedTabGray = Color.white.opacity(0.7)
+        // let clearColor = Color.clear
 
         ZStack {
             AppBackgroundView()
                 .ignoresSafeArea()
             
-            Group {
-                VStack(spacing: 0) {
-                    // Top bar with title and settings button
-                    HStack {
-                        Text("Profile")
-                            .font(.system(size: 24, weight: .bold))
+            VStack(spacing: 0) {
+                // Top bar with title and settings button
+                HStack {
+                    Text("Profile")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        showSettings = true
+                    }) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 20))
                             .foregroundColor(.white)
-                        
-                        Spacer()
-                        
-                        Button(action: {
-                            showSettings = true
-                        }) {
-                            Image(systemName: "gearshape.fill")
-                                .font(.system(size: 20))
-                                .foregroundColor(.white)
-                                .padding(10)
-                                .background(Color.black.opacity(0.3))
-                                .clipShape(Circle())
-                        }
+                            .padding(10)
+                            .background(Color.black.opacity(0.3))
+                            .clipShape(Circle())
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    .padding(.bottom, 16)
-                    
-                    // Profile Card - Always visible
-                    ProfileCardView(
-                        userId: userId,
-                        showEdit: $showEdit,
-                        showingFollowersSheet: $showingFollowersSheet,
-                        showingFollowingSheet: $showingFollowingSheet
-                    )
-                    .padding(.horizontal, 16)
-                    
-                    // Tab bar under profile card
-                    HStack(spacing: 0) {
-                        ForEach(tabItems, id: \.tab) { item in
-                            self.makeTabButton(
-                                title: item.title,
-                                representingTab: item.tab,
-                                selectedColor: selectedTabGreen,
-                                deselectedColor: deselectedTabGray,
-                                indicatorClearColor: clearColor
-                            )
-                        }
-                    }
-                    .padding(.top, 20)
-                    .padding(.bottom, 10)
-                    .background(
-                Rectangle()
-                            .fill(Color.clear)
-                    .frame(height: 1)
-                    )
-                    
-                    // Invisible NavigationLink for programmatic post navigation
-                    // Placed here to be part of the main VStack and ScrollView hierarchy
-                    if let postToNavigate = selectedPostForNavigation {
-                        NavigationLink(
-                            destination: PostDetailView(post: postToNavigate, userId: userId),
-                            isActive: Binding<Bool>(
-                               get: { selectedPostForNavigation?.id == postToNavigate.id },
-                               set: { if !$0 { selectedPostForNavigation = nil } }
-                            ),
-                            label: { EmptyView() }
-                        )
-                        .hidden()
-                        .frame(width: 0, height: 0) // Ensure it takes no space and is not focusable
-                    }
-
-                    // Content based on selected tab handled by helper
-                    tabContent()
                 }
-            }
-        }
-        .onChange(of: selectedTab) { newTab in
-            if newTab == .activity {
-                print("[ProfileView.onChange] Activity tab selected. Checking if posts need fetching for userId: \(userId).")
-                print("[ProfileView.onChange] Current postService.posts count: \(postService.posts.count)")
-                if let firstPostUserId = postService.posts.first?.userId {
-                    print("[ProfileView.onChange] First post in service is for userId: \(firstPostUserId)")
-                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+                .padding(.top, 20) // Added top padding specifically to this HStack
                 
-                if postService.posts.isEmpty || postService.posts.first?.userId != userId {
-                    Task {
-                        print("[ProfileView.onChange] Condition met. Fetching posts for userId: \(userId). Current post count: \(postService.posts.count)")
-                        do {
-                            try await postService.fetchPosts(forUserId: userId)
-                            print("[ProfileView.onChange] Post fetching completed. New postService.posts count: \(postService.posts.count)")
-                        } catch {
-                            print("[ProfileView.onChange] Error fetching posts for userId \(userId): \(error)")
+                // Profile Card - Always visible
+                ProfileCardView(
+                    userId: userId,
+                    showEdit: $showEdit,
+                    showingFollowersSheet: $showingFollowersSheet, // These bindings need to be declared
+                    showingFollowingSheet: $showingFollowingSheet  // These bindings need to be declared
+                )
+                .padding(.horizontal, 16)
+                .padding(.bottom, 20) // Add some space before cards
+                
+                // Invisible NavigationLink for programmatic post navigation (if needed at this level)
+                // This was for the old tab structure. ActivityContentView now handles its navigation internally
+                // when wrapped in NavigationView.
+                if let postToNavigate = selectedPostForNavigation {
+                    NavigationLink(
+                        destination: PostDetailView(post: postToNavigate, userId: userId),
+                        isActive: Binding<Bool>(
+                           get: { selectedPostForNavigation?.id == postToNavigate.id },
+                           set: { if !$0 { selectedPostForNavigation = nil } }
+                        ),
+                        label: { EmptyView() }
+                    )
+                    .hidden()
+                    .frame(width: 0, height: 0)
+                }
+
+                // ScrollView for Navigation Cards
+                ScrollView {
+                    VStack(spacing: 16) {
+                        // Recent Activity Card
+                        navigationCard(
+                            title: "Recent Activity",
+                            iconName: "list.bullet.below.rectangle",
+                            baseColor: Color.blue, 
+                            action: { showActivityDetailView = true }
+                        ) {
+                            Text("View your latest posts and interactions.")
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+
+                        // Analytics Card
+                        navigationCard(
+                            title: "Analytics",
+                            iconName: "chart.bar.xaxis",
+                            baseColor: Color.green, 
+                            action: { showAnalyticsDetailView = true }
+                        ) {
+                            Text("Track your performance stats.")
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+
+                        // Hands Card
+                        navigationCard(
+                            title: "Hands (\(handStore.savedHands.count))",
+                            iconName: "suit.spade.fill",
+                            baseColor: Color.purple, 
+                            action: { showHandsDetailView = true }
+                        ) {
+                             Text("Review your logged poker hands.")
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                        
+                        // Sessions Card
+                        navigationCard(
+                            title: "Sessions (\(totalSessions))",
+                            iconName: "list.star",
+                            baseColor: Color.orange, 
+                            action: { showSessionsDetailView = true }
+                        ) {
+                            Text("Manage and analyze your game sessions.")
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.85))
                         }
                     }
-                } else {
-                    print("[ProfileView.onChange] Posts already loaded for userId: \(userId) or service has other posts. Count: \(postService.posts.count)")
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 30) // For tab bar space
+                    .padding(.top, 3) // Added 3 points of top padding to the VStack of cards
                 }
-            } else if newTab == .sessions {
-                print("[ProfileView.onChange] Sessions tab selected. Checking if sessions need fetching for userId: \(userId).")
-                print("[ProfileView.onChange] Current sessionStore.sessions count: \(sessionStore.sessions.count)")
-                if sessionStore.sessions.isEmpty { 
-                     Task {
-                         print("[ProfileView.onChange] Condition met. Fetching sessions for userId: \(userId).")
-                         sessionStore.fetchSessions() // This is synchronous, updates will publish
-                         print("[ProfileView.onChange] sessionStore.fetchSessions() called. New count: \(sessionStore.sessions.count)") // Note: fetchSessions itself is async internally with listeners
-                     }
-                }
-            } else if newTab == .analytics {
-                print("[ProfileView.onChange] Analytics tab selected. Checking if sessions need fetching for userId: \(userId).")
-                print("[ProfileView.onChange] Current sessionStore.sessions count: \(sessionStore.sessions.count)")
-                 if sessionStore.sessions.isEmpty { 
-                     Task {
-                         print("[ProfileView] Fetching sessions for Analytics tab, userId: \(userId)")
-                         sessionStore.fetchSessions()
-                     }
-                 }
             }
+            .padding(.top, 20) // Added top padding to the main VStack
         }
-        .sheet(isPresented: $showEdit) { 
+        // Removed .onChange(of: selectedTab)
+        .sheet(isPresented: $showEdit) {
             if let profile = userService.currentUserProfile {
                 ProfileEditView(profile: profile) { updatedProfile in
                     Task { try? await userService.fetchUserProfile() }
@@ -207,72 +190,166 @@ struct ProfileView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(userId: userId)
         }
-        .sheet(isPresented: $showingPostDetailSheet) {
-            if let post = selectedPostForNavigation {
-                PostDetailView(post: post, userId: userId)
-            }
-        }
-        .sheet(isPresented: $showingFollowersSheet) {
+        // .sheet(isPresented: $showingPostDetailSheet) // This was for PostDetailView, now handled by NavigationLink in ActivityContentView
+        .sheet(isPresented: $showingFollowersSheet) { // Ensure these are declared
             FollowListView(userId: userId, listType: .followers)
         }
-        .sheet(isPresented: $showingFollowingSheet) {
+        .sheet(isPresented: $showingFollowingSheet) { // Ensure these are declared
             FollowListView(userId: userId, listType: .following)
         }
-        .navigationBarHidden(true)
-        .environmentObject(userService) 
-        .environmentObject(postService)
-        .environmentObject(sessionStore) 
-        .environmentObject(handStore)
-        .onAppear {
-            // Fetch user profile on appear
-            if userService.currentUserProfile == nil {
-                Task {
-                    try? await userService.fetchUserProfile()
-                }
+        .fullScreenCover(isPresented: $showActivityDetailView) {
+            NavigationView {
+                ActivityContentViewWrapper(
+                    userId: userId,
+                    selectedPostForNavigation: $selectedPostForNavigation
+                )
+                .toolbar { ToolbarItem(placement: .navigationBarLeading) { 
+                    Button(action: { showActivityDetailView = false }) {
+                        Image(systemName: "chevron.backward")
+                            .foregroundColor(.white) // Ensure visibility on dark backgrounds
+                    }
+                } }
             }
-            // Initial fetch for posts if the default tab is .activity
-            if selectedTab == .activity {
-                print("[ProfileView.onAppear] Initial tab is .activity. Fetching posts for userId: \(userId).")
-                // Ensure we are calling the correct fetchPosts that updates ActivityContentView's source (postService.posts)
-                Task {
-                    do {
-                        // This fetch should update postService.posts, which ActivityContentView observes
-                        try await postService.fetchPosts(forUserId: userId) 
-                        print("[ProfileView.onAppear] Initial post fetch completed. Post count in service: \(postService.posts.count)")
-                    } catch {
-                        print("[ProfileView.onAppear] Error in initial post fetch: \(error)")
+            .environmentObject(userService)
+            .environmentObject(postService)
+        }
+        .fullScreenCover(isPresented: $showAnalyticsDetailView) {
+            NavigationView {
+                analyticsDetailContent()
+                    .navigationBarTitle("Analytics", displayMode: .inline)
+                    .toolbar { ToolbarItem(placement: .navigationBarLeading) { 
+                        Button(action: { showAnalyticsDetailView = false }) {
+                            Image(systemName: "chevron.backward")
+                                .foregroundColor(.white) // Ensure visibility
+                        }
+                    } }
+            }
+            .environmentObject(sessionStore)
+            .environmentObject(userService) // Pass userService if analyticsDetailContent might need it
+        }
+        .fullScreenCover(isPresented: $showHandsDetailView) {
+            NavigationView {
+                ZStack {
+                    AppBackgroundView().ignoresSafeArea()
+                    HandsTab(handStore: handStore)
+                }
+                .navigationTitle("Hands")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(action: { showHandsDetailView = false }) {
+                            Image(systemName: "chevron.backward")
+                                .foregroundColor(.white) // Ensure visibility
+                        }
                     }
                 }
             }
+            .environmentObject(handStore)
+            .environmentObject(userService) // HandsTab might need user context
+        }
+        .fullScreenCover(isPresented: $showSessionsDetailView) {
+            NavigationView {
+                ZStack {
+                    AppBackgroundView().ignoresSafeArea()
+                    SessionsTab(sessionStore: sessionStore)
+                }
+                .navigationTitle("Sessions")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(action: { showSessionsDetailView = false }) {
+                            Image(systemName: "chevron.backward")
+                                .foregroundColor(.white) // Ensure visibility
+                        }
+                    }
+                }
+            }
+            .environmentObject(sessionStore)
+            .environmentObject(userService) // SessionsTab might need user context
+        }
+        .navigationBarHidden(true)
+        .environmentObject(userService)
+        .environmentObject(postService)
+        .environmentObject(sessionStore)
+        .environmentObject(handStore)
+        .onAppear {
+            if userService.currentUserProfile == nil {
+                Task { try? await userService.fetchUserProfile() }
+            }
+            // Fetch posts for Activity
+            Task {
+                print("[ProfileView.onAppear] Checking if posts need fetching for userId: \(userId).")
+                // Fetch if posts are for a different user or empty
+                if postService.posts.isEmpty || postService.posts.first?.userId != userId {
+                    print("[ProfileView.onAppear] Fetching posts for userId: \(userId).")
+                    try await postService.fetchPosts(forUserId: userId)
+                    print("[ProfileView.onAppear] Post fetch completed. Count: \(postService.posts.count)")
+                } else {
+                    print("[ProfileView.onAppear] Posts already loaded for userId: \(userId). Count: \(postService.posts.count)")
+                }
+            }
+            // Fetch sessions for Analytics & Sessions cards/views
+            if sessionStore.sessions.isEmpty {
+                print("[ProfileView.onAppear] Session store is empty. Fetching sessions for userId: \(userId).")
+                sessionStore.fetchSessions()
+                print("[ProfileView.onAppear] sessionStore.fetchSessions() called.")
+            } else {
+                 print("[ProfileView.onAppear] Sessions already loaded. Count: \(sessionStore.sessions.count)")
+            }
         }
     }
-    
+
+    // State variables for ProfileCardView, if not already present
+    @State private var showingFollowersSheet: Bool = false
+    @State private var showingFollowingSheet: Bool = false
+
+    // Helper for creating styled navigation cards
     @ViewBuilder
-    private func makeTabButton(title: String, representingTab: ProfileTab, selectedColor: Color, deselectedColor: Color, indicatorClearColor: Color) -> some View {
-        let isSelected = (representingTab == self.selectedTab)
+    private func navigationCard<PreviewContent: View>(
+        title: String,
+        iconName: String,
+        baseColor: Color, 
+        action: @escaping () -> Void,
+        @ViewBuilder previewContent: () -> PreviewContent
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: iconName)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundColor(baseColor.opacity(0.9))
+                    .frame(width: 30)
 
-        Button(action: {
-            withAnimation {
-                self.selectedTab = representingTab
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(.white) 
+                    
+                    previewContent()
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.6))
             }
-        }) {
-            VStack(spacing: 8) {
-                let textWeight: Font.Weight = isSelected ? .semibold : .medium
-                Text(title)
-                    .font(.system(size: 15, weight: textWeight))
-                    .foregroundColor(isSelected ? selectedColor : deselectedColor)
-
-                Rectangle()
-                    .fill(isSelected ? selectedColor : indicatorClearColor) // Indicator uses selectedColor when active
-                    .frame(height: 3)
-                    .cornerRadius(1.5)
-            }
-            .frame(maxWidth: .infinity)
+            .padding(EdgeInsets(top: 20, leading: 20, bottom: 20, trailing: 20))
+            // Ensure background doesn't block touches, and contentShape defines the hit area clearly.
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.clear) 
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(baseColor.opacity(0.25), lineWidth: 1)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 20)) // Apply contentShape after background
+            .shadow(color: baseColor.opacity(0.15), radius: 4, x: 0, y: 2) 
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(PlainButtonStyle()) // PlainButtonStyle is important for custom button interactions
     }
     
-    // MARK: - Analytics Helper Properties (Unchanged)
+    // MARK: - Analytics Helper Properties (Unchanged, used by analyticsDetailContent)
     private var totalBankroll: Double {
         return sessionStore.sessions.reduce(0) { $0 + $1.profit }
     }
@@ -331,405 +408,416 @@ struct ProfileView: View {
         return nil
     }
     
-    // Content based on selected tab handled by helper
+    // Content for Analytics Detail View (extracted from old tabContent)
     @ViewBuilder
-    private func tabContent() -> some View {
-        Group {
-            if selectedTab == .activity {
-                ActivityContentView(userId: userId, selectedPostForNavigation: $selectedPostForNavigation, showingPostDetailSheet: $showingPostDetailSheet)
-            } else if selectedTab == .analytics {
-                // Analytics content
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Bankroll section with past month profit/loss indicator
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Bankroll")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.gray)
-                            
-                            Text("$\(Int(totalBankroll).formattedWithCommas)")
-                                .font(.system(size: 36, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+    private func analyticsDetailContent() -> some View {
+        // This ScrollView will be part of the NavigationView in fullScreenCover
+        ScrollView {
+            VStack(spacing: 20) {
+                // Bankroll section with past month profit/loss indicator
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Bankroll")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Text("$\(Int(totalBankroll).formattedWithCommas)")
+                        .font(.system(size: 36, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+        
+                    HStack(spacing: 4) {
+                        // Get profit from selected time range instead of hardcoded month
+                        let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                        let timeRangeProfit = filteredSessions.reduce(0) { $0 + $1.profit }
+                        
+                        Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(timeRangeProfit >= 0 ? 
+                                Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                        
+                        Text("$\(abs(Int(timeRangeProfit)).formattedWithCommas)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(timeRangeProfit >= 0 ? 
+                                Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                        
+                        Text(getTimeRangeLabel(for: selectedTimeRange))
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                        
+                        Spacer()
+                    }
+                    .padding(.top, 2)
+                }
+                .padding(.horizontal, 20)
                 
-                            HStack(spacing: 4) {
-                                // Get profit from selected time range instead of hardcoded month
-                                let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
-                                let timeRangeProfit = filteredSessions.reduce(0) { $0 + $1.profit }
+                // Chart display with time selectors at bottom
+                VStack(spacing: 10) {
+                    if sessionStore.sessions.isEmpty {
+                        Text("No sessions recorded")
+                            .foregroundColor(.gray)
+                            .frame(height: 220)
+                            .frame(maxWidth: .infinity) // Ensure it centers if no data
+                    } else {
+                        // Display chart using BankrollGraph
+                        GeometryReader { geometry in
+                            ZStack {
+                                // Y-axis grid lines (subtle)
+                                VStack(spacing: 0) {
+                                    ForEach(0..<5) { _ in
+                                        Spacer()
+                                        Divider()
+                                            .background(Color.gray.opacity(0.1))
+                                    }
+                                }
                                 
-                                Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(timeRangeProfit >= 0 ? 
-                                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                                // Simple line chart - use green or red based on profit/loss for the selected time range
+                                let selectedSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                                let currentRangeProfit = selectedSessions.reduce(0) { $0 + $1.profit } // Renamed from selectedTimeRangeProfit to avoid conflict
+                                let isProfit = currentRangeProfit >= 0
+                                let chartColor = isProfit ? 
+                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
                                 
-                                Text("$\(abs(Int(timeRangeProfit)).formattedWithCommas)")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(timeRangeProfit >= 0 ? 
-                                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                                // Simplified line chart
+                                Path { path in
+                                    let sessions = filteredSessionsForTimeRange(selectedTimeRange)
+                                    
+                                    guard !sessions.isEmpty else { return }
+                                    
+                                    var cumulativeProfit: [Double] = []
+                                    var cumulative = 0.0
+                                    
+                                    for session in sessions.sorted(by: { $0.startDate < $1.startDate }) {
+                                        cumulative += session.profit
+                                        cumulativeProfit.append(cumulative)
+                                    }
+                                    
+                                    guard !cumulativeProfit.isEmpty else { return }
+                                    
+                                    // Find the min/max for scaling
+                                    let minProfit = cumulativeProfit.min() ?? 0
+                                    let maxProfit = max(cumulativeProfit.max() ?? 1, 1) // Ensure maxProfit is at least 1 to avoid division by zero if range is 0
+                                    let range = max(maxProfit - minProfit, 1) // Ensure range is at least 1
+                                    
+                                    // Draw the path
+                                    let stepX = cumulativeProfit.count > 1 ? geometry.size.width / CGFloat(cumulativeProfit.count - 1) : geometry.size.width
+                                    
+                                    // Function to get Y position
+                                    func getY(_ value: Double) -> CGFloat {
+                                        let normalized = range == 0 ? 0.5 : (value - minProfit) / range // Handle range == 0 case
+                                        return geometry.size.height * (1 - CGFloat(normalized))
+                                    }
+                                    
+                                    // Start path
+                                    path.move(to: CGPoint(x: 0, y: getY(cumulativeProfit[0])))
+                                    
+                                    // Draw lines to each point
+                                    for i in 1..<cumulativeProfit.count {
+                                        let x = CGFloat(i) * stepX
+                                        let y = getY(cumulativeProfit[i])
+                                        
+                                        // Smooth curve
+                                        if i > 0 {
+                                            let prevX = CGFloat(i-1) * stepX
+                                            let prevY = getY(cumulativeProfit[i-1])
+                                            
+                                            let controlPoint1 = CGPoint(x: prevX + stepX/3, y: prevY)
+                                            let controlPoint2 = CGPoint(x: x - stepX/3, y: y)
+                                            
+                                            path.addCurve(to: CGPoint(x: x, y: y), 
+                                                       control1: controlPoint1, 
+                                                       control2: controlPoint2)
+                                        }
+                                    }
+                                }
+                                .stroke(
+                                    chartColor,
+                                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+                                )
+                                .shadow(color: chartColor.opacity(0.3), radius: 3, y: 1)
                                 
-                                Text(getTimeRangeLabel(for: selectedTimeRange))
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.gray)
-                                
-                                Spacer()
+                                // Add chart area fill with gradient
+                                Path { path in
+                                    let sessions = filteredSessionsForTimeRange(selectedTimeRange)
+                                    
+                                    guard !sessions.isEmpty else { return }
+                                    
+                                    var cumulativeProfit: [Double] = []
+                                    var cumulative = 0.0
+                                    
+                                    for session in sessions.sorted(by: { $0.startDate < $1.startDate }) {
+                                        cumulative += session.profit
+                                        cumulativeProfit.append(cumulative)
+                                    }
+                                    
+                                    guard !cumulativeProfit.isEmpty else { return }
+                                    
+                                    // Find the min/max for scaling
+                                    let minProfit = cumulativeProfit.min() ?? 0
+                                    let maxProfit = max(cumulativeProfit.max() ?? 1, 1)
+                                    let range = max(maxProfit - minProfit, 1)
+                                    
+                                    // Draw the path
+                                    let stepX = cumulativeProfit.count > 1 ? geometry.size.width / CGFloat(cumulativeProfit.count - 1) : geometry.size.width
+
+                                    // Function to get Y position
+                                    func getY(_ value: Double) -> CGFloat {
+                                        let normalized = range == 0 ? 0.5 : (value - minProfit) / range
+                                        return geometry.size.height * (1 - CGFloat(normalized))
+                                    }
+                                    
+                                    // Start path - bottom left
+                                    path.move(to: CGPoint(x: 0, y: geometry.size.height))
+                                    
+                                    // Bottom left to first data point
+                                    path.addLine(to: CGPoint(x: 0, y: getY(cumulativeProfit[0])))
+                                    
+                                    // Draw curves through all points
+                                    for i in 1..<cumulativeProfit.count {
+                                        let x = CGFloat(i) * stepX
+                                        let y = getY(cumulativeProfit[i])
+                                        
+                                        // Smooth curve
+                                        if i > 0 {
+                                            let prevX = CGFloat(i-1) * stepX
+                                            let prevY = getY(cumulativeProfit[i-1])
+                                            
+                                            let controlPoint1 = CGPoint(x: prevX + stepX/3, y: prevY)
+                                            let controlPoint2 = CGPoint(x: x - stepX/3, y: y)
+                                            
+                                            path.addCurve(to: CGPoint(x: x, y: y), 
+                                                       control1: controlPoint1, 
+                                                       control2: controlPoint2)
+                                        }
+                                    }
+                                    
+                                    // Last point to bottom right
+                                    path.addLine(to: CGPoint(x: cumulativeProfit.count > 1 ? geometry.size.width : 0, y: geometry.size.height)) // Handle single point
+                                    
+                                    // Close the path
+                                    path.closeSubpath()
+                                }
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            chartColor.opacity(0.3),
+                                            chartColor.opacity(0.05)
+                                        ]),
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
                             }
-                            .padding(.top, 2)
+                        }
+                        .frame(height: 220)
+                        
+                        // Time period selector
+                        HStack {
+                            // Using self.timeRanges to refer to the ProfileView's property
+                            ForEach(Array(self.timeRanges.enumerated()), id: \.element) { index, rangeString in
+                                Button(action: {
+                                    self.selectedTimeRange = index // Update ProfileView's @State
+                                }) {
+                                    Text(rangeString) // Display 24H, 1W, etc.
+                                        .font(.system(size: 13, weight: self.selectedTimeRange == index ? .medium : .regular))
+                                        .foregroundColor(self.selectedTimeRange == index ? .white : .gray)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 8) // Make buttons easier to tap
+                                        .background(self.selectedTimeRange == index ? Color.gray.opacity(0.3) : Color.clear)
+                                        .cornerRadius(8)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
                         }
                         .padding(.horizontal, 20)
-                        
-                        // Chart display with time selectors at bottom
-                        VStack(spacing: 10) {
-                            if sessionStore.sessions.isEmpty {
-                                Text("No sessions recorded")
-                                    .foregroundColor(.gray)
-                                    .frame(height: 220)
-                            } else {
-                                // Display chart using BankrollGraph
-                                GeometryReader { geometry in
-                                    ZStack {
-                                        // Y-axis grid lines (subtle)
-                                        VStack(spacing: 0) {
-                                            ForEach(0..<5) { _ in
-                                                Spacer()
-                                                Divider()
-                                                    .background(Color.gray.opacity(0.1))
-                                            }
-                                        }
-                                        
-                                        // Simple line chart - use green or red based on profit/loss for the selected time range
-                                        let selectedSessions = filteredSessionsForTimeRange(selectedTimeRange)
-                                        let selectedTimeRangeProfit = selectedSessions.reduce(0) { $0 + $1.profit }
-                                        let isProfit = selectedTimeRangeProfit >= 0
-                                        let chartColor = isProfit ? 
-                                            Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                            Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
-                                        
-                                        // Simplified line chart
-                                        Path { path in
-                                            let sessions = filteredSessionsForTimeRange(selectedTimeRange)
-                                            
-                                            guard !sessions.isEmpty else { return }
-                                            
-                                            var cumulativeProfit: [Double] = []
-                                            var cumulative = 0.0
-                                            
-                                            for session in sessions.sorted(by: { $0.startDate < $1.startDate }) {
-                                                cumulative += session.profit
-                                                cumulativeProfit.append(cumulative)
-                                            }
-                                            
-                                            guard !cumulativeProfit.isEmpty else { return }
-                                            
-                                            // Find the min/max for scaling
-                                            let minProfit = cumulativeProfit.min() ?? 0
-                                            let maxProfit = max(cumulativeProfit.max() ?? 1, 1)
-                                            let range = max(maxProfit - minProfit, 1)
-                                            
-                                            // Draw the path
-                                            let step = geometry.size.width / CGFloat(cumulativeProfit.count - 1)
-                                            
-                                            // Function to get Y position
-                                            func getY(_ value: Double) -> CGFloat {
-                                                let normalized = (value - minProfit) / range
-                                                return geometry.size.height * (1 - CGFloat(normalized))
-                                            }
-                                            
-                                            // Start path
-                                            path.move(to: CGPoint(x: 0, y: getY(cumulativeProfit[0])))
-                                            
-                                            // Draw lines to each point
-                                            for i in 1..<cumulativeProfit.count {
-                                                let x = CGFloat(i) * step
-                                                let y = getY(cumulativeProfit[i])
-                                                
-                                                // Smooth curve
-                                                if i > 0 {
-                                                    let prevX = CGFloat(i-1) * step
-                                                    let prevY = getY(cumulativeProfit[i-1])
-                                                    
-                                                    let controlPoint1 = CGPoint(x: prevX + step/3, y: prevY)
-                                                    let controlPoint2 = CGPoint(x: x - step/3, y: y)
-                                                    
-                                                    path.addCurve(to: CGPoint(x: x, y: y), 
-                                                              control1: controlPoint1, 
-                                                              control2: controlPoint2)
-                                                }
-                                            }
-                                        }
-                                        .stroke(
-                                            chartColor,
-                                            style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
-                                        )
-                                        .shadow(color: chartColor.opacity(0.3), radius: 3, y: 1)
-                                        
-                                        // Add chart area fill with gradient
-                                        Path { path in
-                                            let sessions = filteredSessionsForTimeRange(selectedTimeRange)
-                                            
-                                            guard !sessions.isEmpty else { return }
-                                            
-                                            var cumulativeProfit: [Double] = []
-                                            var cumulative = 0.0
-                                            
-                                            for session in sessions.sorted(by: { $0.startDate < $1.startDate }) {
-                                                cumulative += session.profit
-                                                cumulativeProfit.append(cumulative)
-                                            }
-                                            
-                                            guard !cumulativeProfit.isEmpty else { return }
-                                            
-                                            // Find the min/max for scaling
-                                            let minProfit = cumulativeProfit.min() ?? 0
-                                            let maxProfit = max(cumulativeProfit.max() ?? 1, 1)
-                                            let range = max(maxProfit - minProfit, 1)
-                                            
-                                            // Draw the path
-                                            let step = geometry.size.width / CGFloat(cumulativeProfit.count - 1)
-                                            
-                                            // Function to get Y position
-                                            func getY(_ value: Double) -> CGFloat {
-                                                let normalized = (value - minProfit) / range
-                                                return geometry.size.height * (1 - CGFloat(normalized))
-                                            }
-                                            
-                                            // Start path - bottom left
-                                            path.move(to: CGPoint(x: 0, y: geometry.size.height))
-                                            
-                                            // Bottom left to first data point
-                                            path.addLine(to: CGPoint(x: 0, y: getY(cumulativeProfit[0])))
-                                            
-                                            // Draw curves through all points
-                                            for i in 1..<cumulativeProfit.count {
-                                                let x = CGFloat(i) * step
-                                                let y = getY(cumulativeProfit[i])
-                                                
-                                                // Smooth curve
-                                                if i > 0 {
-                                                    let prevX = CGFloat(i-1) * step
-                                                    let prevY = getY(cumulativeProfit[i-1])
-                                                    
-                                                    let controlPoint1 = CGPoint(x: prevX + step/3, y: prevY)
-                                                    let controlPoint2 = CGPoint(x: x - step/3, y: y)
-                                                    
-                                                    path.addCurve(to: CGPoint(x: x, y: y), 
-                                                               control1: controlPoint1, 
-                                                               control2: controlPoint2)
-                                                }
-                                            }
-                                            
-                                            // Last point to bottom right
-                                            path.addLine(to: CGPoint(x: geometry.size.width, y: geometry.size.height))
-                                            
-                                            // Close the path
-                                            path.closeSubpath()
-                                        }
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(colors: [
-                                                    chartColor.opacity(0.3),
-                                                    chartColor.opacity(0.05)
-                                                ]),
-                                                startPoint: .top,
-                                                endPoint: .bottom
-                                            )
-                                        )
-                                    }
-                                }
-                                .frame(height: 220)
-                                
-                                // Time period selector
-                                HStack {
-                                    ForEach(["1H", "24H", "1W", "1M", "6M", "1Y", "All"], id: \.self) { range in
-                                        let index = timeRanges.firstIndex(of: range) ?? 0
-                                        Button(action: {
-                                            selectedTimeRange = index
-                                        }) {
-                                            Text(range)
-                                                .font(.system(size: 13, weight: selectedTimeRange == index ? .medium : .regular))
-                                                .foregroundColor(selectedTimeRange == index ? .white : .gray)
-                                                .frame(maxWidth: .infinity)
-                                        }
-                                        .buttonStyle(PlainButtonStyle())
-                                    }
-                                }
-                                .padding(.horizontal, 20)
-                            }
-                        }
-                        
-                        // Stats cards in grid layout
-                        Text("MORE STATS")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.gray)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 20)
-                            .padding(.top, 10)
-                        
-                        VStack(spacing: 12) {
-                            // Win Rate
-                            HStack {
-                                ZStack {
-                                    Circle()
-                                        .stroke(Color.gray.opacity(0.2), lineWidth: 4)
-                                        .frame(width: 44, height: 44)
-                                    
-                                    Circle()
-                                        .trim(from: 0, to: CGFloat(winRate) / 100)
-                                        .stroke(
-                                            Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)),
-                                            lineWidth: 4
-                                        )
-                                        .frame(width: 44, height: 44)
-                                        .rotationEffect(.degrees(-90))
-                                    
-                                    Text("\(Int(winRate))%")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(.white)
-                                }
-                                
-                                Text("Win Rate")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.white)
-                                
-                                Spacer()
-                            }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                            .background(Color.black.opacity(0.3))
-                            .cornerRadius(12)
-                            .padding(.horizontal, 20)
-                            
-                            // Average Profit, Best Session, Total Sessions
-                            VStack(spacing: 12) {
-                                // Average Profit
-                                HStack {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.15)))
-                                            .frame(width: 24, height: 24)
-                                        
-                                        Image(systemName: "chart.line.uptrend.xyaxis")
-                                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                            .font(.system(size: 12))
-                                    }
-                                    
-                                    Text("Average Profit")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white)
-                                    
-                                    Spacer()
-                                    
-                                    Text("$\(Int(averageProfit).formattedWithCommas)")
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("/session")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.gray)
-                                }
-                                .padding(.vertical, 12)
-                                .padding(.horizontal, 16)
-                                .background(Color.black.opacity(0.3))
-                                .cornerRadius(12)
-                                
-                                // Best Session
-                                HStack {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color.blue.opacity(0.15))
-                                            .frame(width: 24, height: 24)
-                                        
-                                        Image(systemName: "star.fill")
-                                            .foregroundColor(.blue)
-                                            .font(.system(size: 12))
-                                    }
-                                    
-                                    Text("Best Session")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white)
-                                    
-                                    Spacer()
-                                    
-                                    Text("$\(Int(bestSession?.profit ?? 0).formattedWithCommas)")
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("Profit")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.gray)
-                                }
-                                .padding(.vertical, 12)
-                                .padding(.horizontal, 16)
-                                .background(Color.black.opacity(0.3))
-                                .cornerRadius(12)
-                                
-                                // Total Sessions
-                                HStack {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color.orange.opacity(0.15))
-                                            .frame(width: 24, height: 24)
-                                        
-                                        Image(systemName: "calendar")
-                                            .foregroundColor(.orange)
-                                            .font(.system(size: 12))
-                                    }
-                                    
-                                    Text("Total Sessions")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white)
-                                    
-                                    Spacer()
-                                    
-                                    Text("\(totalSessions)")
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("Played")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.gray)
-                                }
-                                .padding(.vertical, 12)
-                                .padding(.horizontal, 16)
-                                .background(Color.black.opacity(0.3))
-                                .cornerRadius(12)
-                            }
-                            .padding(.horizontal, 20)
-                        }
                     }
-                    .padding(.bottom, 30)
                 }
-            } else if selectedTab == .hands {
-                // Use transparent navigation container to keep background consistent
-                TransparentNavigationView(content: HandsTab(handStore: handStore))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.clear)
-                    .disabled(false)
-                    .allowsHitTesting(true)
-            } else if selectedTab == .sessions {
-                // Use transparent navigation container for Sessions tab
-                TransparentNavigationView(content: SessionsTab(sessionStore: sessionStore))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.clear)
-                    .disabled(false)
-                    .allowsHitTesting(true)
+                .padding(.top, 10) // Add some space above the chart section
+                
+                // Stats cards in grid layout
+                Text("MORE STATS")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.gray)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20) // Increased top padding
+                
+                VStack(spacing: 12) {
+                    // Win Rate
+                    HStack {
+                        ZStack {
+                            Circle()
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 4)
+                                .frame(width: 44, height: 44)
+                            
+                            Circle()
+                                .trim(from: 0, to: CGFloat(winRate) / 100)
+                                .stroke(
+                                    Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)),
+                                    style: StrokeStyle(lineWidth: 4, lineCap: .round) // Added lineCap
+                                )
+                                .frame(width: 44, height: 44)
+                                .rotationEffect(.degrees(-90))
+                            
+                            Text("\(Int(winRate))%")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        
+                        Text("Win Rate")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                    }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                    .background(Color.black.opacity(0.3))
+                    .cornerRadius(12)
+                    .padding(.horizontal, 20)
+                    
+                    // Average Profit, Best Session, Total Sessions
+                    VStack(spacing: 12) {
+                        // Average Profit
+                        HStack {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.15)))
+                                    .frame(width: 24, height: 24)
+                                
+                                Image(systemName: "chart.line.uptrend.xyaxis")
+                                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                    .font(.system(size: 12))
+                            }
+                            
+                            Text("Average Profit")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white)
+                            
+                            Spacer()
+                            
+                            Text("$\(Int(averageProfit).formattedWithCommas)")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.white)
+                            
+                            Text("/session")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(12)
+                        
+                        // Best Session
+                        HStack {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.blue.opacity(0.15))
+                                    .frame(width: 24, height: 24)
+                                
+                                Image(systemName: "star.fill")
+                                    .foregroundColor(.blue)
+                                    .font(.system(size: 12))
+                            }
+                            
+                            Text("Best Session")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white)
+                            
+                            Spacer()
+                            
+                            Text("$\(Int(bestSession?.profit ?? 0).formattedWithCommas)")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.white)
+                            
+                            Text("Profit")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(12)
+                        
+                        // Total Sessions
+                        HStack {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.orange.opacity(0.15))
+                                    .frame(width: 24, height: 24)
+                                
+                                Image(systemName: "calendar")
+                                    .foregroundColor(.orange)
+                                    .font(.system(size: 12))
+                            }
+                            
+                            Text("Total Sessions")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white)
+                            
+                            Spacer()
+                            
+                            Text("\(totalSessions)")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.white)
+                            
+                            Text("Played")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal, 20) // This was applying to the VStack of stats, correct
+                }
             }
+            .padding(.bottom, 30) // Overall padding for the ScrollView content
+            .background(AppBackgroundView().ignoresSafeArea()) // Ensure background matches
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity) // Allow Group to expand
-        .padding(.bottom, 30) // Add padding at bottom for tab bar
+        .background(AppBackgroundView().ignoresSafeArea()) // Match app background
     }
     
     private func getTimeRangeLabel(for index: Int) -> String {
-        switch index {
-        case 0: return "Past 24H"
-        case 1: return "Past week"
-        case 2: return "Past month" 
-        case 3: return "Past 6 months"
-        case 4: return "Past year"
-        case 5: return "All time"
-        default: return "Selected period"
+        // Ensure this uses the correct `timeRanges` array if it's defined at ProfileView level
+        // The `timeRanges` array used for buttons should be ["24H", "1W", "1M", "6M", "1Y", "All"]
+        // This function needs to align with that.
+        guard index >= 0 && index < self.timeRanges.count else { return "Selected Period" }
+        let range = self.timeRanges[index]
+        switch range {
+            case "24H": return "Past 24H"
+            case "1W": return "Past week"
+            case "1M": return "Past month"
+            case "6M": return "Past 6 months"
+            case "1Y": return "Past year"
+            case "All": return "All time"
+            default: return "Selected period"
         }
+    }
+}
+
+// Wrapper for ActivityContentView to manage its own dismissal and title
+struct ActivityContentViewWrapper: View {
+    let userId: String
+    @Binding var selectedPostForNavigation: Post?
+
+    @EnvironmentObject private var userService: UserService 
+    @EnvironmentObject private var postService: PostService
+
+    var body: some View {
+        ZStack {
+            AppBackgroundView().ignoresSafeArea()
+            ActivityContentView(
+                userId: userId,
+                selectedPostForNavigation: $selectedPostForNavigation
+            )
+        }
+        .navigationTitle("Recent Activity") 
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -888,7 +976,7 @@ struct ActivityContentView: View {
     @EnvironmentObject private var userService: UserService 
     @EnvironmentObject private var postService: PostService
     @Binding var selectedPostForNavigation: Post? 
-    @Binding var showingPostDetailSheet: Bool // Added to control sheet presentation
+    // @Binding var showingPostDetailSheet: Bool // This binding is no longer needed here
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -934,6 +1022,7 @@ struct ActivityContentView: View {
                     .padding(.top, 0) // Removed vertical padding, posts will be closer to the top
                 }
                 .padding(.top, 8) // Reduced top padding for the ScrollView
+                .padding(.top, 50) // Added 40 points of top padding to the ScrollView
             }
         }
         .padding(.bottom, 8) // Reduced bottom padding for the entire ActivityContentView
@@ -1200,6 +1289,13 @@ extension Int {
         return numberFormatter.string(from: NSNumber(value: self)) ?? "\(self)"
     }
 }
+
+// Helper struct for clarity, though often not strictly necessary for just transparency.
+// struct ClearBackground: View { // This helper is no longer used with the new structure
+//     var body: some View {
+//         Color.clear
+//     }
+// }
 
 
 

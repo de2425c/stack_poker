@@ -74,6 +74,7 @@ struct HandDisplayCardView: View {
                     Rectangle()
                         .fill(Color.yellow)
                         .frame(width: 4, height: 60) 
+                        .background(Color.clear) // Ensure this decorative element doesn't block transparency
 
                     VStack(alignment: .leading, spacing: 6) { 
                         HStack {
@@ -84,23 +85,26 @@ struct HandDisplayCardView: View {
                                 .foregroundColor(heroPnl >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
                         }
 
-                        Text(handVsHandText) // This already includes stakes via potSizeBB if needed, but the main stakes are in PostContextTagView
+                        Text(handVsHandText) 
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                         
-                        Text(timeAndLocationText) // This will be hidden in feed view
+                        Text(timeAndLocationText) 
                             .font(.system(size: 14))
                             .foregroundColor(.gray)
                     }
                     .padding(.leading, 12)
+                    .background(Color.clear) // Ensure this VStack is transparent
 
                     Spacer()
 
-                    // Replay button is already correctly handled by !showReplayInFeed
                     if !showReplayInFeed {
-                        Button(action: { onReplayTap?() }) {
+                        Button(action: { 
+                            print("Replay button tapped in HandDisplayCardView")
+                            onReplayTap?() 
+                        }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "play.rectangle.fill")
                                     .font(.system(size: 24))
@@ -110,36 +114,40 @@ struct HandDisplayCardView: View {
                             .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                             .padding(.horizontal, 16)
                         }
+                        .background(Color.clear) // Ensure button background is transparent
                     }
                 }
-                .frame(height: 80) // This frame applies only when the header is shown
+                .frame(height: 80) 
+                .background(Color.clear) // Ensure this HStack container is transparent
             } else {
-                // If in feed, we still want to show the core PnL and Hand vs Hand, but without the time/location and the original header structure.
-                // The PostContextTagView will handle stakes/location.
-                HStack(alignment: .center, spacing: 0) { // Match the height of the original header if shown
+                HStack(alignment: .center, spacing: 0) { 
                      Rectangle()
-                        .fill(heroPnl >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : Color.red) // Use PNL color for the bar
-                        .frame(width: 4, height: 40) // Shorter bar for feed view
+                        .fill(heroPnl >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : Color.red) 
+                        .frame(width: 4, height: 40) 
                         .padding(.trailing, 12)
+                        .background(Color.clear) // Ensure this decorative element doesn't block transparency
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(pnlText)
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(heroPnl >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
 
-                        Text(handVsHandText) // Stakes info (BB pot) remains here
+                        Text(handVsHandText) 
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
-                    Spacer() // Push content to the left
+                    .background(Color.clear) // Ensure this VStack is transparent
+                    Spacer() 
                 }
-                .frame(height: 60) // Reduced height for the feed version
-                .padding(.vertical, 10) // Add some vertical padding for the feed version
+                .frame(height: 60) 
+                .padding(.vertical, 10) 
+                .background(Color.clear) // Ensure this HStack container is transparent
             }
         }
         .padding(.horizontal) 
+        .background(Color.clear) // Explicitly set the root VStack background to clear
     }
 
     private func formatCardString(_ cardString: String?) -> String {

@@ -25,6 +25,14 @@ class FollowService {
         let currentUserRef = db.collection("users").document(currentUserId)
         batch.updateData(["followingCount": FieldValue.increment(Int64(1))], forDocument: currentUserRef)
         
+        // NEW: Add document to the shared 'userFollows' collection
+        let userFollowsRef = db.collection("userFollows").document()
+        batch.setData([
+            "followerId": currentUserId,
+            "followeeId": targetUserId,
+            "createdAt": FieldValue.serverTimestamp()
+        ], forDocument: userFollowsRef)
+        
         try await batch.commit()
     }
     
@@ -48,6 +56,17 @@ class FollowService {
         // Update following count for current user
         let currentUserRef = db.collection("users").document(currentUserId)
         batch.updateData(["followingCount": FieldValue.increment(Int64(-1))], forDocument: currentUserRef)
+        
+        // NEW: Remove any documents from 'userFollows' matching this relation.
+        // Can't use batch with query results easily in a single batch since we don't know the doc IDs ahead of time.
+        let userFollowsQuery = db.collection("userFollows")
+            .whereField("followerId", isEqualTo: currentUserId)
+            .whereField("followeeId", isEqualTo: targetUserId)
+        
+        let snapshot = try await userFollowsQuery.getDocuments()
+        for document in snapshot.documents {
+            try await db.collection("userFollows").document(document.documentID).delete()
+        }
         
         try await batch.commit()
     }
