@@ -4,6 +4,7 @@ import FirebaseStorage
 import FirebaseFirestore
 import FirebaseAuth
 import Kingfisher
+import MessageUI
 
 struct FeedView: View {
     @EnvironmentObject var postService: PostService
@@ -12,7 +13,6 @@ struct FeedView: View {
     @StateObject private var sessionStore: SessionStore // Added SessionStore
     @State private var showingNewPost = false
     @State private var isRefreshing = false
-    @State private var showingDiscoverUsers = false
     @State private var showingUserSearchView = false
     @State private var selectedPost: Post? = nil
     @State private var showingFullScreenImage = false
@@ -63,10 +63,6 @@ struct FeedView: View {
               // now ignores the keyboard entirely
               .ignoresSafeArea(.keyboard)
           }
-        }
-        .sheet(isPresented: $showingDiscoverUsers) {
-            DiscoverUsersView(userId: userId)
-                .environmentObject(userService)
         }
         .fullScreenCover(isPresented: $showingUserSearchView) {
             UserSearchView(currentUserId: userId, userService: userService)
@@ -128,8 +124,8 @@ struct FeedView: View {
                     VStack(spacing: 0) {
                         Spacer().frame(height: 45) // Re-added top spacer
                         feedHeader() // Add header here
-                        EmptyFeedView(showDiscoverUsers: {
-                            showingDiscoverUsers = true
+                        EmptyFeedView(onFindPlayersTapped: {
+                            showingUserSearchView = true // Updated action
                         })
                         .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure EmptyFeedView can expand
                     }
@@ -151,21 +147,20 @@ struct FeedView: View {
                 // Profile Picture and Search Icon (Left Aligned Group)
                 HStack(spacing: 12) {
                     if let profile = userService.currentUserProfile {
-                        NavigationLink(destination: ProfileView(userId: userId)) {
-                            Group {
-                                if let avatarURLString = profile.avatarURL, let avatarURL = URL(string: avatarURLString) {
-                                    KFImage(avatarURL)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 36, height: 36)
-                                        .clipShape(Circle())
-                                        .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                                } else {
-                                    Image(systemName: "person.circle.fill")
-                                        .resizable()
-                                        .frame(width: 36, height: 36)
-                                        .foregroundColor(.gray) // Placeholder color
-                                }
+                        // Removed NavigationLink wrapping the Group
+                        Group {
+                            if let avatarURLString = profile.avatarURL, let avatarURL = URL(string: avatarURLString) {
+                                KFImage(avatarURL)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 36, height: 36)
+                                    .clipShape(Circle())
+                                    .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            } else {
+                                Image(systemName: "person.circle.fill")
+                                    .resizable()
+                                    .frame(width: 36, height: 36)
+                                    .foregroundColor(.gray) // Placeholder color
                             }
                         }
                     } else {
@@ -200,7 +195,7 @@ struct FeedView: View {
                 HStack(spacing: 16) {
                     Button(action: {
                         // Placeholder action for notifications
-                        print("Notification bell tapped")
+
                     }) {
                         Image(systemName: "bell.fill")
                             .font(.system(size: 20, weight: .semibold))
@@ -257,7 +252,7 @@ struct FeedView: View {
                                         do {
                                             try await postService.toggleLike(postId: post.id ?? "", userId: userId)
                                         } catch {
-                                            print("Error toggling like: \(error)")
+
                                         }
                                     }
                                 },
@@ -311,7 +306,7 @@ struct FeedView: View {
                     try await postService.toggleLike(postId: postId, userId: userId)
                 }
             } catch {
-                print("Error liking post: \(error)")
+
             }
         }
     }
@@ -321,16 +316,16 @@ struct FeedView: View {
         Task {
             do {
                 if let postId = post.id {
-                    print("[FeedView] Attempting to delete post with ID: \(postId)")
+
                     try await postService.deletePost(postId: postId)
-                    print("[FeedView] Post deletion successful for ID: \(postId), refreshing feed.")
+
                     // Refresh feed after deletion
                     try await postService.fetchPosts()
                 } else {
-                    print("[FeedView] Error: Post ID is nil, cannot delete.")
+
                 }
             } catch {
-                print("[FeedView] Error deleting post ID \(post.id ?? "N/A"): \(error.localizedDescription)")
+
             }
         }
     }
@@ -390,12 +385,12 @@ struct BasicPostCardView: View {
         var tempTitle: String? // Use a temporary variable to build the core title
 
         // Initial debug prints
-        print("[ContextTagDebug] --- Evaluating Post ID: \(post.id ?? "nil") ---")
-        print("[ContextTagDebug] Raw Content (first 120 chars): \"\(String(post.content.prefix(120)))\"")
-        print("[ContextTagDebug] PostType: \(post.postType), SessionID: \(post.sessionId ?? "nil"), Location: \(post.location ?? "nil")")
+
+
+
 
         if post.postType == .hand, let hand = post.handHistory {
-            print("[ContextTagDebug] Post is .hand type.")
+
             let smallBlind = hand.raw.gameInfo.smallBlind
             let bigBlind = hand.raw.gameInfo.bigBlind
             if bigBlind > 0 || smallBlind > 0 {
@@ -403,7 +398,7 @@ struct BasicPostCardView: View {
                 tempTitle = "Playing \(stakesString)"
             }
         } else if post.content.starts(with: "Started a new session at ") {
-            print("[ContextTagDebug] Content starts with 'Started a new session at'.")
+
             let relevantContent = String(post.content.dropFirst("Started a new session at ".count))
             if let lastParenOpen = relevantContent.lastIndex(of: "("),
                let lastParenClose = relevantContent.lastIndex(of: ")"),
@@ -412,7 +407,7 @@ struct BasicPostCardView: View {
                 
                 let gamePart = String(relevantContent[..<lastParenOpen]).trimmingCharacters(in: .whitespaces)
                 let stakesPart = String(relevantContent[relevantContent.index(after: lastParenOpen)..<lastParenClose]).trimmingCharacters(in: .whitespaces)
-                print("[ContextTagDebug] Parsed from 'Started at...': Game='\(gamePart)', Stakes='\(stakesPart)'")
+
                 if !gamePart.isEmpty {
                     tempTitle = "Playing \(gamePart)"
                     if !stakesPart.isEmpty {
@@ -421,16 +416,16 @@ struct BasicPostCardView: View {
                 }
             } else if !relevantContent.isEmpty {
                 let gamePart = relevantContent.trimmingCharacters(in: .whitespaces)
-                print("[ContextTagDebug] Parsed from 'Started at...' (no stakes in parens): Game='\(gamePart)'")
+
                 if !gamePart.isEmpty {
                     tempTitle = "Playing \(gamePart)"
                 }
             }
         } else {
-            print("[ContextTagDebug] Not a hand and doesn't start with 'Started a new session at'. Checking other session types.")
+
             let (completedOpt, _) = parseCompletedSessionInfo(from: post.content)
             if let completed = completedOpt {
-                print("[ContextTagDebug] Matched COMPLETED_SESSION_INFO. Game='\(completed.gameName)', Stakes='\(completed.stakes)'")
+
                 if !completed.gameName.isEmpty {
                     tempTitle = "Playing \(completed.gameName)"
                     if !completed.stakes.isEmpty {
@@ -440,11 +435,11 @@ struct BasicPostCardView: View {
                     tempTitle = "Playing \(completed.stakes)"
                 }
             } else {
-                print("[ContextTagDebug] Not COMPLETED_SESSION_INFO. Checking for SESSION_INFO string.")
+
                 let sessionInfoTuple = extractSessionInfo(from: post.content)
                 let gameNameFromInfo = sessionInfoTuple.0
                 let stakesFromInfo = sessionInfoTuple.1
-                print("[ContextTagDebug] extractSessionInfo result: Game='\(gameNameFromInfo ?? "nil")', Stakes='\(stakesFromInfo ?? "nil")'")
+
 
                 if let game = gameNameFromInfo, !game.isEmpty {
                     tempTitle = "Playing \(game)"
@@ -456,9 +451,9 @@ struct BasicPostCardView: View {
                 }
 
                 if tempTitle == nil && post.sessionId != nil {
-                    print("[ContextTagDebug] No title from SESSION_INFO, but post.sessionId exists. Trying parseSessionContent.")
+
                     if let parsed = parseSessionContent(from: post.content) {
-                        print("[ContextTagDebug] parseSessionContent result: Game='\(parsed.gameName)', Stakes='\(parsed.stakes)'")
+
                         if !parsed.gameName.isEmpty {
                             tempTitle = "Playing \(parsed.gameName)"
                             if !parsed.stakes.isEmpty {
@@ -468,7 +463,7 @@ struct BasicPostCardView: View {
                             tempTitle = "Playing \(parsed.stakes)"
                         }
                     } else if post.content.lowercased().starts(with: "playing ") {
-                        print("[ContextTagDebug] parseSessionContent failed. Content starts with 'playing '. Using first line.")
+
                         if let firstLine = post.content.components(separatedBy: "\n").first {
                              let trimmedTitle = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
                              if !trimmedTitle.isEmpty {
@@ -492,11 +487,11 @@ struct BasicPostCardView: View {
         }
         
         if let finalTitle = tempTitle {
-            print("[ContextTagDebug] --- Final Title for Post ID \(post.id ?? "nil"): \"\(finalTitle)\" ---")
+
             return (finalTitle, iconName)
         }
         
-        print("[ContextTagDebug] --- No tag generated for Post ID \(post.id ?? "nil") ---")
+
         return nil
     }
 
@@ -807,12 +802,12 @@ struct PostCardView: View {
         var tempTitle: String? // Use a temporary variable to build the core title
 
         // Initial debug prints
-        print("[ContextTagDebug] --- Evaluating Post ID: \(post.id ?? "nil") (PostCardView) ---")
-        print("[ContextTagDebug] Raw Content (first 120 chars): \"\(String(post.content.prefix(120)))\" (PostCardView)")
-        print("[ContextTagDebug] PostType: \(post.postType), SessionID: \(post.sessionId ?? "nil"), Location: \(post.location ?? "nil") (PostCardView)")
+
+
+
 
         if post.postType == .hand, let hand = post.handHistory {
-            print("[ContextTagDebug] Post is .hand type. (PostCardView)")
+
             let smallBlind = hand.raw.gameInfo.smallBlind
             let bigBlind = hand.raw.gameInfo.bigBlind
             if bigBlind > 0 || smallBlind > 0 {
@@ -820,7 +815,7 @@ struct PostCardView: View {
                 tempTitle = "Playing \(stakesString)"
             }
         } else if post.content.starts(with: "Started a new session at ") {
-            print("[ContextTagDebug] Content starts with 'Started a new session at'. (PostCardView)")
+
             let relevantContent = String(post.content.dropFirst("Started a new session at ".count))
             if let lastParenOpen = relevantContent.lastIndex(of: "("),
                let lastParenClose = relevantContent.lastIndex(of: ")"),
@@ -829,7 +824,7 @@ struct PostCardView: View {
                 
                 let gamePart = String(relevantContent[..<lastParenOpen]).trimmingCharacters(in: .whitespaces)
                 let stakesPart = String(relevantContent[relevantContent.index(after: lastParenOpen)..<lastParenClose]).trimmingCharacters(in: .whitespaces)
-                print("[ContextTagDebug] Parsed from 'Started at...': Game='\(gamePart)', Stakes='\(stakesPart)' (PostCardView)")
+
                 if !gamePart.isEmpty {
                     tempTitle = "Playing \(gamePart)"
                     if !stakesPart.isEmpty {
@@ -838,16 +833,16 @@ struct PostCardView: View {
                 }
             } else if !relevantContent.isEmpty {
                 let gamePart = relevantContent.trimmingCharacters(in: .whitespaces)
-                 print("[ContextTagDebug] Parsed from 'Started at...' (no stakes in parens): Game='\(gamePart)' (PostCardView)")
+
                 if !gamePart.isEmpty {
                     tempTitle = "Playing \(gamePart)"
                 }
             }
         } else {
-            print("[ContextTagDebug] Not a hand and doesn't start with 'Started a new session at'. Checking other session types. (PostCardView)")
+
             let (completedOpt, _) = parseCompletedSessionInfo(from: post.content)
             if let completed = completedOpt {
-                print("[ContextTagDebug] Matched COMPLETED_SESSION_INFO. Game='\(completed.gameName)', Stakes='\(completed.stakes)' (PostCardView)")
+
                 if !completed.gameName.isEmpty {
                     tempTitle = "Playing \(completed.gameName)"
                     if !completed.stakes.isEmpty {
@@ -857,11 +852,11 @@ struct PostCardView: View {
                     tempTitle = "Playing \(completed.stakes)"
                 }
             } else {
-                print("[ContextTagDebug] Not COMPLETED_SESSION_INFO. Checking for SESSION_INFO string. (PostCardView)")
+
                 let sessionInfoTuple = extractSessionInfo(from: post.content)
                 let gameNameFromInfo = sessionInfoTuple.0
                 let stakesFromInfo = sessionInfoTuple.1
-                print("[ContextTagDebug] extractSessionInfo result: Game='\(gameNameFromInfo ?? "nil")', Stakes='\(stakesFromInfo ?? "nil")' (PostCardView)")
+
 
                 if let game = gameNameFromInfo, !game.isEmpty {
                     tempTitle = "Playing \(game)"
@@ -873,9 +868,9 @@ struct PostCardView: View {
                 }
 
                 if tempTitle == nil && post.sessionId != nil {
-                    print("[ContextTagDebug] No title from SESSION_INFO, but post.sessionId exists. Trying parseSessionContent. (PostCardView)")
+
                     if let parsed = parseSessionContent(from: post.content) {
-                        print("[ContextTagDebug] parseSessionContent result: Game='\(parsed.gameName)', Stakes='\(parsed.stakes)' (PostCardView)")
+
                         if !parsed.gameName.isEmpty {
                             tempTitle = "Playing \(parsed.gameName)"
                             if !parsed.stakes.isEmpty {
@@ -885,7 +880,7 @@ struct PostCardView: View {
                             tempTitle = "Playing \(parsed.stakes)"
                         }
                     } else if post.content.lowercased().starts(with: "playing ") {
-                        print("[ContextTagDebug] parseSessionContent failed. Content starts with 'playing '. Using first line. (PostCardView)")
+
                         if let firstLine = post.content.components(separatedBy: "\n").first {
                             let trimmedTitle = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
                             if !trimmedTitle.isEmpty {
@@ -908,11 +903,11 @@ struct PostCardView: View {
         }
         
         if let finalTitle = tempTitle {
-            print("[ContextTagDebug] --- Final Title for Post ID \(post.id ?? "nil"): \"\(finalTitle)\" (PostCardView) ---")
+
             return (finalTitle, iconName)
         }
         
-        print("[ContextTagDebug] --- No tag generated for Post ID \(post.id ?? "nil") (PostCardView) ---")
+
         return nil
     }
 
@@ -1182,7 +1177,7 @@ struct PostCardView: View {
 
 // Empty Feed View
 struct EmptyFeedView: View {
-    let showDiscoverUsers: () -> Void
+    let onFindPlayersTapped: () -> Void // Renamed from showDiscoverUsers
     @State private var animateGlow = false
     
     var body: some View {
@@ -1245,7 +1240,7 @@ struct EmptyFeedView: View {
                         .lineSpacing(6)
                 }
                 
-                Button(action: showDiscoverUsers) {
+                Button(action: onFindPlayersTapped) { // Updated action
                     HStack(spacing: 10) {
                         Image(systemName: "person.2.fill")
                             .font(.system(size: 18))
@@ -1304,6 +1299,7 @@ struct PostDetailView: View {
     @State private var showDeleteConfirm = false
     @FocusState private var isCommentFieldFocused: Bool
     @State private var keyboardHeight: CGFloat = 0 // Added for manual keyboard handling
+    @State private var showingMailView = false
     
     init(post: Post, userId: String) {
         self.post = post
@@ -1329,6 +1325,15 @@ struct PostDetailView: View {
                                 .background(Circle().fill(Color.black.opacity(0.25)))
                         }
                         Spacer()
+                        // Report button
+                        Button(action: { showingMailView = true }) {
+                            Image(systemName: "flag")
+                                .font(.system(size: 18))
+                                .foregroundColor(.white.opacity(0.7))
+                                .padding(12)
+                                .background(Circle().fill(Color.black.opacity(0.25)))
+                        }
+
                         if post.userId == userId { // Keep delete button logic
                             Button(action: { showDeleteConfirm = true }) {
                                 Image(systemName: "trash")
@@ -1389,6 +1394,9 @@ struct PostDetailView: View {
             if let hand = post.handHistory {
                 HandReplayView(hand: hand, userId: userId)
             }
+        }
+        .sheet(isPresented: $showingMailView) {
+            MailView(isShowing: $showingMailView, recipient: "support@stackpoker.gg", subject: "Report Post ID: \(post.id ?? "N/A")", body: "Please describe the issue with the post below:\n\n")
         }
         .onAppear {
             loadComments()
@@ -1606,7 +1614,7 @@ struct PostDetailView: View {
                     }
                 }
             } catch {
-                print("Error loading comments: \(error)")
+
                 await MainActor.run {
                     isLoadingComments = false
                 }
@@ -1632,7 +1640,7 @@ struct PostDetailView: View {
                         }
                     }
                 } catch {
-                    print("Error loading replies for \(parentCommentId): \(error)")
+
                     await MainActor.run {
                         self.isLoadingReplies[parentCommentId] = false
                     }
@@ -1668,41 +1676,41 @@ struct PostDetailView: View {
             if let existingProfile = userService.currentUserProfile {
                 userProfile = existingProfile
             } else {
-                print("[FeedView.addComment] Profile nil, attempting fetch for user ID: \(localCurrentUserId)...")
+
                 do {
                     try await userService.fetchUserProfile() 
                     userProfile = userService.currentUserProfile
                     if userProfile == nil {
-                        print("[FeedView.addComment] Profile still nil after fetch for user ID: \(localCurrentUserId).")
+
                     } else {
-                        print("[FeedView.addComment] Profile fetched successfully for user ID: \(localCurrentUserId). Username: \(userProfile!.username)")
+
                     }
                 } catch {
-                    print("[FeedView.addComment] Error fetching profile for user ID \(localCurrentUserId): \(error.localizedDescription). Cannot add comment.")
+
                     return
                 }
             }
 
             guard let validProfile = userProfile else {
-                print("[FeedView.addComment] User profile is nil even after fetch attempt for user ID: \(localCurrentUserId). Cannot add comment.")
+
                 return
             }
 
             let fetchedUsername = validProfile.username
 
             guard !fetchedUsername.isEmpty else {
-                print("[FeedView.addComment] Error: Username in profile for user ID \(localCurrentUserId) is empty. Username: '\(fetchedUsername)'. Cannot add comment.")
+
                 return
             }
             
             guard fetchedUsername != "User" else {
-                 print("[FeedView.addComment] Error: Username for user ID \(localCurrentUserId) is placeholder 'User'. Username: '\(fetchedUsername)'. Cannot add comment.")
+
                 return
             }
 
             usernameToUse = fetchedUsername
             profileImageToUse = validProfile.avatarURL
-            print("[FeedView.addComment] Using username: '\(usernameToUse)' and profile image: '\(profileImageToUse ?? "nil")\' for comment on post \(postId) by user \(localCurrentUserId).")
+
 
             do {
                 let parentId = replyingToComment?.id 
@@ -1714,27 +1722,27 @@ struct PostDetailView: View {
                     content: newCommentText,
                     parentCommentId: parentId 
                 )
-                print("[FeedView.addComment] Comment successfully added to post \(postId) by user \(localCurrentUserId).")
+
 
                 if let parent = replyingToComment, let parentId = parent.id {
-                    print("[FeedView.addComment] It was a reply to comment \(parentId). Refreshing replies (logic to be implemented).")
+
                     await refreshPostComments(postId: postId)
 
 
                 } else {
                     await refreshPostComments(postId: postId)
-                    print("[FeedView.addComment] It was a top-level comment. Refreshed comments for post \(postId).")
+
                 }
                 
                 await MainActor.run {
                     newCommentText = ""
                     replyingToComment = nil 
                     isCommentFieldFocused = false 
-                     print("[FeedView.addComment] UI reset after adding comment.")
+
                 }
 
             } catch {
-                print("[FeedView.addComment] Error occurred while finally trying to add comment to post \(postId) by user \(localCurrentUserId): \(error.localizedDescription)")
+
             }
         }
     }
@@ -1748,7 +1756,7 @@ struct PostDetailView: View {
             // or a more robust update mechanism from PostService would be better.
             // For now, this attempts a local optimistic update.
             // postService.posts[index] = postToUpdate // This line might be problematic if posts is not directly mutable or doesn't trigger updates.
-            print("[FeedView.refreshPostComments] Post \(postId) comment count potentially updated. UI should refresh.")
+
         }
          // Reload comments for the detail view
         loadComments()
@@ -1772,7 +1780,7 @@ struct PostDetailView: View {
                     loadComments()
                 }
             } catch {
-                print("Error deleting comment: \(error)")
+
             }
         }
     }
@@ -1785,7 +1793,7 @@ struct PostDetailView: View {
                     // Optionally update local post like count if needed, or rely on PostService to publish update
                 }
             } catch {
-                print("Error liking post: \(error)")
+
             }
         }
     }
@@ -1794,18 +1802,18 @@ struct PostDetailView: View {
         Task {
             do {
                 if let postId = post.id {
-                    print("[PostDetailView] Attempting to delete post with ID: \(postId)")
+
                     try await postService.deletePost(postId: postId)
-                    print("[PostDetailView] Post deletion successful for ID: \(postId)")
+
                     await MainActor.run {
                        dismiss()
                     }
                     // Optionally, trigger a refresh of the feed in FeedView via a callback or service update
                 } else {
-                    print("[PostDetailView] Error: Post ID is nil, cannot delete.")
+
                 }
             } catch {
-                print("[PostDetailView] Error deleting post ID \(post.id ?? "N/A"): \(error.localizedDescription)")
+
             }
         }
     }
@@ -2526,7 +2534,7 @@ private struct PostCommentsSectionView: View {
                                 onToggleRepliesTapped(comment)
                             },
                             onDelete: { () -> Void in // REVERTED to original
-                                print("Diagnostic onDelete() for top-level comment ID: \(comment.id ?? "N/A")")
+
                                 // self.handleDeleteAction(commentId: comment.id ?? "", parentComment: nil) // Original logic temporarily bypassed
                             },
                             areRepliesExpanded: commentToExpandReplies?.id == comment.id && (replies[comment.id ?? ""]?.isEmpty == false)
@@ -2552,7 +2560,7 @@ private struct PostCommentsSectionView: View {
                                             onReply: nil,
                                             onToggleReplies: nil,
                                             onDelete: { () -> Void in // REVERTED to original
-                                                print("Diagnostic onDelete() for reply ID: \(reply.id ?? "N/A") to parent: \(comment.id ?? "N/A")")
+
                                                 // self.handleDeleteAction(commentId: reply.id ?? "", parentComment: comment) // Original logic temporarily bypassed
                                             },
                                             areRepliesExpanded: false

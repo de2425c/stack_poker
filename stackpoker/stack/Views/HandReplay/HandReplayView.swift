@@ -269,10 +269,10 @@ struct HandReplayView: View {
         // Print info about cards for debugging
         hand.raw.players.forEach { player in
             if player.cards != nil && !player.cards!.isEmpty {
-                print("Player \(player.name) has \(player.cards!.count) cards: \(player.cards!.joined(separator: ", "))")
+
             }
             if player.finalCards != nil && !player.finalCards!.isEmpty {
-                print("Player \(player.name) has \(player.finalCards!.count) final cards: \(player.finalCards!.joined(separator: ", "))")
+
             }
         }
         
@@ -281,29 +281,29 @@ struct HandReplayView: View {
         for player in hand.raw.players {
             if player.position == "BTN" {
                 // Make sure the player with BTN position is marked as the dealer
-                print("Found BTN player: \(player.name) - marking as dealer")
+
             }
         }
         
         // Check showdown flag to ensure it's properly set
         if let showdown = hand.raw.showdown {
-            print("Hand has showdown = \(showdown)")
+
             if showdown {
                 // If hand has showdown, ensure we have proper data for card reveal
                 let playersWithCards = hand.raw.players.filter { $0.cards != nil && !$0.cards!.isEmpty }
                 if playersWithCards.count <= 1 {
-                    print("WARNING: Showdown flag is true but only \(playersWithCards.count) players have cards")
+
                 }
             }
         } else {
-            print("Hand does not have explicit showdown flag")
+
         }
         
         // Log pot distribution for debugging
         if let distribution = hand.raw.pot.distribution {
-            print("Hand has pot distribution: \(distribution.map { "\($0.playerName): $\($0.amount)" }.joined(separator: ", "))")
+
         } else {
-            print("Hand does not have pot distribution data")
+
         }
     }
     
@@ -325,7 +325,7 @@ struct HandReplayView: View {
         isShowdownComplete = false
         showWinnerPopup = false
         
-        print("DEBUG - startReplay(): All state reset, cards will be revealed at the end of the hand")
+
         
         // Initialize player stacks to their starting values
         initializeStacks()
@@ -334,7 +334,7 @@ struct HandReplayView: View {
     private func nextAction() {
         // If hand is complete but we need one more click for showdown, handle that
         if isHandComplete && !isShowdownComplete && (hand.raw.showdown ?? false) {
-            print("DEBUG - Final showdown click: Revealing all cards now")
+
             withAnimation(.easeInOut(duration: 0.5)) {
                 showdownRevealed = true
                 isShowdownComplete = true
@@ -379,7 +379,7 @@ struct HandReplayView: View {
                 
                 // If this is the last action of the last street AND showdown is true, reveal cards immediately
                 if isLastAction && isLastStreet && (hand.raw.showdown ?? false) {
-                    print("DEBUG - Last action on river with showdown=true, revealing cards immediately")
+
                     withAnimation(.easeInOut(duration: 0.5)) {
                         showdownRevealed = true
                         isShowdownComplete = true
@@ -490,7 +490,7 @@ struct HandReplayView: View {
                 } else {
                     // Villain(s) won - make all non-hero active players winners
                     winningPlayers = Set(activePlayers.filter { !$0.isHero }.map { $0.name })
-                    print("DEBUG - Villains won based on negative hero PnL: $\(heroPnl)")
+
                 }
                 showWinnerPopup = true
                 
@@ -512,7 +512,7 @@ struct HandReplayView: View {
     private func processAction(_ action: Action) {
         // Ensure player exists in stacks; handle error if not
         guard let stack = playerStacks[action.playerName] else {
-            print("Error: Player \(action.playerName) not found in stacks during action processing.")
+
             // Consider how to handle this - skip action, show error?
             return
         }
@@ -564,7 +564,7 @@ struct HandReplayView: View {
         // Handle other potential actions if they exist in your hand history format
         // (e.g., "all-in", "shows", "mucks")
         default:
-            print("Warning: Unhandled action type '\(action.action)' for player \(action.playerName)")
+            print("")
             // If an action involves an amount (like maybe an uncategorized "bets"),
             // you might need a fallback, but explicit handling is better.
             // Example: if action.amount > 0 { /* handle generic bet? */ }
@@ -572,19 +572,19 @@ struct HandReplayView: View {
     }
     
     private func handleShowdown() {
-        print("DEBUG - handleShowdown() called - Checking if card reveal is needed")
+
         
         // First, log the showdown status to help with debugging
         if let showdown = hand.raw.showdown {
-            print("DEBUG - Hand showdown flag is explicitly set to: \(showdown)")
+
         } else {
-            print("DEBUG - Hand has no explicit showdown flag")
+
         }
         
         // Priority #1: Always respect the explicit showdown flag if it exists
         if let showdownFlag = hand.raw.showdown {
             if showdownFlag {
-                print("DEBUG - Respecting explicit showdown=true flag")
+
                 withAnimation(.easeInOut(duration: 0.5)) {
                     showdownRevealed = true
                     isShowdownComplete = true
@@ -600,7 +600,7 @@ struct HandReplayView: View {
                 return
             } else {
                 // Explicit showdown=false - no showdown should happen
-                print("DEBUG - Respecting explicit showdown=false flag - no cards will be revealed")
+
                 withAnimation(.easeInOut(duration: 0.5)) {
                     showdownRevealed = false
                     isShowdownComplete = false
@@ -624,7 +624,7 @@ struct HandReplayView: View {
             }
             
             if playersWithCards.count >= 2 {
-                print("DEBUG - Multiple players with cards at end - treating as showdown")
+
                 withAnimation(.easeInOut(duration: 0.5)) {
                     showdownRevealed = true
                     isShowdownComplete = true
@@ -643,7 +643,7 @@ struct HandReplayView: View {
         
         // Priority #3: If only one player is active, they win without showdown
         if activePlayerCount == 1 {
-            print("DEBUG - Only one active player - no showdown needed")
+
             withAnimation(.easeInOut(duration: 0.5)) {
                 showdownRevealed = false
                 isShowdownComplete = true
@@ -655,7 +655,7 @@ struct HandReplayView: View {
         }
         
         // Fallback: No clear showdown condition
-        print("DEBUG - No clear showdown determination - defaulting to no showdown")
+
         withAnimation(.easeInOut(duration: 0.5)) {
             showdownRevealed = false
             isShowdownComplete = true
@@ -672,11 +672,11 @@ struct HandReplayView: View {
             // Use explicit pot distribution from hand history
             winningPlayers = Set(distribution.filter { $0.amount > 0 }.map { $0.playerName })
             
-            print("DEBUG - Using explicit pot distribution: \(distribution.map { "\($0.playerName): $\($0.amount)" }.joined(separator: ", "))")
+
             
             // Log final hand rankings for all winners
             for winner in distribution.filter({ $0.amount > 0 }) {
-                print("DEBUG - Winner \(winner.playerName) with hand: \(winner.hand)")
+
             }
             
             // Animate pot distribution after a delay
@@ -688,7 +688,7 @@ struct HandReplayView: View {
                     for potDist in distribution {
                         if let currentStack = self.playerStacks[potDist.playerName] {
                             self.playerStacks[potDist.playerName] = currentStack + potDist.amount
-                            print("DEBUG - Distributing $\(potDist.amount) to \(potDist.playerName), new stack: $\(currentStack + potDist.amount)")
+
                         }
                     }
                     self.potAmount = 0
@@ -696,7 +696,7 @@ struct HandReplayView: View {
             }
         } else {
             // No distribution data, fallback to simple determination
-            print("DEBUG - No pot distribution data, using fallback winner determination")
+
             
             // If only one player is active (everyone else folded), they win
             let activePlayers = hand.raw.players.filter { !foldedPlayers.contains($0.name) }
@@ -706,7 +706,7 @@ struct HandReplayView: View {
                 let winner = activePlayers.first!
                 winningPlayers = [winner.name]
                 
-                print("DEBUG - Single active player: \(winner.name) wins by fold")
+
                 
                 // Animate winner getting pot
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -716,7 +716,7 @@ struct HandReplayView: View {
                         // Update winner stack
                         if let currentStack = self.playerStacks[winner.name] {
                             self.playerStacks[winner.name] = currentStack + self.potAmount
-                            print("DEBUG - Distributing $\(self.potAmount) to \(winner.name), new stack: $\(currentStack + self.potAmount)")
+
                         }
                         self.potAmount = 0
                     }
@@ -730,11 +730,11 @@ struct HandReplayView: View {
                     if heroPnl > 0 {
                         // Hero won
                         winningPlayers = [hero.name]
-                        print("DEBUG - Hero won based on positive PnL: $\(heroPnl)")
+
                     } else {
                         // Villain(s) won - make all non-hero active players winners
                         winningPlayers = Set(activePlayers.filter { !$0.isHero }.map { $0.name })
-                        print("DEBUG - Villains won based on negative hero PnL: $\(heroPnl)")
+
                     }
                     
                     // Distribute pot (simplified)
@@ -778,7 +778,7 @@ struct HandReplayView: View {
     // Helper function to distribute pot to all active players
     private func distributeToAllActivePlayers(_ activePlayers: [Player]) {
         // Can't determine winner, distribute evenly
-        print("DEBUG - Cannot determine winner, using fallback equal distribution")
+
         
         winningPlayers = Set(activePlayers.map { $0.name })
         

@@ -612,7 +612,7 @@ struct StakerInputView: View {
                     self.config.isSearching = false
                 }
             } catch {
-                print("Error searching stakers: \(error.localizedDescription)")
+
                 DispatchQueue.main.async {
                     self.config.searchResults = []
                     self.config.isSearching = false
@@ -1025,7 +1025,7 @@ struct SessionFormView: View {
                             selectedGame = nil
                         }
                     } catch {
-                        print("Error deleting cash game: \(error.localizedDescription)")
+
                         // Handle error (e.g., show another alert to the user)
                     }
                 }
@@ -1043,7 +1043,7 @@ struct SessionFormView: View {
                         self.baseBuyIn = String(format: "%.2f", buyinValue)
                     } else {
                         self.baseBuyIn = "" // Clear or set to default if parsing fails
-                        print("Could not parse buy-in from event: \(selectedEvent.buyin_string)")
+
                     }
                     
                     self.tournamentLocation = selectedEvent.casino // Prioritize casino
@@ -1132,7 +1132,7 @@ struct SessionFormView: View {
 
         if selectedLogType == .cashGame {
             guard let game = selectedGame else {
-                print("Cash game not selected.")
+
                 isLoading = false
                 // TODO: Show alert to user
                 return
@@ -1149,13 +1149,13 @@ struct SessionFormView: View {
 
         } else { // Tournament Log
             guard !tournamentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                print("Tournament name is required.")
+
                 isLoading = false
                 // TODO: Show alert to user
                 return
             }
             guard !tournamentLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                print("Tournament location is required.")
+
                 isLoading = false
                 // TODO: Show alert to user
                 return
@@ -1224,11 +1224,11 @@ struct SessionFormView: View {
 
         if validConfigs.isEmpty {
             // If no valid staking configurations are provided (either stakerConfigs is empty or all entries are invalid)
-            print("No valid staking configurations. Saving session data only.")
+
             saveSessionDataOnly(sessionData: sessionDataToSave)
         } else {
             // If there are valid staking configurations
-            print("Found \(validConfigs.count) valid staking configurations. Saving session and stakes.")
+
             saveSessionDataAndIndividualStakes(
                 sessionData: sessionDataToSave,
                 gameName: gameNameForStake,
@@ -1250,7 +1250,7 @@ struct SessionFormView: View {
                 if error == nil {
                     dismiss()
                 } else {
-                    print("Error adding session: \(error!.localizedDescription)")
+
                     // Handle error (e.g., show an alert)
                 }
             }
@@ -1274,7 +1274,7 @@ struct SessionFormView: View {
 
         db.collection("sessions").document(newDocumentId).setData(mutableSessionData) { error in
             if let error = error {
-                print("Error adding session/log: \(error.localizedDescription)")
+
                 DispatchQueue.main.async {
                     isLoading = false
                     // Handle error
@@ -1293,7 +1293,7 @@ struct SessionFormView: View {
                     guard let stakerProfile = config.selectedStaker,
                           let percentageSoldDouble = Double(config.percentageSold),
                           let markupDouble = Double(config.markup) else {
-                        print("Skipping invalid stake config during Stake object creation: \(config.id)")
+
                         allStakesSuccessful = false
                         continue
                     }
@@ -1314,10 +1314,10 @@ struct SessionFormView: View {
                     )
                     do {
                         _ = try await stakeService.addStake(newStake)
-                        print("Stake added successfully for staker \(stakerProfile.username) for session/log: \(newDocumentId)")
+
                         savedStakeCount += 1
                     } catch {
-                        print("Error adding stake for staker \(stakerProfile.username): \(error.localizedDescription)")
+
                         allStakesSuccessful = false
                         // Potentially collect errors
                     }
@@ -1326,16 +1326,16 @@ struct SessionFormView: View {
                 DispatchQueue.main.async {
                     isLoading = false
                     if allStakesSuccessful && savedStakeCount == configs.count && savedStakeCount > 0 {
-                         print("All \(savedStakeCount) stakes saved successfully.")
+
                         dismiss()
                     } else if savedStakeCount > 0 {
-                         print("Partially successful: \(savedStakeCount) out of \(configs.count) stakes saved.")
+
                         // Still dismiss as session is saved and some stakes might be too.
                         // User can verify on dashboard.
                         dismiss()
                     }
                     else {
-                        print("Failed to save any stakes, but session might be saved.")
+
                         // Provide more specific feedback or error handling
                         // For now, we will dismiss as the session itself was likely saved.
                         dismiss() 

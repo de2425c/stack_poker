@@ -89,7 +89,7 @@ struct StandaloneHomeGameBar_Previews: PreviewProvider {
             Color.black.edgesIgnoringSafeArea(.all)
             
             StandaloneHomeGameBar(game: sampleGame, onTap: {
-                print("Standalone Home Game Bar tapped!")
+
             })
         }
     }

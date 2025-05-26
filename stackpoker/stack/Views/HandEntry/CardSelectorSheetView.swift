@@ -356,7 +356,7 @@ struct CardSelectorSheetView_Previews: PreviewProvider {
                     initialUsedCards: Set(["Ah", "Kd"]),
                     currentSelections: pairBinding.wrappedValue,
                     onComplete: { selectedCards in
-                        print("Pair selection completed: \(selectedCards)")
+
                         pairBinding.wrappedValue = selectedCards
                     }
                 )

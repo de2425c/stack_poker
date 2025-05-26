@@ -121,9 +121,13 @@ class PostService: ObservableObject {
             let batchSize = 10 // Firebase limit for 'in' queries
             var allFetchedPosts: [Post] = []
             
-            // Use a Set to keep track of document IDs to avoid duplicates if a user is in multiple batches
-            // (though with current fetchFollowingUsers, this shouldn't happen)
+            // Use a Set to keep track of document IDs to avoid duplicates
             var processedPostIDs = Set<String>()
+
+            // Define a larger limit for fetching posts per user batch initially,
+            // to ensure we get enough candidates for the chronological feed.
+            // This isn't an overall limit, but a per-batch fetch limit.
+            let perBatchFetchLimit = 50 // Fetch up to 50 most recent posts per batch of users
 
             for i in stride(from: 0, to: self.followingUserIds.count, by: batchSize) {
                 let end = min(i + batchSize, self.followingUserIds.count)
@@ -134,7 +138,7 @@ class PostService: ObservableObject {
                 let query = db.collection("posts")
                     .whereField("userId", in: userIdBatch)
                     .order(by: "createdAt", descending: true)
-                    .limit(to: postsPerPage) // Fetch postsPerPage for initial load per batch, then consolidate
+                    .limit(to: perBatchFetchLimit) // Apply a per-batch limit here
 
                 let batchSnapshot = try await query.getDocuments()
                 let batchPosts = try await processPosts(from: batchSnapshot, existingIds: &processedPostIDs)
@@ -144,24 +148,17 @@ class PostService: ObservableObject {
             // Sort all collected posts by creation date to get the true most recent
             allFetchedPosts.sort { $0.createdAt > $1.createdAt }
 
-            // Take the top 'postsPerPage' (or a bit more to ensure screen fills)
-            let initialLoadCount = postsPerPage * 2 // Fetch more initially to ensure screen is full
-            self.posts = Array(allFetchedPosts.prefix(initialLoadCount))
+            // Now apply the overall desired size for the initial feed load
+            let overallInitialLoadSize = 20 // Display 20 posts for the initial feed
+            self.posts = Array(allFetchedPosts.prefix(overallInitialLoadSize))
             
-            // Set the lastDocument based on the actual last post displayed
-            // This will be used by the NEW fetchMorePosts logic which relies on its timestamp
-            if let lastDisplayedPost = self.posts.last, let id = lastDisplayedPost.id {
-                 // We need the actual DocumentSnapshot for timestamp based pagination with startAfter
-                 // For simplicity now, we'll fetch it. Ideally, processPosts would return snapshots too.
-                 // Or, even better, fetchMorePosts will use the timestamp of self.posts.last.
-                 // For now, let's assume processPosts stores the snapshot or we re-fetch.
-                 // The key is that fetchMorePosts will now rely on the *timestamp* of self.posts.last
-            }
-             self.lastDocument = nil // For timestamp pagination, this specific snapshot isn't the primary cursor for fetchMorePosts
+            // lastDocument logic for pagination will be based on the timestamp of the oldest loaded post,
+            // so we don't need to store a specific DocumentSnapshot here for the new fetchMorePosts logic.
+            self.lastDocument = nil
 
         } catch {
             // Consider more specific error handling or re-throwing
-            print("Error fetching posts: \\(error)")
+
             throw error
         }
     }
@@ -189,7 +186,7 @@ class PostService: ObservableObject {
                     posts.append(post)
                     existingIds.insert(postId)
                 } catch {
-                    print("Error decoding post \(postId): \(error)")
+
                 }
             }
         }
@@ -200,7 +197,7 @@ class PostService: ObservableObject {
         // Use the timestamp of the oldest post currently loaded for pagination
         guard let oldestPost = self.posts.last else {
             // No posts loaded yet. Cannot paginate.
-            print("Cannot fetch more posts: no existing posts.")
+
             return
         }
         let oldestPostTimestamp = oldestPost.createdAt // createdAt is non-optional
@@ -216,13 +213,16 @@ class PostService: ObservableObject {
         }
         
         guard !self.followingUserIds.isEmpty else {
-            print("Cannot fetch more posts: not following any users.")
+
             return
         }
 
         var newlyFetchedPosts: [Post] = []
         let batchSize = 10
         var processedPostIDs = Set<String>(self.posts.compactMap { $0.id }) // Exclude already loaded posts
+
+        // Define a larger limit for fetching posts per user batch during pagination.
+        let perBatchFetchLimitForMore = 30 // Fetch up to 30 older posts per batch of users
 
         for i in stride(from: 0, to: self.followingUserIds.count, by: batchSize) {
             let end = min(i + batchSize, self.followingUserIds.count)
@@ -235,7 +235,7 @@ class PostService: ObservableObject {
                 .whereField("userId", in: userIdBatch)
                 .whereField("createdAt", isLessThan: oldestPostTimestamp) // Fetch posts older than the oldest one we have
                 .order(by: "createdAt", descending: true) // Still order by most recent among the older ones
-                .limit(to: postsPerPage)
+                .limit(to: perBatchFetchLimitForMore) // Apply a per-batch limit here
 
             let batchSnapshot = try await query.getDocuments()
             let batchPosts = try await processPosts(from: batchSnapshot, existingIds: &processedPostIDs)
@@ -245,9 +245,10 @@ class PostService: ObservableObject {
         // Sort all newly fetched older posts to maintain order
         newlyFetchedPosts.sort { $0.createdAt > $1.createdAt }
         
-        // Append to the main posts array
+        // Append a reasonable number of these new posts to the main posts array
+        let paginationPageSize = 10 // Add 10 more posts when paginating
         if !newlyFetchedPosts.isEmpty {
-            self.posts.append(contentsOf: newlyFetchedPosts)
+            self.posts.append(contentsOf: Array(newlyFetchedPosts.prefix(paginationPageSize)))
         }
     }
     
@@ -396,7 +397,7 @@ class PostService: ObservableObject {
                 comment.id = document.documentID
                 return comment
             } catch {
-                print("Error decoding comment \\(document.documentID): \\(error)")
+
                 return nil
             }
         }
@@ -477,7 +478,7 @@ class PostService: ObservableObject {
         // Fetch the comment to determine if it's a top-level or a reply, and if it has replies
         let commentSnapshot = try await commentRef.getDocument()
         guard commentSnapshot.exists, var commentData = try? commentSnapshot.data(as: Comment.self) else {
-            print("Error: Comment \\(commentId) not found or couldn't be decoded.")
+
             throw NSError(domain: "CommentError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Comment not found or could not be decoded"])
         }
         commentData.id = commentSnapshot.documentID // Ensure ID is set
@@ -529,7 +530,7 @@ class PostService: ObservableObject {
             var existingIds = Set<String>() // Initialize an empty set for this context
             return try await processPosts(from: snapshot, existingIds: &existingIds)
         } catch {
-            print("Error fetching session posts: \(error)")
+
             return []
         }
     }
@@ -539,7 +540,7 @@ class PostService: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        print("🚀 Fetching posts for user ID: \\(userId)")
+
 
         let query = db.collection("posts")
             .whereField("userId", isEqualTo: userId)
@@ -562,10 +563,10 @@ class PostService: ObservableObject {
             // For now, the primary use case is fetching the initial set.
             self.lastDocument = snapshot.documents.last 
             
-            print("✅ Successfully fetched \\(self.posts.count) posts for user \\(userId).")
+
 
         } catch {
-            print("❌ Error fetching posts for user \\(userId): \\(error)")
+
             // Clear posts on error or handle as needed
             self.posts = []
             self.lastDocument = nil
@@ -575,11 +576,11 @@ class PostService: ObservableObject {
     
     // MARK: - Fetching Single Post by ID
     func fetchSinglePost(byId postId: String) async throws -> Post? {
-        print("🌐 PostService: Fetching single post with ID: \(postId)")
+
         let documentSnapshot = try await db.collection("posts").document(postId).getDocument()
         
         guard documentSnapshot.exists else {
-            print("⚠️ PostService: Post with ID \(postId) not found.")
+
             return nil
         }
         
@@ -599,10 +600,10 @@ class PostService: ObservableObject {
                 }
             }
             
-            print("✅ PostService: Successfully fetched and decoded post \(postId).")
+
             return post
         } catch {
-            print("❌ PostService: Error decoding post \(postId): \(error.localizedDescription)")
+
             // It might be better to throw a specific error or return nil depending on desired behavior
             // For now, re-throwing the decoding error.
             throw error 

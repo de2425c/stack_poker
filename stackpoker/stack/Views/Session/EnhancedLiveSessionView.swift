@@ -621,9 +621,9 @@ struct EnhancedLiveSessionView: View {
         }
         
         // Log the state for debugging
-        print("Enhanced Live Session View appeared")
-        print("Session mode: \(sessionMode)")
-        print("Current chip updates: \(sessionStore.enhancedLiveSession.chipUpdates.count)")
+
+
+
         
         // Ensure user profile is loaded for posting
         Task {
@@ -963,7 +963,7 @@ struct EnhancedLiveSessionView: View {
                             selectedGame = nil
                         }
                     } catch {
-                        print("Error deleting cash game: \(error.localizedDescription)")
+
                         // Handle error (e.g., show another alert to the user)
                     }
                 }
@@ -1308,7 +1308,7 @@ struct EnhancedLiveSessionView: View {
                     let handContentSummary = self.createSummaryFromParsedHand(hand: savedHand.hand) // Optional: for a brief text part if needed
                     self.showShareToFeedDialog(content: "", isHand: true, handData: savedHand.hand, updateId: savedHand.id)
                 } else {
-                    print("Error: Could not find SavedHand in handStore for ID: \(item.id)")
+
                     // Optionally, show an alert to the user that the hand data couldn't be loaded for sharing
                 }
             } else if item.kind == .sessionStart {
@@ -1414,7 +1414,7 @@ struct EnhancedLiveSessionView: View {
                                 onReplayTap: { 
                                     // Placeholder for future replay functionality
                                     // You would typically present a HandReplayView here, possibly passing handData.id or handData.hand
-                                    print("Replay tapped for hand ID: \(handData.id)")
+
                                 }, 
                                 location: "$\(Int(handData.hand.raw.gameInfo.smallBlind))/$\(Int(handData.hand.raw.gameInfo.bigBlind))", // Use stakes as location
                                 createdAt: handData.timestamp, // Use handData.timestamp
@@ -1515,7 +1515,7 @@ struct EnhancedLiveSessionView: View {
                                 
                                                 loadSessionPosts()
                                             } catch {
-                                                print("Error toggling like: \(error)")
+
                                             }
                                         }
                                     },
@@ -1901,11 +1901,11 @@ struct EnhancedLiveSessionView: View {
 
         if validConfigs.isEmpty {
             // If no valid staking configurations are provided (either stakerConfigs is empty or all entries are invalid)
-            print("No valid staking configurations. Saving session data only.")
+
             await saveSessionDataOnly(sessionData: sessionDataToSave)
         } else {
             // If there are valid staking configurations
-            print("Found \(validConfigs.count) valid staking configurations. Saving session and stakes.")
+
             await saveSessionDataAndIndividualStakes(
                 sessionData: sessionDataToSave,
                 gameName: gameNameForStake,
@@ -1937,7 +1937,7 @@ struct EnhancedLiveSessionView: View {
                 }
             }
         } catch {
-            print("Error adding session: \(error.localizedDescription)")
+
             await MainActor.run {
                 self.isLoadingSave = false
             }
@@ -1972,7 +1972,7 @@ struct EnhancedLiveSessionView: View {
                 guard let stakerProfile = config.selectedStaker,
                       let percentageSoldDouble = Double(config.percentageSold),
                       let markupDouble = Double(config.markup) else {
-                    print("Skipping invalid stake config during Stake object creation: \(config.id)")
+
                     allStakesSuccessful = false
                     continue
                 }
@@ -1993,10 +1993,10 @@ struct EnhancedLiveSessionView: View {
                 )
                 do {
                     _ = try await stakeService.addStake(newStake)
-                    print("Stake added successfully for staker \(stakerProfile.username) for session/log: \(newDocumentId)")
+
                     savedStakeCount += 1
                 } catch {
-                    print("Error adding stake for staker \(stakerProfile.username): \(error.localizedDescription)")
+
                     allStakesSuccessful = false
                 }
             }
@@ -2005,11 +2005,11 @@ struct EnhancedLiveSessionView: View {
                 self.sessionStore.clearLiveSession()
                 self.isLoadingSave = false
                 if allStakesSuccessful && savedStakeCount == configs.count && savedStakeCount > 0 {
-                    print("All \(savedStakeCount) stakes saved successfully.")
+
                 } else if savedStakeCount > 0 {
-                    print("Partially successful: \(savedStakeCount) out of \(configs.count) stakes saved.")
+
                 } else {
-                    print("Failed to save any stakes, but session might be saved.")
+
                 }
                 
                 // Show session detail regardless of stake success
@@ -2021,7 +2021,7 @@ struct EnhancedLiveSessionView: View {
                 }
             }
         } catch {
-            print("Error adding session: \(error.localizedDescription)")
+
             await MainActor.run {
                 self.isLoadingSave = false
             }
@@ -2336,13 +2336,13 @@ struct EnhancedLiveSessionView: View {
     
     // Function to check for new hands after wizard is closed
     private func checkForNewHands() {
-        print("Checking for new hands for current session...")
-        print("Found \(handStore.savedHands.count) total hands")
-        print("Session ID: \(sessionStore.liveSession.id)")
+
+
+
         
         // Filter hands for this session and log
         let sessionHands = handStore.savedHands.filter { $0.sessionId == sessionStore.liveSession.id }
-        print("Found \(sessionHands.count) hands for this session")
+
         
         // Process each hand
         for hand in sessionHands {
@@ -2352,7 +2352,7 @@ struct EnhancedLiveSessionView: View {
             }
             
             if !isAlreadyTracked {
-                print("Adding untracked hand: \(hand.id)")
+
                 
                 // Create a content String from the hand to add to the session
                 let handSummary = createSummaryFromParsedHand(hand: hand.hand)
@@ -2783,16 +2783,16 @@ struct EnhancedLiveSessionView: View {
     // Function to load posts for the current session
     private func loadSessionPosts() {
         guard !sessionStore.liveSession.id.isEmpty else {
-            print("Cannot load posts: Session ID is empty")
+
             return
         }
         
         isLoadingSessionPosts = true
-        print("Loading posts for session ID: \(sessionStore.liveSession.id)")
+
         
         Task {
             let posts = await postService.getSessionPosts(sessionId: sessionStore.liveSession.id)
-            print("Found \(posts.count) posts for this session")
+
             
             await MainActor.run {
                 sessionPosts = posts
@@ -2804,15 +2804,15 @@ struct EnhancedLiveSessionView: View {
     // Refresh session posts
     private func refreshSessionPosts() async {
         guard !sessionStore.liveSession.id.isEmpty else {
-            print("Cannot refresh posts: Session ID is empty")
+
             return
         }
         
         isLoadingSessionPosts = true
-        print("Refreshing posts for session ID: \(sessionStore.liveSession.id)")
+
         
         let posts = await postService.getSessionPosts(sessionId: sessionStore.liveSession.id)
-        print("Found \(posts.count) posts for this session after refresh")
+
         
         await MainActor.run {
             sessionPosts = posts

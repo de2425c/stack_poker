@@ -101,9 +101,10 @@ struct UserProfileView: View {
                     
                     Divider().padding(.horizontal)
                     
-                    // Placeholder for user's posts
-                    Text("User's Posts")
-                        .font(.headline)
+                    // Changed from "User's Posts"
+                    Text("Recent Activity")
+                        .font(.plusJakarta(.title2, weight: .bold)) // Using Plus Jakarta Sans, bold, size 22-24 equivalent
+                        .foregroundColor(.white) // Ensure text is white
                         .padding([.horizontal, .top])
                     
                     if profilePostService.posts.isEmpty && !profilePostService.isLoading {
@@ -116,12 +117,17 @@ struct UserProfileView: View {
                     
                     // List of user's posts (using existing PostView)
                     ForEach(profilePostService.posts) { post in
-                        PostView(
-                            post: post, 
-                            onLike: { /* Implement like for profile view if needed */ }, 
-                            onComment: { /* Implement comment for profile view if needed */ }, 
-                            userId: loggedInUserId ?? "" // Pass logged-in user ID
-                        )
+                        NavigationLink(destination: PostDetailView(post: post, userId: loggedInUserId ?? "").environmentObject(userService).environmentObject(profilePostService)) {
+                            PostView(
+                                post: post, 
+                                onLike: { 
+                                    Task { try? await profilePostService.toggleLike(postId: post.id ?? "", userId: loggedInUserId ?? "") } 
+                                }, 
+                                onComment: { /* Comment handling for profile view if needed */ }, 
+                                userId: loggedInUserId ?? "" // Pass logged-in user ID
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle()) // Ensures the whole PostView is tappable like a button
                         Divider()
                     }
                     
@@ -150,7 +156,7 @@ struct UserProfileView: View {
                 }
                 // Fetch user's posts
                 try? await profilePostService.fetchPosts(forUserId: userId)
-                print("Displaying UserProfileView for userId: \(userId), isFollowing: \(self.isFollowing)")
+
             }
         }
     }
@@ -168,7 +174,7 @@ struct UserProfileView: View {
                 } else {
                     try await userService.unfollowUser(userIdToUnfollow: userId)
                 }
-                print("Successfully performed \(actionIsFollow ? "follow" : "unfollow") action.")
+
                 
                 // Refresh both user profiles to get updated counts
                 await userService.fetchUser(id: userId) 
@@ -181,7 +187,7 @@ struct UserProfileView: View {
                 self.isFollowing = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
 
             } catch {
-                print("Error toggling follow state: \(error)")
+
                 // Optionally, revert optimistic UI update if server operation failed
                 // self.isFollowing = !actionIsFollow 
             }

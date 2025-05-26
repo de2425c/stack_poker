@@ -447,7 +447,7 @@ struct BuyInView: View {
                 do {
                     self.game = try await homeGameService.fetchHomeGame(gameId: gameId)
                 } catch {
-                    print("Error fetching game: \(error.localizedDescription)")
+
             }
         }
     }

@@ -28,7 +28,7 @@ class UserService: ObservableObject {
     
     // Method to completely clear all user data from memory
     @objc func clearUserData() {
-        print("🧹 Clearing all cached user data")
+
         DispatchQueue.main.async {
             // Clear the current profile
             self.currentUserProfile = nil
@@ -61,35 +61,35 @@ class UserService: ObservableObject {
     
     func fetchUserProfile() async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            print("⛔️ fetchUserProfile: No authenticated user")
+
             throw UserServiceError.notAuthenticated
         }
         
-        print("🔍 Fetching profile for user: \(userId)")
+
         
         do {
             let document = try await db.collection("users")
                 .document(userId)
                 .getDocument()
             
-            print("📄 Document exists: \(document.exists)")
+
             
             if !document.exists {
-                print("⚠️ No profile document found")
+
                 throw UserServiceError.profileNotFound
             }
             
             guard let data = document.data() else {
-                print("⚠️ Document exists but no data")
+
                 throw UserServiceError.invalidData
             }
             
             // Get follower counts
             let (followersCount, followingCount) = try await getFollowerCounts(for: userId)
             
-            print("✅ Successfully fetched profile data")
+
             let avatarURL = data["avatarURL"] as? String
-            print("[DEBUG] Profile avatarURL from Firestore: \(avatarURL ?? "nil")")
+
             await MainActor.run {
                 self.currentUserProfile = UserProfile(
                     id: userId,
@@ -106,22 +106,22 @@ class UserService: ObservableObject {
                 )
             }
         } catch {
-            print("❌ Error fetching profile: \(error)")
+
             throw error
         }
     }
     
     func createUserProfile(userData: [String: Any]) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            print("⛔️ createUserProfile: No authenticated user")
+
             throw UserServiceError.notAuthenticated
         }
         
-        print("📝 Creating profile for user: \(userId) with data")
+
         
         // Extract username for availability check
         guard let username = userData["username"] as? String, !username.isEmpty else {
-            print("⚠️ Username is required")
+
             throw NSError(domain: "UserServiceError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Username is required"])
         }
         
@@ -132,7 +132,7 @@ class UserService: ObservableObject {
                 .getDocuments()
             
             if !querySnapshot.documents.isEmpty {
-                print("⚠️ Username already exists")
+
                 throw UserServiceError.usernameAlreadyExists
             }
             
@@ -144,7 +144,7 @@ class UserService: ObservableObject {
             let docRef = db.collection("users").document(userId)
             try await docRef.setData(profileData)
             
-            print("✅ Successfully created profile with complete data")
+
             
             // Create a profile object from the data
             let displayName = userData["displayName"] as? String
@@ -173,9 +173,9 @@ class UserService: ObservableObject {
             }
             
         } catch let firestoreError as NSError {
-            print("❌ Firestore error: \(firestoreError.localizedDescription)")
-            print("❌ Error code: \(firestoreError.code)")
-            print("❌ Error domain: \(firestoreError.domain)")
+
+
+
             throw UserServiceError.from(firestoreError)
         }
     }
@@ -191,7 +191,7 @@ class UserService: ObservableObject {
 
     // Function to update or set the FCM token for a user
     func updateFCMToken(userId: String, token: String) async throws {
-        print("🔄 Attempting to update FCM token for user: \(userId) with token: \(token)")
+
         let userRef = db.collection("users").document(userId)
         do {
             // Check if the document exists
@@ -208,39 +208,39 @@ class UserService: ObservableObject {
                     let maxTokens = 5
                     if existingTokens.count >= maxTokens {
                         existingTokens = Array(existingTokens.suffix(maxTokens - 1))
-                        print("ℹ️ Trimming old FCM tokens for user: \(userId). Keeping most recent \(maxTokens - 1) tokens.")
+
                     }
                     
                     // Add the new token
                     existingTokens.append(token)
                     try await userRef.updateData(["fcmTokens": existingTokens])
-                    print("✅ FCM token appended for user: \(userId)")
+
                 } else {
                     // If token exists, refresh its position to be the most recent
                     if let index = existingTokens.firstIndex(of: token), index < existingTokens.count - 1 {
                         existingTokens.remove(at: index)
                         existingTokens.append(token)
                         try await userRef.updateData(["fcmTokens": existingTokens])
-                        print("ℹ️ FCM token refreshed position for user: \(userId)")
+
                     } else {
-                        print("ℹ️ FCM token already exists and is most recent for user: \(userId)")
+
                     }
                 }
             } else {
                 // Document doesn't exist, create it with the FCM token
-                print("⚠️ User document \(userId) does not exist. Creating with FCM token.")
+
                 try await userRef.setData(["fcmTokens": [token]], merge: true)
-                print("✅ FCM token set for new/non-existent user document: \(userId)")
+
             }
         } catch {
-            print("❌ Error updating FCM token for user \(userId): \(error.localizedDescription)")
+
             throw error
         }
     }
     
     // Add a function to handle token invalidation
     func invalidateFCMToken(userId: String, token: String) async {
-        print("🔄 Attempting to remove invalid FCM token for user: \(userId)")
+
         let userRef = db.collection("users").document(userId)
         
         do {
@@ -254,15 +254,15 @@ class UserService: ObservableObject {
                 
                 if existingTokens.count < initialCount {
                     try await userRef.updateData(["fcmTokens": existingTokens])
-                    print("✅ Removed invalid FCM token for user: \(userId)")
+
                 } else {
-                    print("ℹ️ FCM token was not found in user's tokens array: \(userId)")
+
                 }
             } else {
-                print("ℹ️ No FCM tokens found for user: \(userId) or document doesn't exist")
+
             }
         } catch {
-            print("❌ Error removing invalid FCM token for user \(userId): \(error.localizedDescription)")
+
         }
     }
     
@@ -285,7 +285,7 @@ class UserService: ObservableObject {
                 if let urlString = url?.absoluteString {
                     // Ensure we're using HTTPS
                     let httpsUrlString = urlString.replacingOccurrences(of: "http://", with: "https://")
-                    print("[DEBUG] Firebase Storage download URL: \(httpsUrlString)")
+
                     completion(.success(httpsUrlString))
                 } else {
                     completion(.failure(NSError(domain: "URLError", code: 0, userInfo: [NSLocalizedDescriptionKey: "No URL returned."])) )
@@ -301,7 +301,7 @@ class UserService: ObservableObject {
         //     print("User \(id) already loaded.")
         //     return
         // }
-        print("🔍 Fetching profile for user: \(id) for loadedUsers dictionary")
+
 
         do {
             let document = try await db.collection("users")
@@ -309,14 +309,14 @@ class UserService: ObservableObject {
                 .getDocument()
 
             if !document.exists {
-                print("⚠️ No profile document found for user ID: \(id)")
+
                 // You might want to handle this case, e.g., by setting nil or a specific error state
                 // For now, it just won't add to loadedUsers
                 return
             }
 
             guard let data = document.data() else {
-                print("⚠️ Document exists for user ID \(id) but no data")
+
                 return
             }
 
@@ -341,11 +341,11 @@ class UserService: ObservableObject {
             // Update the published dictionary on the main thread
             DispatchQueue.main.async {
                 self.loadedUsers[id] = userProfile
-                print("✅ Successfully fetched and stored user profile: \(userProfile.username) in loadedUsers")
+
             }
 
         } catch {
-            print("❌ Error fetching profile for user ID \(id): \(error)")
+
             // Optionally, handle the error, e.g., by setting nil for this ID in loadedUsers
         }
     }
@@ -359,14 +359,14 @@ class UserService: ObservableObject {
         
         // Prevent following oneself
         guard currentUserId != userIdToFollow else {
-            print("User cannot follow themselves.")
+
             return // Or throw an error
         }
 
         // Check if already following to prevent duplicate follow documents
         let alreadyFollowing = await isUserFollowing(targetUserId: userIdToFollow, currentUserId: currentUserId)
         guard !alreadyFollowing else {
-            print("User \(currentUserId) is already following \(userIdToFollow).")
+
             return
         }
 
@@ -386,7 +386,7 @@ class UserService: ObservableObject {
             try await currentUserFollowingRef.setData(["timestamp": FieldValue.serverTimestamp()])
             try await targetUserFollowersRef.setData(["timestamp": FieldValue.serverTimestamp()])
             
-            print("User \(currentUserId) successfully followed \(userIdToFollow) (both new + legacy collections).")
+
 
             // Optimistically update local counts and refresh profiles
             DispatchQueue.main.async {
@@ -406,7 +406,7 @@ class UserService: ObservableObject {
             // await fetchUser(id: userIdToFollow)
             // await fetchUser(id: currentUserId) 
         } catch {
-            print("Error following user: \(error)")
+
             throw error
         }
     }
@@ -423,7 +423,7 @@ class UserService: ObservableObject {
         do {
             let snapshot = try await query.getDocuments()
             guard !snapshot.documents.isEmpty else {
-                print("User \(currentUserId) is not following \(userIdToUnfollow), cannot unfollow.")
+
                 return // Or throw an error indicating not currently following
             }
 
@@ -441,7 +441,7 @@ class UserService: ObservableObject {
             try? await currentUserFollowingRef.delete()
             try? await targetUserFollowersRef.delete()
             
-            print("User \(currentUserId) successfully unfollowed \(userIdToUnfollow) (removed from new + legacy collections).")
+
 
             // Optimistically update local counts and refresh profiles
             DispatchQueue.main.async {
@@ -461,7 +461,7 @@ class UserService: ObservableObject {
             // await fetchUser(id: userIdToUnfollow)
             // await fetchUser(id: currentUserId)
         } catch {
-            print("Error unfollowing user: \(error)")
+
             throw error
         }
     }
@@ -481,7 +481,7 @@ class UserService: ObservableObject {
             let snapshot = try await query.getDocuments()
             return !snapshot.documents.isEmpty
         } catch {
-            print("Error checking follow status: \(error)")
+
             return false
         }
     }
@@ -492,7 +492,7 @@ class UserService: ObservableObject {
             let snapshot = try await query.getDocuments()
             return snapshot.documents.compactMap { $0.data()["followerId"] as? String }
         } catch {
-            print("Error fetching follower IDs: \(error)")
+
             return []
         }
     }
@@ -503,7 +503,7 @@ class UserService: ObservableObject {
             let snapshot = try await query.getDocuments()
             return snapshot.documents.compactMap { $0.data()["followeeId"] as? String }
         } catch {
-            print("Error fetching following IDs: \(error)")
+
             return []
         }
     }
@@ -544,7 +544,7 @@ class UserService: ObservableObject {
                     }
                 }
             } catch {
-                print("Error fetching user profiles by IDs chunk: \(error)")
+
             }
         }
         return profiles
@@ -600,7 +600,7 @@ class UserService: ObservableObject {
             }
             return profiles
         } catch {
-            print("Error searching users by username prefix \"\(usernamePrefix)\": \(error.localizedDescription)")
+
             throw error
         }
     }

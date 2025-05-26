@@ -207,7 +207,7 @@ struct LiveSessionBar: View {
                 .padding(.bottom, 2)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    print("Collapsed bar tapped - launching session")
+
                     onTap()
                 }
             }

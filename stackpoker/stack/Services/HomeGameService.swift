@@ -22,12 +22,12 @@ class HomeGameService: ObservableObject {
         let listener = db.collection("homeGames").document(gameId)
             .addSnapshotListener { documentSnapshot, error in
                 guard let document = documentSnapshot else {
-                    print("Error listening for game updates: \(error?.localizedDescription ?? "Unknown error")")
+
                     return
                 }
                 
                 guard document.exists, let data = document.data() else {
-                    print("Game document no longer exists")
+
                     return
                 }
                 
@@ -36,7 +36,7 @@ class HomeGameService: ObservableObject {
                         onChange(game)
                     }
                 } catch {
-                    print("Error parsing game data: \(error.localizedDescription)")
+
                 }
             }
         
@@ -146,7 +146,7 @@ class HomeGameService: ObservableObject {
     
     /// End a game and process all active players
     func endGame(gameId: String) async throws {
-        print("[HomeGameService] endGame called for gameId: \(gameId)")
+
         guard let currentUser = Auth.auth().currentUser else {
             throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }

@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		661DF9662DCC1570000D1BE1 /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 661DF9652DCC1570000D1BE1 /* Kingfisher */; };
 		6659AE102DD8FD0D0000B8E0 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 6659AE0F2DD8FD0D0000B8E0 /* FirebaseMessaging */; };
+		66732C322DE4F5A400117715 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 66732C312DE4F5A400117715 /* FirebaseCrashlytics */; };
+		66732C342DE4F5D000117715 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 66732C332DE4F5D000117715 /* FirebaseAnalytics */; };
 		66EA95B32DBC267B0076E0AD /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 66EA95B22DBC267B0076E0AD /* FirebaseAuth */; };
 		66EA95B52DBC26860076E0AD /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 66EA95B42DBC26860076E0AD /* FirebaseCore */; };
 		66EA95B82DBC26DD0076E0AD /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 66EA95B72DBC26DD0076E0AD /* GoogleSignIn */; };
@@ -80,8 +82,10 @@
 				6659AE102DD8FD0D0000B8E0 /* FirebaseMessaging in Frameworks */,
 				66EA95CD2DBC3F170076E0AD /* FirebaseFirestore in Frameworks */,
 				66EA95B32DBC267B0076E0AD /* FirebaseAuth in Frameworks */,
+				66732C322DE4F5A400117715 /* FirebaseCrashlytics in Frameworks */,
 				66EA96052DBF54040076E0AD /* FirebaseStorage in Frameworks */,
 				66EA95B82DBC26DD0076E0AD /* GoogleSignIn in Frameworks */,
+				66732C342DE4F5D000117715 /* FirebaseAnalytics in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -157,6 +161,8 @@
 				66EA96042DBF54040076E0AD /* FirebaseStorage */,
 				661DF9652DCC1570000D1BE1 /* Kingfisher */,
 				6659AE0F2DD8FD0D0000B8E0 /* FirebaseMessaging */,
+				66732C312DE4F5A400117715 /* FirebaseCrashlytics */,
+				66732C332DE4F5D000117715 /* FirebaseAnalytics */,
 			);
 			productName = stack;
 			productReference = 66EA95672DBC1E0B0076E0AD /* stack.app */;
@@ -461,6 +467,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-ObjC",
+					"$(inherited)",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = gg.stackpoker.stack;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -492,6 +502,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-ObjC",
+					"$(inherited)",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = gg.stackpoker.stack;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -646,6 +660,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 66EA95A82DBC24810076E0AD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseMessaging;
+		};
+		66732C312DE4F5A400117715 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 66EA95A82DBC24810076E0AD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
+		};
+		66732C332DE4F5D000117715 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 66EA95A82DBC24810076E0AD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
 		};
 		66EA95B22DBC267B0076E0AD /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;

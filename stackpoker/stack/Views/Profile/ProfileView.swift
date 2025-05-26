@@ -276,17 +276,44 @@ struct ProfileView: View {
                     userId: userId,
                     selectedPostForNavigation: $selectedPostForNavigation
                 )
+                .navigationTitle("Recent Activity")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(action: { showActivityDetailView = false }) {
+                            Image(systemName: "chevron.backward")
+                                .foregroundColor(.white)
+                        }
+                    }
+                }
             }
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .background(AppBackgroundView().ignoresSafeArea(.all))
+            .accentColor(.white)
             .environmentObject(userService)
             .environmentObject(postService)
         }
         .fullScreenCover(isPresented: $showAnalyticsDetailView) {
             NavigationView {
                 analyticsDetailContent()
-                    .navigationBarTitle("Analytics", displayMode: .inline)
+                    .navigationTitle("Analytics")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button(action: { showAnalyticsDetailView = false }) {
+                                Image(systemName: "chevron.backward")
+                                    .foregroundColor(.white)
+                            }
+                        }
+                    }
             }
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .background(AppBackgroundView().ignoresSafeArea(.all))
+            .accentColor(.white)
             .environmentObject(sessionStore)
-            .environmentObject(userService) // Pass userService if analyticsDetailContent might need it
+            .environmentObject(userService)
         }
         .fullScreenCover(isPresented: $showHandsDetailView) {
             NavigationView {
@@ -296,9 +323,21 @@ struct ProfileView: View {
                 }
                 .navigationTitle("Hands")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(action: { showHandsDetailView = false }) {
+                            Image(systemName: "chevron.backward")
+                                .foregroundColor(.white)
+                        }
+                    }
+                }
             }
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .background(AppBackgroundView().ignoresSafeArea(.all))
+            .accentColor(.white)
             .environmentObject(handStore)
-            .environmentObject(userService) // HandsTab might need user context
+            .environmentObject(userService)
         }
         .fullScreenCover(isPresented: $showSessionsDetailView) {
             NavigationView {
@@ -310,15 +349,19 @@ struct ProfileView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Done") {
-                            showSessionsDetailView = false
+                        Button(action: { showSessionsDetailView = false }) {
+                            Image(systemName: "chevron.backward")
+                                .foregroundColor(.white)
                         }
-                        .foregroundColor(.white)
                     }
                 }
             }
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .background(AppBackgroundView().ignoresSafeArea(.all))
+            .accentColor(.white)
             .environmentObject(sessionStore)
-            .environmentObject(userService) // SessionsTab might need user context
+            .environmentObject(userService)
         }
         .fullScreenCover(isPresented: $showStakingDashboardView) {
             NavigationView {
@@ -357,23 +400,23 @@ struct ProfileView: View {
             }
             // Fetch posts for Activity
             Task {
-                print("[ProfileView.onAppear] Checking if posts need fetching for userId: \(userId).")
+
                 // Fetch if posts are for a different user or empty
                 if postService.posts.isEmpty || postService.posts.first?.userId != userId {
-                    print("[ProfileView.onAppear] Fetching posts for userId: \(userId).")
+
                     try await postService.fetchPosts(forUserId: userId)
-                    print("[ProfileView.onAppear] Post fetch completed. Count: \(postService.posts.count)")
+
                 } else {
-                    print("[ProfileView.onAppear] Posts already loaded for userId: \(userId). Count: \(postService.posts.count)")
+
                 }
             }
             // Fetch sessions for Analytics & Sessions cards/views
             if sessionStore.sessions.isEmpty {
-                print("[ProfileView.onAppear] Session store is empty. Fetching sessions for userId: \(userId).")
+
                 sessionStore.fetchSessions()
-                print("[ProfileView.onAppear] sessionStore.fetchSessions() called.")
+
             } else {
-                 print("[ProfileView.onAppear] Sessions already loaded. Count: \(sessionStore.sessions.count)")
+
             }
         }
     }
@@ -1240,7 +1283,7 @@ struct SettingsView: View {
                 do {
                     try Auth.auth().signOut()
                 } catch {
-                    print("Error signing out after account deletion: \(error.localizedDescription)")
+
                 }
                 
                 await MainActor.run {
@@ -1313,7 +1356,7 @@ struct SettingsView: View {
                 .delete()
         } catch {
             // Log the error but continue with account deletion
-            print("Profile image deletion failed: \(error.localizedDescription). Continuing with account deletion.")
+
         }
     }
 }

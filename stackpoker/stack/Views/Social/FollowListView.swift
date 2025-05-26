@@ -20,7 +20,7 @@ struct FollowListView: View {
     
     var body: some View {
         ZStack {
-            Color(UIColor(red: 10/255, green: 10/255, blue: 15/255, alpha: 1.0)).ignoresSafeArea()
+            AppBackgroundView().ignoresSafeArea()
             
             VStack(spacing: 0) {
                 // Search Bar
@@ -101,6 +101,7 @@ struct FollowListView: View {
                     }
                 }
             }
+            .padding(.top, 60)
             .navigationTitle(listType == .followers ? "Followers" : "Following")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -204,7 +205,7 @@ struct UserListRow: View {
             do {
                 isFollowing = try await followService.checkIfFollowing(currentUserId: actualLoggedInUserId, targetUserId: user.id)
             } catch {
-                print("Error checking follow status for user \(user.id) by loggedInUser \(actualLoggedInUserId): \(error)")
+
             }
         }
     }
@@ -228,7 +229,7 @@ struct UserListRow: View {
                     isFollowing.toggle()
                 }
             } catch {
-                print("Error toggling follow state for user \(user.id) by loggedInUser \(actualLoggedInUserId): \(error)")
+
             }
             isLoading = false
         }
@@ -252,13 +253,13 @@ class FollowListViewModel: ObservableObject {
                 guard let self = self else { return }
                 
                 if let error = error {
-                    print("Error fetching follow list for user \(userId): \(error)")
+
                     self.isLoading = false
                     return
                 }
                 
                 guard let documents = snapshot?.documents else {
-                    print("No follow documents found for user \(userId) in \(followsCollection)")
+
                     self.isLoading = false
                     self.users = []
                     self.filteredUsers = []
@@ -268,7 +269,7 @@ class FollowListViewModel: ObservableObject {
                 let userIds = documents.map { $0.documentID }
                 
                 if userIds.isEmpty {
-                    print("User ID list is empty for user \(userId) in \(followsCollection)")
+
                     self.users = []
                     self.filteredUsers = []
                     self.isLoading = false
@@ -293,14 +294,14 @@ class FollowListViewModel: ObservableObject {
                 defer { self.isLoading = false }
 
                 if let error = error {
-                    print("Error fetching user profiles: \(error.localizedDescription)")
+
                     self.users = []
                     self.filteredUsers = []
                     return
                 }
 
                 guard let documents = querySnapshot?.documents else {
-                    print("No documents found for user profiles.")
+
                     self.users = []
                     self.filteredUsers = []
                     return
@@ -313,7 +314,7 @@ class FollowListViewModel: ObservableObject {
                     ($0.displayName ?? $0.username).lowercased() < ($1.displayName ?? $1.username).lowercased()
                 }
                 self.filteredUsers = self.users
-                print("Successfully fetched \(self.users.count) user profiles.")
+
             }
     }
     

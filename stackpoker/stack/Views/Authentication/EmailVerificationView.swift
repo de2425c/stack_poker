@@ -100,7 +100,7 @@ struct EmailVerificationView: View {
         }
         .onChange(of: authViewModel.appFlow) { newState in
             if case .main(let uid) = newState {
-                print("🏁 Flow is MAIN – presenting HomePage overlay immediately")
+
                 self.uidToShow = uid
                 presentFeed = true
             }
@@ -110,7 +110,7 @@ struct EmailVerificationView: View {
             timer = nil
         }
         .fullScreenCover(isPresented: $showingProfileSetup, onDismiss: {
-            print("📱 Profile setup finished – refreshing flow")
+
             authViewModel.refreshFlow()
         }) {
             ProfileSetupView(isNewUser: true)
@@ -130,7 +130,7 @@ struct EmailVerificationView: View {
         Task {
             // First check current auth state - don't proceed if already signed in
             if case .main = authViewModel.appFlow {
-                print("⚠️ Auth state is already signedIn - canceling verification check")
+
                 await MainActor.run {
                     isLoading = false
                 }
@@ -140,11 +140,11 @@ struct EmailVerificationView: View {
             do {
                 // Force reload the Firebase user to get the latest verification status
                 let isVerified = try await authService.reloadUser()
-                print("📝 Email verification check result: \(isVerified ? "VERIFIED ✅" : "NOT VERIFIED ❌")")
+
                 
                 // Check auth state again before proceeding
                 if case .main = authViewModel.appFlow {
-                    print("⚠️ Auth state changed to signedIn during verification check - canceling")
+
                     await MainActor.run {
                         isLoading = false
                     }
@@ -155,15 +155,15 @@ struct EmailVerificationView: View {
                     if isVerified {
                         // One more check to prevent race conditions
                         if case .main = authViewModel.appFlow {
-                            print("⚠️ Already in main flow - not showing profile setup")
+
                             isLoading = false
                         } else {
-                            print("📧 Verified – showing profile setup now")
+
                             isLoading = false
                             showingProfileSetup = true
                         }
                     } else {
-                        print("📱 Email is NOT verified - showing error message")
+
                         errorMessage = "Your email is not verified yet. Please check your email and click the verification link."
                         showingError = true
                         isLoading = false
@@ -171,7 +171,7 @@ struct EmailVerificationView: View {
                 }
             } catch {
                 let errorMsg = (error as? AuthError)?.message ?? "Failed to check verification status"
-                print("❌ Error checking verification: \(errorMsg)")
+
                 
                 await MainActor.run {
                     errorMessage = errorMsg

@@ -44,14 +44,14 @@ class NewHandEntryViewModel: ObservableObject {
     // Other Players
     @Published var players: [PlayerInput] = [] {
         didSet {
-            print("📣 OBSERVED: players array changed")
+
             
             // Check if active players have changed
             let oldActive = oldValue.filter({ $0.isActive }).map({ $0.position })
             let newActive = players.filter({ $0.isActive }).map({ $0.position })
             
             if oldActive != newActive {
-                print("📣 OBSERVED: ACTIVE PLAYERS CHANGED from \(oldActive) to \(newActive)")
+
                 
                 // Reset all action queues when active players change
                 resetActionQueues()
@@ -60,7 +60,7 @@ class NewHandEntryViewModel: ObservableObject {
                 updatePreflopStateAndFirstActor()
             } else if oldValue.map({ $0.isActive }) != players.map({ $0.isActive }) {
                 // This is a backup check in case array order changes
-                print("📣 OBSERVED: Player active status changed but positions are the same")
+
                 resetActionQueues()
                 updatePreflopStateAndFirstActor()
             }
@@ -77,28 +77,28 @@ class NewHandEntryViewModel: ObservableObject {
     // Actions for each street
     @Published var preflopActions: [ActionInput] = [] { 
         didSet { 
-            print("📣 OBSERVED: preflopActions changed, count: \(preflopActions.count)")
+
             updatePotDisplay()
             determineNextPlayerAndUpdateState() 
         } 
     }
     @Published var flopActions: [ActionInput] = [] { 
         didSet { 
-            print("📣 OBSERVED: flopActions changed, count: \(flopActions.count)")
+
             updatePotDisplay()
             determineNextPlayerAndUpdateState() 
         } 
     }
     @Published var turnActions: [ActionInput] = [] { 
         didSet { 
-            print("📣 OBSERVED: turnActions changed, count: \(turnActions.count)")
+
             updatePotDisplay()
             determineNextPlayerAndUpdateState() 
         } 
     }
     @Published var riverActions: [ActionInput] = [] { 
         didSet { 
-            print("📣 OBSERVED: riverActions changed, count: \(riverActions.count)")
+
             updatePotDisplay()
             determineNextPlayerAndUpdateState() 
         } 
@@ -218,13 +218,13 @@ class NewHandEntryViewModel: ObservableObject {
             for pos in self.allOrderedPositionsInHand {
                 playerBetsOnStreet[pos] = 0
             }
-            print("QUEUE_LOGIC (PlayerActionQueue INIT): StreetStarters=\(self.allOrderedPositionsInHand.sorted())")
-            print("QUEUE_LOGIC (PlayerActionQueue INIT): Initial currentPlayerTurnQ: \(self.currentPlayerQueue), CurrentBet: \(self.currentBetAmountOnStreet)")
+
+
         }
 
         var isComplete: Bool {
             if activePlayerPositionsInHand.count <= 1 {
-                print("QUEUE_LOGIC (PlayerActionQueue.isComplete): True (<=1 active player in hand: \(activePlayerPositionsInHand.count))")
+
                 return true
             }
             
@@ -232,24 +232,24 @@ class NewHandEntryViewModel: ObservableObject {
             // AND their current bet on the street matches the currentBetAmountOnStreet.
             let unactedPlayers = activePlayerPositionsInHand.filter { !playersWhoHaveActedInCurrentBettingRound.contains($0) }
             if !unactedPlayers.isEmpty {
-                print("QUEUE_LOGIC (PlayerActionQueue.isComplete): False (Unacted players: \(unactedPlayers.sorted()))")
+
                 return false
             }
 
             // All active players have acted. Now check if their bets match.
             let betsNotMatched = activePlayerPositionsInHand.filter { (playerBetsOnStreet[$0] ?? -1) != currentBetAmountOnStreet }
             if !betsNotMatched.isEmpty {
-                 print("QUEUE_LOGIC (PlayerActionQueue.isComplete): False (Bets not matched for: \(betsNotMatched.sorted()). Expected \(currentBetAmountOnStreet))")
+
                  return false
             }
             
-            print("QUEUE_LOGIC (PlayerActionQueue.isComplete): True (All active players acted & bets matched \(currentBetAmountOnStreet))")
+
             return true
         }
 
         func nextPlayer() -> String? {
             if isComplete { // Rely on isComplete
-                print("QUEUE_LOGIC (PlayerActionQueue.nextPlayer): Queue is complete. No next player.")
+
                 return nil
             }
 
@@ -262,7 +262,7 @@ class NewHandEntryViewModel: ObservableObject {
                 
                 // If player folded this street, skip.
                 if !activePlayerPositionsInHand.contains(next) {
-                    print("QUEUE_LOGIC (PlayerActionQueue.nextPlayer): Skipping \(next) - folded this street.")
+
                     currentPlayerQueue.removeAll(where: { $0 == next }) // Ensure removed from main queue too
                     continue
                 }
@@ -270,7 +270,7 @@ class NewHandEntryViewModel: ObservableObject {
                 // If player has acted and their bet matches current amount, they don't need to act now
                 // unless action was re-opened (which clears playersWhoHaveActedInCurrentBettingRound for others)
                 if playersWhoHaveActedInCurrentBettingRound.contains(next) && (playerBetsOnStreet[next] ?? -1) == currentBetAmountOnStreet {
-                    print("QUEUE_LOGIC (PlayerActionQueue.nextPlayer): Skipping \(next) - already acted and bet matches \(currentBetAmountOnStreet). Will be put to back.")
+
                     // Move to back of currentPlayerQueue if they are still in it
                     if let idx = currentPlayerQueue.firstIndex(of: next) {
                         currentPlayerQueue.remove(at: idx)
@@ -279,19 +279,19 @@ class NewHandEntryViewModel: ObservableObject {
                     continue
                 }
                 
-                print("QUEUE_LOGIC (PlayerActionQueue.nextPlayer): Next player to act is \(next). CurrentQ: \(currentPlayerQueue)")
+
                 return next // Found a player who needs to act
             }
             
             // If loop finishes, means no one in currentPlayerQueue needs to act, implies completion.
             // This state should ideally be caught by isComplete earlier.
-            print("QUEUE_LOGIC (PlayerActionQueue.nextPlayer): CurrentPlayerQueue exhausted, no one needs to act. Completion logic should handle.")
+
             return nil
         }
         
         func processAction(player: String, action: PokerActionType, betAmount: Double? = nil, isBlindOrStraddle: Bool = false) {
-            print("QUEUE_LOGIC (PlayerActionQueue.processAction): Player=\(player), Action=\(action), Amount=\(betAmount ?? -1), isBlindOrStraddle=\(isBlindOrStraddle)")
-            print("QUEUE_LOGIC (PlayerActionQueue.processAction): State BEFORE: \(debugQueueState)")
+
+
 
             // Player is acting. Add to playersWhoHaveActedInCurrentBettingRound ONLY IF IT'S A VOLUNTARY ACTION.
             // Blind posts and straddle posts are forced and do not count as a player's voluntary action
@@ -307,18 +307,18 @@ class NewHandEntryViewModel: ObservableObject {
             case .fold:
                 activePlayerPositionsInHand.remove(player)
                 // Do not add back to currentPlayerQueue
-                print("QUEUE_LOGIC (PlayerActionQueue.processAction): \(player) FOLDED. Remaining active in hand: \(activePlayerPositionsInHand.sorted())")
+
             
             case .check: // This is always a voluntary action
                 playerBetsOnStreet[player] = playerBetsOnStreet[player] ?? 0 // Should match currentBetAmountOnStreet
                 currentPlayerQueue.append(player) 
-                print("QUEUE_LOGIC (PlayerActionQueue.processAction): \(player) CHECKED. Bet on street: \(playerBetsOnStreet[player]!). CurrentQ: \(currentPlayerQueue)")
+
 
             case .call: // Also always voluntary
                 let amountCalled = currentBetAmountOnStreet 
                 playerBetsOnStreet[player] = amountCalled
                 currentPlayerQueue.append(player)
-                print("QUEUE_LOGIC (PlayerActionQueue.processAction): \(player) CALLED \(amountCalled). Bet on street: \(playerBetsOnStreet[player]!). CurrentQ: \(currentPlayerQueue)")
+
 
             case .bet, .raise: // Can be voluntary or a blind/straddle post
                 let totalBetByPlayerThisStreet = betAmount ?? 0
@@ -326,11 +326,11 @@ class NewHandEntryViewModel: ObservableObject {
                 let oldBetAmountOnStreet = currentBetAmountOnStreet
                 currentBetAmountOnStreet = totalBetByPlayerThisStreet 
                 
-                print("QUEUE_LOGIC (PlayerActionQueue.processAction): \(player) \(action.rawValue.uppercased()) to \(totalBetByPlayerThisStreet).")
+
                 
                 // If this bet/raise increases the amount to call, the action is re-opened for other players.
                 if totalBetByPlayerThisStreet > oldBetAmountOnStreet {
-                    print("QUEUE_LOGIC (PlayerActionQueue.processAction): ACTION RE-OPENED due to new bet/raise amount.")
+
                     playersWhoHaveActedInCurrentBettingRound.removeAll() // Clear for everyone
                     // The current player (actor) is only re-added if their action was voluntary (not a blind/straddle post)
                     if !isBlindOrStraddle {
@@ -343,7 +343,7 @@ class NewHandEntryViewModel: ObservableObject {
                 // If it was a blind post, player is not added. If voluntary, player is added. This is correct.
                 
                 currentPlayerQueue.append(player) 
-                print("QUEUE_LOGIC (PlayerActionQueue.processAction): Current actor \(player) moved to back. New currentPlayerQueue: \(currentPlayerQueue)")
+
             }
             
             // Specific handling for blind/straddle AMOUNTS if they were posted as .bet
@@ -355,10 +355,10 @@ class NewHandEntryViewModel: ObservableObject {
                  playerBetsOnStreet[player] = postedAmount 
                  // Ensure currentBetAmountOnStreet reflects the highest posted blind/straddle
                  currentBetAmountOnStreet = max(currentBetAmountOnStreet, postedAmount)
-                 print("QUEUE_LOGIC (PlayerActionQueue.processAction): Confirmed BLIND/STRADDLE for \(player) amount \(postedAmount). CurrentBet: \(currentBetAmountOnStreet), PlayerBet: \(playerBetsOnStreet[player]!)")
+
             }
 
-            print("QUEUE_LOGIC (PlayerActionQueue.processAction): State AFTER: \(debugQueueState)")
+
         }
         
         func hasPlayerFolded(_ position: String) -> Bool {
@@ -386,7 +386,7 @@ class NewHandEntryViewModel: ObservableObject {
 
     init(sessionId: String? = nil) { // Add sessionId to init, default to nil
         self.sessionId = sessionId // Store sessionId
-        print("📣 ENTRY POINT: NewHandEntryViewModel init() called with sessionId: \(sessionId ?? "None")")
+
         if !availablePositions.contains(heroPosition) {
             heroPosition = availablePositions.first ?? "BTN"
         }
@@ -394,13 +394,13 @@ class NewHandEntryViewModel: ObservableObject {
         // Post blinds after initialization to avoid re-entrancy issues during init
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            print("📣 ENTRY POINT: DispatchQueue.main.async firing for initial updatePreflopStateAndFirstActor")
+
             self.updatePreflopStateAndFirstActor()
         }
     }
 
     func setupInitialPlayers() {
-        print("📣 ENTRY POINT: setupInitialPlayers() called")
+
         let currentHeroPos = self.heroPosition
         players = availablePositions.map {
             PlayerInput(position: $0, 
@@ -411,9 +411,9 @@ class NewHandEntryViewModel: ObservableObject {
         
         // Print active player information
         let activePlayers = players.filter { $0.isActive }
-        print("📣 DEBUG: Set up \(players.count) total players, \(activePlayers.count) active")
+
         for player in activePlayers {
-            print("📣 DEBUG: Active player: \(player.position) (Hero: \(player.isHero))")
+
         }
         
         if !players.contains(where: { $0.isHero }) {
@@ -434,16 +434,16 @@ class NewHandEntryViewModel: ObservableObject {
     }
     
     private func updatePreflopStateAndFirstActor() {
-        print("📣 ENTRY POINT: updatePreflopStateAndFirstActor() called")
+
         
         // Debug print the current player state before posting blinds
-        print("🔵 PLAYER STATE: Current players in table:")
+
         for player in players {
-            print("🔵 PLAYER: \(player.position) | Active: \(player.isActive) | Hero: \(player.isHero) | Stack: \(player.stack)")
+
         }
         
-        print("🔵 HERO POSITION: \(heroPosition)")
-        print("🔵 BLINDS: SB=\(smallBlind), BB=\(bigBlind)")
+
+
         
         postBlinds(forceQueueRefresh: true) // This will set preflopActions with a fresh queue
         // determineNextPlayerAndUpdateState() will be called by preflopActions.didSet
@@ -451,9 +451,9 @@ class NewHandEntryViewModel: ObservableObject {
 
     // Posts blinds and sets initial preflop state. NO OTHER FOLDS HERE.
     private func postBlinds(forceQueueRefresh: Bool = false) {
-        print("QUEUE_LOGIC (VM): postBlinds called. forceQueueRefresh=\(forceQueueRefresh), isPostingBlinds=\(isPostingBlinds).")
+
         if isPostingBlinds && !forceQueueRefresh { // Allow forced refresh even if already posting (e.g. during init)
-            print("QUEUE_LOGIC (VM): postBlinds - Bailing early, already posting blinds and not a forced refresh.")
+
             return
         }
         isPostingBlinds = true
@@ -469,12 +469,12 @@ class NewHandEntryViewModel: ObservableObject {
 
         // Get/create the queue. If forced, it will be new.
         let queue = getOrCreateActionQueue(for: .preflop, force: forceQueueRefresh)
-        print("QUEUE_LOGIC (VM): postBlinds - Got preflopActionQueue. State: \(queue.debugQueueState)")
+
 
         // Explicitly process these new/current blind actions into the queue.
         // This is crucial if the queue was just reset (force:true) or if blind values changed.
         if forceQueueRefresh || self.preflopActions.filter({ $0.isSystemAction }) != actualBlindActions.filter({ $0.isSystemAction }) {
-            print("QUEUE_LOGIC (VM): postBlinds - Processing/Re-processing blind actions into the queue.")
+
             // The PlayerActionQueue.processAction with isBlindOrStraddle=true should correctly set/overwrite the playerBetsOnStreet.
             // No need to directly access queue.playerBetsOnStreet["SB"] = 0 from here.
 
@@ -486,34 +486,34 @@ class NewHandEntryViewModel: ObservableObject {
                     isBlindOrStraddle: true
                 )
             }
-            print("QUEUE_LOGIC (VM): postBlinds - Queue state AFTER processing actualBlindActions: \(queue.debugQueueState)")
+
         }
 
         // Update the published actions array IF they have changed.
         // This will trigger determineNextPlayerAndUpdateState via its didSet.
         if self.preflopActions != actualBlindActions {
-            print("QUEUE_LOGIC (VM): postBlinds - Setting self.preflopActions, which will trigger UI update and determineNextPlayer.")
+
             self.preflopActions = actualBlindActions
         } else if forceQueueRefresh {
             // If actions are the same but queue was forced, still need to determine next player with the fresh queue.
-            print("QUEUE_LOGIC (VM): postBlinds - preflopActions are same, but queue was forced. Manually calling determineNextPlayer.")
+
             determineNextPlayerAndUpdateState()
         } else {
-            print("QUEUE_LOGIC (VM): postBlinds - No changes to blind actions and no forced refresh. No action needed.")
+
         }
     }
     
     // New method to auto-fold all inactive players in preflop
     private func autoFoldAllInactivePlayers() {
-        print("📣 ENTRY POINT: autoFoldAllInactivePlayers() called")
+
         
         // REMOVE THIS METHOD COMPLETELY
         // Instead of auto-folding all inactive players at once, we'll let them fold
         // as they come up in position order through the normal queue processing
         
         // Just reset the queue to make sure inactive players are included
-        print("📣 DEBUG: No longer auto-folding all inactive players upfront")
-        print("📣 DEBUG: Will fold inactive players in position order")
+
+
     }
     
     // Central function to determine next player and update all related state
@@ -524,33 +524,33 @@ class NewHandEntryViewModel: ObservableObject {
     // 4. If player is active, create pending action and prompt user
     // 5. When betting round is complete, advance to next street if possible
     private func determineNextPlayerAndUpdateState() {
-        print("📣 ENTRY POINT: determineNextPlayerAndUpdateState() called")
+
         
         if currentActionStreet == .preflop && preflopActions.isEmpty && !isPostingBlinds {
-            print("🔄 DEBUG: No preflop actions yet and not posting blinds - will post blinds")
+
             postBlinds()
             return // postBlinds will trigger this function again
         }
 
-        print("🔄 DEBUG: Determining next player for street: \(currentActionStreet)")
+
         
         // Get the current queue, always forcing refresh to ensure consistency after potential undo/changes
         let actionQueue = getOrCreateActionQueue(for: currentActionStreet, force: true)
-        print("🔄 DEBUG: Current queue state after getOrCreate (forced): \(actionQueue.debugQueueState)")
+
         
         // Clear any previous pending action
         self.pendingActionInput = nil
         
         // Find out who needs to act next
         let nextPlayerPosition = determineNextPlayerToAct(on: currentActionStreet)
-        print("🔄 DEBUG: Next player to act: \(nextPlayerPosition ?? "NONE - betting round complete")")
+
 
         if let playerPos = nextPlayerPosition {
             // Check if this player is inactive - if so, automatically fold them
             let isPlayerActive = players.first(where: { $0.position == playerPos })?.isActive ?? false
             
             if !isPlayerActive {
-                print("🚨 CRITICAL: Auto-folding inactive player: \(playerPos)")
+
                 // Create a system fold action for the display
                 let foldAction = ActionInput(
                     playerName: playerPos, 
@@ -570,44 +570,44 @@ class NewHandEntryViewModel: ObservableObject {
             }
             
             // Regular flow for active player - prompt the user
-            print("🚨 CRITICAL: Creating pending action for active player: \(playerPos)")
+
             let newPendingAction = ActionInput(playerName: playerPos, actionType: .fold)
             self.pendingActionInput = newPendingAction
-            print("🚨 CRITICAL: pendingActionInput set to \(playerPos) \(newPendingAction.actionType.rawValue)")
+
             
             // Update legal actions and amounts
             self.legalActionsForPendingPlayer = getLegalActions(for: playerPos, on: currentActionStreet)
-            print("🚨 CRITICAL: Legal actions for \(playerPos): \(self.legalActionsForPendingPlayer.map { $0.rawValue })")
+
             
             // If fold isn't legal for some reason, use first legal action
             if !self.legalActionsForPendingPlayer.contains(newPendingAction.actionType) {
                 self.pendingActionInput?.actionType = self.legalActionsForPendingPlayer.first ?? .fold
-                print("🔄 DEBUG: Changed default action to \(self.pendingActionInput?.actionType.rawValue ?? "unknown")")
+
             }
             
             // Calculate call amount and min bet/raise
             self.callAmountForPendingPlayer = calculateAmountToCall(for: playerPos, on: currentActionStreet)
             self.minBetRaiseAmountForPendingPlayer = calculateMinBetRaise(for: playerPos, on: currentActionStreet)
-            print("🔄 DEBUG: Call amount: \(self.callAmountForPendingPlayer), min bet/raise: \(self.minBetRaiseAmountForPendingPlayer)")
+
 
             // Pre-fill amount for call/check
             if self.pendingActionInput?.actionType == .call {
                 self.pendingActionInput?.amount = self.callAmountForPendingPlayer
-                print("🔄 DEBUG: Pre-filled call amount: \(self.callAmountForPendingPlayer)")
+
             }
         } else {
             // No more players to act on this street - betting round complete
-            print("🚨 CRITICAL: No more players to act on street \(currentActionStreet) - betting round complete")
+
             self.pendingActionInput = nil
-            print("🚨 CRITICAL: pendingActionInput cleared (nil)")
+
             self.legalActionsForPendingPlayer = []
             
             // If there are actions on this street, advance to the next street
             if !actionsForStreet(currentActionStreet).isEmpty {
-                print("🔄 DEBUG: Found actions on \(currentActionStreet), checking if we can advance to next street")
+
                 advanceToNextStreetIfNeeded()
             } else {
-                print("🔄 DEBUG: No actions on \(currentActionStreet), cannot advance")
+
             }
         }
         
@@ -617,34 +617,34 @@ class NewHandEntryViewModel: ObservableObject {
     
     // Called when user commits an action via the UI (e.g. by tapping "Add" on the pending action line)
     func commitPendingAction() {
-        print("📣 ENTRY POINT: commitPendingAction() called")
+
         
         guard var actionToCommit = pendingActionInput else {
-            print("⚠️ DEBUG: No pending action to commit")
+
             errorMessage = "No pending action to commit."
             return
         }
 
-        print("🔄 DEBUG: Committing action: \(actionToCommit.playerName) \(actionToCommit.actionType.rawValue) \(actionToCommit.amount ?? 0)")
+
 
         // Validate and finalize amount based on action type before committing
         if actionToCommit.actionType == .bet || actionToCommit.actionType == .raise {
             if actionToCommit.amount ?? 0 < minBetRaiseAmountForPendingPlayer {
-                print("⚠️ DEBUG: Invalid bet/raise amount, min required: \(minBetRaiseAmountForPendingPlayer)")
+
                 errorMessage = "Amount must be at least \(minBetRaiseAmountForPendingPlayer)."
                 return
             }
         } else if actionToCommit.actionType == .call {
             actionToCommit.amount = callAmountForPendingPlayer
-            print("🔄 DEBUG: Set call amount to \(callAmountForPendingPlayer)")
+
         } else if actionToCommit.actionType == .check || actionToCommit.actionType == .fold {
             actionToCommit.amount = nil
-            print("🔄 DEBUG: Cleared amount for check/fold")
+
         }
 
         // Get the correct action queue for this street
         let activeQueue = getOrCreateActionQueue(for: currentActionStreet)
-        print("🔄 DEBUG: Got active queue for \(currentActionStreet): \(activeQueue.debugQueueState)")
+
         
         // Process the action in the queue with bet amount
         activeQueue.processAction(
@@ -655,14 +655,14 @@ class NewHandEntryViewModel: ObservableObject {
 
         // Add the action to the appropriate street
         addActionInternal(actionToCommit, to: currentActionStreet)
-        print("🔄 DEBUG: Added action to \(currentActionStreet) actions")
+
         
         // Clear pending action BEFORE determining next player
         self.pendingActionInput = nil 
-        print("🔄 DEBUG: Cleared pending action")
+
         
         // Immediately determine next player
-        print("🔄 DEBUG: Determining next player after action")
+
         determineNextPlayerAndUpdateState()
         
         // Clear any error message on successful commit
@@ -683,24 +683,24 @@ class NewHandEntryViewModel: ObservableObject {
     // Its only job is to check if cards for *that specific street* are complete.
     // If so, it triggers advanceToNextStreetIfNeeded() to see if we can move forward.
     private func setupNextStreetIfReady(_ streetCardWasDealtFor: StreetIdentifier) {
-        print("QUEUE_LOGIC (VM): setupNextStreetIfReady called because a card for \(streetCardWasDealtFor) was set/changed.")
+
 
         var cardsNowCompleteForStreet = false
         switch streetCardWasDealtFor {
         case .flop:
             cardsNowCompleteForStreet = flopCard1 != nil && flopCard2 != nil && flopCard3 != nil
             if cardsNowCompleteForStreet {
-                 print("QUEUE_LOGIC (VM): All FLOP cards are now set.")
+
             }
         case .turn:
             cardsNowCompleteForStreet = turnCard != nil
             if cardsNowCompleteForStreet {
-                 print("QUEUE_LOGIC (VM): TURN card is now set.")
+
             }
         case .river:
             cardsNowCompleteForStreet = riverCard != nil
             if cardsNowCompleteForStreet {
-                 print("QUEUE_LOGIC (VM): RIVER card is now set.")
+
             }
         case .preflop: // Not applicable for board cards
             return
@@ -710,7 +710,7 @@ class NewHandEntryViewModel: ObservableObject {
             // If the cards for the street are complete, and we were waiting for them for the *current action street*,
             // we should clear the waiting flags and try to determine the next player again.
             if waitingForNextStreetCards && nextStreetNeeded == streetCardWasDealtFor && currentActionStreet == streetCardWasDealtFor {
-                print("QUEUE_LOGIC (VM): Was waiting for these cards for CURRENT street \(currentActionStreet). Clearing wait flags & re-evaluating action.")
+
                 waitingForNextStreetCards = false
                 nextStreetNeeded = nil
                 // It's possible the queue was already forced for this street but was empty. Re-force to be sure.
@@ -719,15 +719,15 @@ class NewHandEntryViewModel: ObservableObject {
             } else {
                 // Cards for a street are complete. Now, let advanceToNextStreetIfNeeded decide if we can proceed.
                 // This is the more common path: e.g., flop cards entered, preflop betting done, now try to move to flop street.
-                print("QUEUE_LOGIC (VM): Cards for \(streetCardWasDealtFor) are complete. Calling advanceToNextStreetIfNeeded() to check progression.")
+
                 advanceToNextStreetIfNeeded()
             }
         } else {
-            print("QUEUE_LOGIC (VM): Cards for \(streetCardWasDealtFor) are NOT YET complete.")
+
             // If cards became incomplete for the current action street we were waiting for, reset waiting state
             if nextStreetNeeded == streetCardWasDealtFor && currentActionStreet == streetCardWasDealtFor {
                  if !waitingForNextStreetCards { // If we weren't already waiting, but now cards are missing
-                    print("QUEUE_LOGIC (VM): Cards for current action street \(currentActionStreet) became INCOMPLETE. Setting to wait.")
+
                     waitingForNextStreetCards = true
                     // pendingActionInput = nil // Clear pending action if we can't proceed
                  }
@@ -736,28 +736,28 @@ class NewHandEntryViewModel: ObservableObject {
     }
 
     private func advanceToNextStreetIfNeeded() {
-        print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - Checking if we can advance from \(currentActionStreet)...")
+
         
         let currentQueue = getOrCreateActionQueue(for: currentActionStreet)
         if !currentQueue.isComplete {
-            print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - Betting on \(currentActionStreet) is NOT complete. Queue: \(currentQueue.debugQueueState). Cannot advance yet.")
+
             if pendingActionInput == nil { // If no one is currently prompted, try to prompt.
                  determineNextPlayerAndUpdateState() 
             }
             return
         }
 
-        print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - Betting on \(currentActionStreet) IS complete.")
+
 
         let streetOrder: [StreetIdentifier] = [.preflop, .flop, .turn, .river]
         guard let currentStreetOrderIndex = streetOrder.firstIndex(of: currentActionStreet) else { 
-            print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - ERROR - Could not find current street index for \(currentActionStreet).")
+
             return
         }
         
         // Check if hand ended due to folds on current street
         if currentQueue.activePlayerPositionsInHand.count <= 1 && currentActionStreet != .preflop { // Preflop has different conditions for ending (e.g. BB is last to act)
-            print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - Only \(currentQueue.activePlayerPositionsInHand.count) players left in hand on \(currentActionStreet). Hand betting ends.")
+
             pendingActionInput = nil
             waitingForNextStreetCards = false
             nextStreetNeeded = nil
@@ -768,7 +768,7 @@ class NewHandEntryViewModel: ObservableObject {
         // Try to move to the next street in order
         if currentStreetOrderIndex + 1 < streetOrder.count {
             let potentialNextStreet = streetOrder[currentStreetOrderIndex + 1]
-            print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - Potential next street after \(currentActionStreet) is \(potentialNextStreet).")
+
             
             var cardsAreSetForThePotentialNextStreet = false
             switch potentialNextStreet {
@@ -776,28 +776,28 @@ class NewHandEntryViewModel: ObservableObject {
                 case .turn: cardsAreSetForThePotentialNextStreet = turnCard != nil
                 case .river: cardsAreSetForThePotentialNextStreet = riverCard != nil
                 default: // Should not happen for .preflop as a next street from here
-                    print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - ERROR - Invalid potentialNextStreet: \(potentialNextStreet)")
+
                     return
             }
             
             if cardsAreSetForThePotentialNextStreet {
-                print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - Advancing from \(currentActionStreet) to \(potentialNextStreet) - cards are set.")
+
                 currentActionStreet = potentialNextStreet
                 waitingForNextStreetCards = false // Cleared as we are on the new street
                 nextStreetNeeded = nil          // Cleared
                 _ = getOrCreateActionQueue(for: currentActionStreet, force: true) // Force new queue for the new street
                 determineNextPlayerAndUpdateState() // Start action on the new street
             } else {
-                print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - Cannot advance to \(potentialNextStreet) - cards are NOT YET set.")
+
                 pendingActionInput = nil // No one to act on current street (it's complete)
                 legalActionsForPendingPlayer = []
                 waitingForNextStreetCards = true // Now waiting for cards for this potentialNextStreet
                 nextStreetNeeded = potentialNextStreet
-                print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - UI should show waiting for \(potentialNextStreet) cards.")
+
             }
         } else {
             // We were on the river and betting is complete, or hand ended earlier.
-            print("QUEUE_LOGIC (VM): advanceToNextStreetIfNeeded - River betting is complete or hand ended. No further streets to advance to.")
+
             pendingActionInput = nil
             legalActionsForPendingPlayer = []
             waitingForNextStreetCards = false
@@ -808,20 +808,20 @@ class NewHandEntryViewModel: ObservableObject {
 
     // Replace the entire determineNextPlayerToAct function with a simpler, correct version
     func determineNextPlayerToAct(on street: StreetIdentifier) -> String? {
-        print("🚨 CRITICAL: determineNextPlayerToAct called for street: \(street)")
+
         
         // First, determine the active queue for this street (create if needed)
         let activeQueue = getOrCreateActionQueue(for: street)
         
         // Check if the betting round is complete
         if activeQueue.isComplete {
-            print("🚨 CRITICAL: Betting round is COMPLETE for \(street)")
+
             return nil // No more action needed
         }
         
         // Get next player from queue
         let nextPlayer = activeQueue.nextPlayer()
-        print("🚨 CRITICAL: Next player to act: \(nextPlayer ?? "NONE")")
+
         return nextPlayer
     }
 
@@ -901,7 +901,7 @@ class NewHandEntryViewModel: ObservableObject {
             actionOrder.append("BB")
         }
         
-        print("🚨 CRITICAL: Preflop action order: \(actionOrder)")
+
         return actionOrder
     }
     
@@ -1240,7 +1240,7 @@ class NewHandEntryViewModel: ObservableObject {
     private func didShowdownOccur(streets: [Street], activePlayers: [Player]) -> Bool {
         // First check - if only one player remains active, there's no showdown
         if activePlayers.count <= 1 {
-            print("Showdown check: Only \(activePlayers.count) active player - no showdown")
+
             return false
         }
         
@@ -1250,7 +1250,7 @@ class NewHandEntryViewModel: ObservableObject {
         }
         
         if playersWithCards.count >= 2 {
-            print("Showdown check: Multiple players (\(playersWithCards.count)) have cards - showdown")
+
             return true
         }
         
@@ -1258,7 +1258,7 @@ class NewHandEntryViewModel: ObservableObject {
         if let riverStreet = streets.first(where: { $0.name == "river" }), !riverStreet.actions.isEmpty {
             let activePlayers = getActivePlayersAtEndOfStreet(streets: streets)
             if activePlayers.count >= 2 {
-                print("Showdown check: Multiple active players at end of river - showdown")
+
                 return true
             }
         }
@@ -1274,13 +1274,13 @@ class NewHandEntryViewModel: ObservableObject {
                 let isLastActionCallOrCheck = lastAction.action.lowercased() == "calls" || lastAction.action.lowercased() == "checks"
                 
                 if hasBetOrRaise && isLastActionCallOrCheck {
-                    print("Showdown check: Last action is call/check after bet/raise with multiple players - showdown")
+
                     return true
                 }
                 
                 // If all players checked through, it's a showdown
                 if lastStreet.actions.allSatisfy({ $0.action.lowercased() == "checks" }) && lastStreet.actions.count >= 2 {
-                    print("Showdown check: All players checked through - showdown")
+
                     return true
                 }
             }
@@ -1373,7 +1373,7 @@ class NewHandEntryViewModel: ObservableObject {
 
     // Add an undo function to remove the last action
     func undoLastAction() {
-        print("🔄 Attempting to undo last action on \(currentActionStreet)")
+
         
         var actionsOnThisStreet: [ActionInput]
         switch currentActionStreet {
@@ -1384,14 +1384,14 @@ class NewHandEntryViewModel: ObservableObject {
         }
         
         guard let actionToUndo = actionsOnThisStreet.last else {
-            print("⚠️ No actions to undo on \(currentActionStreet)")
+
             return
         }
 
         // Prevent undoing system-generated actions like initial blinds if they are the only ones, or auto-folds.
         // User should only be able to undo their own manual entries.
         if actionToUndo.isSystemAction {
-            print("⚠️ Cannot undo system-generated actions (e.g., blinds, auto-folds) with the undo button.")
+
             // Allow undoing blinds if there are other non-system actions after them, effectively rewinding to before the last player action.
             // However, the current logic is to find the *last* action. If it's a system action, block.
             // This means if user posts blind, then UTG acts, then user wants to undo UTG, that's fine.
@@ -1430,7 +1430,7 @@ class NewHandEntryViewModel: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             if self.pendingActionInput?.playerName == undonePlayerName {
-                print("🔄 UNDO: Restoring action type and amount for \(undonePlayerName) to type: \(undoneActionType.rawValue), amount: \(String(describing: undoneAmount))")
+
                 self.pendingActionInput?.actionType = undoneActionType
                 self.pendingActionInput?.amount = undoneAmount
 
@@ -1452,17 +1452,17 @@ class NewHandEntryViewModel: ObservableObject {
 
     // Helper to get or create action queue for a street
     private func getOrCreateActionQueue(for street: StreetIdentifier, force: Bool = false) -> PlayerActionQueue {
-        print("QUEUE_LOGIC (VM): getOrCreateActionQueue called for street: \(street), force: \(force)")
+
 
         switch street {
         case .preflop:
             if preflopActionQueue == nil || force {
                 let positionsInOrder = getPreflopActionOrder()
-                print("QUEUE_LOGIC (VM) [PREFLOP]: Creating NEW preflop queue. All standard positions in order: \(positionsInOrder).")
+
                 preflopActionQueue = PlayerActionQueue(orderedPositionsWhoStartedStreet: positionsInOrder)
                 
                 if force { // If forced, replay all existing preflop actions into the new queue.
-                    print("QUEUE_LOGIC (VM) [PREFLOP]: Force Replay: Replaying \(self.preflopActions.count) actions into new queue.")
+
                     for action in self.preflopActions {
                         let isBlind = action.isSystemAction && (action.playerName == "SB" || action.playerName == "BB") && action.actionType == .bet
                         preflopActionQueue!.processAction(
@@ -1473,15 +1473,15 @@ class NewHandEntryViewModel: ObservableObject {
                         )
                     }
                 }
-                print("QUEUE_LOGIC (VM) [PREFLOP]: Initial preflop queue state after potential replay: \(preflopActionQueue!.debugQueueState)")
+
             } else {
-                print("QUEUE_LOGIC (VM) [PREFLOP]: Using EXISTING preflop queue: \(preflopActionQueue!.debugQueueState)")
+
             }
             return preflopActionQueue!
 
         case .flop:
             if flopActionQueue == nil || force {
-                print("QUEUE_LOGIC (VM) [FLOP]: Creating NEW flop queue.")
+
                 let postflopStandardOrder = getPostflopActionOrder()
                 let preflopFoldedPlayers = Set(preflopActions.filter { $0.actionType == .fold }.map { $0.playerName })
                 let playersWhoMadeItToFlop = players
@@ -1491,7 +1491,7 @@ class NewHandEntryViewModel: ObservableObject {
                 flopActionQueue = PlayerActionQueue(orderedPositionsWhoStartedStreet: orderedPlayersForFlopStreet)
 
                 if force { // If forced, replay all existing flop actions
-                    print("QUEUE_LOGIC (VM) [FLOP]: Force Replay: Replaying \(self.flopActions.count) actions into new queue.")
+
                     for action in self.flopActions {
                         flopActionQueue!.processAction(
                             player: action.playerName,
@@ -1501,15 +1501,15 @@ class NewHandEntryViewModel: ObservableObject {
                         )
                     }
                 }
-                print("QUEUE_LOGIC (VM) [FLOP]: Initial flop queue state after potential replay: \(flopActionQueue!.debugQueueState)")
+
             } else {
-                print("QUEUE_LOGIC (VM) [FLOP]: Using EXISTING flop queue: \(flopActionQueue!.debugQueueState)")
+
             }
             return flopActionQueue!
 
         case .turn:
             if turnActionQueue == nil || force {
-                print("QUEUE_LOGIC (VM) [TURN]: Creating NEW turn queue.")
+
                 let postflopStandardOrder = getPostflopActionOrder()
                 let preflopFoldedPlayers = Set(preflopActions.filter { $0.actionType == .fold }.map { $0.playerName })
                 let flopFoldedPlayers = Set(flopActions.filter { $0.actionType == .fold }.map { $0.playerName })
@@ -1521,7 +1521,7 @@ class NewHandEntryViewModel: ObservableObject {
                 turnActionQueue = PlayerActionQueue(orderedPositionsWhoStartedStreet: orderedPlayersForTurnStreet)
 
                 if force { // If forced, replay all existing turn actions
-                    print("QUEUE_LOGIC (VM) [TURN]: Force Replay: Replaying \(self.turnActions.count) actions into new queue.")
+
                     for action in self.turnActions {
                         turnActionQueue!.processAction(
                             player: action.playerName,
@@ -1531,15 +1531,15 @@ class NewHandEntryViewModel: ObservableObject {
                         )
                     }
                 }
-                print("QUEUE_LOGIC (VM) [TURN]: Initial turn queue state after potential replay: \(turnActionQueue!.debugQueueState)")
+
             } else {
-                print("QUEUE_LOGIC (VM) [TURN]: Using EXISTING turn queue: \(turnActionQueue!.debugQueueState)")
+
             }
             return turnActionQueue!
 
         case .river:
             if riverActionQueue == nil || force {
-                print("QUEUE_LOGIC (VM) [RIVER]: Creating NEW river queue.")
+
                 let postflopStandardOrder = getPostflopActionOrder()
                 let preflopFoldedPlayers = Set(preflopActions.filter { $0.actionType == .fold }.map { $0.playerName })
                 let flopFoldedPlayers = Set(flopActions.filter { $0.actionType == .fold }.map { $0.playerName })
@@ -1552,7 +1552,7 @@ class NewHandEntryViewModel: ObservableObject {
                 riverActionQueue = PlayerActionQueue(orderedPositionsWhoStartedStreet: orderedPlayersForRiverStreet)
 
                 if force { // If forced, replay all existing river actions
-                    print("QUEUE_LOGIC (VM) [RIVER]: Force Replay: Replaying \(self.riverActions.count) actions into new queue.")
+
                     for action in self.riverActions {
                         riverActionQueue!.processAction(
                             player: action.playerName,
@@ -1562,9 +1562,9 @@ class NewHandEntryViewModel: ObservableObject {
                         )
                     }
                 }
-                print("QUEUE_LOGIC (VM) [RIVER]: Initial river queue state after potential replay: \(riverActionQueue!.debugQueueState)")
+
             } else {
-                print("QUEUE_LOGIC (VM) [RIVER]: Using EXISTING river queue: \(riverActionQueue!.debugQueueState)")
+
             }
             return riverActionQueue!
         }
@@ -1617,17 +1617,17 @@ class NewHandEntryViewModel: ObservableObject {
         guard let queue = preflopActionQueue else { return }
         
         // Print the current queue state
-        print("🔧 FIXING: Checking queue for blind posters: \(queue.debugQueueState)")
+
         
         // Force the queue to update the next player
         _ = queue.nextPlayer()
         
-        print("🔧 FIXING: Queue updated after adjustment: \(queue.debugQueueState)")
+
     }
 
     // New method to reset all action queues when active players change
     private func resetActionQueues() {
-        print("📣 RESET: Clearing all action queues due to active player changes")
+
         preflopActionQueue = nil
         flopActionQueue = nil
         turnActionQueue = nil
@@ -1640,9 +1640,9 @@ class NewHandEntryViewModel: ObservableObject {
             flopActions = []
             turnActions = []
             riverActions = []
-            print("📣 RESET: Cleared all actions - starting fresh")
+
         } else {
-            print("📣 RESET: Keeping existing actions but queues will be rebuilt")
+
         }
         
         // Reset pending action
@@ -1651,11 +1651,11 @@ class NewHandEntryViewModel: ObservableObject {
 
     // Add method to update active players in the queue when they change in the UI
     func updateQueueWithNewActiveStatus() {
-        print("📣 UPDATE: Updating queue with new active status")
+
         
         // Get the current active positions
         let currentActive = players.filter { $0.isActive }.map { $0.position }
-        print("📣 UPDATE: Current active players: \(currentActive)")
+
         
         // Update the queue for the current street
         let queue = getOrCreateActionQueue(for: currentActionStreet, force: true)
@@ -1691,12 +1691,12 @@ class NewHandEntryViewModel: ObservableObject {
     // Method to set the current street for the UI
     func setCurrentStreet(street: StreetIdentifier) {
         currentActionStreet = street
-        print("📣 Setting current action street to \(street.rawValue)")
+
     }
 
     // Method to get the next player to act and prepare the UI
     func getNextPlayerToAct() {
-        print("📣 Getting next player to act on \(currentActionStreet.rawValue)")
+
         
         // Clear any existing pending action
         pendingActionInput = nil
@@ -1706,7 +1706,7 @@ class NewHandEntryViewModel: ObservableObject {
         
         // Get the next player from the queue
         if let nextPlayerPosition = queue.nextPlayer() {
-            print("📣 Next player to act: \(nextPlayerPosition)")
+
             
             // Determine legal actions for this player
             legalActionsForPendingPlayer = getLegalActions(for: nextPlayerPosition, on: currentActionStreet)
@@ -1724,7 +1724,7 @@ class NewHandEntryViewModel: ObservableObject {
                 pendingActionInput!.amount = minBetRaiseAmountForPendingPlayer
             }
         } else {
-            print("📣 No next player to act, betting round is complete")
+
             
             // If no next player and we're at the preflop street, move to flop
             // (Other streets rely on card selection to advance)

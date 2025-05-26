@@ -27,6 +27,14 @@ struct SimpleDate: Hashable, Comparable {
         self.day = d
     }
 
+    init(year: Int, month: Int, day: Int) {
+        // Basic validation for month and day ranges can be added if necessary,
+        // but components from Calendar should be valid.
+        self.year = year
+        self.month = month
+        self.day = day
+    }
+
     // For Comparable conformance (chronological order)
     static func < (lhs: SimpleDate, rhs: SimpleDate) -> Bool {
         if lhs.year != rhs.year {
@@ -114,22 +122,22 @@ struct Event: Identifiable, Hashable {
     init?(document: QueryDocumentSnapshot) {
         let data = document.data()
 
-        print("--- Debug Event Init Attempt --- DOC_ID: \(document.documentID)")
+
 
         guard let docId = Optional(document.documentID), !docId.isEmpty else {
-            print("DEBUG EVENT INIT [FAILED]: Missing or empty document.documentID")
+
             return nil
         }
         self.id = docId
 
         guard let buyinStr = data["buyin_string"] as? String, !buyinStr.isEmpty else { 
-            print("DEBUG EVENT INIT [FAILED - DOC: \(docId)]: Missing or empty 'buyin_string'. Value: \(String(describing: data["buyin_string"])) ")
+
             return nil 
         }
         self.buyin_string = buyinStr
 
         guard let casinoStr = data["casino"] as? String, !casinoStr.isEmpty else { 
-            print("DEBUG EVENT INIT [FAILED - DOC: \(docId)]: Missing or empty 'casino'. Value: \(String(describing: data["casino"])) ")
+
             return nil
         }
         self.casino = casinoStr
@@ -141,13 +149,13 @@ struct Event: Identifiable, Hashable {
 
         guard let dateStringFromFirestore = data["date"] as? String,
               let parsedSimpleDate = SimpleDate(from: dateStringFromFirestore) else { 
-            print("DEBUG EVENT INIT [FAILED - DOC: \(docId)]: Could not parse SimpleDate from 'date' string. Value: \(String(describing: data["date"])) ")
+
             return nil
         }
         self.simpleDate = parsedSimpleDate
 
         guard let nameStr = data["name"] as? String, !nameStr.isEmpty else { 
-            print("DEBUG EVENT INIT [FAILED - DOC: \(docId)]: Missing or empty 'name'. Value: \(String(describing: data["name"])) ")
+
             return nil
         }
         self.name = nameStr
@@ -159,7 +167,7 @@ struct Event: Identifiable, Hashable {
             self.time = nil
         }
         
-        print("DEBUG EVENT INIT [SUCCESS - DOC: \(docId)]: Successfully initialized event: \(self.name)")
+
     }
 
     func hash(into hasher: inout Hasher) {
@@ -386,44 +394,44 @@ class ExploreViewModel: ObservableObject {
     }
 
     func fetchEvents() {
-        print("--- DEBUG ExploreViewModel: fetchEvents() called ---")
+
         isLoading = true
         errorMessage = nil
         
         db.collection("events").order(by: "date").getDocuments { [weak self] (querySnapshot, error) in
-            print("--- DEBUG ExploreViewModel: Firestore query returned ---")
+
             guard let self = self else {
-                print("--- DEBUG ExploreViewModel: self is nil after query, returning. ---")
+
                 return
             }
             DispatchQueue.main.async {
                 self.isLoading = false
                 if let error = error {
                     self.errorMessage = "Failed to load events: \(error.localizedDescription)"
-                    print("--- DEBUG ExploreViewModel: Firestore error: \(error.localizedDescription) ---")
+
                     return
                 }
                 guard let documents = querySnapshot?.documents else {
                     self.errorMessage = "No event documents found in 'events_parsed'."
-                    print("--- DEBUG ExploreViewModel: No documents found in 'events_parsed'. ---")
+
                     return
                 }
                 
-                print("--- DEBUG ExploreViewModel: Received \(documents.count) documents from Firestore. Attempting to parse... ---")
+
                 
                 let parsedEvents = documents.compactMap { Event(document: $0) }
-                print("--- DEBUG ExploreViewModel: Successfully parsed \(parsedEvents.count) events out of \(documents.count) documents. ---")
+
 
                 self.allEvents = parsedEvents
                 
                 if self.allEvents.isEmpty && documents.count > 0 {
                      self.errorMessage = "Event data could not be processed or all events had empty buy-ins/invalid dates. Check console for details."
-                     print("--- DEBUG ExploreViewModel: Error - Event data could not be processed or all events had invalid data (allEvents.isEmpty is true, documents.count > 0). Check Event init logs. ---")
+
                 } else if self.allEvents.isEmpty {
                     self.errorMessage = "No events available (or all had empty buy-ins/invalid dates)."
-                    print("--- DEBUG ExploreViewModel: No events available (allEvents.isEmpty is true, documents.count is 0 or all failed parsing). Check Event init logs. ---")
+
                 } else {
-                    print("--- DEBUG ExploreViewModel: Successfully loaded \(self.allEvents.count) events. ---")
+
                     // Optionally clear errorMessage if it was set from a previous failed attempt
                     // self.errorMessage = nil 
                 }
@@ -436,6 +444,7 @@ class ExploreViewModel: ObservableObject {
 struct SimpleDateHeaderPicker: View {
     var availableDates: [IdentifiableSimpleDate]
     @Binding var selectedDate: SimpleDate?
+    let currentSystemDate: SimpleDate
     // TODO: Pass in font names as parameters if Jakarta is used elsewhere for consistency
 
     @State private var isExpanded: Bool = false
@@ -483,28 +492,34 @@ struct SimpleDateHeaderPicker: View {
                 ScrollView { // Wrap the list in a ScrollView
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(availableDates) { identifiableDate in
+                            let isPastDate = identifiableDate.simpleDate < currentSystemDate
                             Button(action: {
-                                self.selectedDate = identifiableDate.simpleDate
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    self.isExpanded = false
+                                if !isPastDate { // Only allow selection if not a past date
+                                    self.selectedDate = identifiableDate.simpleDate
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                        self.isExpanded = false
+                                    }
                                 }
                             }) {
                                 HStack {
                                     Text(identifiableDate.simpleDate.displayMedium)
                                         // TODO: Replace with .font(.custom("YourJakartaFontName-Regular", size: 16))
-                                        .font(.system(size: 16, weight: selectedDate == identifiableDate.simpleDate ? .bold : .regular, design: .rounded))
-                                        .foregroundColor(selectedDate == identifiableDate.simpleDate ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.8))
+                                        .font(.system(size: 16, weight: selectedDate == identifiableDate.simpleDate && !isPastDate ? .bold : .regular, design: .rounded))
+                                        .foregroundColor(
+                                            isPastDate ? .gray.opacity(0.5) : (selectedDate == identifiableDate.simpleDate ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.8))
+                                        )
                                     Spacer()
-                                    if selectedDate == identifiableDate.simpleDate {
+                                    if selectedDate == identifiableDate.simpleDate && !isPastDate { // Checkmark only if selected AND not past
                                         Image(systemName: "checkmark")
                                             .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                                     }
                                 }
                                 .padding(.vertical, 10)
                                 .padding(.horizontal, 10) // Padding within list items
-                                .background(Color.black.opacity(selectedDate == identifiableDate.simpleDate ? 0.15 : 0.05))
+                                .background(Color.black.opacity(isPastDate ? 0.03 : (selectedDate == identifiableDate.simpleDate ? 0.15 : 0.05))) // Adjust background for past dates
                                 .cornerRadius(8)
                             }
+                            .disabled(isPastDate) // Disable the button for past dates
                             .padding(.vertical, 2) // Spacing between items
                         }
                     }
@@ -532,6 +547,14 @@ struct ExploreView: View {
     var onEventSelected: ((Event) -> Void)? // Callback for when an event is selected
     var isSheetPresentation: Bool = false // New parameter to control top padding
     @Environment(\.dismiss) var dismiss // To dismiss the view if used as a sheet
+
+    private var currentSystemSimpleDate: SimpleDate {
+        let now = Date()
+        let calendar = Calendar.current
+        return SimpleDate(year: calendar.component(.year, from: now),
+                          month: calendar.component(.month, from: now),
+                          day: calendar.component(.day, from: now))
+    }
 
     // --- Computed Property for Dynamic Header Title / Date Picker Label ---
     private var selectedDateDisplayString: String { 
@@ -635,7 +658,7 @@ struct ExploreView: View {
                 HStack(spacing: 6) {
                     // --- Replace old Picker with Custom SimpleDateHeaderPicker ---
                     if !identifiableUniqueSimpleDates.isEmpty {
-                        SimpleDateHeaderPicker(availableDates: identifiableUniqueSimpleDates, selectedDate: $selectedSimpleDate)
+                        SimpleDateHeaderPicker(availableDates: identifiableUniqueSimpleDates, selectedDate: $selectedSimpleDate, currentSystemDate: currentSystemSimpleDate)
                     } else {
                         // Fallback if no dates: "Events On No Dates"
                         Text("Events On \(selectedDateDisplayString)") 
@@ -650,7 +673,7 @@ struct ExploreView: View {
                     
                     Button(action: {
                         // TODO: Implement search action
-                        print("Search icon tapped")
+
                     }) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 22, weight: .medium))
@@ -863,17 +886,20 @@ struct ExploreView: View {
         }
         .onAppear {
             viewModel.fetchEvents()
-            // Auto-select the first date if nothing is selected and dates are available
-            if selectedSimpleDate == nil, let firstAvailableDate = identifiableUniqueSimpleDates.first?.simpleDate {
-                selectedSimpleDate = firstAvailableDate
+            // Auto-select the current system date if nothing is selected.
+            if selectedSimpleDate == nil {
+                selectedSimpleDate = currentSystemSimpleDate
             }
         }
         .onChange(of: viewModel.allEvents) { _ in 
-            // If selectedSimpleDate is nil or not in the new set of dates, try to select the first available date.
-            let currentSelectionStillValid = identifiableUniqueSimpleDates.contains { $0.simpleDate == selectedSimpleDate }
-            if selectedSimpleDate == nil || !currentSelectionStillValid {
-                 selectedSimpleDate = identifiableUniqueSimpleDates.first?.simpleDate
+            let currentSelectionIsValidInNewList = identifiableUniqueSimpleDates.contains { $0.simpleDate == selectedSimpleDate }
+            let isSelectedDateInPast = selectedSimpleDate != nil && selectedSimpleDate! < currentSystemSimpleDate
+
+            if selectedSimpleDate == nil || !currentSelectionIsValidInNewList || isSelectedDateInPast {
+                selectedSimpleDate = currentSystemSimpleDate
             }
+            // If currentSystemSimpleDate has no events, selectedSimpleDate will be current date,
+            // and filteredEvents will be empty for that date, showing "No events for selected date". This is okay.
         }
     }
 }

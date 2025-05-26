@@ -135,7 +135,7 @@ struct SessionDetailView: View {
                             if #available(iOS 16.0, *) {
                                 showingImagePicker = true
                             } else {
-                                print("Share functionality requires iOS 16+")
+
                             }
                         }
                         
@@ -263,7 +263,7 @@ struct SessionDetailView: View {
     private func fetchSessionDetails() {
         // Fetch Hands using the liveSessionUUID if available, otherwise fall back (though ideally it should always be available for new sessions)
         guard let idForHandsQuery = session.liveSessionUUID, !idForHandsQuery.isEmpty else {
-            print("SessionDetailView: liveSessionUUID is missing or empty on the session object. Cannot fetch hands.")
+
             // Optionally, you could try session.id as a last resort if some old data might use it,
             // but the primary mechanism should be liveSessionUUID.
             // For now, we just won't fetch if the intended ID is missing.
@@ -273,11 +273,11 @@ struct SessionDetailView: View {
         }
 
         isLoadingHands = true
-        print("SessionDetailView: Attempting to fetch hands with liveSessionUUID: \(idForHandsQuery)")
+
         handStore.fetchHands(forSessionId: idForHandsQuery) { hands in
             self.sessionHands = hands
             self.isLoadingHands = false
-            print("SessionDetailView: Received \(hands.count) hands from HandStore.")
+
         }
     }
 }

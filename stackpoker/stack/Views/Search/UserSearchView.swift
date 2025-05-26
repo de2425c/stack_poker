@@ -57,7 +57,7 @@ class UserSearchViewModel: ObservableObject {
             .getDocuments { snapshot, error in
                 defer { dispatchGroup.leave() }
                 if let error = error {
-                    print("Error searching users by username: \(error)")
+
                     return
                 }
                 for document in snapshot?.documents ?? [] {
@@ -78,7 +78,7 @@ class UserSearchViewModel: ObservableObject {
             .getDocuments { snapshot, error in
                 defer { dispatchGroup.leave() }
                 if let error = error {
-                    print("Error searching users by displayName: \(error)")
+
                     return
                 }
                 for document in snapshot?.documents ?? [] {
@@ -488,7 +488,7 @@ struct EnhancedUserRow: View {
                 }
                 self.isFollowing.toggle() 
             } catch {
-                print("Error toggling follow state for user \(user.username): \(error)")
+
             }
             processingFollow = false
         }
@@ -578,7 +578,7 @@ struct UserRow: View {
                 }
                 self.isFollowing.toggle() 
             } catch {
-                print("Error toggling follow state for user \(user.username): \(error)")
+
             }
             processingFollow = false
         }

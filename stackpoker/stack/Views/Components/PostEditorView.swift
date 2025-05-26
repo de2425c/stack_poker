@@ -472,7 +472,7 @@ struct PostEditorView: View {
     private func createPost() {
         // For completed session, ensure title is present
         if selectedCompletedSession != nil && completedSessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            print("Error: Session title is required when sharing a completed session.")
+
             // Optionally show an alert to the user
             return
         }
@@ -550,7 +550,7 @@ struct PostEditorView: View {
                 do {
                     finalImageURLs = try await postService.uploadImages(images: selectedImages, userId: userId)
                 } catch {
-                    print("Error uploading images: \(error)")
+
                     isLoading = false
                     // Optionally show an error to the user
                     return
@@ -578,7 +578,7 @@ struct PostEditorView: View {
                     dismiss()
                 }
             } catch {
-                print("Error creating post: \(error)")
+
                 DispatchQueue.main.async {
                     isLoading = false
                 }
@@ -590,13 +590,13 @@ struct PostEditorView: View {
     private func shareHand() {
         // Ensure username is available
         guard let username = userService.currentUserProfile?.username else {
-            print("Error: Username not available for sharing hand.")
+
             // Optionally show an alert to the user or handle this case appropriately
             return
         }
         // The hand object should be set if this is a hand post
         guard let handToShare = self.hand else {
-            print("Error: Hand data is missing for sharing hand.")
+
             return
         }
         // Comment for the hand (postText) can be empty if the user doesn't add one
@@ -633,7 +633,7 @@ struct PostEditorView: View {
                     dismiss()
                 }
             } catch {
-                print("Error sharing hand: \(error)")
+
                 DispatchQueue.main.async {
                     isLoading = false
                 }

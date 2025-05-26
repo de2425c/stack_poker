@@ -39,7 +39,6 @@ class GroupService: ObservableObject {
                 let imageURL = try await uploadGroupImage(image, groupId: groupId)
                 groupData["avatarURL"] = imageURL
             } catch {
-                print("Error uploading group image: \(error.localizedDescription)")
                 // Continue creating the group without the image
             }
         }
@@ -118,7 +117,6 @@ class GroupService: ObservableObject {
                         groups.append(group)
                     }
                 } catch {
-                    print("Error fetching group \(groupId): \(error)")
                     // Continue with next group
                 }
             }
@@ -245,7 +243,6 @@ class GroupService: ObservableObject {
                         let invite = try GroupInvite(dictionary: data, id: doc.documentID)
                         invites.append(invite)
                     } catch {
-                        print("Error parsing invite: \(error)")
                     }
                 }
             }
@@ -538,11 +535,9 @@ class GroupService: ObservableObject {
     
     // Upload a group profile image and return its download URL
     func uploadGroupImage(_ image: UIImage, groupId: String) async throws -> String {
-        print("GROUP SERVICE: Starting group image upload for group \(groupId)")
         
         // Compress the image to reduce upload size
         guard let imageData = image.jpegData(compressionQuality: 0.7) else {
-            print("GROUP SERVICE: Failed to compress image")
             throw GroupServiceError.invalidData
         }
         
@@ -552,13 +547,11 @@ class GroupService: ObservableObject {
         // Get the Firebase Storage reference
         let storageRef = storage.reference().child("groups/\(fileName)")
         
-        print("GROUP SERVICE: Starting Firebase Storage upload for group image")
         
         // Upload the image to Firebase Storage
         do {
             // Upload the image
             _ = try await storageRef.putData(imageData, metadata: nil)
-            print("GROUP SERVICE: Group image uploaded successfully")
             
             // Add a small delay to allow Firebase to process the upload
             try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
@@ -571,10 +564,8 @@ class GroupService: ObservableObject {
             while downloadURL == nil && retryCount < maxRetries {
                 do {
                     downloadURL = try await storageRef.downloadURL()
-                    print("GROUP SERVICE: Got group image download URL on attempt \(retryCount + 1): \(downloadURL?.absoluteString ?? "nil")")
                 } catch {
                     retryCount += 1
-                    print("GROUP SERVICE: Failed to get group image download URL (attempt \(retryCount)/\(maxRetries)): \(error.localizedDescription)")
                     if retryCount < maxRetries {
                         try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 second delay between retries
                     }
@@ -587,7 +578,6 @@ class GroupService: ObservableObject {
             
             return finalURL.absoluteString
         } catch {
-            print("GROUP SERVICE ERROR: \(error.localizedDescription)")
             throw error
         }
     }
@@ -660,7 +650,6 @@ class GroupService: ObservableObject {
                     let message = try GroupMessage(dictionary: data, id: doc.documentID)
                     messages.append(message)
                 } catch {
-                    print("Error parsing message: \(error)")
                 }
             }
             
@@ -702,7 +691,6 @@ class GroupService: ObservableObject {
             .whereField("timestamp", isGreaterThan: Timestamp(date: Date()))
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self = self, let snapshot = snapshot else {
-                    print("Error listening for messages: \(error?.localizedDescription ?? "Unknown error")")
                     return
                 }
                 
@@ -714,7 +702,6 @@ class GroupService: ObservableObject {
                                 self.groupMessages.append(message)
                             }
                         } catch {
-                            print("Error parsing new message: \(error)")
                         }
                     }
                 }
@@ -768,17 +755,14 @@ class GroupService: ObservableObject {
     
     // Send an image message
     func sendImageMessage(groupId: String, image: UIImage) async throws {
-        print("GROUP SERVICE: Starting image upload for group \(groupId)")
         
         guard let userId = Auth.auth().currentUser?.uid else {
-            print("GROUP SERVICE: Not authenticated")
             throw GroupServiceError.notAuthenticated
         }
         
         // Get the user's info
         let userDoc = try await db.collection("users").document(userId).getDocument()
         guard let userData = userDoc.data() else {
-            print("GROUP SERVICE: Invalid user data")
             throw GroupServiceError.invalidData
         }
         
@@ -787,7 +771,6 @@ class GroupService: ObservableObject {
         let senderName = displayName ?? username
         let avatarURL = userData["avatarURL"] as? String
         
-        print("GROUP SERVICE: Processing image for upload")
         
         // Resize large images before uploading to reduce storage and bandwidth
         let maxSize: CGFloat = 1200
@@ -808,7 +791,6 @@ class GroupService: ObservableObject {
             }
             UIGraphicsEndImageContext()
             
-            print("GROUP SERVICE: Resized image from \(image.size) to \(resizedImage.size)")
         } else {
             resizedImage = image
         }
@@ -819,27 +801,22 @@ class GroupService: ObservableObject {
         
         // If we still don't have image data, try PNG as a fallback
         if imageData == nil {
-            print("GROUP SERVICE: JPEG compression failed, trying PNG")
             imageData = resizedImage.pngData()
         }
         
         guard let finalImageData = imageData else {
-            print("GROUP SERVICE: Failed to create image data with any format")
             throw GroupServiceError.invalidData
         }
         
-        print("GROUP SERVICE: Image data created: \(finalImageData.count) bytes")
         
         let uuid = UUID().uuidString
         let storageRef = storage.reference().child("group_messages/\(groupId)/\(uuid).jpg")
         
-        print("GROUP SERVICE: Starting Firebase Storage upload")
         
         // Upload the image to Firebase Storage
         do {
             // Upload the image
             _ = try await storageRef.putData(finalImageData, metadata: nil)
-            print("GROUP SERVICE: Image uploaded successfully")
             
             // Add a small delay to allow Firebase to process the upload
             try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
@@ -852,10 +829,8 @@ class GroupService: ObservableObject {
             while downloadURL == nil && retryCount < maxRetries {
                 do {
                     downloadURL = try await storageRef.downloadURL()
-                    print("GROUP SERVICE: Got download URL on attempt \(retryCount + 1): \(downloadURL?.absoluteString ?? "nil")")
                 } catch {
                     retryCount += 1
-                    print("GROUP SERVICE: Failed to get download URL (attempt \(retryCount)/\(maxRetries)): \(error.localizedDescription)")
                     if retryCount < maxRetries {
                         try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 second delay between retries
                     }
@@ -888,7 +863,6 @@ class GroupService: ObservableObject {
             
             // Save the message
             try await messageRef.setData(messageData)
-            print("GROUP SERVICE: Message document created")
             
             // Update the group's last message information
             try await db.collection("groups").document(groupId).updateData([
@@ -898,7 +872,6 @@ class GroupService: ObservableObject {
             
             return
         } catch {
-            print("GROUP SERVICE ERROR: \(error.localizedDescription)")
             throw error
         }
     }

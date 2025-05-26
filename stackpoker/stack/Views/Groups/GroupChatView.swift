@@ -14,19 +14,19 @@ extension View {
             .onAppear {
                 if let msg = appeared {
                     let timestamp = Date()
-                    print("VIEW LIFECYCLE [\(timestamp.formatted(date: .numeric, time: .standard))]: \(msg) appeared")
+
                 }
             }
             .onDisappear {
                 if let msg = disappeared {
                     let timestamp = Date()
-                    print("VIEW LIFECYCLE [\(timestamp.formatted(date: .numeric, time: .standard))]: \(msg) disappeared")
+
                 }
             }
             .task {
                 if let msg = created {
                     let timestamp = Date()
-                    print("VIEW LIFECYCLE [\(timestamp.formatted(date: .numeric, time: .standard))]: \(msg) created")
+
                 }
             }
     }
@@ -424,7 +424,7 @@ struct GroupChatView: View {
         .task {
             // View was created
             viewCreatedTime = Date()
-            print("TASK: GroupChatView task started at \(Date().formatted())")
+
             
             // Don't wait for onAppear - preload messages immediately when task starts
             await preloadMessages()
@@ -449,7 +449,7 @@ struct GroupChatView: View {
             
             tabBarVisibility.isVisible = true
             
-            print("ONDISAPPEAR: GroupChatView disappeared at \(Date().formatted())")
+
             
             // Clean up subscriptions
             cancellables.forEach { $0.cancel() }
@@ -480,26 +480,26 @@ struct GroupChatView: View {
             .onChange(of: imagePickerItem) { newItem in
                 Task {
                     do {
-                        print("IMAGE: Starting image transfer at \(Date().formatted())")
+
                         
                         guard let newItem = newItem else {
-                            print("IMAGE: No item selected")
+
                             return
                         }
                         
                         let data = try await newItem.loadTransferable(type: Data.self)
                         
                         guard let data = data else {
-                            print("IMAGE: Failed to load image data")
+
                             throw NSError(domain: "ImageLoading", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not load image data"])
                         }
                         
                         guard let image = UIImage(data: data) else {
-                            print("IMAGE: Failed to create UIImage from data")
+
                             throw NSError(domain: "ImageLoading", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not create image from data"])
                         }
                         
-                        print("IMAGE: Successfully loaded image: \(image.size.width)x\(image.size.height)")
+
                         
                         // Clean up the picker item to allow selecting the same image again
                         await MainActor.run {
@@ -509,7 +509,7 @@ struct GroupChatView: View {
                             showingImagePicker = false
                         }
                     } catch {
-                        print("IMAGE ERROR: \(error.localizedDescription)")
+
                         await MainActor.run {
                             self.error = "Failed to load image: \(error.localizedDescription)"
                             self.showError = true
@@ -537,20 +537,20 @@ struct GroupChatView: View {
         .onPreferenceChange(ViewRenderTimeKey.self) { _ in
             // Debug - capture render end time
             renderEndTime = Date()
-            print("RENDER END: \(renderEndTime.formatted()) - Duration: \(renderEndTime.timeIntervalSince(renderStartTime)) seconds")
+
         }
         .preference(key: ViewRenderTimeKey.self, value: Date())
     }
     
     // Setup Combine subscription to observe messages
     private func setupSubscription() {
-        print("SUBSCRIPTION: Setting up at \(Date().formatted())")
+
         
         // Setup publisher subscription for messages
         groupService.$groupMessages
             .receive(on: RunLoop.main)
             .sink { newMessages in
-                print("SUBSCRIPTION: Received \(newMessages.count) messages at \(Date().formatted())")
+
                 messages = newMessages
             }
             .store(in: &cancellables)
@@ -559,7 +559,7 @@ struct GroupChatView: View {
     // Preload messages using Task for better async handling
     private func preloadMessages() async {
         let startTime = Date()
-        print("FETCH: Starting at \(startTime.formatted())")
+
         isLoadingMessages = true
         
         do {
@@ -591,7 +591,7 @@ struct GroupChatView: View {
                 let uiEnd = Date()
             }
         } catch {
-            print("FETCH ERROR: \(error.localizedDescription) at \(Date().formatted())")
+
             
             await MainActor.run {
                 self.error = error.localizedDescription
@@ -625,7 +625,7 @@ struct GroupChatView: View {
                     self.isPinnedGameLoading = false
                 }
             } catch {
-                print("Error loading active home games: \(error.localizedDescription)")
+
                 
                 await MainActor.run {
                     self.isPinnedGameLoading = false
@@ -651,7 +651,7 @@ struct GroupChatView: View {
                             }
                         }
                     } catch {
-                        print("Error loading home game: \(error.localizedDescription)")
+
                     }
                 }
                 break // Only try the most recent home game message
@@ -700,7 +700,7 @@ struct GroupChatView: View {
     
     private func sendImage(_ image: UIImage) {
         isSendingImage = true
-        print("IMAGE: Sending image to server at \(Date().formatted())")
+
         
         Task {
             do {
@@ -708,13 +708,13 @@ struct GroupChatView: View {
                 try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
                 
                 try await groupService.sendImageMessage(groupId: group.id, image: image)
-                print("IMAGE: Successfully sent image at \(Date().formatted())")
+
                 
                 await MainActor.run {
                     isSendingImage = false
                 }
             } catch {
-                print("IMAGE UPLOAD ERROR: \(error.localizedDescription)")
+
                 
                 await MainActor.run {
                     self.error = "Failed to upload image: \(error.localizedDescription)"
@@ -1117,7 +1117,7 @@ struct HandMessageView: View {
                     }
                 }
             } catch {
-                print("ERROR fetching shared hand: \(error.localizedDescription)")
+
                 await MainActor.run {
                     loadError = "Failed to load hand: \(error.localizedDescription)"
                     isLoading = false

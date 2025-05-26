@@ -579,7 +579,7 @@ struct StakeDetailView: View {
                 try await stakeService.initiateSettlement(stakeId: stakeId, initiatorUserId: currentUserId)
                 onUpdate()
             } catch {
-                print("Error initiating settlement: \(error.localizedDescription)")
+
             }
             DispatchQueue.main.async {
                 isSettling = false
@@ -590,7 +590,7 @@ struct StakeDetailView: View {
     private func confirmSettlement() {
         guard let stakeId = stake.id else { return }
         guard stake.settlementInitiatorUserId != currentUserId else { 
-            print("Cannot confirm own settlement initiation.")
+
             return
         }
         isSettling = true
@@ -599,7 +599,7 @@ struct StakeDetailView: View {
                 try await stakeService.confirmSettlement(stakeId: stakeId, confirmingUserId: currentUserId)
                 onUpdate()
             } catch {
-                print("Error confirming settlement: \(error.localizedDescription)")
+
             }
             DispatchQueue.main.async {
                 isSettling = false
@@ -621,7 +621,7 @@ struct StakeDetailView: View {
                         if let fetchedUser = userService.loadedUsers[partnerId] {
                             showUserDetails[partnerId] = fetchedUser
                         } else {
-                            print("Still couldn't find user \(partnerId) in cache after fetch for StakeDetailView.")
+
                         }
                     }
                 }

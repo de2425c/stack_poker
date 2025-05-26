@@ -92,7 +92,6 @@ class AuthService: ObservableObject {
             return error as! AuthError
         }
         
-        print("Firebase error: \(error.localizedDescription) (Code: \(nsError.code))")
         
         switch nsError.code {
         case AuthErrorCode.wrongPassword.rawValue:

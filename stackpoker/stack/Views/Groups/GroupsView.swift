@@ -559,77 +559,33 @@ struct CreateGroupView: View {
                         
                         // Form fields
                         VStack(spacing: 20) {
-                            // Group name field with floating label
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("GROUP NAME")
-                                    .font(.system(size: 12, weight: .medium, design: .default))
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                    .padding(.leading, 4)
-                                
-                                TextField("", text: $groupName)
-                                    .placeholder(when: groupName.isEmpty) {
-                                        Text("Enter group name").foregroundColor(.gray.opacity(0.7))
-                                    }
+                            GlassyInputField(icon: "person.2.fill", title: "GROUP NAME") {
+                                TextField("Enter group name", text: $groupName)
                                     .font(.system(size: 17, design: .default))
-                                    .padding()
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(
-                                                LinearGradient(
-                                                    gradient: Gradient(colors: [
-                                                        Color.white.opacity(0.1),
-                                                        Color.clear,
-                                                        Color.clear,
-                                                        Color.clear
-                                                    ]),
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                ),
-                                                lineWidth: 1
-                                            )
-                                    )
                                     .foregroundColor(.white)
+                                    .padding(.vertical, 6)
                             }
                             .opacity(nameFieldOpacity)
                             
-                            // Group description field with floating label
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("DESCRIPTION")
-                                    .font(.system(size: 12, weight: .medium, design: .default))
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                    .padding(.leading, 4)
-                                
-                                TextField("", text: $groupDescription)
-                                    .placeholder(when: groupDescription.isEmpty) {
-                                        Text("What's this group about? (Optional)").foregroundColor(.gray.opacity(0.7))
+                            GlassyInputField(icon: "text.bubble.fill", title: "DESCRIPTION") {
+                                ZStack(alignment: .topLeading) {
+                                    TextEditor(text: $groupDescription)
+                                        .font(.system(size: 17, design: .default))
+                                        .foregroundColor(.white)
+                                        .frame(minHeight: 80, maxHeight: 120)
+                                        .scrollContentBackground(.hidden)
+                                        .background(Color.clear)
+                                        .padding(.vertical, 6)
+
+                                    if groupDescription.isEmpty {
+                                        Text("What's this group about? (Optional)")
+                                            .font(.system(size: 17, design: .default))
+                                            .foregroundColor(.gray.opacity(0.7))
+                                            .padding(.leading, 5)
+                                            .padding(.top, 14)
+                                            .allowsHitTesting(false)
                                     }
-                                    .font(.system(size: 17, design: .default))
-                                    .padding()
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(
-                                                LinearGradient(
-                                                    gradient: Gradient(colors: [
-                                                        Color.white.opacity(0.1),
-                                                        Color.clear,
-                                                        Color.clear,
-                                                        Color.clear
-                                                    ]),
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                ),
-                                                lineWidth: 1
-                                            )
-                                    )
-                                    .foregroundColor(.white)
+                                }
                             }
                             .opacity(descFieldOpacity)
                         }
@@ -668,7 +624,11 @@ struct CreateGroupView: View {
                         .padding(.top, 20)
                         .opacity(buttonOpacity)
                     }
+                    .padding(.top, 60)
                     .padding(.bottom, 40)
+                }
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
                 .alert(isPresented: $showError, content: {
                     Alert(
@@ -723,7 +683,7 @@ struct CreateGroupView: View {
                     }
                 }
             } catch {
-                print("Error loading image: \(error)")
+
             }
         }
     }
@@ -1344,7 +1304,7 @@ struct GroupDetailView: View {
                     }
                 }
             } catch {
-                print("Error loading image: \(error)")
+
             }
         }
     }

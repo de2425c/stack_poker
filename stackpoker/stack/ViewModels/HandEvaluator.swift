@@ -176,14 +176,14 @@ struct HandEvaluator {
     static func evaluateBestHand(cards: [String]) -> HandEvaluation? {
         // Safety checks for empty or invalid input
         guard !cards.isEmpty else {
-            print("Warning: Empty card array passed to evaluateBestHand")
+
             return nil
         }
         
         // Parse card strings to Card objects
         let parsedCards: [Card] = cards.compactMap { cardString in
             guard cardString.count >= 2 else {
-                print("Warning: Invalid card format: \(cardString)")
+
                 return nil
             }
             return Card(from: cardString)
@@ -191,13 +191,13 @@ struct HandEvaluator {
         
         // Ensure we have valid cards
         guard !parsedCards.isEmpty else {
-            print("Warning: No valid cards could be parsed from input")
+
             return nil
         }
         
         // Need at least 5 cards for a valid poker hand
         if parsedCards.count < 5 {
-            print("Warning: Not enough cards to form a valid poker hand: \(parsedCards.count)")
+
             
             // If at least 1 card, return a partial hand evaluation for display purposes
             if parsedCards.count >= 1 {

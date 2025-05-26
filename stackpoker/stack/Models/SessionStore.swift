@@ -35,17 +35,17 @@ struct Session: Identifiable, Equatable {
         // More detailed date logging
         if let startDateTimestamp = data["startDate"] as? Timestamp {
             self.startDate = startDateTimestamp.dateValue()
-            print("📅 Session \(id) startDate: \(startDateTimestamp.dateValue())")
+
         } else {
-            print("⚠️ No startDate timestamp for session \(id)")
+
             self.startDate = Date()
         }
         
         if let startTimeTimestamp = data["startTime"] as? Timestamp {
             self.startTime = startTimeTimestamp.dateValue()
-            print("🕒 Session \(id) startTime: \(startTimeTimestamp.dateValue())")
+
         } else {
-            print("⚠️ No startTime timestamp for session \(id)")
+
             self.startTime = Date()
         }
         
@@ -62,7 +62,7 @@ struct Session: Identifiable, Equatable {
         
         if let createdAtTimestamp = data["createdAt"] as? Timestamp {
             self.createdAt = createdAtTimestamp.dateValue()
-            print("📝 Session \(id) createdAt: \(createdAtTimestamp.dateValue())")
+
         } else {
             self.createdAt = Date()
         }
@@ -118,7 +118,7 @@ class SessionStore: ObservableObject {
     private var timer: Timer?
     
     init(userId: String) {
-        print("📱 SessionStore initialized with userId: \(userId)")
+
         self.userId = userId
         fetchSessions()
         loadLiveSessionState()
@@ -181,7 +181,7 @@ class SessionStore: ObservableObject {
     // Update a note at a specific index
     func updateNote(at index: Int, with newText: String) {
         guard enhancedLiveSession.notes.indices.contains(index) else {
-            print("Error: Note index out of bounds")
+
             return
         }
         enhancedLiveSession.notes[index] = newText
@@ -191,39 +191,39 @@ class SessionStore: ObservableObject {
     // MARK: - Session Database Operations
     
     func fetchSessions() {
-        print("🔍 Fetching sessions for user: \(userId)")
+
         db.collection("sessions")
             .whereField("userId", isEqualTo: userId)
             .order(by: "startDate", descending: true)
             .order(by: "startTime", descending: true)
             .addSnapshotListener { [weak self] snapshot, error in
                 if let error = error {
-                    print("❌ Error fetching sessions: \(error.localizedDescription)")
+
                     return
                 }
                 
                 guard let documents = snapshot?.documents else {
-                    print("⚠️ No documents found in snapshot")
+
                     return
                 }
                 
-                print("📄 Received \(documents.count) session documents")
+
                 
                 self?.sessions = documents.map { document in
                     let data = document.data()
-                    print("\n🔍 Processing session: \(document.documentID)")
-                    print("Raw startDate: \(String(describing: data["startDate"]))")
-                    print("Raw startTime: \(String(describing: data["startTime"]))")
-                    print("Profit: \(data["profit"] as? Double ?? 0)")
+
+
+
+
                     return Session(id: document.documentID, data: data)
                 }
                 
-                print("\n✅ Final sessions array:")
+
                 self?.sessions.forEach { session in
-                    print("ID: \(session.id)")
-                    print("Date: \(session.startDate)")
-                    print("Profit: \(session.profit)")
-                    print("---")
+
+
+
+
                 }
             }
     }
@@ -240,10 +240,10 @@ class SessionStore: ObservableObject {
     func updateSessionDetails(sessionId: String, updatedData: [String: Any], completion: @escaping (Error?) -> Void) {
         db.collection("sessions").document(sessionId).updateData(updatedData) { error in
             if let error = error {
-                print("Error updating session \(sessionId): \(error.localizedDescription)")
+
                 completion(error)
             } else {
-                print("Session \(sessionId) updated successfully.")
+
                 // Refresh the local sessions array to reflect changes
                 self.fetchSessions() 
                 completion(nil)
@@ -347,7 +347,7 @@ class SessionStore: ObservableObject {
             clearLiveSession()
             return docRef.documentID // Return the new document ID
         } catch {
-            print("Error saving session: \(error.localizedDescription)")
+
             return nil // Return nil if saving failed
         }
     }

@@ -52,7 +52,7 @@ class StakeService: ObservableObject {
             allStakes.sort { $0.proposedAt > $1.proposedAt }
             return allStakes
         } catch {
-            print("Error fetching stakes for user \(userId): \(error.localizedDescription)")
+
             throw error
         }
     }
@@ -66,7 +66,7 @@ class StakeService: ObservableObject {
             }
             return stakes.sorted { $0.proposedAt > $1.proposedAt }
         } catch {
-            print("Error fetching stakes for session \(sessionId): \(error.localizedDescription)")
+
             throw error
         }
     }
@@ -94,7 +94,7 @@ class StakeService: ObservableObject {
             Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
         ]
         try await stakesCollectionRef.document(stakeId).updateData(dataToUpdate)
-        print("Settlement initiated for stake \(stakeId) by user \(initiatorUserId)")
+
     }
 
     func confirmSettlement(stakeId: String, confirmingUserId: String) async throws {
@@ -108,7 +108,7 @@ class StakeService: ObservableObject {
             Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
         ]
         try await stakesCollectionRef.document(stakeId).updateData(dataToUpdate)
-        print("Settlement confirmed for stake \(stakeId) by user \(confirmingUserId)")
+
     }
 
     // MARK: - Delete
@@ -127,6 +127,6 @@ class StakeService: ObservableObject {
             }
         }
         try await batch.commit()
-        print("Deleted all stakes for session \(sessionId).")
+
     }
 } 

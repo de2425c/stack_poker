@@ -32,6 +32,7 @@ struct HomePage: View {
     @State private var gameForDetailView: HomeGame?
     @State private var showGameDetailView = false
     @State private var activeHostedStandaloneGame: HomeGame?
+    @State private var showNewHandEntryViewSheet = false
     
     init(userId: String) {
         self.userId = userId
@@ -81,14 +82,14 @@ struct HomePage: View {
                             isExpanded: $liveSessionBarExpanded,
                             onTap: { 
                                 // Make sure the session is shown when tapped
-                                print("LiveSessionBar tapped - opening session")
+
                                 showingLiveSession = true 
                             }
                         )
                         .onTapGesture {
                             // Additional tap gesture to ensure it works
                             if !liveSessionBarExpanded {
-                                print("LiveSessionBar tapped via gesture - opening session")
+
                                 showingLiveSession = true
                             }
                         }
@@ -173,7 +174,8 @@ struct HomePage: View {
                         userId: userId,
                         showSessionForm: $showingSessionForm,
                         showingLiveSession: $showingLiveSession,
-                        showingOpenHomeGameFlow: $showingOpenHomeGameFlow
+                        showingOpenHomeGameFlow: $showingOpenHomeGameFlow,
+                        showNewHandEntryViewSheet: $showNewHandEntryViewSheet
                     )
                     .zIndex(1)
                 }
@@ -215,6 +217,9 @@ struct HomePage: View {
             .sheet(isPresented: $showingSessionForm) {
                 SessionFormView(userId: userId)
             }
+            .sheet(isPresented: $showNewHandEntryViewSheet) {
+                NewHandEntryView()
+            }
             .sheet(isPresented: $showingOpenHomeGameFlow, onDismiss: {
                 // If showing game detail, the sheet dismissal should let the navigation link activate
                 if self.gameForDetailView != nil {
@@ -224,7 +229,7 @@ struct HomePage: View {
                 }
                 
                 // Force refresh active game bar on dismissal (whether from cancel or create)
-                print("⚡️ Force refreshing active games on sheet dismiss")
+
                 loadActiveHostedStandaloneGame()
             }) {
                 HomeGameView(groupId: nil, onGameCreated: { newGame in
@@ -233,7 +238,7 @@ struct HomePage: View {
                     
                     // Set active hosted game for the banner immediately
                     if newGame.status == .active && newGame.creatorId == self.userId {
-                        print("⚡️ DIRECTLY setting active standalone game: \(newGame.title)")
+
                         self.activeHostedStandaloneGame = newGame
                     }
                 })
@@ -265,31 +270,31 @@ struct HomePage: View {
     }
     
     private func loadActiveHostedStandaloneGame() {
-        print("⚡️ Loading active hosted standalone games...")
+
         Task {
             do {
                 let allHostedGames = try await pageLevelHomeGameService.fetchActiveGames(createdBy: self.userId)
-                print("⚡️ Found \(allHostedGames.count) active games hosted by user")
+
                 
                 // Get standalone games (no groupId) that are active and sort by creation date (newest first)
                 let standaloneGames = allHostedGames
                     .filter { $0.groupId == nil && $0.status == .active }
                     .sorted { $0.createdAt > $1.createdAt }
                 
-                print("⚡️ Filtered to \(standaloneGames.count) standalone active games")
+
                 
                 await MainActor.run {
                     // Get the most recent one
                     self.activeHostedStandaloneGame = standaloneGames.first
                     
                     if let game = self.activeHostedStandaloneGame {
-                        print("⚡️ Set active game: \(game.title) (created \(game.createdAt))")
+
                     } else {
-                        print("⚡️ No active standalone games found")
+
                     }
                 }
             } catch {
-                print("⚡️ Error fetching active hosted standalone games: \(error.localizedDescription)")
+
                 await MainActor.run {
                     self.activeHostedStandaloneGame = nil // Ensure it's nil on error
                 }
@@ -841,12 +846,6 @@ struct ProfileEditView: View {
     @State private var activeField: ProfileField? = nil
     @State private var scrollOffset: CGFloat = 0
     
-    // Delete account
-    @State private var showDeleteConfirmation = false
-    @State private var showFinalDeleteConfirmation = false
-    @State private var isDeleting = false
-    @State private var deleteError: String? = nil
-    
     // Game options
     let gameOptions = ["NLH", "PLO", "Omaha", "Stud8", "Razz"]
     
@@ -858,7 +857,7 @@ struct ProfileEditView: View {
     var body: some View {
         ZStack {
             // Background
-            Color(red: 18/255, green: 18/255, blue: 22/255)
+            AppBackgroundView()
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
@@ -874,31 +873,39 @@ struct ProfileEditView: View {
                                     .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
                             )
                     }
-                    
-                    Spacer()
-                    
+
+                    Spacer(minLength: 10) // Ensure spacer expands
+
                     Text("Edit Profile")
                         .font(.system(size: 18, weight: .bold, design: .default))
                         .foregroundColor(.white)
-                    
-                    Spacer()
-                    
+                        .lineLimit(1) // Prevent title from taking too much space if it wraps
+
+                    Spacer(minLength: 10) // Ensure spacer expands
+
                     Button(action: saveProfile) {
                         if isUploading {
                             ProgressView()
                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .frame(width: 20, height: 20)
+                                .frame(width: 30, height: 30) // Give it a defined frame
                         } else {
                             Text("Save")
                                 .font(.system(size: 16, weight: .semibold, design: .default))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 15) // Add some padding to make it more visible
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                )
                         }
                     }
-                    .disabled(isUploading || isDeleting)
+                    .disabled(isUploading)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 16) // Standardized padding
+                .padding(.vertical, 10)   // Standardized padding
+                .padding(.top, 100)        // Increased top padding to 70
+                .frame(height: 44)        // Give the HStack a fixed height
                 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -908,7 +915,7 @@ struct ProfileEditView: View {
                                 // Profile image container
                                 Circle()
                                     .fill(Color(red: 32/255, green: 34/255, blue: 38/255))
-                                    .frame(width: 120, height: 120)
+                                    .frame(width: 82, height: 82)
                                     .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 2)
                                 
                                 // Profile image
@@ -916,7 +923,7 @@ struct ProfileEditView: View {
                                     Image(uiImage: selectedImage)
                                         .resizable()
                                         .aspectRatio(contentMode: .fill)
-                                        .frame(width: 110, height: 110)
+                                        .frame(width: 75, height: 75)
                                         .clipShape(Circle())
                                 } else if let url = profile.avatarURL, !url.isEmpty, let imageURL = URL(string: url) {
                                     AsyncImage(url: imageURL) { phase in
@@ -924,7 +931,7 @@ struct ProfileEditView: View {
                                             image
                                                 .resizable()
                                                 .aspectRatio(contentMode: .fill)
-                                                .frame(width: 110, height: 110)
+                                                .frame(width: 75, height: 75)
                                                 .clipShape(Circle())
                                         } else if phase.error != nil {
                                             Image(systemName: "person.fill")
@@ -935,7 +942,7 @@ struct ProfileEditView: View {
                                                 .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
                                         }
                                     }
-                                    .frame(width: 110, height: 110)
+                                    .frame(width: 75, height: 75)
                                 } else {
                                     Image(systemName: "person.fill")
                                         .font(.system(size: 50, design: .default))
@@ -973,79 +980,62 @@ struct ProfileEditView: View {
                         // Form fields
                         VStack(spacing: 20) {
                             // Display name field
-                            ProfileTextField(
-                                title: "DISPLAY NAME",
-                                placeholder: "Your display name",
-                                text: $displayName,
-                                isActive: activeField == .displayName,
-                                onEditingChanged: { isEditing in
-                                    activeField = isEditing ? .displayName : nil
-                                }
-                            )
+                            GlassyInputField(icon: "person.text.rectangle", title: "DISPLAY NAME") {
+                                TextField("Your display name", text: $displayName)
+                                    .font(.system(size: 16, design: .default))
+                                    .foregroundColor(.white)
+                                    .padding(.vertical, 6) // Consistent padding
+                                    .onTapGesture { activeField = .displayName }
+                            }
                             
-                            // Username field (non-editable)
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("USERNAME")
-                                    .font(.system(size: 12, weight: .medium, design: .default))
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                
+                            // Username field (non-editable, styled to match)
+                            GlassyInputField(icon: "at", title: "USERNAME") {
                                 HStack {
                                     Text("@\(username)")
                                         .font(.system(size: 16, design: .default))
-                                        .foregroundColor(.gray)
-                                        .padding()
-                                    
+                                        .foregroundColor(.gray) // Non-editable, so grayed out
                                     Spacer()
                                 }
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(
-                                            LinearGradient(
-                                                gradient: Gradient(colors: [
-                                                    Color.white.opacity(0.1),
-                                                    Color.clear,
-                                                    Color.clear,
-                                                    Color.clear
-                                                ]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            ),
-                                            lineWidth: 1
-                                        )
-                                )
+                                .padding(.vertical, 6) // Consistent padding
+                            }
+
+                            // Bio field
+                            GlassyInputField(icon: "text.alignleft", title: "BIO") {
+                                ZStack(alignment: .topLeading) {
+                                    TextEditor(text: $bio)
+                                        .font(.system(size: 16, design: .default))
+                                        .foregroundColor(.white)
+                                        .frame(minHeight: 80, maxHeight: 120)
+                                        .scrollContentBackground(.hidden)
+                                        .background(Color.clear)
+                                        .padding(.vertical, 6)
+                                        .onTapGesture { activeField = .bio }
+
+                                    if bio.isEmpty {
+                                        Text("Tell us about yourself")
+                                            .font(.system(size: 16, design: .default))
+                                            .foregroundColor(.gray.opacity(0.7))
+                                            .padding(.leading, 5)
+                                            .padding(.top, 14)
+                                            .allowsHitTesting(false)
+                                    }
+                                }
                             }
                             
-                            // Bio field
-                            ProfileTextField(
-                                title: "BIO",
-                                placeholder: "Tell us about yourself",
-                                text: $bio,
-                                isActive: activeField == .bio,
-                                onEditingChanged: { isEditing in
-                                    activeField = isEditing ? .bio : nil
-                                }
-                            )
-                            
                             // Location field
-                            ProfileTextField(
-                                title: "LOCATION",
-                                placeholder: "Your location",
-                                text: $location,
-                                isActive: activeField == .location,
-                                onEditingChanged: { isEditing in
-                                    activeField = isEditing ? .location : nil
-                                }
-                            )
+                            GlassyInputField(icon: "mappin.and.ellipse", title: "LOCATION") {
+                                TextField("Your location", text: $location)
+                                    .font(.system(size: 16, design: .default))
+                                    .foregroundColor(.white)
+                                    .padding(.vertical, 6)
+                                    .onTapGesture { activeField = .location }
+                            }
                             
                             // Favorite game picker
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("FAVORITE GAME")
                                     .font(.system(size: 12, weight: .medium, design: .default))
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                    .foregroundColor(Color.gray) // Changed from green
                                 
                                 // Game selection cards
                                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1064,15 +1054,15 @@ struct ProfileEditView: View {
                                                     .background(
                                                         RoundedRectangle(cornerRadius: 12)
                                                             .fill(favoriteGame == game ?
-                                                                  Color(red: 123/255, green: 255/255, blue: 99/255) :
-                                                                  Color(red: 32/255, green: 35/255, blue: 40/255))
+                                                                  Color.white.opacity(0.9) : // Selected: prominent white
+                                                                  Color.white.opacity(0.1)) // Unselected: subtle glassy white
                                                     )
                                                     .overlay(
                                                         RoundedRectangle(cornerRadius: 12)
                                                             .stroke(
                                                                 favoriteGame == game ?
-                                                                Color.clear :
-                                                                Color.white.opacity(0.1),
+                                                                Color.white.opacity(0.7) : // Selected border
+                                                                Color.white.opacity(0.2), // Unselected border
                                                                 lineWidth: 1
                                                             )
                                                     )
@@ -1094,27 +1084,13 @@ struct ProfileEditView: View {
                                 .padding(.top, 8)
                         }
                         
-                        // Delete account button
+                        // Section for content that needs bottom padding before the end of ScrollView
                         VStack(spacing: 10) {
-                            Divider()
-                                .background(Color.gray.opacity(0.3))
-                                .padding(.top, 20)
-                            
-                            Button(action: { showDeleteConfirmation = true }) {
-                                HStack {
-                                    Spacer()
-                                    Text("Delete Account")
-                                        .font(.system(size: 15, weight: .medium, design: .default))
-                                        .foregroundColor(.red)
-                                    Spacer()
-                                }
-                                .padding(.vertical, 16)
-                            }
+                            // Intentionally left blank for now, can add content here if needed above keyboard
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 20)
-                        .padding(.bottom, 30)
+                        .padding(.bottom, 30) // Ensures space when keyboard is up or for general layout
                     }
+                    .padding(.top, 60) // Correct placement for the top padding
                     .padding(.bottom, 20)
                 }
             }
@@ -1122,27 +1098,6 @@ struct ProfileEditView: View {
         .onAppear {
             initializeFields()
             animateIn()
-        }
-        .alert("Delete Your Account?", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                showFinalDeleteConfirmation = true
-            }
-        } message: {
-            Text("This will remove all your data from the app. This action cannot be undone.")
-        }
-        .alert("Permanently Delete Account", isPresented: $showFinalDeleteConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Yes, Delete Everything", role: .destructive) {
-                deleteAccount()
-            }
-        } message: {
-            Text("Are you absolutely sure? All your data, posts, groups, and messages will be permanently deleted.")
-        }
-        .alert("Error", isPresented: .init(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(deleteError ?? "An unknown error occurred")
         }
     }
     
@@ -1174,7 +1129,7 @@ struct ProfileEditView: View {
                     }
                 }
             } catch {
-                print("Error loading image: \(error)")
+
             }
         }
     }
@@ -1233,219 +1188,6 @@ struct ProfileEditView: View {
             }
         }
     }
-    
-    private func deleteAccount() {
-        guard let userId = Auth.auth().currentUser?.uid else {
-            deleteError = "Not signed in"
-            return
-        }
-        
-        isDeleting = true
-        
-        Task {
-            do {
-                // 1. Delete user data from collections
-                try await deleteUserDataFromFirestore(userId)
-                
-                // 2. Delete Firebase Auth user
-                try await Auth.auth().currentUser?.delete()
-                
-                // 3. Sign out immediately after successful deletion
-                do {
-                    try Auth.auth().signOut()
-                } catch {
-                    print("Error signing out after account deletion: \(error.localizedDescription)")
-                }
-                
-                await MainActor.run {
-                    isDeleting = false
-                    // The app will automatically redirect to the sign-in page due to auth state change
-                }
-            } catch {
-                await MainActor.run {
-                    isDeleting = false
-                    deleteError = "Failed to delete account: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-    
-    private func deleteUserDataFromFirestore(_ userId: String) async throws {
-        let db = Firestore.firestore()
-        let batch = db.batch()
-        
-        // Delete user document
-        batch.deleteDocument(db.collection("users").document(userId))
-        
-        // Delete user's groups
-        let userGroups = try await db.collection("users")
-            .document(userId)
-            .collection("groups")
-            .getDocuments()
-        
-        for doc in userGroups.documents {
-            batch.deleteDocument(doc.reference)
-        }
-        
-        // Delete user's group invites
-        let userInvites = try await db.collection("users")
-            .document(userId)
-            .collection("groupInvites")
-            .getDocuments()
-        
-        for doc in userInvites.documents {
-            batch.deleteDocument(doc.reference)
-        }
-        
-        // Delete user's followers/following
-        let followers = try await db.collection("users")
-            .document(userId)
-            .collection("followers")
-            .getDocuments()
-        
-        for doc in followers.documents {
-            batch.deleteDocument(doc.reference)
-        }
-        
-        let following = try await db.collection("users")
-            .document(userId)
-            .collection("following")
-            .getDocuments()
-        
-        for doc in following.documents {
-            batch.deleteDocument(doc.reference)
-        }
-        
-        // Commit the batch deletion of Firestore data
-        try await batch.commit()
-        
-        // Attempt to delete profile image, but don't let it stop the account deletion process
-        do {
-            try await Storage.storage().reference()
-                .child("profile_images/\(userId).jpg")
-                .delete()
-        } catch {
-            // Log the error but continue with account deletion
-            print("Profile image deletion failed: \(error.localizedDescription). Continuing with account deletion.")
-        }
-    }
-}
-
-// MARK: - Supporting Views
-
-struct ProfileTextField: View {
-    let title: String
-    let placeholder: String
-    @Binding var text: String
-    let isActive: Bool
-    let onEditingChanged: (Bool) -> Void
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.system(size: 12, weight: .medium, design: .default))
-                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-            
-            TextField(placeholder, text: $text, onEditingChanged: onEditingChanged)
-                .font(.system(size: 16, design: .default))
-                .foregroundColor(.white)
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(
-                            isActive ?
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color(red: 123/255, green: 255/255, blue: 99/255)]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ) :
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color.white.opacity(0.1),
-                                    Color.clear,
-                                    Color.clear,
-                                    Color.clear
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: isActive ? 1.5 : 1
-                        )
-                )
-                .animation(.easeOut(duration: 0.2), value: isActive)
-        }
-    }
-}
-
-struct ProfileTextEditor: View {
-    let title: String
-    let placeholder: String
-    @Binding var text: String
-    let isActive: Bool
-    let onEditingChanged: (Bool) -> Void
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.system(size: 12, weight: .medium, design: .default))
-                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-            
-            ZStack(alignment: .topLeading) {
-                if text.isEmpty {
-                    Text(placeholder)
-                        .font(.system(size: 16, design: .default))
-                        .foregroundColor(.gray.opacity(0.7))
-                        .padding(.top, 16)
-                        .padding(.leading, 16)
-                }
-                
-                TextEditor(text: $text)
-                    .font(.system(size: 16, design: .default))
-                    .foregroundColor(.white)
-                    .frame(minHeight: 100)
-                    .padding(4)
-                    .background(Color.clear)
-                    .onTapGesture {
-                        onEditingChanged(true)
-                    }
-                    .onAppear {
-                        UITextView.appearance().backgroundColor = .clear
-                    }
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(
-                        isActive ?
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color(red: 123/255, green: 255/255, blue: 99/255)]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ) :
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.white.opacity(0.1),
-                                Color.clear,
-                                Color.clear,
-                                Color.clear
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: isActive ? 1.5 : 1
-                    )
-            )
-            .frame(height: 120)
-            .animation(.easeOut(duration: 0.2), value: isActive)
-        }
-    }
 }
 
 struct ProfileImageView: View {
@@ -1486,14 +1228,14 @@ struct ProfileImageView: View {
                 isLoading = false
                 
                 if let error = error {
-                    print("Error loading image: \(error)")
+
                     self.error = error
                     return
                 }
                 
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode) else {
-                    print("Invalid response")
+
                     return
                 }
                 
@@ -1508,10 +1250,10 @@ struct ProfileImageView: View {
 struct AddMenuOverlay: View {
     @Binding var showingMenu: Bool
     let userId: String
-    @State private var showHandInput = false
     @Binding var showSessionForm: Bool
     @Binding var showingLiveSession: Bool
     @Binding var showingOpenHomeGameFlow: Bool
+    @Binding var showNewHandEntryViewSheet: Bool
 
     var body: some View {
         ZStack {
@@ -1589,7 +1331,7 @@ struct AddMenuOverlay: View {
                                 icon: "doc.text",
                                 title: "Add Hand",
                                 action: { 
-                                    showHandInput = true 
+                                    showNewHandEntryViewSheet = true
                                     showingMenu = false
                                 }
                             )
@@ -1610,7 +1352,7 @@ struct AddMenuOverlay: View {
                 .transition(.opacity)
             }
         }
-        .sheet(isPresented: $showHandInput) {
+        .sheet(isPresented: $showNewHandEntryViewSheet) {
             NewHandEntryView()
         }
     }

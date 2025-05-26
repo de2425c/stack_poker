@@ -74,7 +74,7 @@ extension Encodable {
             let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
             return dict
         } catch {
-            print("Error converting to dictionary:", error)
+
             return nil
         }
     }

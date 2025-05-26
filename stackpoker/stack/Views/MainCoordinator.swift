@@ -33,7 +33,7 @@ class AuthViewModel: ObservableObject {
         let timeSinceLastUpdate = now.timeIntervalSince(lastAuthStateUpdate)
         lastAuthStateUpdate = now
         
-        print("🔄 AUTH STATE CHANGE: \(previousState) → \(newState) (after \(String(format: "%.2f", timeSinceLastUpdate))s)")
+
     }
 
     /// Adds a Firebase `AuthStateDidChangeListener` so the view model reacts instantly to log-in / log-out events
@@ -53,7 +53,7 @@ class AuthViewModel: ObservableObject {
     /// housekeeping such as loading / clearing the profile.
     private func processFirebaseUser(_ user: FirebaseAuth.User?) {
         if let user = user {
-            print("🔄 Auth listener: user signed in with id \(user.uid)")
+
 
             // Get latest user verification status
             Task {
@@ -63,7 +63,7 @@ class AuthViewModel: ObservableObject {
                     
                     // Get the fresh user object after reload
                     guard let freshUser = Auth.auth().currentUser else {
-                        print("⚠️ User no longer available after reload")
+
                         await MainActor.run {
                             self.userService.currentUserProfile = nil
                             self.setAuthState(.signedOut)
@@ -73,22 +73,22 @@ class AuthViewModel: ObservableObject {
                     
                     // Email verification check with the latest status
                     if !freshUser.isEmailVerified {
-                        print("📧 User email is not verified")
+
                         await MainActor.run {
                             self.setAuthState(.emailVerificationRequired)
                         }
                         return
                     }
                     
-                    print("✅ User email is verified, fetching profile")
+
                     try await self.userService.fetchUserProfile()
                     
                     await MainActor.run {
                         self.setAuthState(.signedIn)
-                        print("🚀 User fully authenticated and profile loaded")
+
                     }
                 } catch {
-                    print("❌ Auth listener – error during authentication flow: \(error)")
+
                     
                     // Handle specific errors
                     if let serviceError = error as? UserServiceError, serviceError == .permissionDenied {
@@ -103,7 +103,7 @@ class AuthViewModel: ObservableObject {
                         if let currentUser = Auth.auth().currentUser, currentUser.isEmailVerified {
                             await MainActor.run {
                                 self.setAuthState(.signedIn)
-                                print("⚠️ Email verified but profile not found - user needs to create profile")
+
                             }
                         } else {
                             await MainActor.run {
@@ -114,13 +114,13 @@ class AuthViewModel: ObservableObject {
                         // General error - default to signed in state
                         await MainActor.run {
                             self.setAuthState(.signedIn)
-                            print("⚠️ Error but keeping user signed in: \(error.localizedDescription)")
+
                         }
                     }
                 }
             }
         } else {
-            print("🔄 Auth listener: user signed OUT")
+
             DispatchQueue.main.async {
                 self.userService.currentUserProfile = nil
                 self.setAuthState(.signedOut)
@@ -153,7 +153,7 @@ class AuthViewModel: ObservableObject {
             if let currentUser = Auth.auth().currentUser,
                let profile = self.userService.currentUserProfile,
                currentUser.uid != profile.id {
-                print("⚠️ Profile mismatch detected: Auth user ID doesn't match profile ID")
+
                 // Clear the profile to force a refresh
                 self.userService.clearUserData()
                 // Fetch the correct profile
@@ -174,77 +174,77 @@ class AuthViewModel: ObservableObject {
             try Auth.auth().signOut()
             
             // The auth state listener will handle UI updates
-            print("✅ User signed out successfully")
+
         } catch {
-            print("❌ Error signing out: \(error.localizedDescription)")
+
         }
     }
 
     // Helper method to force a specific auth state (for debugging)
     func forceAuthState(_ state: AuthState) {
-        print("⚠️ FORCING auth state to: \(state)")
+
         setAuthState(state)
     }
 
     // MARK: - Single refresh point
     func refreshFlow() {
         guard !isRefreshingFlow else {
-            print("🌀 AuthViewModel.refreshFlow() called while already in progress. Skipping.")
+
             return
         }
         isRefreshingFlow = true
         // Ensure the flag is reset when the function exits, however it exits.
         defer { isRefreshingFlow = false }
 
-        print("🌀 AuthViewModel.refreshFlow() called")
+
         setAppFlow(.loading)
 
         guard let firebaseUser = Auth.auth().currentUser else {
-            print("  ↳ No Firebase user, setting flow to .signedOut")
+
             setAppFlow(.signedOut)
             return
         }
 
         Task {
             do {
-                print("  ⏳ Attempting firebaseUser.reload() for user: \(firebaseUser.uid)")
+
                 try await firebaseUser.reload()
-                print("  ✅ firebaseUser.reload() successful")
+
                 let verified = firebaseUser.isEmailVerified
 
                 // Does profile exist?
                 var profileExists = false
                 if self.userService.currentUserProfile != nil {
-                    print("  💁 Profile found in userService cache.")
+
                     profileExists = true
                 } else {
-                    print("  🔎 Profile not in cache, checking Firestore for user: \(firebaseUser.uid)")
+
                     let doc = try await Firestore.firestore()
                         .collection("users").document(firebaseUser.uid).getDocument()
                     profileExists = doc.exists
-                    print("  📄 Firestore profile document exists: \(profileExists)")
+
                 }
 
-                print("  📊 Status before decision: verified=\(verified), profileExists=\(profileExists)")
+
 
                 if !verified {
-                    print("  ➡️ Flow decision: !verified -> .emailVerification")
+
                     setAppFlow(.emailVerification)
                 } else if !profileExists {
-                    print("  ➡️ Flow decision: verified && !profileExists -> .profileSetup")
+
                     setAppFlow(.profileSetup)
                 } else {
-                    print("  ➡️ Flow decision: verified && profileExists -> .main")
+
                     // cache profile
                     if self.userService.currentUserProfile == nil {
-                        print("    ⏳ userService.currentUserProfile is nil, calling fetchUserProfile()")
+
                         try await userService.fetchUserProfile()
-                        print("    ✅ fetchUserProfile() completed")
+
                     }
                     setAppFlow(.main(userId: firebaseUser.uid))
                 }
             } catch {
-                print("❌❌❌ refreshFlow error: \(error.localizedDescription) - \(error)")
+
                 setAppFlow(.signedOut)
             }
         }
@@ -254,7 +254,7 @@ class AuthViewModel: ObservableObject {
     private func setAppFlow(_ newFlow: AppFlow) {
         DispatchQueue.main.async {
             if newFlow == self.appFlow { return }
-            print("🔄 APP FLOW: \(self.appFlow) → \(newFlow)")
+
             self.appFlow = newFlow
         }
     }
@@ -263,7 +263,7 @@ class AuthViewModel: ObservableObject {
     @MainActor
     func enterMainFlow() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        print("🚀 enterMainFlow() called – forcing .main for uid \(uid)")
+
         isRefreshingFlow = false // reset debounce flag
         setAppFlow(.main(userId: uid))
     }
@@ -303,9 +303,9 @@ struct MainCoordinator: View {
                 .environmentObject(authViewModel)
         }
         .onReceive(NotificationCenter.default.publisher(for: .handlePushNotificationTap)) { notification in
-            print("MainCoordinator received .handlePushNotificationTap via .onReceive: \\(notification.userInfo ?? [:])")
+
             if let postId = notification.userInfo?["postId"] as? String {
-                print("Attempting to navigate to post detail for postId: \\(postId) via .onReceive")
+
                 self.notificationPostIdWrapper = IdentifiableString(id: postId)
             }
         }
@@ -370,23 +370,23 @@ struct PostDetailViewWrapper: View {
                 if let existingPost = postService.posts.first(where: { $0.id == postId }) {
                     self.post = existingPost
                     self.isLoading = false
-                    print("Post \\(postId) found in existing PostService.posts")
+
                     return
                 }
                 // If not found, fetch from Firestore
-                print("Post \\(postId) not in PostService.posts, attempting fetch...")
+
                 // This line assumes fetchSinglePost exists and is an async throws function in PostService
                 self.post = try await postService.fetchSinglePost(byId: postId)
                 self.isLoading = false
                 if self.post == nil {
-                    print("Post \\(postId) still not found after fetchSinglePost.")
+
                 } else {
-                    print("Post \\(postId) successfully fetched.")
+
                 }
             } catch {
                 self.error = error
                 self.isLoading = false
-                print("Error fetching post \\(postId): \\(error)")
+
             }
         }
     }

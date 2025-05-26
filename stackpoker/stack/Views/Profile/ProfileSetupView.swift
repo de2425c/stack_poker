@@ -286,7 +286,7 @@ struct ProfileSetupView: View {
                     }
                 }
             } catch {
-                print("Error loading image: \(error)")
+
             }
         }
     }
@@ -373,7 +373,7 @@ struct ProfileSetupView: View {
                     case .success(let url):
                         avatarURL = url
                     case .failure(let error):
-                        print("Warning: Failed to upload profile image: \(error.localizedDescription)")
+                        print("upload failed")
                         // Continue without image if upload fails
                     }
                 }
@@ -412,11 +412,11 @@ struct ProfileSetupView: View {
                 let currentUser = Auth.auth().currentUser
                 let isEmailVerified = currentUser?.isEmailVerified ?? false
                 
-                print("🔑 User verification status after profile creation: \(isEmailVerified)")
+
                 
                 // Dismiss on main thread
                 await MainActor.run {
-                    print("📱 Completing profile setup with verified email: \(isEmailVerified)")
+
                     dismiss()
                 }
 
@@ -424,14 +424,14 @@ struct ProfileSetupView: View {
                 try await Task.sleep(nanoseconds: 500_000_000)
 
                 // Regardless of email status, enter main flow
-                print("🚀 Forcing main flow after profile setup")
+
                 await authViewModel.enterMainFlow()
             } catch {
                 await MainActor.run {
                     errorMessage = (error as? UserServiceError)?.message ?? "An unexpected error occurred"
                     showingError = true
                     isLoading = false
-                    print("❌ Profile creation error: \(error.localizedDescription)")
+
                 }
             }
         }

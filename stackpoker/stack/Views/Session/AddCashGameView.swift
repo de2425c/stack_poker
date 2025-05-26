@@ -209,7 +209,7 @@ struct AddCashGameView: View {
             } catch {
                 await MainActor.run {
                     isLoading = false
-                    print("Error adding cash game: \(error.localizedDescription)")
+
                     // Could show an alert here
                 }
             }

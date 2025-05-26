@@ -960,7 +960,7 @@ struct HandSummaryRow: View {
                         do {
                             try await handStore.deleteHand(id: id)
                         } catch {
-                            print("Error deleting hand: \(error.localizedDescription)")
+
                         }
                     }
                 },
@@ -1191,7 +1191,7 @@ struct SessionsTab: View {
                             do {
                                 try await deleteSession(session.id)
                             } catch {
-                                print("Error deleting session: \(error.localizedDescription)")
+
                             }
                         }
                     }
@@ -1224,7 +1224,7 @@ struct SessionsTab: View {
     private func deleteSession(_ sessionId: String) async throws {
         try await sessionStore.deleteSession(sessionId) { error in
             if let error = error {
-                print("Error deleting session: \(error.localizedDescription)")
+
             }
         }
     }
@@ -1254,7 +1254,7 @@ struct SessionsTab: View {
                 // If successful, refresh sessions
                 self.sessionStore.fetchSessions()
             } else {
-                print("Error updating session: \(error?.localizedDescription ?? "Unknown error")")
+
             }
         }
     }

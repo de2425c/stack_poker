@@ -261,7 +261,7 @@ struct ImageCompositionView: View {
             self.isSharing = true // This will trigger the .sheet
         } else {
             // Handle error: image rendering failed
-            print("Error: Could not render image for sharing.")
+
             // Optionally, present an alert to the user
         }
     }

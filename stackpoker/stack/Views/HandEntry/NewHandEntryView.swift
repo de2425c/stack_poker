@@ -52,8 +52,38 @@ extension Color {
     // Suit colors
     static let spadeColor = Color.white
     static let heartColor = Color.red
-    static let diamondColor = Color(red: 0.95, green: 0.4, blue: 0.4)
-    static let clubColor = Color(white: 0.9)
+    static let diamondColor = Color(red: 0.3, green: 0.7, blue: 1.0) // A light blue for diamonds
+    static let clubColor = Color(red: 0.3, green: 0.9, blue: 0.4)   // A distinct green for clubs
+}
+
+// Helper for applying a glassy section style
+struct GlassySectionModifier: ViewModifier {
+    var cornerRadius: CGFloat = 14 // Consistent with original panel
+    var materialOpacity: Double = 0.25 // Slightly more pronounced material
+    var glassOpacity: Double = 0.02   // Subtle white overlay
+
+    func body(content: Content) -> some View {
+        content
+            .padding() // Add internal padding to the content before applying background
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(materialOpacity)
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(Color.white.opacity(glassOpacity))
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1) // Subtle border
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    }
+}
+
+extension View {
+    func glassySectionStyle() -> some View {
+        self.modifier(GlassySectionModifier())
+    }
 }
 
 struct NewHandEntryView: View {
@@ -109,10 +139,11 @@ struct NewHandEntryView: View {
 
     var body: some View {
         ZStack {
-            Color.primaryBackground.edgesIgnoringSafeArea(.all)
-            
+            // Color.primaryBackground.edgesIgnoringSafeArea(.all) // Replaced
+            AppBackgroundView().edgesIgnoringSafeArea(.all) // Use AppBackgroundView
+
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
+                VStack(spacing: 16) { // Main content VStack
                     // Add title at the top
                     Text("Save Hand")
                         .font(.system(size: 22, weight: .bold))
@@ -363,12 +394,7 @@ struct NewHandEntryView: View {
                 .frame(minWidth: 0, maxWidth: .infinity) // Allow this VStack to expand
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 14) // Slightly increased corner radius
-                .fill(Color.secondaryBackground)
-                .shadow(color: Color.black.opacity(0.25), radius: 5, x: 0, y: 3) // Slightly enhanced shadow
-        )
+        .glassySectionStyle()
     }
     
     // Helper for styled input fields to reduce repetition and ensure consistency
@@ -412,89 +438,94 @@ struct NewHandEntryView: View {
     
     // Fix hero section to be truly one line with more space for position picker
     private var playersSectionView: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) { // Reduced spacing between player sub-sections for compactness
             // Hero section - all in one line
-            HStack(alignment: .center, spacing: 10) {
-                // Hero position with more space - complete redesign
-                HStack(spacing: 0) {
-                    Text("HERO")
-                        .font(.system(size: 12, weight: .bold))
+            VStack(alignment: .leading, spacing: 8) { // Wrap Hero content for glassy style
+                HStack {
+                    Image(systemName: "person.crop.circle.fill")
                         .foregroundColor(.accentGreen)
-                        .lineLimit(1)
-                        .frame(width: 40, alignment: .leading)
-                    
-                    Spacer(minLength: 10)
-                    
-                    Picker("", selection: $viewModel.heroPosition) {
-                        ForEach(viewModel.availablePositions, id: \.self) { position in
-                            Text(position).tag(position)
-                        }
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                    .frame(width: 80)
-                }
-                .frame(width: 130)
-                
-                // Hero cards
-                HStack(spacing: 4) {
-                    ForEach([viewModel.heroCard1, viewModel.heroCard2], id: \.self) { card in
-                        let (symbol, color) = cardSymbol(for: card)
-                        Button(action: { cardSelectionTarget = .heroHand }) {
-                            Text(symbol)
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(color)
-                                .frame(width: 32, height: 38)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .fill(card == nil ? Color.cardBackground.opacity(0.5) : Color.cardBackground)
-                                        .shadow(color: Color.black.opacity(0.2), radius: 1, x: 0, y: 1)
-                                )
-                        }
-                    }
-                }
-                
-                Spacer()
-                
-                // Stack amount - fix wrapping
-                HStack(spacing: 0) {
-                    Text("STACK $")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.textSecondary)
-                        .lineLimit(1)
-                        .frame(width: 55, alignment: .leading)
-                    
-                    Spacer(minLength: 5)
-                    
-                    TextField("", value: $viewModel.effectiveStackAmount, formatter: doubleFormatter)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .font(.system(size: 14, weight: .medium))
+                    Text("Hero Details")
+                        .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.textPrimary)
-                        .padding(5)
-                        .frame(width: 45)
-                        .background(Color.inputBackground)
-                        .cornerRadius(5)
-                        .onChange(of: viewModel.effectiveStackAmount) { _ in
-                            viewModel.updatePlayerStacksBasedOnEffectiveStack()
-                            viewModel.effectiveStackType = .dollars
-                        }
+                    Spacer()
                 }
-                .frame(width: 105)
+                HStack(alignment: .center, spacing: 10) {
+                    // Hero position with more space - complete redesign
+                    HStack(spacing: 0) {
+                        Text("HERO")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.accentGreen)
+                            .lineLimit(1)
+                            .frame(width: 40, alignment: .leading)
+                        
+                        Spacer(minLength: 10)
+                        
+                        Picker("", selection: $viewModel.heroPosition) {
+                            ForEach(viewModel.availablePositions, id: \.self) { position in
+                                Text(position).tag(position)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        .frame(width: 80)
+                    }
+                    .frame(width: 130)
+                    
+                    // Hero cards
+                    HStack(spacing: 4) {
+                        ForEach([viewModel.heroCard1, viewModel.heroCard2], id: \.self) { card in
+                            let (symbol, color) = cardSymbol(for: card)
+                            Button(action: { cardSelectionTarget = .heroHand }) {
+                                Text(symbol)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(color)
+                                    .frame(width: 32, height: 38)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 5)
+                                            .fill(card == nil ? Color.cardBackground.opacity(0.5) : Color.cardBackground)
+                                            .shadow(color: Color.black.opacity(0.2), radius: 1, x: 0, y: 1)
+                                    )
+                            }
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    // Stack amount - fix wrapping
+                    HStack(spacing: 0) {
+                        Text("STACK $")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.textSecondary)
+                            .lineLimit(1)
+                            .frame(width: 55, alignment: .leading)
+                        
+                        Spacer(minLength: 5)
+                        
+                        TextField("", value: $viewModel.effectiveStackAmount, formatter: doubleFormatter)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.textPrimary)
+                            .padding(5)
+                            .frame(width: 45)
+                            .background(Color.inputBackground)
+                            .cornerRadius(5)
+                            .onChange(of: viewModel.effectiveStackAmount) { _ in
+                                viewModel.updatePlayerStacksBasedOnEffectiveStack()
+                                viewModel.effectiveStackType = .dollars
+                            }
+                    }
+                    .frame(width: 105)
+                }
             }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.secondaryBackground)
-            )
+            .glassySectionStyle()
             
             // Active villains section
-            VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) { // Wrap Active Villains for glassy style
                 HStack {
-                    Text("ACTIVE VILLAINS")
+                    Text("ACTIVE VILLAINS") // Kept original styling for this title
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.accentGreen)
                         .tracking(0.8)
-                    
                     Spacer()
                 }
                 
@@ -563,20 +594,15 @@ struct NewHandEntryView: View {
                     }
                 }
             }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.secondaryBackground)
-            )
+            .glassySectionStyle()
             
             // Available positions section - renamed to "ADD ACTIVE VILLAIN"
-            VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) { // Wrap Add Villains for glassy style
                 HStack {
-                    Text("ADD ACTIVE VILLAIN")
+                    Text("ADD ACTIVE VILLAIN") // Kept original styling
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.accentGreen)
                         .tracking(0.8)
-                    
                     Spacer()
                 }
                 
@@ -609,11 +635,7 @@ struct NewHandEntryView: View {
                     }
                 }
             }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.secondaryBackground)
-            )
+            .glassySectionStyle()
         }
     }
     
@@ -675,12 +697,8 @@ struct NewHandEntryView: View {
                     riverContent
                 }
             }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.secondaryBackground)
-            )
         }
+        .glassySectionStyle() // Apply to the whole Board & Action area
     }
     
     // Fix action display with more space

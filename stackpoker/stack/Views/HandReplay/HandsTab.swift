@@ -116,7 +116,7 @@ struct HandListSection: View {
                 ForEach(hands) { savedHand in
                     HandDisplayCardView(hand: savedHand.hand, 
                                         onReplayTap: {
-                                            print("Replay tapped for hand ID: \(savedHand.id) in HandListSection")
+
                                             onHandTap(savedHand) // Call the closure passed from HandsTab
                                         },
                                         location: savedHand.hand.raw.gameInfo.tableSize > 2 ? "Live Game" : "Online Game", // Example: derive from table size or pass nil

@@ -102,7 +102,7 @@ struct HandDisplayCardView: View {
 
                     if !showReplayInFeed {
                         Button(action: { 
-                            print("Replay button tapped in HandDisplayCardView")
+
                             onReplayTap?() 
                         }) {
                             VStack(spacing: 4) {
