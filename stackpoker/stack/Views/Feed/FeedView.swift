@@ -387,75 +387,116 @@ struct BasicPostCardView: View {
     // Computed property for context tag information
     private var contextTagInfo: (title: String, iconName: String)? {
         let iconName = "rectangle.stack.fill"
-        var titleToShow: String?
+        var tempTitle: String? // Use a temporary variable to build the core title
+
+        // Initial debug prints
+        print("[ContextTagDebug] --- Evaluating Post ID: \(post.id ?? "nil") ---")
+        print("[ContextTagDebug] Raw Content (first 120 chars): \"\(String(post.content.prefix(120)))\"")
+        print("[ContextTagDebug] PostType: \(post.postType), SessionID: \(post.sessionId ?? "nil"), Location: \(post.location ?? "nil")")
 
         if post.postType == .hand, let hand = post.handHistory {
+            print("[ContextTagDebug] Post is .hand type.")
             let smallBlind = hand.raw.gameInfo.smallBlind
             let bigBlind = hand.raw.gameInfo.bigBlind
             if bigBlind > 0 || smallBlind > 0 {
-                 let stakesString = String(format: "$%g/$%g", smallBlind, bigBlind)
-                 var title = "Playing \(stakesString)"
-                 if let location = post.location, !location.isEmpty {
-                     title += " at \(location)"
-                 }
-                 titleToShow = title
+                let stakesString = String(format: "$%g/$%g", smallBlind, bigBlind)
+                tempTitle = "Playing \(stakesString)"
+            }
+        } else if post.content.starts(with: "Started a new session at ") {
+            print("[ContextTagDebug] Content starts with 'Started a new session at'.")
+            let relevantContent = String(post.content.dropFirst("Started a new session at ".count))
+            if let lastParenOpen = relevantContent.lastIndex(of: "("),
+               let lastParenClose = relevantContent.lastIndex(of: ")"),
+               lastParenOpen < lastParenClose,
+               relevantContent.index(after: lastParenClose) == relevantContent.endIndex {
+                
+                let gamePart = String(relevantContent[..<lastParenOpen]).trimmingCharacters(in: .whitespaces)
+                let stakesPart = String(relevantContent[relevantContent.index(after: lastParenOpen)..<lastParenClose]).trimmingCharacters(in: .whitespaces)
+                print("[ContextTagDebug] Parsed from 'Started at...': Game='\(gamePart)', Stakes='\(stakesPart)'")
+                if !gamePart.isEmpty {
+                    tempTitle = "Playing \(gamePart)"
+                    if !stakesPart.isEmpty {
+                        tempTitle! += " (\(stakesPart))"
+                    }
+                }
+            } else if !relevantContent.isEmpty {
+                let gamePart = relevantContent.trimmingCharacters(in: .whitespaces)
+                print("[ContextTagDebug] Parsed from 'Started at...' (no stakes in parens): Game='\(gamePart)'")
+                if !gamePart.isEmpty {
+                    tempTitle = "Playing \(gamePart)"
+                }
             }
         } else {
-            // Attempt to derive session information for non-hand posts
-
-            // 1. Check for completed session format first
+            print("[ContextTagDebug] Not a hand and doesn't start with 'Started a new session at'. Checking other session types.")
             let (completedOpt, _) = parseCompletedSessionInfo(from: post.content)
             if let completed = completedOpt {
-                // Use stakes from completed session info if available, else fallback to gameName
-                let primaryDisplay: String = {
-                    if !completed.stakes.isEmpty && !completed.gameName.isEmpty {
-                        return "\(completed.stakes) \(completed.gameName)"
-                    } else if !completed.stakes.isEmpty {
-                        return completed.stakes
-                    } else {
-                        return completed.gameName
+                print("[ContextTagDebug] Matched COMPLETED_SESSION_INFO. Game='\(completed.gameName)', Stakes='\(completed.stakes)'")
+                if !completed.gameName.isEmpty {
+                    tempTitle = "Playing \(completed.gameName)"
+                    if !completed.stakes.isEmpty {
+                        tempTitle! += " (\(completed.stakes))"
                     }
-                }()
-                var title = "Playing \(primaryDisplay)"
-                if let loc = post.location, !loc.isEmpty {
-                    title += " at \(loc)"
+                } else if !completed.stakes.isEmpty {
+                    tempTitle = "Playing \(completed.stakes)"
                 }
-                titleToShow = title
-            // 2. Check for explicit SESSION_INFO or other session parsing
-            } else { // No more "if let" for the tuple itself
-                let sessionInfo = extractSessionInfo(from: post.content) // Assign directly
-                if let stakes = sessionInfo.1, !stakes.isEmpty { // Check the optional 'stakes'
-                    var title = "Playing \(stakes)"
-                    if let loc = post.location, !loc.isEmpty {
-                        title += " at \(loc)"
+            } else {
+                print("[ContextTagDebug] Not COMPLETED_SESSION_INFO. Checking for SESSION_INFO string.")
+                let sessionInfoTuple = extractSessionInfo(from: post.content)
+                let gameNameFromInfo = sessionInfoTuple.0
+                let stakesFromInfo = sessionInfoTuple.1
+                print("[ContextTagDebug] extractSessionInfo result: Game='\(gameNameFromInfo ?? "nil")', Stakes='\(stakesFromInfo ?? "nil")'")
+
+                if let game = gameNameFromInfo, !game.isEmpty {
+                    tempTitle = "Playing \(game)"
+                    if let stakes = stakesFromInfo, !stakes.isEmpty {
+                        tempTitle! += " (\(stakes))"
                     }
-                    titleToShow = title
+                } else if let stakes = stakesFromInfo, !stakes.isEmpty {
+                    tempTitle = "Playing \(stakes)"
                 }
-                // 3. Live session posts (chip updates) identified by non-nil sessionId
-                else if post.sessionId != nil { // This 'else if' is for the case where 'stakes' was nil or empty
-                    // Attempt to parse stakes via parseSessionContent for live chip updates
+
+                if tempTitle == nil && post.sessionId != nil {
+                    print("[ContextTagDebug] No title from SESSION_INFO, but post.sessionId exists. Trying parseSessionContent.")
                     if let parsed = parseSessionContent(from: post.content) {
-                        let primaryDisp = parsed.stakes.isEmpty ? parsed.gameName : "\(parsed.stakes) \(parsed.gameName)"
-                        var title = "Playing \(primaryDisp)"
-                        if let loc = post.location, !loc.isEmpty {
-                            title += " at \(loc)"
+                        print("[ContextTagDebug] parseSessionContent result: Game='\(parsed.gameName)', Stakes='\(parsed.stakes)'")
+                        if !parsed.gameName.isEmpty {
+                            tempTitle = "Playing \(parsed.gameName)"
+                            if !parsed.stakes.isEmpty {
+                                tempTitle! += " (\(parsed.stakes))"
+                            }
+                        } else if !parsed.stakes.isEmpty {
+                            tempTitle = "Playing \(parsed.stakes)"
                         }
-                        titleToShow = title
-                    } else {
-                        // Fallback generic session tag
-                        var title = "Playing Session"
-                        if let loc = post.location, !loc.isEmpty {
-                            title += " at \(loc)"
+                    } else if post.content.lowercased().starts(with: "playing ") {
+                        print("[ContextTagDebug] parseSessionContent failed. Content starts with 'playing '. Using first line.")
+                        if let firstLine = post.content.components(separatedBy: "\n").first {
+                             let trimmedTitle = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                             if !trimmedTitle.isEmpty {
+                                tempTitle = trimmedTitle
+                             }
                         }
-                        titleToShow = title
                     }
                 }
             }
         }
 
-        if let title = titleToShow {
-            return (title, iconName)
+        // Append location if a title was formed and location exists
+        if var title = tempTitle, let loc = post.location, !loc.isEmpty {
+            // Avoid appending "at location" if the title *already* contains "at location" from "Playing ... at location"
+            if !(title.lowercased().starts(with: "playing ") && title.lowercased().contains(" at \(loc.lowercased())")) {
+                 if !title.lowercased().contains(" at ") { // general check to avoid double "at"
+                    title += " at \(loc)"
+                 }
+            }
+            tempTitle = title
         }
+        
+        if let finalTitle = tempTitle {
+            print("[ContextTagDebug] --- Final Title for Post ID \(post.id ?? "nil"): \"\(finalTitle)\" ---")
+            return (finalTitle, iconName)
+        }
+        
+        print("[ContextTagDebug] --- No tag generated for Post ID \(post.id ?? "nil") ---")
         return nil
     }
 
@@ -763,75 +804,115 @@ struct PostCardView: View {
     // Computed property for context tag information
     private var contextTagInfo: (title: String, iconName: String)? {
         let iconName = "rectangle.stack.fill"
-        var titleToShow: String?
+        var tempTitle: String? // Use a temporary variable to build the core title
+
+        // Initial debug prints
+        print("[ContextTagDebug] --- Evaluating Post ID: \(post.id ?? "nil") (PostCardView) ---")
+        print("[ContextTagDebug] Raw Content (first 120 chars): \"\(String(post.content.prefix(120)))\" (PostCardView)")
+        print("[ContextTagDebug] PostType: \(post.postType), SessionID: \(post.sessionId ?? "nil"), Location: \(post.location ?? "nil") (PostCardView)")
 
         if post.postType == .hand, let hand = post.handHistory {
+            print("[ContextTagDebug] Post is .hand type. (PostCardView)")
             let smallBlind = hand.raw.gameInfo.smallBlind
             let bigBlind = hand.raw.gameInfo.bigBlind
             if bigBlind > 0 || smallBlind > 0 {
                 let stakesString = String(format: "$%g/$%g", smallBlind, bigBlind)
-                var title = "Playing \(stakesString)"
-                if let location = post.location, !location.isEmpty {
-                    title += " at \(location)"
+                tempTitle = "Playing \(stakesString)"
+            }
+        } else if post.content.starts(with: "Started a new session at ") {
+            print("[ContextTagDebug] Content starts with 'Started a new session at'. (PostCardView)")
+            let relevantContent = String(post.content.dropFirst("Started a new session at ".count))
+            if let lastParenOpen = relevantContent.lastIndex(of: "("),
+               let lastParenClose = relevantContent.lastIndex(of: ")"),
+               lastParenOpen < lastParenClose,
+               relevantContent.index(after: lastParenClose) == relevantContent.endIndex {
+                
+                let gamePart = String(relevantContent[..<lastParenOpen]).trimmingCharacters(in: .whitespaces)
+                let stakesPart = String(relevantContent[relevantContent.index(after: lastParenOpen)..<lastParenClose]).trimmingCharacters(in: .whitespaces)
+                print("[ContextTagDebug] Parsed from 'Started at...': Game='\(gamePart)', Stakes='\(stakesPart)' (PostCardView)")
+                if !gamePart.isEmpty {
+                    tempTitle = "Playing \(gamePart)"
+                    if !stakesPart.isEmpty {
+                        tempTitle! += " (\(stakesPart))"
+                    }
                 }
-                titleToShow = title
+            } else if !relevantContent.isEmpty {
+                let gamePart = relevantContent.trimmingCharacters(in: .whitespaces)
+                 print("[ContextTagDebug] Parsed from 'Started at...' (no stakes in parens): Game='\(gamePart)' (PostCardView)")
+                if !gamePart.isEmpty {
+                    tempTitle = "Playing \(gamePart)"
+                }
             }
         } else {
-            // Attempt to derive session information for non-hand posts
-
-            // 1. Check for completed session format first
-            let (completedOpt2, _) = parseCompletedSessionInfo(from: post.content)
-            if let completed = completedOpt2 {
-                // Use stakes from completed session info if available, else fallback to gameName
-                let primaryDisplay: String = {
-                    if !completed.stakes.isEmpty && !completed.gameName.isEmpty {
-                        return "\(completed.stakes) \(completed.gameName)"
-                    } else if !completed.stakes.isEmpty {
-                        return completed.stakes
-                    } else {
-                        return completed.gameName
+            print("[ContextTagDebug] Not a hand and doesn't start with 'Started a new session at'. Checking other session types. (PostCardView)")
+            let (completedOpt, _) = parseCompletedSessionInfo(from: post.content)
+            if let completed = completedOpt {
+                print("[ContextTagDebug] Matched COMPLETED_SESSION_INFO. Game='\(completed.gameName)', Stakes='\(completed.stakes)' (PostCardView)")
+                if !completed.gameName.isEmpty {
+                    tempTitle = "Playing \(completed.gameName)"
+                    if !completed.stakes.isEmpty {
+                        tempTitle! += " (\(completed.stakes))"
                     }
-                }()
-                var title = "Playing \(primaryDisplay)"
-                if let loc = post.location, !loc.isEmpty {
-                    title += " at \(loc)"
+                } else if !completed.stakes.isEmpty {
+                    tempTitle = "Playing \(completed.stakes)"
                 }
-                titleToShow = title
-            // 2. Check for explicit SESSION_INFO or other session parsing
             } else {
-                let sessionInfo = extractSessionInfo(from: post.content) // Call the function and assign the tuple
-                if let stakes = sessionInfo.1, !stakes.isEmpty { // Then check the optional content
-                    var title = "Playing \(stakes)"
-                    if let loc = post.location, !loc.isEmpty {
-                        title += " at \(loc)"
+                print("[ContextTagDebug] Not COMPLETED_SESSION_INFO. Checking for SESSION_INFO string. (PostCardView)")
+                let sessionInfoTuple = extractSessionInfo(from: post.content)
+                let gameNameFromInfo = sessionInfoTuple.0
+                let stakesFromInfo = sessionInfoTuple.1
+                print("[ContextTagDebug] extractSessionInfo result: Game='\(gameNameFromInfo ?? "nil")', Stakes='\(stakesFromInfo ?? "nil")' (PostCardView)")
+
+                if let game = gameNameFromInfo, !game.isEmpty {
+                    tempTitle = "Playing \(game)"
+                    if let stakes = stakesFromInfo, !stakes.isEmpty {
+                        tempTitle! += " (\(stakes))"
                     }
-                    titleToShow = title
+                } else if let stakes = stakesFromInfo, !stakes.isEmpty {
+                    tempTitle = "Playing \(stakes)"
                 }
-                // 3. Live session posts (chip updates) identified by non-nil sessionId
-                else if post.sessionId != nil {
-                    // Attempt to parse stakes via parseSessionContent for live chip updates
+
+                if tempTitle == nil && post.sessionId != nil {
+                    print("[ContextTagDebug] No title from SESSION_INFO, but post.sessionId exists. Trying parseSessionContent. (PostCardView)")
                     if let parsed = parseSessionContent(from: post.content) {
-                        let primaryDisp = parsed.stakes.isEmpty ? parsed.gameName : "\(parsed.stakes) \(parsed.gameName)"
-                        var title = "Playing \(primaryDisp)"
-                        if let loc = post.location, !loc.isEmpty {
-                            title += " at \(loc)"
+                        print("[ContextTagDebug] parseSessionContent result: Game='\(parsed.gameName)', Stakes='\(parsed.stakes)' (PostCardView)")
+                        if !parsed.gameName.isEmpty {
+                            tempTitle = "Playing \(parsed.gameName)"
+                            if !parsed.stakes.isEmpty {
+                                tempTitle! += " (\(parsed.stakes))"
+                            }
+                        } else if !parsed.stakes.isEmpty {
+                            tempTitle = "Playing \(parsed.stakes)"
                         }
-                        titleToShow = title
-                    } else {
-                        // Fallback generic session tag
-                        var title = "Playing Session"
-                        if let loc = post.location, !loc.isEmpty {
-                            title += " at \(loc)"
+                    } else if post.content.lowercased().starts(with: "playing ") {
+                        print("[ContextTagDebug] parseSessionContent failed. Content starts with 'playing '. Using first line. (PostCardView)")
+                        if let firstLine = post.content.components(separatedBy: "\n").first {
+                            let trimmedTitle = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !trimmedTitle.isEmpty {
+                               tempTitle = trimmedTitle
+                            }
                         }
-                        titleToShow = title
                     }
                 }
             }
         }
 
-        if let title = titleToShow {
-            return (title, iconName)
+        // Append location if a title was formed and location exists
+        if var title = tempTitle, let loc = post.location, !loc.isEmpty {
+             if !(title.lowercased().starts(with: "playing ") && title.lowercased().contains(" at \(loc.lowercased())")) {
+                 if !title.lowercased().contains(" at ") {
+                    title += " at \(loc)"
+                 }
+            }
+            tempTitle = title
         }
+        
+        if let finalTitle = tempTitle {
+            print("[ContextTagDebug] --- Final Title for Post ID \(post.id ?? "nil"): \"\(finalTitle)\" (PostCardView) ---")
+            return (finalTitle, iconName)
+        }
+        
+        print("[ContextTagDebug] --- No tag generated for Post ID \(post.id ?? "nil") (PostCardView) ---")
         return nil
     }
 

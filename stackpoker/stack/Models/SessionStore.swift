@@ -21,6 +21,9 @@ struct Session: Identifiable, Equatable {
     let createdAt: Date
     let notes: [String]?
     let liveSessionUUID: String?
+    let location: String?
+    let tournamentType: String?
+    let series: String?
     
     init(id: String, data: [String: Any]) {
         self.id = id
@@ -66,6 +69,11 @@ struct Session: Identifiable, Equatable {
         
         self.notes = data["notes"] as? [String]
         self.liveSessionUUID = data["liveSessionUUID"] as? String
+        
+        // Populate new tournament-specific fields
+        self.location = data["location"] as? String
+        self.tournamentType = data["tournamentType"] as? String
+        self.series = data["series"] as? String
     }
     
     static func == (lhs: Session, rhs: Session) -> Bool {
@@ -83,7 +91,10 @@ struct Session: Identifiable, Equatable {
                lhs.profit == rhs.profit &&
                lhs.createdAt == rhs.createdAt &&
                lhs.notes == rhs.notes &&
-               lhs.liveSessionUUID == rhs.liveSessionUUID
+               lhs.liveSessionUUID == rhs.liveSessionUUID &&
+               lhs.location == rhs.location &&
+               lhs.tournamentType == rhs.tournamentType &&
+               lhs.series == rhs.series
     }
 }
 
@@ -247,17 +258,21 @@ class SessionStore: ObservableObject {
     
     // MARK: - Live Session Management
     
-    func startLiveSession(gameName: String, stakes: String, buyIn: Double) {
+    func startLiveSession(gameName: String, stakes: String, buyIn: Double, isTournament: Bool = false, tournamentDetails: (name: String, type: String, baseBuyIn: Double)? = nil) {
         stopLiveSessionTimer() // Ensure any existing timer is stopped
         liveSession = LiveSessionData(
             isActive: true,
             startTime: Date(),
             elapsedTime: 0,
-            gameName: gameName,
-            stakes: stakes,
-            buyIn: buyIn,
+            gameName: isTournament ? (tournamentDetails?.name ?? gameName) : gameName,
+            stakes: isTournament ? (tournamentDetails?.type ?? stakes) : stakes,
+            buyIn: isTournament ? (tournamentDetails?.baseBuyIn ?? buyIn) : buyIn,
             lastPausedAt: nil,
-            lastActiveAt: Date()
+            lastActiveAt: Date(),
+            isTournament: isTournament,
+            tournamentName: tournamentDetails?.name,
+            tournamentType: tournamentDetails?.type,
+            baseTournamentBuyIn: tournamentDetails?.baseBuyIn
         )
         
         // Initialize enhanced session data
@@ -309,19 +324,21 @@ class SessionStore: ObservableObject {
 
         let sessionData: [String: Any] = [
             "userId": userId,
-            "gameType": "CASH GAME", // Assuming cash game for now, adjust if needed
+            "gameType": liveSession.isTournament ? SessionLogType.tournament.rawValue : SessionLogType.cashGame.rawValue,
             "gameName": liveSession.gameName,
             "stakes": liveSession.stakes,
             "startDate": Timestamp(date: liveSession.startTime),
             "startTime": Timestamp(date: liveSession.startTime),
             "endTime": Timestamp(date: Date()), // Current time for end time
             "hoursPlayed": liveSession.elapsedTime / 3600,
-            "buyIn": liveSession.buyIn,
+            "buyIn": liveSession.buyIn, // This now includes all rebuys for tournaments too
             "cashout": cashout,
-            "profit": cashout - liveSession.buyIn,
+            "profit": cashout - liveSession.buyIn, // liveSession.buyIn is total for both types
             "createdAt": FieldValue.serverTimestamp(), // Firestore server timestamp for creation
             "notes": enhancedLiveSession.notes, // Include notes
-            "liveSessionUUID": currentLiveSessionId // Link to the live session instance
+            "liveSessionUUID": currentLiveSessionId, // Link to the live session instance
+            "location": liveSession.isTournament ? (liveSession.tournamentName) : nil, // Assuming tournament name can be used as a proxy for location if not separately stored for live
+            "tournamentType": liveSession.isTournament ? liveSession.tournamentType : nil,
         ]
         
         do {
@@ -420,6 +437,12 @@ class SessionStore: ObservableObject {
                     liveSession = updatedSession
                 } else {
                     liveSession = loadedSession
+                }
+                
+                // Restore tournament specific state if it was a tournament
+                if liveSession.isTournament {
+                    // The EnhancedLiveSessionView will pick up these from liveSession
+                    // in its onAppear and set its local @State vars accordingly.
                 }
                 
                 if loadedSession.isActive {

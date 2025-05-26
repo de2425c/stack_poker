@@ -49,6 +49,7 @@ struct ProfileView: View {
     @State private var showAnalyticsDetailView = false
     @State private var showHandsDetailView = false
     @State private var showSessionsDetailView = false
+    @State private var showStakingDashboardView = false // New state for Staking Dashboard
     
     // Analytics specific state (remains for analyticsDetailContent)
     @State private var selectedTimeRange = 1 // Default to 1W (index 1) for Analytics
@@ -230,6 +231,19 @@ struct ProfileView: View {
                                     .foregroundColor(.white.opacity(0.85))
                             }
                         }
+
+                        // Staking Dashboard Card (New)
+                        navigationCard(
+                            title: "Staking Dashboard",
+                            iconName: "person.2.square.stack.fill",
+                            baseColor: Color.cyan, // Or any color you prefer
+                            action: { showStakingDashboardView = true }
+                        ) {
+                            Text("View and manage your stakes.")
+                                .font(.plusJakarta(.subheadline))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 30) // For tab bar space
@@ -262,12 +276,6 @@ struct ProfileView: View {
                     userId: userId,
                     selectedPostForNavigation: $selectedPostForNavigation
                 )
-                .toolbar { ToolbarItem(placement: .navigationBarLeading) { 
-                    Button(action: { showActivityDetailView = false }) {
-                        Image(systemName: "chevron.backward")
-                            .foregroundColor(.white) // Ensure visibility on dark backgrounds
-                    }
-                } }
             }
             .environmentObject(userService)
             .environmentObject(postService)
@@ -276,12 +284,6 @@ struct ProfileView: View {
             NavigationView {
                 analyticsDetailContent()
                     .navigationBarTitle("Analytics", displayMode: .inline)
-                    .toolbar { ToolbarItem(placement: .navigationBarLeading) { 
-                        Button(action: { showAnalyticsDetailView = false }) {
-                            Image(systemName: "chevron.backward")
-                                .foregroundColor(.white) // Ensure visibility
-                        }
-                    } }
             }
             .environmentObject(sessionStore)
             .environmentObject(userService) // Pass userService if analyticsDetailContent might need it
@@ -294,14 +296,6 @@ struct ProfileView: View {
                 }
                 .navigationTitle("Hands")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(action: { showHandsDetailView = false }) {
-                            Image(systemName: "chevron.backward")
-                                .foregroundColor(.white) // Ensure visibility
-                        }
-                    }
-                }
             }
             .environmentObject(handStore)
             .environmentObject(userService) // HandsTab might need user context
@@ -316,15 +310,41 @@ struct ProfileView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
-                        Button(action: { showSessionsDetailView = false }) {
-                            Image(systemName: "chevron.backward")
-                                .foregroundColor(.white) // Ensure visibility
+                        Button("Done") {
+                            showSessionsDetailView = false
                         }
+                        .foregroundColor(.white)
                     }
                 }
             }
             .environmentObject(sessionStore)
             .environmentObject(userService) // SessionsTab might need user context
+        }
+        .fullScreenCover(isPresented: $showStakingDashboardView) {
+            NavigationView {
+                StakingDashboardView()
+                    .navigationTitle("Staking Dashboard")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button(action: { showStakingDashboardView = false }) {
+                                Image(systemName: "chevron.backward")
+                                    .foregroundColor(.white)
+                            }
+                        }
+                    }
+            }
+            // For iOS 16+ make the toolbar background effectively transparent
+            .toolbarBackground(
+                Color.clear, // Use a clear color to make it transparent
+                for: .navigationBar
+            )
+            .toolbarBackground(.visible, for: .navigationBar) 
+            // This background on the NavigationView should then show through the transparent toolbar area
+            .background(AppBackgroundView().ignoresSafeArea(.all))
+            .accentColor(.white) 
+            .environmentObject(userService) 
+            .environmentObject(StakeService()) 
         }
         .navigationBarHidden(true)
         .environmentObject(userService)
@@ -392,7 +412,7 @@ struct ProfileView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white.opacity(0.6))
             }
-            .padding(EdgeInsets(top: 20, leading: 20, bottom: 20, trailing: 20))
+            .padding(EdgeInsets(top: 17, leading: 20, bottom: 15, trailing: 20))
             // Ensure background doesn't block touches, and contentShape defines the hit area clearly.
             .background(
                 RoundedRectangle(cornerRadius: 20)

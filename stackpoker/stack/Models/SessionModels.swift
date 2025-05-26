@@ -109,6 +109,12 @@ struct LiveSessionData: Codable {
 
     /// Explicitly set to `true` once the session is ended and results saved
     var isEnded: Bool = false
+
+    // MARK: - Tournament Specific Data (for live session persistence)
+    var isTournament: Bool = false
+    var tournamentName: String? = nil // Name of the tournament
+    var tournamentType: String? = nil // e.g., NLH, PLO (used as stakes for tournaments)
+    var baseTournamentBuyIn: Double? = nil // Initial buy-in for the tournament (excluding rebuys)
 }
 
 // Extended LiveSessionData to include updates and hand histories
@@ -175,4 +181,37 @@ extension LiveSessionData {
             }
         }
     }
+}
+
+// MARK: - Session Log Type (Cash or Tournament)
+enum SessionLogType: String, CaseIterable, Identifiable {
+    case cashGame = "CASH GAME"
+    case tournament = "TOURNAMENT"
+    var id: String { self.rawValue }
+}
+
+// MARK: - Tournament Log Model
+struct TournamentLog: Identifiable, Codable {
+    @DocumentID var id: String? // Firestore document ID
+    let userId: String
+    let tournamentName: String
+    let tournamentType: String   // e.g., "MTT", "SNG", "PKO", "Custom"
+    let location: String?        // New field for tournament location
+    let buyIn: Double            // Cost per single entry - NOW TOTAL BUY-IN
+    var totalInvestment: Double { // Calculated property - NOW SIMPLY BUY-IN
+        return buyIn
+    }
+    let cashout: Double
+    var profit: Double { // Calculated property
+        return cashout - totalInvestment
+    }
+    let startDate: Date          // Date of the tournament
+    let startTime: Date          // Actual start time on that date
+    let endTime: Date            // Actual end time, could be next day relative to startDate + startTime
+    let hoursPlayed: Double
+    let notes: String?
+    let createdAt: Timestamp     // Firestore server timestamp for record creation
+
+    // Staking related fields are not directly part of this model.
+    // A separate 'Stake' object will reference this TournamentLog's ID if staking is involved.
 } 

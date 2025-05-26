@@ -144,6 +144,9 @@ struct AddCashGameView: View {
                         .frame(minHeight: geometry.size.height, alignment: .top) // Ensure content starts from top
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) // Position ScrollView at top
+                    .onTapGesture {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
                 }
                 .frame(width: geometry.size.width, height: .infinity, alignment: .top) // Position ZStack at top
             }

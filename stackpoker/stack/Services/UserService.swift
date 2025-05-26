@@ -556,6 +556,54 @@ class UserService: ObservableObject {
     // they should ideally be updated by Cloud Functions. 
     // The `fetchUser` method will continue to use `getFollowerCounts` to populate these if they exist.
 
+    // MARK: - User Search
+    func searchUsersByUsernamePrefix(usernamePrefix: String, limit: Int = 10) async throws -> [UserProfile] {
+        guard !usernamePrefix.isEmpty else { return [] }
+        
+        let lowercasedPrefix = usernamePrefix.lowercased()
+        
+        // Firestore query for "starts with" (case-insensitive requires storing a lowercase version of username or handling differently)
+        // For a simpler MVP, this will be case-sensitive matching the stored username.
+        // To make it truly case-insensitive with this query, you'd need to store a lowercase version of the username.
+        // For now, we proceed with case-sensitive prefix search on the `username` field.
+        let endPrefix = lowercasedPrefix + "\u{f8ff}" // \u{f8ff} is a very high code point character
+
+        let query = db.collection("users")
+            .whereField("username", isGreaterThanOrEqualTo: lowercasedPrefix)
+            .whereField("username", isLessThan: endPrefix)
+            .limit(to: limit)
+
+        do {
+            let snapshot = try await query.getDocuments()
+            var profiles: [UserProfile] = []
+            for document in snapshot.documents {
+                let data = document.data()
+                let (followersCount, followingCount) = (try? await getFollowerCounts(for: document.documentID)) ?? (0,0)
+                let userProfile = UserProfile(
+                    id: document.documentID,
+                    username: data["username"] as? String ?? "",
+                    displayName: data["displayName"] as? String,
+                    createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                    favoriteGames: data["favoriteGames"] as? [String],
+                    bio: data["bio"] as? String,
+                    avatarURL: data["avatarURL"] as? String,
+                    location: data["location"] as? String,
+                    favoriteGame: data["favoriteGame"] as? String,
+                    followersCount: followersCount,
+                    followingCount: followingCount
+                )
+                profiles.append(userProfile)
+                // Optionally cache these results in loadedUsers as well
+                DispatchQueue.main.async {
+                    self.loadedUsers[document.documentID] = userProfile
+                }
+            }
+            return profiles
+        } catch {
+            print("Error searching users by username prefix \"\(usernamePrefix)\": \(error.localizedDescription)")
+            throw error
+        }
+    }
 }
 
 // Helper extension for chunking arrays (used in fetchUserProfiles)

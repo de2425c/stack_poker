@@ -62,6 +62,31 @@ struct SessionDetailView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+
+    // Computed properties for card display
+    private var cardGameName: String {
+        if session.gameType == SessionLogType.tournament.rawValue {
+            return session.series ?? session.gameName // Series or Tournament Name
+        } else {
+            return session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)"
+        }
+    }
+    
+    private var cardStakes: String {
+        if session.gameType == SessionLogType.tournament.rawValue {
+            return session.location ?? "Location TBD" // Location as the secondary line
+        } else {
+            return session.stakes
+        }
+    }
+    
+    private var cardLocation: String {
+        if session.gameType == SessionLogType.tournament.rawValue {
+            return session.tournamentType ?? "Tournament" // Tournament Type for the original 'location' prop
+        } else {
+            return session.location ?? session.gameName // Fallback for cash games
+        }
+    }
     
     init(session: Session) {
         self.session = session
@@ -97,9 +122,9 @@ struct SessionDetailView: View {
                             .padding(.bottom, 5)
 
                         FinishedSessionCardView(
-                            gameName: session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)",
-                            stakes: session.stakes,
-                            location: session.gameName, // Assuming gameName can serve as a location string here
+                            gameName: cardGameName,
+                            stakes: cardStakes,
+                            location: cardLocation, 
                             date: session.startDate,
                             duration: formatDuration(hours: session.hoursPlayed),
                             buyIn: session.buyIn,

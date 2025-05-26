@@ -11,6 +11,7 @@ struct EnhancedLiveSessionView: View {
     @ObservedObject var sessionStore: SessionStore
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var handStore = HandStore(userId: Auth.auth().currentUser?.uid ?? "")
+    @StateObject private var stakeService = StakeService() // Add StakeService
     @State private var handEntryMinimized = false
     
     // Callback for when a session ends, passing the new session ID
@@ -32,6 +33,12 @@ struct EnhancedLiveSessionView: View {
     @State private var showingCashoutPrompt = false
     @State private var isLoadingSave = false
     @State private var cashoutAmount = ""
+    @State private var gameToDelete: CashGame? = nil // For delete confirmation
+    @State private var showingDeleteGameAlert = false // For delete confirmation
+    
+    // Staking State Variables - COPIED FROM SessionFormView
+    @State private var stakerConfigs: [StakerConfig] = [] // Array for multiple stakers
+    @State private var showStakingSection = false // To toggle visibility of staking fields
     
     // Data model values - initialized onAppear
     @State private var chipUpdates: [ChipStackUpdate] = []
@@ -122,13 +129,31 @@ struct EnhancedLiveSessionView: View {
         case ending   // Session is ending, entering cashout
     }
     
+    // MARK: - Tournament Support
+    @State private var selectedLogType: SessionLogType = .cashGame // Choose between CASH GAME or TOURNAMENT
+    // Tournament setup fields
+    @State private var tournamentName: String = ""
+    @State private var selectedTournamentType: String = "NLH"
+    @State private var tournamentLocation: String = ""
+    @State private var showingEventSelector = false
+    @State private var baseBuyInTournament: String = ""
+    // Runtime helpers for tournament sessions
+    @State private var isTournamentSession: Bool = false
+    @State private var baseBuyInForTournament: Double = 0
+    @State private var tournamentRebuyCount: Int = 0
+    
     // MARK: - Computed Properties
     
     private var sessionTitle: String {
         if sessionMode == .setup {
             return "New Session"
         } else {
-            return "\(sessionStore.liveSession.stakes) @ \(sessionStore.liveSession.gameName)"
+            if isTournamentSession {
+                let buyInText = baseBuyInForTournament > 0 ? " ($\(Int(baseBuyInForTournament)) Buy-in)" : ""
+                return "\(sessionStore.liveSession.tournamentName ?? "Tournament")\(buyInText)"
+            } else {
+                return "\(sessionStore.liveSession.stakes) @ \(sessionStore.liveSession.gameName)"
+            }
         }
     }
     
@@ -294,6 +319,7 @@ struct EnhancedLiveSessionView: View {
                             }
                         }
                 }
+                .environmentObject(self.sessionStore) // Ensure SessionStore is injected
             }
         }
     }
@@ -555,13 +581,23 @@ struct EnhancedLiveSessionView: View {
     
     private func handleOnAppear() {
         // Check if there's an active session first
-        if sessionStore.liveSession.buyIn > 0 {
+        if sessionStore.liveSession.buyIn > 0 { // buyIn > 0 means a session (cash or tourney) exists
             // Determine session mode more directly
             sessionMode = sessionStore.liveSession.isActive ? .active : .paused
             
-            // If it's a new session or the initial buy-in hasn't been recorded as a chip update yet
-            if sessionStore.enhancedLiveSession.chipUpdates.isEmpty && sessionStore.liveSession.buyIn > 0 {
-                 sessionStore.updateChipStack(amount: sessionStore.liveSession.buyIn, note: "Initial buy-in")
+            // NEW: Restore tournament state if it is a tournament session
+            isTournamentSession = sessionStore.liveSession.isTournament
+            if isTournamentSession {
+                tournamentName = sessionStore.liveSession.tournamentName ?? "Tournament"
+                selectedTournamentType = sessionStore.liveSession.tournamentType ?? "NLH"
+                baseBuyInForTournament = sessionStore.liveSession.baseTournamentBuyIn ?? 0
+                // Ensure the buyIn field in the view (if used for display in tournament active view) reflects total
+                // For tournaments, liveSession.buyIn in SessionStore tracks the *total* buy-in including rebuys.
+            } else {
+                // If it's a new cash session or the initial buy-in hasn't been recorded as a chip update yet
+                if sessionStore.enhancedLiveSession.chipUpdates.isEmpty && sessionStore.liveSession.buyIn > 0 {
+                     sessionStore.updateChipStack(amount: sessionStore.liveSession.buyIn, note: "Initial buy-in")
+                }
             }
             // Initialize data from session store's enhanced session
             updateLocalDataFromStore() // This will now include Session Started and the initial chip update if just added
@@ -603,125 +639,359 @@ struct EnhancedLiveSessionView: View {
             // Use AppBackgroundView as background
             AppBackgroundView()
                 .ignoresSafeArea()
+                .onTapGesture {
+                    // Dismiss keyboard when tapping background
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
                 
             ScrollView {
-                VStack(spacing: 20) {
-                    // Add top padding for transparent navigation bar
+                VStack(spacing: 20) { // This is the main content VStack for the ScrollView
+                    // Add top padding for transparent navigation bar - REDUCED
                     Spacer()
-                        .frame(height: 64)
+                        .frame(height: 10) // Reduced from 64
                     
-                    // Game Selection Section
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Select Game")
-                            .font(.plusJakarta(.headline, weight: .medium))
-                            .foregroundColor(.white)
-                            .padding(.leading, 6)
-                            .padding(.bottom, 2)
-                        
-                        if cashGameService.cashGames.isEmpty {
-                            HStack {
-                                Text("No games added. Tap to add a new game.")
-                                    .font(.plusJakarta(.caption, weight: .medium))
-                                    .foregroundColor(.gray)
-                                
-                                Spacer()
-                                
-                                Button(action: { showingAddGame = true }) {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.white)
-                                        .padding(10)
-                                        .background(Circle().fill(Color.gray.opacity(0.3)))
-                                }
-                            }
-                            .padding(.vertical, 20)
-                        } else {
-                            // Game selection horizontal scroll
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 12) {
-                                ForEach(cashGameService.cashGames) { game in
-                                        let stakes = formatStakes(game: game)
-                                    GameCard(
-                                            stakes: stakes,
-                                            name: game.name,
-                                            isSelected: selectedGame?.id == game.id,
-                                            titleColor: .white,
-                                            subtitleColor: Color.white.opacity(0.7),
-                                            glassOpacity: 0.01,
-                                            materialOpacity: 0.2
-                                    )
-                                    .onTapGesture {
-                                        selectedGame = game
-                                    }
-                                }
-                                
-                                    // Add Game Button with glassy style
-                                    AddGameButton(
-                                        textColor: .white,
-                                        glassOpacity: 0.01,
-                                        materialOpacity: 0.2
-                                    )
-                                    .onTapGesture {
-                                        showingAddGame = true
-                                    }
-                                }
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                            }
+                    // Session type selector
+                    Picker("Session Type", selection: $selectedLogType) {
+                        ForEach(SessionLogType.allCases) { type in
+                            Text(type.rawValue.capitalized).tag(type)
                         }
                     }
+                    .pickerStyle(SegmentedPickerStyle())
                     .padding(.horizontal)
                     
-                    // Buy-in Section
-                    if selectedGame != nil {
+                    // Game Selection Section (Cash Games)
+                    if selectedLogType == .cashGame {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Buy-in Amount")
+                            Text("Select Game")
                                 .font(.plusJakarta(.headline, weight: .medium))
                                 .foregroundColor(.white)
                                 .padding(.leading, 6)
                                 .padding(.bottom, 2)
                             
-                            // Glassy Buy-in field
+                            if cashGameService.cashGames.isEmpty {
+                                HStack {
+                                    Text("No games added. Tap to add a new game.")
+                                        .font(.plusJakarta(.caption, weight: .medium))
+                                        .foregroundColor(.gray)
+                                    
+                                    Spacer()
+                                    
+                                    Button(action: { showingAddGame = true }) {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 18))
+                                            .foregroundColor(.white)
+                                            .padding(10)
+                                            .background(Circle().fill(Color.gray.opacity(0.3)))
+                                    }
+                                }
+                                .padding(.vertical, 20)
+                            } else {
+                                // Game selection horizontal scroll
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 12) {
+                                    ForEach(cashGameService.cashGames) { game in
+                                            let stakes = formatStakes(game: game)
+                                        GameCard(
+                                                stakes: stakes,
+                                                name: game.name,
+                                                isSelected: selectedGame?.id == game.id,
+                                                titleColor: .white,
+                                                subtitleColor: Color.white.opacity(0.7),
+                                                glassOpacity: 0.01,
+                                                materialOpacity: 0.2
+                                        )
+                                        .onTapGesture {
+                                            selectedGame = game
+                                        }
+                                        .contextMenu { // Added context menu for deletion
+                                            Button(role: .destructive) {
+                                                gameToDelete = game
+                                                showingDeleteGameAlert = true
+                                            } label: {
+                                                Label("Delete Game", systemImage: "trash")
+                                            }
+                                        }
+                                    }
+                                    
+                                        // Add Game Button with glassy style
+                                        AddGameButton(
+                                            textColor: .white,
+                                            glassOpacity: 0.01,
+                                            materialOpacity: 0.2
+                                        )
+                                        .onTapGesture {
+                                            showingAddGame = true
+                                        }
+                                    }
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        
+                        // Buy-in Section
+                        if selectedGame != nil {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Buy-in Amount")
+                                    .font(.plusJakarta(.headline, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 6)
+                                    .padding(.bottom, 2)
+                                
+                                // Glassy Buy-in field
+                                GlassyInputField(
+                                    icon: "dollarsign.circle",
+                                    title: "Buy in",
+                                    content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
+                                    glassOpacity: 0.01,
+                                    labelColor: .gray,
+                                    materialOpacity: 0.2
+                                )
+                            }
+                            .padding(.horizontal)
+                        }
+                    } // End of Cash Game Section
+                    
+                    // Tournament Setup Section
+                    if selectedLogType == .tournament {
+                        VStack(alignment: .leading, spacing: 12) { // This is the VStack for tournament content
+                            HStack {
+                                Text("Tournament Details")
+                                    .font(.plusJakarta(.headline, weight: .medium))
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Button(action: { showingEventSelector = true }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "calendar.badge.plus")
+                                        Text("Select Event")
+                                    }
+                                    .font(.plusJakarta(.caption, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.9))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.white.opacity(0.1))
+                                    .cornerRadius(8)
+                                }
+                            }
+                            .padding(.leading, 6)
+
+                            GlassyInputField(
+                                icon: "trophy",
+                                title: "Tournament Name",
+                                content: AnyGlassyContent(TextFieldContent(text: $tournamentName, isReadOnly: true, textColor: .white)),
+                                glassOpacity: 0.01,
+                                labelColor: .gray,
+                                materialOpacity: 0.2
+                            )
+
+                            HStack(spacing: 12) {
+                                GlassyInputField(
+                                    icon: "tag",
+                                    title: "Type",
+                                    content: AnyGlassyContent(TextFieldContent(text: $selectedTournamentType, isReadOnly: true, textColor: .white)),
+                                    glassOpacity: 0.01,
+                                    labelColor: .gray,
+                                    materialOpacity: 0.2
+                                )
+                                GlassyInputField(
+                                    icon: "location.fill",
+                                    title: "Location",
+                                    content: AnyGlassyContent(TextFieldContent(text: $tournamentLocation, isReadOnly: true, textColor: .white)),
+                                    glassOpacity: 0.01,
+                                    labelColor: .gray,
+                                    materialOpacity: 0.2
+                                )
+                            }
+
                             GlassyInputField(
                                 icon: "dollarsign.circle",
                                 title: "Buy in",
-                                content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
+                                content: AnyGlassyContent(TextFieldContent(text: $baseBuyInTournament, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
                                 glassOpacity: 0.01,
                                 labelColor: .gray,
                                 materialOpacity: 0.2
                             )
                         }
-                        .padding(.horizontal)
-                    }
-                    
-                    // Start Button
-                    if selectedGame != nil {
-                        Button(action: startSession) {
-                            Text("Start Session")
-                                .font(.plusJakarta(.body, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 54)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 27)
-                                        .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
-                                        .background(.ultraThinMaterial)
-                                        .clipShape(RoundedRectangle(cornerRadius: 27))
-                                )
+                        .padding(.horizontal) // Padding for the tournament VStack
+                    } // End of Tournament Setup Section
+
+                    // Staking Section Toggle - COPIED FROM SessionFormView
+                    VStack(alignment: .leading, spacing: 10) {
+                        Button(action: {
+                            withAnimation {
+                                showStakingSection.toggle()
+                                // If opening and no stakers exist, add one
+                                if showStakingSection && stakerConfigs.isEmpty {
+                                    stakerConfigs.append(StakerConfig())
+                                }
+                            }
+                        }) {
+                            HStack {
+                                Text(showStakingSection ? "Hide Staking Details" : "Add Staking Details")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Image(systemName: showStakingSection ? "chevron.up" : "chevron.down")
+                                    .foregroundColor(.white)
+                            }
                         }
-                        .disabled(buyIn.isEmpty)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
+                        .padding(.leading, 6)
+                        .padding(.bottom, showStakingSection ? 10 : 0) // Add bottom padding only when section is open
+                    }
+                    .padding(.horizontal)
+
+                    // Staking Details Section (Conditional) - COPIED FROM SessionFormView
+                    if showStakingSection {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Staking Info")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                Spacer()
+                            }
+                            .padding(.leading, 6)
+                            .padding(.bottom, 2)
+
+                            ForEach($stakerConfigs) { $configBinding in // Iterate with bindings
+                                StakerInputView(
+                                    config: $configBinding,
+                                    userService: userService,
+                                    primaryTextColor: .white,
+                                    secondaryTextColor: Color.white.opacity(0.7),
+                                    glassOpacity: 0.01,
+                                    materialOpacity: 0.2,
+                                    onRemove: {
+                                        if let index = stakerConfigs.firstIndex(where: { $0.id == configBinding.id }) {
+                                            stakerConfigs.remove(at: index)
+                                            if stakerConfigs.isEmpty { // if all removed, hide section
+                                                showStakingSection = false
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                            
+                            Button(action: {
+                                stakerConfigs.append(StakerConfig())
+                            }) {
+                                HStack {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("Add Another Staker")
+                                }
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.white.opacity(0.9))
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                                .background(Color.white.opacity(0.1))
+                                .cornerRadius(10)
+                            }
+                            .padding(.top, stakerConfigs.isEmpty ? 0 : 10)
+                        }
+                        .padding(.horizontal)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                     
+                    // Start Button Section - FIXED POSITIONING
+                    VStack(spacing: 20) {
+                        if selectedLogType == .cashGame {
+                            // Start Button for Cash Game
+                            if selectedGame != nil {
+                                Button(action: startSession) {
+                                    Text("Start Session")
+                                        .font(.plusJakarta(.body, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 54)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 27)
+                                                .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
+                                                .background(.ultraThinMaterial)
+                                                .clipShape(RoundedRectangle(cornerRadius: 27))
+                                        )
+                                }
+                                .disabled(buyIn.isEmpty)
+                                .padding(.horizontal, 20)
+                                .padding(.top, 16)
+                            }
+                        } else {
+                            // Start Button for Tournament
+                            if !tournamentName.isEmpty && !baseBuyInTournament.isEmpty {
+                                Button(action: startSession) {
+                                    Text("Start Session")
+                                        .font(.plusJakarta(.body, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 54)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 27)
+                                                .fill(baseBuyInTournament.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
+                                                .background(.ultraThinMaterial)
+                                                .clipShape(RoundedRectangle(cornerRadius: 27))
+                                        )
+                                }
+                                .disabled(baseBuyInTournament.isEmpty)
+                                .padding(.horizontal, 20)
+                                .padding(.top, 16)
+                            }
+                        }
+                    }
+                    
+                    // Bottom spacing
                     Spacer()
-                }
-                .padding(.top, 16)
-                .padding(.bottom, 40)
+                        .frame(height: 40)
+
+                } // End of main content VStack for ScrollView
+                .padding(.top, 5) // Reduced top padding for the content of ScrollView
+                .padding(.bottom, 40) // Apply bottom padding to the content of ScrollView
+            } // End of ScrollView
+            .onTapGesture {
+                // Also dismiss keyboard when tapping on ScrollView content
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
-        }
+        } // End of ZStack
         .sheet(isPresented: $showingAddGame) {
             AddCashGameView(cashGameService: cashGameService)
+        }
+        .alert("Delete Cash Game?", isPresented: $showingDeleteGameAlert, presenting: gameToDelete) { gameToDelete in // Ensure correct variable name here
+            Button("Delete \(gameToDelete.name)", role: .destructive) {
+                Task {
+                    do {
+                        try await cashGameService.deleteCashGame(gameToDelete)
+                        // Optionally clear selection if the deleted game was selected
+                        if selectedGame?.id == gameToDelete.id {
+                            selectedGame = nil
+                        }
+                    } catch {
+                        print("Error deleting cash game: \(error.localizedDescription)")
+                        // Handle error (e.g., show another alert to the user)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { gameToDelete in // Ensure correct variable name here
+            Text("Are you sure you want to delete the cash game \"\(gameToDelete.name) - \(formatStakes(game: gameToDelete))\"? This action cannot be undone.")
+        }
+        .sheet(isPresented: $showingEventSelector) {
+            NavigationView {
+                ExploreView(onEventSelected: { selectedEvent in
+                    self.tournamentName = selectedEvent.name
+                    self.tournamentLocation = selectedEvent.casino.isEmpty ? (selectedEvent.city ?? "") : selectedEvent.casino
+                    self.selectedTournamentType = inferTournamentType(from: selectedEvent.name, series: selectedEvent.series)
+                    if let parsedBuyin = parseBuyinToDouble(selectedEvent.buyin_string) {
+                        self.baseBuyInTournament = String(format: "%.0f", parsedBuyin)
+                    }
+                    self.showingEventSelector = false
+                }, isSheetPresentation: true)
+                .navigationTitle("Select Event")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Cancel") { showingEventSelector = false }
+                            .foregroundColor(.white)
+                    }
+                }
+            }
         }
     }
     
@@ -917,15 +1187,29 @@ struct EnhancedLiveSessionView: View {
     }
     
     private func startSession() {
-        guard let game = selectedGame, let buyInAmount = Double(buyIn), buyInAmount > 0 else { return }
-        
-        // Start the session
-        sessionStore.startLiveSession(
-            gameName: game.name,
-            stakes: game.stakes,
-            buyIn: buyInAmount
-        )
-        
+        if selectedLogType == .cashGame {
+            guard let game = selectedGame, let buyInAmount = Double(buyIn), buyInAmount > 0 else { return }
+            sessionStore.startLiveSession(
+                gameName: game.name,
+                stakes: game.stakes,
+                buyIn: buyInAmount,
+                isTournament: false // Explicitly false for cash games
+            )
+            isTournamentSession = false
+        } else {
+            guard !tournamentName.isEmpty, let baseAmount = Double(baseBuyInTournament), baseAmount > 0 else { return }
+            sessionStore.startLiveSession(
+                gameName: tournamentName, // This becomes the tournament name
+                stakes: selectedTournamentType, // This becomes the tournament type
+                buyIn: baseAmount, // This is the base buy-in for the tournament
+                isTournament: true,
+                tournamentDetails: (name: tournamentName, type: selectedTournamentType, baseBuyIn: baseAmount)
+            )
+            isTournamentSession = true
+            baseBuyInForTournament = baseAmount
+        }
+        // Reset rebuy count
+        tournamentRebuyCount = 0
         // Update UI mode
         sessionMode = .active
     }
@@ -939,8 +1223,39 @@ struct EnhancedLiveSessionView: View {
                 timerSection
                     .padding(.horizontal)
                 
-                chipStackSection
+                if isTournamentSession {
+                    HStack(spacing: 12) { // HStack to hold Rebuy and Edit buttons
+                        Button(action: addTournamentRebuy) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "plus.circle")
+                                Text("Add Rebuy ($\(Int(baseBuyInForTournament)))")
+                            }
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity) // Let it take available width
+                            .padding()
+                            .background(RoundedRectangle(cornerRadius: 16).fill(Color.gray.opacity(0.4)))
+                        }
+                        
+                        // New Edit Total Buy-in Button for Tournaments
+                        Button(action: {
+                            editBuyInAmount = String(sessionStore.liveSession.buyIn)
+                            showingEditBuyInSheet = true
+                        }) {
+                            Image(systemName: "pencil.circle.fill")
+                                .font(.system(size: 22)) // Slightly larger for better tap target
+                                .foregroundColor(.white.opacity(0.8))
+                                .padding(12) // Adjust padding as needed
+                                .background(Color.gray.opacity(0.25))
+                                .clipShape(Circle())
+                        }
+                        .frame(width: 50) // Give it a defined width to balance with the rebuy button
+                    }
                     .padding(.horizontal)
+                } else {
+                    chipStackSection
+                        .padding(.horizontal)
+                }
                 
                 // Recent Updates Section (Chip / Notes / Hands)
                 if !recentUpdates.isEmpty {
@@ -998,8 +1313,13 @@ struct EnhancedLiveSessionView: View {
                 }
             } else if item.kind == .sessionStart {
                 // For session start updates, share basic session info
-                let sessionInfo = self.getSessionDetailsText() // This text is more for the card background
-                let postContent = "Started a new session at \(sessionStore.liveSession.gameName) (\(sessionStore.liveSession.stakes))"
+                let postContent: String
+                if self.isTournamentSession {
+                    let buyText = self.baseBuyInForTournament > 0 ? "$\(Int(self.baseBuyInForTournament)) Buy-in" : self.sessionStore.liveSession.stakes
+                    postContent = "Playing \(self.tournamentName) (\(buyText))"
+                } else {
+                    postContent = "Started a new session at \(self.sessionStore.liveSession.gameName) (\(self.sessionStore.liveSession.stakes))"
+                }
                 self.showShareToFeedDialog(content: postContent, isHand: false, isSharingSessionStart: true)
             }
         }
@@ -1257,18 +1577,15 @@ struct EnhancedLiveSessionView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 
-                // Session stats
+                // Session stats - MODIFIED
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text("Buy-in: $\(Int(sessionStore.liveSession.buyIn))")
-                        .font(.system(size: 14))
+                    Text("TOTAL BUY-IN") // Changed label
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.gray)
                     
-                    let profit = currentProfit
-                    let isProfit = profit >= 0
-                    
-                    Text(String(format: "%@$%.0f", isProfit ? "+" : "", profit))
+                    Text("$\(Int(sessionStore.liveSession.buyIn))") // Display total buy-in
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(isProfit ? .white : .white.opacity(0.7))
+                        .foregroundColor(.white) // Profit/loss color removed
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -1491,6 +1808,13 @@ struct EnhancedLiveSessionView: View {
         updateLocalDataFromStore()
     }
     
+    // MARK: - Tournament Helpers
+    private func addTournamentRebuy() {
+        guard baseBuyInForTournament > 0 else { return }
+        sessionStore.updateLiveSessionBuyIn(amount: baseBuyInForTournament)
+        tournamentRebuyCount += 1
+    }
+    
     // MARK: - Helper Functions
     
     // Toggle session active state (pause/resume)
@@ -1512,23 +1836,194 @@ struct EnhancedLiveSessionView: View {
                 self.sessionStore.updateChipStack(amount: cashout, note: "Final cashout amount")
             }
             
-            let endedSessionId = await self.sessionStore.endLiveSessionAndGetId(cashout: cashout) 
+            // MODIFIED: Handle staking like SessionFormView
+            let finalBuyIn = self.sessionStore.liveSession.buyIn
+            let finalCashout = cashout
             
+            var sessionDetails: [String: Any] = [
+                "userId": userId,
+                "gameType": self.sessionStore.liveSession.isTournament ? SessionLogType.tournament.rawValue : SessionLogType.cashGame.rawValue,
+                "gameName": self.sessionStore.liveSession.gameName,
+                "stakes": self.sessionStore.liveSession.stakes,
+                "startDate": Timestamp(date: self.sessionStore.liveSession.startTime),
+                "startTime": Timestamp(date: self.sessionStore.liveSession.startTime),
+                "endTime": Timestamp(date: Date()),
+                "hoursPlayed": self.sessionStore.liveSession.elapsedTime / 3600,
+                "buyIn": finalBuyIn,
+                "cashout": finalCashout,
+                "profit": finalCashout - finalBuyIn,
+                "createdAt": FieldValue.serverTimestamp(),
+                "notes": self.sessionStore.enhancedLiveSession.notes,
+                "liveSessionUUID": self.sessionStore.liveSession.id,
+                "location": self.sessionStore.liveSession.isTournament ? (self.sessionStore.liveSession.tournamentName) : nil,
+                "tournamentType": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentType : nil,
+            ]
+            
+            // Handle staking using the same logic as SessionFormView
+            await self.handleStakingAndSave(
+                sessionDataToSave: sessionDetails,
+                gameNameForStake: self.sessionStore.liveSession.gameName,
+                stakesForStake: self.sessionStore.liveSession.stakes,
+                startDateTimeForStake: self.sessionStore.liveSession.startTime,
+                sessionBuyInForStake: finalBuyIn,
+                sessionCashout: finalCashout,
+                isTournamentFlagForStake: self.sessionStore.liveSession.isTournament,
+                tournamentTotalInvestmentForStake: self.sessionStore.liveSession.isTournament ? finalBuyIn : nil,
+                tournamentNameForStake: self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentName : nil
+            )
+        }
+    }
+
+    // COPIED FROM SessionFormView: Unified function to handle staking and saving
+    private func handleStakingAndSave(
+        sessionDataToSave: [String: Any],
+        gameNameForStake: String,
+        stakesForStake: String,
+        startDateTimeForStake: Date,
+        sessionBuyInForStake: Double, 
+        sessionCashout: Double,
+        isTournamentFlagForStake: Bool,
+        tournamentTotalInvestmentForStake: Double?,
+        tournamentNameForStake: String?
+    ) async {
+        let actualBuyInForStaking = tournamentTotalInvestmentForStake ?? sessionBuyInForStake
+
+        // Filter out configs that are truly empty or invalid before deciding to save session only or with stakes.
+        let validConfigs = stakerConfigs.filter { config in
+            guard let _ = config.selectedStaker, // Must have a staker
+                  let percentage = Double(config.percentageSold), percentage > 0, // Percentage must be valid and > 0
+                  let _ = Double(config.markup), // Markup must be a valid double (can be 0 or more)
+                  actualBuyInForStaking > 0 else { // Session buy-in must be > 0 for staking
+                return false
+            }
+            return true
+        }
+
+        if validConfigs.isEmpty {
+            // If no valid staking configurations are provided (either stakerConfigs is empty or all entries are invalid)
+            print("No valid staking configurations. Saving session data only.")
+            await saveSessionDataOnly(sessionData: sessionDataToSave)
+        } else {
+            // If there are valid staking configurations
+            print("Found \(validConfigs.count) valid staking configurations. Saving session and stakes.")
+            await saveSessionDataAndIndividualStakes(
+                sessionData: sessionDataToSave,
+                gameName: gameNameForStake,
+                stakes: stakesForStake,
+                startDateTime: startDateTimeForStake,
+                actualSessionBuyInForStaking: actualBuyInForStaking,
+                sessionCashout: sessionCashout,
+                tournamentName: tournamentNameForStake,
+                isTournamentStake: isTournamentFlagForStake,
+                configs: validConfigs // Pass the array of valid configs
+            )
+        }
+    }
+
+    // COPIED FROM SessionFormView
+    private func saveSessionDataOnly(sessionData: [String: Any]) async {
+        do {
+            let docRef = try await Firestore.firestore().collection("sessions").addDocument(data: sessionData)
+            // After successful save, clear the live session state
+            await MainActor.run {
+                self.sessionStore.clearLiveSession()
+                self.isLoadingSave = false
+                let sessionId = docRef.documentID // documentID is not optional
+                if let completedSession = self.sessionStore.getSessionById(sessionId) {
+                    self.completedSessionToShowInSheet = completedSession
+                    self.showSessionDetailSheet = true
+                } else {
+                    self.dismiss()
+                }
+            }
+        } catch {
+            print("Error adding session: \(error.localizedDescription)")
             await MainActor.run {
                 self.isLoadingSave = false
-                if let sessionId = endedSessionId {
-                    if let completedSession = self.sessionStore.getSessionById(sessionId) { 
-                        self.completedSessionToShowInSheet = completedSession
-                        self.showSessionDetailSheet = true
-                        // Do NOT dismiss EnhancedLiveSessionView here; it will be dismissed when the sheet is closed.
-                    } else {
-                        print("Error: Could not fetch completed session details for ID: \(sessionId)")
-                        self.dismiss() // Dismiss if we can't show details
-                    }
-                } else {
-                    print("Error saving session or getting ID.")
-                    self.dismiss() 
+            }
+        }
+    }
+
+    // COPIED FROM SessionFormView
+    private func saveSessionDataAndIndividualStakes(
+        sessionData: [String: Any],
+        gameName: String,
+        stakes: String,
+        startDateTime: Date,
+        actualSessionBuyInForStaking: Double,
+        sessionCashout: Double,
+        tournamentName: String?,
+        isTournamentStake: Bool,
+        configs: [StakerConfig] // Takes an array of StakerConfig
+    ) async {
+        let newDocumentId = Firestore.firestore().collection("sessions").document().documentID
+        var mutableSessionData = sessionData
+
+        do {
+            try await Firestore.firestore().collection("sessions").document(newDocumentId).setData(mutableSessionData)
+            
+            // Session/Log added successfully, now add stakes for each config
+            var allStakesSuccessful = true
+            var savedStakeCount = 0
+
+            for config in configs {
+                // Basic validation already done in handleStakingAndSave,
+                // but ensure crucial parts are still present for constructing Stake object.
+                guard let stakerProfile = config.selectedStaker,
+                      let percentageSoldDouble = Double(config.percentageSold),
+                      let markupDouble = Double(config.markup) else {
+                    print("Skipping invalid stake config during Stake object creation: \(config.id)")
+                    allStakesSuccessful = false
+                    continue
                 }
+
+                let newStake = Stake(
+                    sessionId: newDocumentId,
+                    sessionGameName: tournamentName ?? gameName,
+                    sessionStakes: stakes,
+                    sessionDate: startDateTime,
+                    stakerUserId: stakerProfile.id, // Use ID from config
+                    stakedPlayerUserId: self.userId,
+                    stakePercentage: percentageSoldDouble / 100.0, // Convert to decimal
+                    markup: markupDouble,
+                    totalPlayerBuyInForSession: actualSessionBuyInForStaking,
+                    playerCashoutForSession: sessionCashout,
+                    status: .awaitingSettlement,
+                    isTournamentSession: isTournamentStake
+                )
+                do {
+                    _ = try await stakeService.addStake(newStake)
+                    print("Stake added successfully for staker \(stakerProfile.username) for session/log: \(newDocumentId)")
+                    savedStakeCount += 1
+                } catch {
+                    print("Error adding stake for staker \(stakerProfile.username): \(error.localizedDescription)")
+                    allStakesSuccessful = false
+                }
+            }
+
+            await MainActor.run {
+                self.sessionStore.clearLiveSession()
+                self.isLoadingSave = false
+                if allStakesSuccessful && savedStakeCount == configs.count && savedStakeCount > 0 {
+                    print("All \(savedStakeCount) stakes saved successfully.")
+                } else if savedStakeCount > 0 {
+                    print("Partially successful: \(savedStakeCount) out of \(configs.count) stakes saved.")
+                } else {
+                    print("Failed to save any stakes, but session might be saved.")
+                }
+                
+                // Show session detail regardless of stake success
+                if let completedSession = self.sessionStore.getSessionById(newDocumentId) {
+                    self.completedSessionToShowInSheet = completedSession
+                    self.showSessionDetailSheet = true
+                } else {
+                    self.dismiss()
+                }
+            }
+        } catch {
+            print("Error adding session: \(error.localizedDescription)")
+            await MainActor.run {
+                self.isLoadingSave = false
             }
         }
     }
@@ -1979,8 +2474,8 @@ struct EnhancedLiveSessionView: View {
                 isSessionPost: true,
                 isNote: shareToFeedIsNote,
                 showFullSessionCard: false,  // Just show badge for notes/hands
-                sessionGameName: gameName,  // Pass game name directly
-                sessionStakes: stakes  // Pass stakes directly
+                sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,  // Pass game name directly
+                sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes  // For tournaments, just show buy-in
             )
             .environmentObject(postService)
             .environmentObject(userService)
@@ -1999,8 +2494,8 @@ struct EnhancedLiveSessionView: View {
                 isSessionPost: true,
                 isNote: false,
                 showFullSessionCard: true, // Show full card for session start
-                sessionGameName: gameName,
-                sessionStakes: stakes
+                sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,
+                sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes
             )
             .environmentObject(postService)
             .environmentObject(userService)
@@ -2011,6 +2506,9 @@ struct EnhancedLiveSessionView: View {
         }
         // For chip updates, show the FULL session card
         else if shareToFeedIsChipUpdate {
+            let effectiveGameName = isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName
+            let effectiveStakes = isTournamentSession ? "Rebuy/Add-on ($\(Int(baseBuyInForTournament)))" : stakes
+
             return PostEditorView(
                 userId: userId,
                 initialText: getSessionDetailsText() + "\n\n" + shareToFeedContent,
@@ -2019,8 +2517,8 @@ struct EnhancedLiveSessionView: View {
                 isSessionPost: true,
                 isNote: false,
                 showFullSessionCard: true,  // Show full card for chip updates
-                sessionGameName: gameName,
-                sessionStakes: stakes
+                sessionGameName: effectiveGameName,
+                sessionStakes: effectiveStakes
             )
             .environmentObject(postService)
             .environmentObject(userService)
@@ -2039,8 +2537,8 @@ struct EnhancedLiveSessionView: View {
                 isSessionPost: true,
                 isNote: false,
                 showFullSessionCard: !shareToFeedIsNote && !shareToFeedIsHand,
-                sessionGameName: gameName,
-                sessionStakes: stakes
+                sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,
+                sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes
             )
             .environmentObject(postService)
             .environmentObject(userService)
@@ -2607,6 +3105,26 @@ struct EnhancedLiveSessionView: View {
         }
         .toolbarColorScheme(.dark, for: .navigationBar)
         .accentColor(.white)
+    }
+
+    // MARK: - Tournament Utility Functions
+    private func parseBuyinToDouble(_ buyinString: String) -> Double? {
+        let currencySymbols = CharacterSet(charactersIn: "$,€£¥")
+        var cleaned = buyinString.trimmingCharacters(in: .whitespacesAndNewlines)
+        cleaned = cleaned.components(separatedBy: currencySymbols).joined()
+        cleaned = cleaned.replacingOccurrences(of: ",", with: "")
+        if let mainPart = cleaned.split(whereSeparator: { "+-/".contains($0) }).first {
+            cleaned = String(mainPart)
+        }
+        return Double(cleaned)
+    }
+
+    private func inferTournamentType(from name: String, series: String?) -> String {
+        let combined = "\(name.lowercased()) \(series?.lowercased() ?? "")"
+        if combined.contains("plo") || combined.contains("omaha") {
+            return "PLO"
+        }
+        return "NLH"
     }
 }
 
