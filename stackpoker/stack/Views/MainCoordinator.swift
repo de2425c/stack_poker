@@ -3,6 +3,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import Combine
 
+@MainActor
 class AuthViewModel: ObservableObject {
     @Published var authState: AuthState = .loading // <— legacy
     @Published var appFlow: AppFlow = .loading      // ✅ single source of truth
@@ -64,29 +65,23 @@ class AuthViewModel: ObservableObject {
                     // Get the fresh user object after reload
                     guard let freshUser = Auth.auth().currentUser else {
 
-                        await MainActor.run {
-                            self.userService.currentUserProfile = nil
-                            self.setAuthState(.signedOut)
-                        }
+                        self.userService.currentUserProfile = nil
+                        self.setAuthState(.signedOut)
                         return
                     }
                     
                     // Email verification check with the latest status
                     if !freshUser.isEmailVerified {
 
-                        await MainActor.run {
-                            self.setAuthState(.emailVerificationRequired)
-                        }
+                        self.setAuthState(.emailVerificationRequired)
                         return
                     }
                     
 
                     try await self.userService.fetchUserProfile()
                     
-                    await MainActor.run {
-                        self.setAuthState(.signedIn)
+                    self.setAuthState(.signedIn)
 
-                    }
                 } catch {
 
                     
@@ -94,37 +89,27 @@ class AuthViewModel: ObservableObject {
                     if let serviceError = error as? UserServiceError, serviceError == .permissionDenied {
                         // Profile access issue - sign out
                         try? Auth.auth().signOut()
-                        await MainActor.run {
-                            self.userService.currentUserProfile = nil
-                            self.setAuthState(.signedOut)
-                        }
+                        self.userService.currentUserProfile = nil
+                        self.setAuthState(.signedOut)
                     } else if let serviceError = error as? UserServiceError, serviceError == .profileNotFound {
                         // Profile not created yet but email might be verified
                         if let currentUser = Auth.auth().currentUser, currentUser.isEmailVerified {
-                            await MainActor.run {
-                                self.setAuthState(.signedIn)
+                            self.setAuthState(.signedIn)
 
-                            }
                         } else {
-                            await MainActor.run {
-                                self.setAuthState(.emailVerificationRequired)
-                            }
+                            self.setAuthState(.emailVerificationRequired)
                         }
                     } else {
                         // General error - default to signed in state
-                        await MainActor.run {
-                            self.setAuthState(.signedIn)
+                        self.setAuthState(.signedIn)
 
-                        }
                     }
                 }
             }
         } else {
 
-            DispatchQueue.main.async {
-                self.userService.currentUserProfile = nil
-                self.setAuthState(.signedOut)
-            }
+            self.userService.currentUserProfile = nil
+            self.setAuthState(.signedOut)
         }
     }
 
@@ -148,18 +133,18 @@ class AuthViewModel: ObservableObject {
     
     // Verify that the current user ID matches the stored profile ID to prevent profile mismatch
     func verifyProfileConsistency() {
-        DispatchQueue.main.async {
-            // If we have a signed-in user but the profile is for a different user, clear it
-            if let currentUser = Auth.auth().currentUser,
-               let profile = self.userService.currentUserProfile,
-               currentUser.uid != profile.id {
+        // No longer need DispatchQueue.main.async as class is @MainActor
+        // If we have a signed-in user but the profile is for a different user, clear it
+        if let currentUser = Auth.auth().currentUser,
+           let profile = self.userService.currentUserProfile,
+           currentUser.uid != profile.id {
 
-                // Clear the profile to force a refresh
-                self.userService.clearUserData()
-                // Fetch the correct profile
-                Task {
-                    try? await self.userService.fetchUserProfile()
-                }
+            // Clear the profile to force a refresh
+            self.userService.clearUserData() // This is @MainActor
+            // Fetch the correct profile
+            Task {
+                // userService.fetchUserProfile is @MainActor, called from a Task
+                try? await self.userService.fetchUserProfile()
             }
         }
     }
@@ -252,11 +237,9 @@ class AuthViewModel: ObservableObject {
 
     // Helper to update flow with logging
     private func setAppFlow(_ newFlow: AppFlow) {
-        DispatchQueue.main.async {
-            if newFlow == self.appFlow { return }
+        if newFlow == self.appFlow { return }
 
-            self.appFlow = newFlow
-        }
+        self.appFlow = newFlow
     }
 
     // MARK: - Public helper to force main flow after onboarding

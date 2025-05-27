@@ -467,6 +467,16 @@ class NewHandEntryViewModel: ObservableObject {
             actualBlindActions.append(ActionInput(playerName: "BB", actionType: .bet, amount: bigBlind, isSystemAction: true))
         }
 
+        // NEW: Handle optional straddle (third blind)
+        if hasStraddle, let straddleAmount = straddle, straddleAmount > 0 {
+            // Determine the typical straddle position: UTG (first to act preflop)
+            // If UTG isn't available (e.g. 3-max), fallback to the first non-blind position in preflop order
+            let preflopOrder = getPreflopActionOrder()
+            if let straddlePos = preflopOrder.first(where: { pos in pos != "SB" && pos != "BB" && players.contains(where: { $0.position == pos }) }) {
+                actualBlindActions.append(ActionInput(playerName: straddlePos, actionType: .bet, amount: straddleAmount, isSystemAction: true))
+            }
+        }
+
         // Get/create the queue. If forced, it will be new.
         let queue = getOrCreateActionQueue(for: .preflop, force: forceQueueRefresh)
 
@@ -1052,6 +1062,8 @@ class NewHandEntryViewModel: ObservableObject {
             tableSize: self.tableSize,
             smallBlind: self.smallBlind,
             bigBlind: self.bigBlind,
+            ante: self.hasAnte ? self.ante : nil,
+            straddle: self.hasStraddle ? self.straddle : nil,
             dealerSeat: determineDealerSeat() // Implement this helper
         )
 

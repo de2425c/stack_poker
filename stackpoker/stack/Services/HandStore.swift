@@ -1,6 +1,7 @@
 import Foundation
 import FirebaseFirestore
 
+@MainActor
 class HandStore: ObservableObject {
     @Published var savedHands: [SavedHand] = []
     @Published var sharedHands: [String: SavedHand] = [:] // Cache for shared hands from other users
@@ -43,35 +44,42 @@ class HandStore: ObservableObject {
             .collection("hands")
             .order(by: "timestamp", descending: true)
             .addSnapshotListener { [weak self] snapshot, error in
-                guard let documents = snapshot?.documents else {
-                    return
+                // Error handling can be added here if needed
+                Task { // Hop to the main actor to call the processing method
+                    await self?.processHandDocuments(snapshot?.documents)
                 }
-                
-                self?.savedHands = documents.compactMap { document in
-                    guard let dict = document.data()["hand"] as? [String: Any],
-                          let data = try? JSONSerialization.data(withJSONObject: dict),
-                          let hand = try? JSONDecoder().decode(ParsedHandHistory.self, from: data),
-                          let timestamp = document.data()["timestamp"] as? Timestamp
-                    else {
-                        return nil
-                    }
-                    
-                    let sessionId = document.data()["sessionId"] as? String
-                    
-                    var savedHand = SavedHand(
-                        id: document.documentID,
-                        hand: hand,
-                        timestamp: timestamp.dateValue()
-                    )
-                    
-                    // Set the sessionId if available
-                    savedHand.sessionId = sessionId
-                    
-                    return savedHand
-                }
-                
-
             }
+    }
+    
+    private func processHandDocuments(_ documents: [QueryDocumentSnapshot]?) {
+        guard let documents = documents else {
+            // Optionally handle the case where documents are nil, e.g., due to an error
+            // For now, if documents are nil, we won't change savedHands
+            return
+        }
+        
+        self.savedHands = documents.compactMap { document in
+            guard let dict = document.data()["hand"] as? [String: Any],
+                  let data = try? JSONSerialization.data(withJSONObject: dict),
+                  let hand = try? JSONDecoder().decode(ParsedHandHistory.self, from: data),
+                  let timestamp = document.data()["timestamp"] as? Timestamp
+            else {
+                return nil
+            }
+            
+            let sessionId = document.data()["sessionId"] as? String
+            
+            var savedHand = SavedHand(
+                id: document.documentID,
+                hand: hand,
+                timestamp: timestamp.dateValue()
+            )
+            
+            // Set the sessionId if available
+            savedHand.sessionId = sessionId
+            
+            return savedHand
+        }
     }
     
     func deleteHand(id: String) async throws {
@@ -83,9 +91,7 @@ class HandStore: ObservableObject {
             .delete()
         
         // Update the local state by removing the deleted hand
-        DispatchQueue.main.async {
-            self.savedHands.removeAll { $0.id == id }
-        }
+        self.savedHands.removeAll { $0.id == id }
     }
     
     // Fetch a hand by ID from any user
@@ -253,7 +259,8 @@ class HandStore: ObservableObject {
                     }
                     
                     // sessionId field is confirmed by the whereField query, but let's log what's in the doc
-                    let docSessionId = documentData["sessionId"] as? String ?? "MISSING/NIL"
+                    // let docSessionId = documentData[\"sessionId\"] as? String ?? \"MISSING/NIL\"
+                    // print(\"Document \(document.documentID) has session ID: \(docSessionId) (querying for \(sessionId))\")\n
 
 
                     var savedHand = SavedHand(

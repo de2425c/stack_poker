@@ -80,7 +80,7 @@ struct EmailVerificationView: View {
                     .cornerRadius(12)
                     .disabled(resendDisabled || isLoading)
                     
-                    Button(action: signOut) {
+                    Button(action: { Task { await signOut() } }) {
                         Text("Cancel")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundColor(.white.opacity(0.7))
@@ -187,12 +187,12 @@ struct EmailVerificationView: View {
             do {
                 try await authService.sendEmailVerification()
                 
-                DispatchQueue.main.async {
+                await MainActor.run {
                     // Start the countdown timer for resend button
                     startResendCountdown()
                 }
             } catch {
-                DispatchQueue.main.async {
+                await MainActor.run {
                     errorMessage = (error as? AuthError)?.message ?? "Failed to resend verification email"
                     showingError = true
                 }
@@ -215,10 +215,10 @@ struct EmailVerificationView: View {
         }
     }
     
-    private func signOut() {
+    private func signOut() async {
         // Use AuthService's signOut for proper notification handling
         do {
-            try authService.signOut()
+            try await authService.signOut()
             dismiss()
         } catch {
             errorMessage = (error as? AuthError)?.message ?? "Failed to sign out"

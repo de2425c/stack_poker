@@ -29,12 +29,16 @@ struct GameInfo: Codable {
     let tableSize: Int
     let smallBlind: Double
     let bigBlind: Double
+    let ante: Double?
+    let straddle: Double?
     let dealerSeat: Int
     
     enum CodingKeys: String, CodingKey {
         case tableSize = "table_size"
         case smallBlind = "small_blind"
         case bigBlind = "big_blind"
+        case ante
+        case straddle
         case dealerSeat = "dealer_seat"
     }
 }

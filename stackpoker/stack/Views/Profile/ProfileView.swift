@@ -1179,6 +1179,7 @@ struct SettingsView: View {
     @State private var showFinalDeleteConfirmation = false
     @State private var deleteError: String? = nil
     @State private var isDeleting = false
+    @State private var pushNotificationsEnabled: Bool = true // Added for push notification toggle
     
     var body: some View {
         ZStack {
@@ -1194,6 +1195,29 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
+                
+                // Push Notifications Toggle
+                HStack {
+                    Text("Push Notifications")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                    Spacer()
+                    Toggle("", isOn: $pushNotificationsEnabled)
+                        .labelsHidden()
+                        .tint(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))) // Green accent
+                        .onChange(of: pushNotificationsEnabled) { newValue in
+                            // TODO: Implement logic to update user's push notification preferences
+                            print("Push notifications toggled to: \(newValue)")
+                            // Example: APIManager.shared.updatePushNotificationSetting(enabled: newValue)
+                        }
+                }
+                .padding(.vertical, 14)
+                .padding(.horizontal, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                )
+                .padding(.horizontal, 20)
                 
                 Spacer()
                 
@@ -1230,7 +1254,29 @@ struct SettingsView: View {
                     )
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, 120) // Extra padding for tab bar
+
+                // Company Info
+                VStack(spacing: 8) {
+                    Text("stackpoker.gg")
+                        .font(.plusJakarta(.footnote)) // Using Plus Jakarta Sans font
+                        .foregroundColor(.gray)
+                        .onTapGesture {
+                            if let url = URL(string: "https://stackpoker.gg") {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+
+                    Text("support@stackpoker.gg")
+                        .font(.plusJakarta(.footnote)) // Using Plus Jakarta Sans font
+                        .foregroundColor(.gray)
+                        .onTapGesture {
+                            if let url = URL(string: "mailto:support@stackpoker.gg") {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                }
+                .padding(.top, 30) // Space above company info
+                .padding(.bottom, 120) // Maintained bottom padding for tab bar space
             }
         }
         .alert("Delete Your Account?", isPresented: $showDeleteConfirmation) {

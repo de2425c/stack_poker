@@ -3,7 +3,7 @@ import Combine
 import FirebaseFirestore
 import Kingfisher
 
-// ViewModel remains largely the same
+@MainActor
 class UserSearchViewModel: ObservableObject {
     @Published var searchText = ""
     @Published var searchResults: [UserProfile] = []

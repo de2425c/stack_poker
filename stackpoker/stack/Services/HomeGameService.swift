@@ -4,6 +4,7 @@ import FirebaseFirestore
 import Combine
 import FirebaseAuth
 
+@MainActor
 class HomeGameService: ObservableObject {
     private let db = Firestore.firestore()
     @Published var activeGames: [HomeGame] = []
@@ -20,23 +21,15 @@ class HomeGameService: ObservableObject {
         
         // Create a new listener
         let listener = db.collection("homeGames").document(gameId)
-            .addSnapshotListener { documentSnapshot, error in
+            .addSnapshotListener { [weak self] documentSnapshot, error in
                 guard let document = documentSnapshot else {
-
+                    // Handle error or return
                     return
                 }
                 
-                guard document.exists, let data = document.data() else {
-
-                    return
-                }
-                
-                do {
-                    if let game = try? self.parseHomeGame(data: data, id: gameId) {
-                        onChange(game)
-                    }
-                } catch {
-
+                // Use a Task to hop to the MainActor for processing
+                Task {
+                    await self?._processGameUpdate(gameId: gameId, document: document, onChange: onChange)
                 }
             }
         
@@ -265,22 +258,16 @@ class HomeGameService: ObservableObject {
             }
         }
         
-        DispatchQueue.main.async {
-            self.activeGames = games
-        }
+        self.activeGames = games
         
         return games
     }
     
     /// Fetch all active games created by a specific user ID
     func fetchActiveGames(createdBy userId: String) async throws -> [HomeGame] {
-        DispatchQueue.main.async {
-            self.isLoading = true
-        }
+        self.isLoading = true
         defer { 
-            DispatchQueue.main.async {
-                self.isLoading = false
-            }
+            self.isLoading = false
         }
         
         let querySnapshot = try await db.collection("homeGames")
@@ -992,5 +979,22 @@ class HomeGameService: ObservableObject {
             cashOutRequests: cashOutRequests,
             gameHistory: gameHistory
         )
+    }
+    
+    // New private method to handle game update processing on the MainActor
+    private func _processGameUpdate(gameId: String, document: DocumentSnapshot, onChange: @escaping (HomeGame) -> Void) {
+        guard document.exists, let data = document.data() else {
+            // Handle document not existing or no data
+            return
+        }
+        
+        do {
+            // self.parseHomeGame will run on MainActor because the class is @MainActor
+            if let game = try? self.parseHomeGame(data: data, id: gameId) {
+                onChange(game) // This callback will also be on the MainActor
+            }
+        } catch {
+            // Handle parsing error
+        }
     }
 } 

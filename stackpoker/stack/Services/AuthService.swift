@@ -1,25 +1,38 @@
 import Foundation
-import FirebaseAuth
+@preconcurrency import FirebaseAuth
 
+@MainActor
 class AuthService: ObservableObject {
     @Published var user: FirebaseAuth.User?
     @Published var isAuthenticated = false
     @Published var errorMessage: String?
     
+    private var authStateDidChangeListenerHandle: AuthStateDidChangeListenerHandle?
+    
     init() {
         // Listen for authentication state changes
-        Auth.auth().addStateDidChangeListener { [weak self] _, user in
-            DispatchQueue.main.async {
-                self?.user = user
-                self?.isAuthenticated = user != nil
+        authStateDidChangeListenerHandle = Auth.auth().addStateDidChangeListener { [weak self] _, firebaseUser in
+            Task {
+                await self?._updateAuthState(with: firebaseUser)
             }
+        }
+    }
+    
+    private func _updateAuthState(with firebaseUser: FirebaseAuth.User?) {
+        self.user = firebaseUser
+        self.isAuthenticated = firebaseUser != nil
+    }
+    
+    deinit {
+        if let handle = authStateDidChangeListenerHandle {
+            Auth.auth().removeStateDidChangeListener(handle)
         }
     }
     
     func signInWithEmail(email: String, password: String) async throws {
         do {
             let result = try await Auth.auth().signIn(withEmail: email, password: password)
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.user = result.user
                 self.isAuthenticated = true
             }
@@ -36,7 +49,7 @@ class AuthService: ObservableObject {
     func signUpWithEmail(email: String, password: String) async throws {
         do {
             let result = try await Auth.auth().createUser(withEmail: email, password: password)
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.user = result.user
                 self.isAuthenticated = true
             }
@@ -69,13 +82,13 @@ class AuthService: ObservableObject {
         return Auth.auth().currentUser?.isEmailVerified ?? false
     }
     
-    func signOut() throws {
+    func signOut() async throws {
         do {
             // Post notification to allow services to clean up before sign out
             NotificationCenter.default.post(name: NSNotification.Name("UserWillSignOut"), object: nil)
             
             try Auth.auth().signOut()
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.user = nil
                 self.isAuthenticated = false
             }

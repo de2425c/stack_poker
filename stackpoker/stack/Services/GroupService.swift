@@ -94,38 +94,10 @@ class GroupService: ObservableObject {
         }
         
         do {
-            // Get the user's groups
-            let snapshot = try await db.collection("users")
-                .document(userId)
-                .collection("groups")
-                .getDocuments()
-            
-            var groups: [UserGroup] = []
-            
-            // Fetch each group's details
-            for doc in snapshot.documents {
-                guard let groupId = doc.data()["groupId"] as? String else { continue }
-                
-                do {
-                    let groupDoc = try await db.collection("groups").document(groupId).getDocument()
-                    
-                    if let groupData = groupDoc.data(), groupDoc.exists {
-                        var data = groupData
-                        data["id"] = groupId
-                        
-                        let group = try UserGroup(dictionary: data, id: groupId)
-                        groups.append(group)
-                    }
-                } catch {
-                    // Continue with next group
-                }
-            }
-            
-            // Sort groups by creation date (newest first)
-            groups.sort { $0.createdAt > $1.createdAt }
+            let fetchedGroups = try await _fetchUserGroupsData(userId: userId)
             
             await MainActor.run {
-                self.userGroups = groups
+                self.userGroups = fetchedGroups
                 self.isLoading = false
             }
         } catch {
@@ -135,6 +107,39 @@ class GroupService: ObservableObject {
             }
             throw error
         }
+    }
+    
+    private func _fetchUserGroupsData(userId: String) async throws -> [UserGroup] {
+        // Get the user's groups
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("groups")
+            .getDocuments()
+        
+        var groups: [UserGroup] = []
+        
+        // Fetch each group's details
+        for doc in snapshot.documents {
+            guard let groupId = doc.data()["groupId"] as? String else { continue }
+            
+            do {
+                let groupDoc = try await db.collection("groups").document(groupId).getDocument()
+                
+                if let groupData = groupDoc.data(), groupDoc.exists {
+                    var data = groupData
+                    data["id"] = groupId
+                    
+                    let group = try UserGroup(dictionary: data, id: groupId)
+                    groups.append(group)
+                }
+            } catch {
+                // Continue with next group
+            }
+        }
+        
+        // Sort groups by creation date (newest first)
+        groups.sort { $0.createdAt > $1.createdAt }
+        return groups
     }
     
     // Send an invite to a user to join a group
@@ -228,27 +233,10 @@ class GroupService: ObservableObject {
         }
         
         do {
-            let snapshot = try await db.collection("users")
-                .document(userId)
-                .collection("groupInvites")
-                .whereField("status", isEqualTo: GroupInvite.InviteStatus.pending.rawValue)
-                .order(by: "createdAt", descending: true)
-                .getDocuments()
-            
-            var invites: [GroupInvite] = []
-            
-            for doc in snapshot.documents {
-                if let data = doc.data() as? [String: Any] {
-                    do {
-                        let invite = try GroupInvite(dictionary: data, id: doc.documentID)
-                        invites.append(invite)
-                    } catch {
-                    }
-                }
-            }
+            let fetchedInvites = try await _fetchPendingInvitesData(userId: userId)
             
             await MainActor.run {
-                self.pendingInvites = invites
+                self.pendingInvites = fetchedInvites
                 self.isLoading = false
             }
         } catch {
@@ -258,6 +246,29 @@ class GroupService: ObservableObject {
             }
             throw error
         }
+    }
+    
+    private func _fetchPendingInvitesData(userId: String) async throws -> [GroupInvite] {
+        let snapshot = try await db.collection("users")
+            .document(userId)
+            .collection("groupInvites")
+            .whereField("status", isEqualTo: GroupInvite.InviteStatus.pending.rawValue)
+            .order(by: "createdAt", descending: true)
+            .getDocuments()
+
+        var invites: [GroupInvite] = []
+
+        for doc in snapshot.documents {
+            if let data = doc.data() as? [String: Any] {
+                do {
+                    let invite = try GroupInvite(dictionary: data, id: doc.documentID)
+                    invites.append(invite)
+                } catch {
+                    // Log or handle individual parsing error if needed
+                }
+            }
+        }
+        return invites
     }
     
     // Accept a group invite
@@ -402,46 +413,17 @@ class GroupService: ObservableObject {
         guard let currentUserId = Auth.auth().currentUser?.uid else {
             throw GroupServiceError.notAuthenticated
         }
-        
+
         await MainActor.run {
             self.isLoading = true
+            self.error = nil // Also clear previous error
         }
-        
+
         do {
-            let snapshot = try await db.collection("users")
-                .getDocuments()
-            
-            var users: [UserListItem] = []
-            
-            for doc in snapshot.documents {
-                let data = doc.data()
-                let userId = doc.documentID
-                
-                // Don't include the current user
-                if userId == currentUserId {
-                    continue
-                }
-                
-                if let username = data["username"] as? String {
-                    let displayName = data["displayName"] as? String
-                    let avatarURL = data["avatarURL"] as? String
-                    
-                    let user = UserListItem(
-                        id: userId,
-                        username: username,
-                        displayName: displayName,
-                        avatarURL: avatarURL
-                    )
-                    
-                    users.append(user)
-                }
-            }
-            
-            // Sort by username
-            users.sort { $0.username < $1.username }
+            let fetchedUsers = try await _fetchAvailableUsersData(currentUserId: currentUserId)
             
             await MainActor.run {
-                self.availableUsers = users
+                self.availableUsers = fetchedUsers
                 self.isLoading = false
             }
             
@@ -453,74 +435,58 @@ class GroupService: ObservableObject {
             throw error
         }
     }
+
+    private func _fetchAvailableUsersData(currentUserId: String) async throws -> [UserListItem] {
+        let snapshot = try await db.collection("users")
+            .getDocuments()
+
+        var users: [UserListItem] = []
+
+        for doc in snapshot.documents {
+            let data = doc.data()
+            let userId = doc.documentID
+
+            // Don't include the current user
+            if userId == currentUserId {
+                continue
+            }
+
+            if let username = data["username"] as? String {
+                let displayName = data["displayName"] as? String
+                let avatarURL = data["avatarURL"] as? String
+
+                let user = UserListItem(
+                    id: userId,
+                    username: username,
+                    displayName: displayName,
+                    avatarURL: avatarURL
+                )
+                users.append(user)
+            }
+        }
+
+        // Sort by username
+        users.sort { $0.username < $1.username }
+        return users
+    }
     
     // Fetch all members of a group
     func fetchGroupMembers(groupId: String) async throws {
         guard Auth.auth().currentUser != nil else {
             throw GroupServiceError.notAuthenticated
         }
-        
+
         await MainActor.run {
             self.isLoading = true
-            self.groupMembers = []
+            self.groupMembers = [] // Clear previous members
+            self.error = nil // Clear previous error
         }
-        
+
         do {
-            // Get all members from the group's members collection
-            let snapshot = try await db.collection("groups")
-                .document(groupId)
-                .collection("members")
-                .getDocuments()
-            
-            var members: [GroupMemberInfo] = []
-            
-            // For each member, get their user profile
-            for doc in snapshot.documents {
-                let data = doc.data()
-                let userId = doc.documentID
-                
-                if let role = data["role"] as? String,
-                   let joinedAt = (data["joinedAt"] as? Timestamp)?.dateValue() {
-                    
-                    // Get the user's profile
-                    let userDoc = try await db.collection("users")
-                        .document(userId)
-                        .getDocument()
-                    
-                    if let userData = userDoc.data() {
-                        let username = userData["username"] as? String ?? "Unknown"
-                        let displayName = userData["displayName"] as? String
-                        let avatarURL = userData["avatarURL"] as? String
-                        
-                        let member = GroupMemberInfo(
-                            id: userId,
-                            username: username,
-                            displayName: displayName,
-                            avatarURL: avatarURL,
-                            role: role,
-                            joinedAt: joinedAt
-                        )
-                        
-                        members.append(member)
-                    }
-                }
-            }
-            
-            // Sort by role (owner first) then by join date
-            members.sort { member1, member2 in
-                if member1.role == GroupMember.MemberRole.owner.rawValue && 
-                   member2.role != GroupMember.MemberRole.owner.rawValue {
-                    return true
-                } else if member1.role != GroupMember.MemberRole.owner.rawValue && 
-                          member2.role == GroupMember.MemberRole.owner.rawValue {
-                    return false
-                } else {
-                    return member1.joinedAt < member2.joinedAt
-                }
-            }
+            let fetchedMembers = try await _fetchGroupMembersData(groupId: groupId)
             
             await MainActor.run {
-                self.groupMembers = members
+                self.groupMembers = fetchedMembers
                 self.isLoading = false
             }
             
@@ -531,6 +497,61 @@ class GroupService: ObservableObject {
             }
             throw error
         }
+    }
+
+    private func _fetchGroupMembersData(groupId: String) async throws -> [GroupMemberInfo] {
+        // Get all members from the group's members collection
+        let snapshot = try await db.collection("groups")
+            .document(groupId)
+            .collection("members")
+            .getDocuments()
+
+        var members: [GroupMemberInfo] = []
+
+        // For each member, get their user profile
+        for doc in snapshot.documents {
+            let data = doc.data()
+            let userId = doc.documentID
+
+            if let role = data["role"] as? String,
+               let joinedAt = (data["joinedAt"] as? Timestamp)?.dateValue() {
+
+                // Get the user's profile
+                let userDoc = try await db.collection("users")
+                    .document(userId)
+                    .getDocument()
+
+                if let userData = userDoc.data() {
+                    let username = userData["username"] as? String ?? "Unknown"
+                    let displayName = userData["displayName"] as? String
+                    let avatarURL = userData["avatarURL"] as? String
+
+                    let member = GroupMemberInfo(
+                        id: userId,
+                        username: username,
+                        displayName: displayName,
+                        avatarURL: avatarURL,
+                        role: role,
+                        joinedAt: joinedAt
+                    )
+                    members.append(member)
+                }
+            }
+        }
+
+        // Sort by role (owner first) then by join date
+        members.sort { member1, member2 in
+            if member1.role == GroupMember.MemberRole.owner.rawValue && 
+               member2.role != GroupMember.MemberRole.owner.rawValue {
+                return true
+            } else if member1.role != GroupMember.MemberRole.owner.rawValue && 
+                      member2.role == GroupMember.MemberRole.owner.rawValue {
+                return false
+            } else {
+                return member1.joinedAt < member2.joinedAt
+            }
+        }
+        return members
     }
     
     // Upload a group profile image and return its download URL
@@ -621,52 +642,28 @@ class GroupService: ObservableObject {
         guard Auth.auth().currentUser != nil else {
             throw GroupServiceError.notAuthenticated
         }
-        
+
         await MainActor.run {
             self.isLoading = true
+            if beforeTimestamp == nil {
+                self.error = nil // Clear error only on initial load
+            }
         }
-        
+
         do {
-            // Create a query for the messages collection
-            var query = db.collection("groups")
-                .document(groupId)
-                .collection("messages")
-                .order(by: "timestamp", descending: true)
-                .limit(to: limit)
-            
-            // Add pagination if provided
-            if let beforeTimestamp = beforeTimestamp {
-                query = query.whereField("timestamp", isLessThan: Timestamp(date: beforeTimestamp))
-            }
-            
-            // Execute the query
-            let snapshot = try await query.getDocuments()
-            
-            var messages: [GroupMessage] = []
-            
-            for doc in snapshot.documents {
-                let data = doc.data()
-                do {
-                    let message = try GroupMessage(dictionary: data, id: doc.documentID)
-                    messages.append(message)
-                } catch {
-                }
-            }
-            
-            // Sort by timestamp (newest last)
-            messages.sort { $0.timestamp < $1.timestamp }
+            let fetchedMessages = try await _fetchGroupMessagesData(groupId: groupId, limit: limit, beforeTimestamp: beforeTimestamp)
             
             await MainActor.run {
                 if beforeTimestamp == nil {
                     // First load, replace all messages
-                    self.groupMessages = messages
+                    self.groupMessages = fetchedMessages
                 } else {
                     // Pagination load, add to existing messages
-                    self.groupMessages.insert(contentsOf: messages, at: 0)
+                    self.groupMessages.insert(contentsOf: fetchedMessages, at: 0)
                 }
                 self.isLoading = false
             }
-            
+
             // Set up a listener for new messages
             if beforeTimestamp == nil {
                 // Only set up listener on initial load
@@ -681,7 +678,40 @@ class GroupService: ObservableObject {
             throw error
         }
     }
-    
+
+    private func _fetchGroupMessagesData(groupId: String, limit: Int, beforeTimestamp: Date?) async throws -> [GroupMessage] {
+        // Create a query for the messages collection
+        var query = db.collection("groups")
+            .document(groupId)
+            .collection("messages")
+            .order(by: "timestamp", descending: true)
+            .limit(to: limit)
+
+        // Add pagination if provided
+        if let beforeTimestamp = beforeTimestamp {
+            query = query.whereField("timestamp", isLessThan: Timestamp(date: beforeTimestamp))
+        }
+
+        // Execute the query
+        let snapshot = try await query.getDocuments()
+
+        var messages: [GroupMessage] = []
+
+        for doc in snapshot.documents {
+            let data = doc.data()
+            do {
+                let message = try GroupMessage(dictionary: data, id: doc.documentID)
+                messages.append(message)
+            } catch {
+                // Log or handle individual parsing error
+            }
+        }
+
+        // Sort by timestamp (newest last for correct insertion/replacement)
+        messages.sort { $0.timestamp < $1.timestamp }
+        return messages
+    }
+
     // Listen for new messages
     private func setupMessageListener(groupId: String) {
         db.collection("groups")

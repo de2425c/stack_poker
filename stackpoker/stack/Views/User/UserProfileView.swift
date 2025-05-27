@@ -75,6 +75,20 @@ struct UserProfileView: View {
                                     )
                             }
                             .disabled(isProcessingFollow)
+                            
+                            // Block Button
+                            Button(action: { 
+                                // Action for block button (not implemented)
+                                print("Block button tapped for user: \(user.username)")
+                            }) {
+                                Image(systemName: "person.crop.circle.badge.xmark")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .background(Color.red.opacity(0.7))
+                                    .cornerRadius(20)
+                            }
                         } else {
                             // Placeholder for "Edit Profile" button for current user
                             Button(action: { /* TODO: Implement Edit Profile Navigation */ }) {

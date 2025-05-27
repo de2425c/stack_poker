@@ -4,6 +4,7 @@ import FirebaseAuth
 import FirebaseStorage
 import Combine
 
+@MainActor
 class UserService: ObservableObject {
     private let db = Firestore.firestore()
     @Published var currentUserProfile: UserProfile?
@@ -28,17 +29,14 @@ class UserService: ObservableObject {
     
     // Method to completely clear all user data from memory
     @objc func clearUserData() {
-
-        DispatchQueue.main.async {
-            // Clear the current profile
-            self.currentUserProfile = nil
-            
-            // Clear all loaded users data
-            self.loadedUsers.removeAll()
-            
-            // Clear any other cached data that might be stored
-            // (Add additional cache clearing here if needed)
-        }
+        // Clear the current profile
+        self.currentUserProfile = nil
+        
+        // Clear all loaded users data
+        self.loadedUsers.removeAll()
+        
+        // Clear any other cached data that might be stored
+        // (Add additional cache clearing here if needed)
     }
 
     // Helper method to get follower counts
@@ -338,11 +336,8 @@ class UserService: ObservableObject {
                 followingCount: followingCount
             )
             
-            // Update the published dictionary on the main thread
-            DispatchQueue.main.async {
-                self.loadedUsers[id] = userProfile
-
-            }
+            // Update the published dictionary on the main thread - No longer needed due to @MainActor
+            self.loadedUsers[id] = userProfile
 
         } catch {
 
@@ -388,19 +383,17 @@ class UserService: ObservableObject {
             
 
 
-            // Optimistically update local counts and refresh profiles
-            DispatchQueue.main.async {
-                if var followedUser = self.loadedUsers[userIdToFollow] {
-                    followedUser.followersCount += 1
-                    self.loadedUsers[userIdToFollow] = followedUser
-                }
-                if var currentUser = self.loadedUsers[currentUserId] {
-                    currentUser.followingCount += 1
-                    self.loadedUsers[currentUserId] = currentUser
-                }
-                if self.currentUserProfile?.id == currentUserId {
-                    self.currentUserProfile?.followingCount += 1
-                }
+            // Optimistically update local counts and refresh profiles - No longer need DispatchQueue.main.async
+            if var followedUser = self.loadedUsers[userIdToFollow] {
+                followedUser.followersCount += 1
+                self.loadedUsers[userIdToFollow] = followedUser
+            }
+            if var currentUser = self.loadedUsers[currentUserId] {
+                currentUser.followingCount += 1
+                self.loadedUsers[currentUserId] = currentUser
+            }
+            if self.currentUserProfile?.id == currentUserId {
+                self.currentUserProfile?.followingCount += 1
             }
             // Consider re-fetching profiles for robustness or relying on Cloud Functions for counters
             // await fetchUser(id: userIdToFollow)
@@ -444,18 +437,16 @@ class UserService: ObservableObject {
 
 
             // Optimistically update local counts and refresh profiles
-            DispatchQueue.main.async {
-                if var unfollowedUser = self.loadedUsers[userIdToUnfollow] {
-                    unfollowedUser.followersCount = max(0, unfollowedUser.followersCount - 1)
-                    self.loadedUsers[userIdToUnfollow] = unfollowedUser
-                }
-                if var currentUser = self.loadedUsers[currentUserId] {
-                    currentUser.followingCount = max(0, currentUser.followingCount - 1)
-                    self.loadedUsers[currentUserId] = currentUser
-                }
-                if self.currentUserProfile?.id == currentUserId {
-                    self.currentUserProfile?.followingCount = max(0, (self.currentUserProfile?.followingCount ?? 0) - 1)
-                }
+            if var unfollowedUser = self.loadedUsers[userIdToUnfollow] {
+                unfollowedUser.followersCount = max(0, unfollowedUser.followersCount - 1)
+                self.loadedUsers[userIdToUnfollow] = unfollowedUser
+            }
+            if var currentUser = self.loadedUsers[currentUserId] {
+                currentUser.followingCount = max(0, currentUser.followingCount - 1)
+                self.loadedUsers[currentUserId] = currentUser
+            }
+            if self.currentUserProfile?.id == currentUserId {
+                self.currentUserProfile?.followingCount = max(0, (self.currentUserProfile?.followingCount ?? 0) - 1)
             }
             // Consider re-fetching profiles or relying on Cloud Functions for counters
             // await fetchUser(id: userIdToUnfollow)
@@ -539,9 +530,7 @@ class UserService: ObservableObject {
                         followingCount: followingCount
                     )
                     profiles.append(userProfile)
-                    DispatchQueue.main.async {
-                        self.loadedUsers[document.documentID] = userProfile // Cache it
-                    }
+                    self.loadedUsers[document.documentID] = userProfile // Cache it
                 }
             } catch {
 
@@ -593,10 +582,8 @@ class UserService: ObservableObject {
                     followingCount: followingCount
                 )
                 profiles.append(userProfile)
-                // Optionally cache these results in loadedUsers as well
-                DispatchQueue.main.async {
-                    self.loadedUsers[document.documentID] = userProfile
-                }
+                // No longer need DispatchQueue.main.async as class is @MainActor
+                self.loadedUsers[document.documentID] = userProfile // Cache it
             }
             return profiles
         } catch {

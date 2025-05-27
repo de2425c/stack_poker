@@ -955,11 +955,17 @@ struct PlayerSeatView: View {
         return player.position == "BTN"
     }
     
-    private let positionOrder6Max = ["SB", "BB", "UTG", "MP", "CO", "BTN"]
-    private let positionOrder9Max = ["SB", "BB", "UTG", "UTG+1", "MP", "MP+1", "HJ", "CO", "BTN"]
     private let positionOrder2Max = ["SB", "BB"]
+    private let positionOrder6Max = ["SB", "BB", "UTG", "MP", "CO", "BTN"]
+    private let positionOrder9Max = ["SB", "BB", "UTG", "UTG+1", "MP1", "MP2", "HJ", "CO", "BTN"]
 
     private func getPosition() -> CGPoint {
+        // FIXED: Position inconsistencies between NewHandEntryViewModel and HandReplayView
+        // - Now using exact same position names: "MP1", "MP2" instead of "MP", "MP+1"
+        // - Added comprehensive table size support (2-9 max)
+        // - Improved fallback positioning to prevent center overlap
+        // - All position orders now match NewHandEntryViewModel exactly
+        
         let width = geometry.size.width
         let height = geometry.size.height
         let centerX = width * 0.5
@@ -976,33 +982,39 @@ struct PlayerSeatView: View {
             return CGPoint(x: centerX, y: centerY)
         }
         
-        // 2. Set up position orders for different table sizes
-        let positionOrder2Max = ["SB", "BB"]
-        let positionOrder6Max = ["SB", "BB", "UTG", "MP", "CO", "BTN"]
-        let positionOrder9Max = ["SB", "BB", "UTG", "UTG+1", "MP", "MP+1", "HJ", "CO", "BTN"]
-        
-        // 3. Determine the appropriate order based on table size
+        // 2. Set up position orders for different table sizes - MATCH NewHandEntryViewModel exactly
         let positionOrder: [String]
         let tableSize = allPlayers.count
         
         switch tableSize {
         case 2:
-            positionOrder = positionOrder2Max
-        case 3...6:
-            positionOrder = positionOrder6Max
-        case 7...9:
-            positionOrder = positionOrder9Max
+            positionOrder = ["SB", "BB"]
+        case 3:
+            positionOrder = ["BTN", "SB", "BB"]
+        case 4:
+            positionOrder = ["BTN", "SB", "BB", "UTG"]
+        case 5:
+            positionOrder = ["BTN", "SB", "BB", "UTG", "CO"]
+        case 6:
+            positionOrder = ["BTN", "SB", "BB", "UTG", "MP", "CO"]
+        case 7:
+            positionOrder = ["BTN", "SB", "BB", "UTG", "MP", "HJ", "CO"]
+        case 8:
+            positionOrder = ["BTN", "SB", "BB", "UTG", "UTG+1", "MP", "HJ", "CO"]
+        case 9:
+            positionOrder = ["BTN", "SB", "BB", "UTG", "UTG+1", "MP1", "MP2", "HJ", "CO"]
         default:
-            positionOrder = positionOrder6Max // Default to 6-max
+            positionOrder = ["BTN", "SB", "BB", "UTG", "MP", "CO"] // Default to 6-max
         }
         
-        // 4. Find the index of the hero's position in the order
+        // 3. Find the index of the hero's position in the order
         guard let heroIndex = positionOrder.firstIndex(of: heroPosition) else {
-            // Fallback if hero's position isn't in the standard order
-            return CGPoint(x: centerX, y: centerY)
+            // Instead of fallback to center, let's assign a unique position based on player.seat or name
+            let uniqueOffset = CGFloat((player.seat ?? 1) * 60) // Use seat number for unique positioning
+            return CGPoint(x: centerX + uniqueOffset, y: centerY + uniqueOffset)
         }
         
-        // 5. Define seat positions around the table (clockwise from bottom)
+        // 4. Define seat positions around the table (clockwise from bottom)
         // These are the fixed seat locations regardless of who sits where
         let seatPositions: [(CGFloat, CGFloat)]
         
@@ -1037,23 +1049,27 @@ struct PlayerSeatView: View {
             ]
         }
         
-        // 6. If this is the hero, always place at the bottom position
+        // 5. If this is the hero, always place at the bottom position
         if isHero {
             let (xPercent, yPercent) = seatPositions[0] // Hero always at bottom
             return CGPoint(x: width * xPercent, y: height * yPercent)
         }
         
-        // 7. For other players, calculate their position relative to hero
+        // 6. For other players, calculate their position relative to hero
         guard let playerPosition = player.position,
               let playerIndex = positionOrder.firstIndex(of: playerPosition) else {
-            // Fallback if player's position isn't found
-            return CGPoint(x: centerX, y: centerY)
+            // Better fallback: use seat number or create unique position instead of center overlap
+            let fallbackAngle = CGFloat((player.seat ?? 1)) * (2 * .pi / CGFloat(max(tableSize, 3)))
+            let fallbackRadius = min(width, height) * 0.3
+            let fallbackX = centerX + cos(fallbackAngle) * fallbackRadius
+            let fallbackY = centerY + sin(fallbackAngle) * fallbackRadius * 0.6 // Elliptical
+            return CGPoint(x: fallbackX, y: fallbackY)
         }
         
         // Calculate relative position (how many seats away from hero, clockwise)
         let relativePosition = (playerIndex - heroIndex + positionOrder.count) % positionOrder.count
         
-        // 8. Map to the appropriate seat position
+        // 7. Map to the appropriate seat position
         // Seat 0 is always hero at bottom, so we start at seat 1
         let seatIndex = relativePosition == 0 ? 0 : relativePosition
         

@@ -3,6 +3,8 @@ import SwiftUI
 struct HandsTab: View {
     @ObservedObject var handStore: HandStore
     @State private var selectedHandForReplay: SavedHand? = nil
+    @State private var handToDelete: SavedHand? = nil
+    @State private var showDeleteAlert: Bool = false
     
     // Group hands by time periods
     private var groupedHands: (today: [SavedHand], lastWeek: [SavedHand], older: [SavedHand]) {
@@ -40,6 +42,9 @@ struct HandsTab: View {
                     if !groupedHands.today.isEmpty {
                         HandListSection(title: "Today", hands: groupedHands.today, onHandTap: { hand in
                             self.selectedHandForReplay = hand
+                        }, onHandLongPress: { hand in
+                            self.handToDelete = hand
+                            self.showDeleteAlert = true
                         })
                     }
                     
@@ -47,6 +52,9 @@ struct HandsTab: View {
                     if !groupedHands.lastWeek.isEmpty {
                         HandListSection(title: "Last Week", hands: groupedHands.lastWeek, onHandTap: { hand in
                             self.selectedHandForReplay = hand
+                        }, onHandLongPress: { hand in
+                            self.handToDelete = hand
+                            self.showDeleteAlert = true
                         })
                     }
                     
@@ -54,6 +62,9 @@ struct HandsTab: View {
                     if !groupedHands.older.isEmpty {
                         HandListSection(title: "All Time", hands: groupedHands.older, onHandTap: { hand in
                             self.selectedHandForReplay = hand
+                        }, onHandLongPress: { hand in
+                            self.handToDelete = hand
+                            self.showDeleteAlert = true
                         })
                     }
                     
@@ -87,6 +98,16 @@ struct HandsTab: View {
             // Corrected initializer for HandReplayView
             HandReplayView(hand: handToReplay.hand, userId: handStore.userId) 
         }
+        .alert("Delete this hand?", isPresented: $showDeleteAlert, presenting: handToDelete) { hand in
+            Button("Delete", role: .destructive) {
+                Task {
+                    try? await handStore.deleteHand(id: hand.id)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { hand in
+            Text("This action cannot be undone.")
+        }
     }
 }
 
@@ -94,6 +115,7 @@ struct HandListSection: View {
     let title: String
     let hands: [SavedHand]
     var onHandTap: (SavedHand) -> Void // Closure to handle tap, passed from HandsTab
+    var onHandLongPress: (SavedHand) -> Void // Closure for long-press
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -123,6 +145,9 @@ struct HandListSection: View {
                                         createdAt: savedHand.timestamp)
                     .cornerRadius(12) // Keep corner radius if desired for the card's shape
                     .shadow(color: Color.black.opacity(0.1), radius: 3, y: 1) // Adjusted shadow for subtlety
+                    .onLongPressGesture {
+                        onHandLongPress(savedHand)
+                    }
                 }
             }
         }
