@@ -459,38 +459,46 @@ class SessionStore: ObservableObject {
         if let savedData = UserDefaults.standard.data(forKey: "LiveSession_\(userId)"),
            let loadedSession = try? JSONDecoder().decode(LiveSessionData.self, from: savedData) {
             
-            // If isEnded is true, it's definitively ended. Clear it and return.
-            // This handles sessions that were correctly marked as ended.
             if loadedSession.isEnded {
                 clearLiveSession()
                 return
             }
 
-            // If isEnded is false (either explicitly set so, or by default from missing field in legacy data):
-            // Now check other conditions to see if it should be restored.
+            let shouldRestore: Bool
+            let now = Date()
+            let validBuyIn = loadedSession.buyIn > 0
 
-            let isPotentiallyRestorable = loadedSession.isActive || loadedSession.lastPausedAt != nil
-            let hasValidBuyIn = loadedSession.buyIn > 0
+            if loadedSession.isActive, let lastActive = loadedSession.lastActiveAt {
+                let timeSinceLastActive = now.timeIntervalSince(lastActive)
+                let activeThreshold: TimeInterval = 60 * 60 * 1 // 1 hour for active sessions
+                if timeSinceLastActive < activeThreshold && validBuyIn {
+                    shouldRestore = true
+                } else {
+                    shouldRestore = false
+                }
+            } else if !loadedSession.isActive, let lastPaused = loadedSession.lastPausedAt {
+                let timeSincePaused = now.timeIntervalSince(lastPaused)
+                let pausedThreshold: TimeInterval = 60 * 60 * 6 // 6 hours for paused sessions
+                if timeSincePaused < pausedThreshold && validBuyIn {
+                    shouldRestore = true
+                } else {
+                    shouldRestore = false
+                }
+            } else {
+                // Neither active with recent lastActive, nor paused with recent lastPaused
+                shouldRestore = false
+            }
 
-            // Staleness/Abandoned Check:
-            // If a session wasn't explicitly ended (i.e., isEnded is false),
-            // and its last activity (active, pause, or even start time) was > 24 hours ago,
-            // consider it abandoned and clear it. This helps clean up legacy sessions
-            // or sessions from crashes that were never properly ended.
-            let lastActivityTime = loadedSession.lastActiveAt ?? loadedSession.lastPausedAt ?? loadedSession.startTime
-            let timeSinceLastActivity = Date().timeIntervalSince(lastActivityTime)
-            let isAbandoned = timeSinceLastActivity > (24 * 60 * 60) // 24 hours
-
-            if hasValidBuyIn && isPotentiallyRestorable && !isAbandoned {
-                // This session looks like it should be restored.
+            if shouldRestore {
                 var sessionToRestore = loadedSession
                 if sessionToRestore.isActive, let lastActive = sessionToRestore.lastActiveAt {
-                    // If it was active, calculate time passed since last active and add to elapsed.
-                    let additionalTime = Date().timeIntervalSince(lastActive)
+                    let additionalTime = now.timeIntervalSince(lastActive)
                     sessionToRestore.elapsedTime += additionalTime
-                    sessionToRestore.lastActiveAt = Date() // Update last active to now
+                    sessionToRestore.lastActiveAt = now 
+                } else if !sessionToRestore.isActive, sessionToRestore.lastPausedAt != nil {
+                    // For paused sessions, we don't add to elapsed time here as it was already accounted for upon pausing.
+                    // We just ensure it's properly set up to be resumed in its paused state.
                 }
-                // If it was paused, it's loaded as is.
                 
                 self.liveSession = sessionToRestore
                 
@@ -498,12 +506,8 @@ class SessionStore: ObservableObject {
                     startLiveSessionTimer()
                 }
                 self.showLiveSessionBar = true
-                loadEnhancedLiveSessionState() // Also load its associated enhanced data
+                loadEnhancedLiveSessionState()
             } else {
-                // Conditions not met for restoration:
-                // - No valid buy-in (effectively an empty or cleared session).
-                // - Not marked as active or paused (e.g., only startTime set, then app quit).
-                // - Considered abandoned (last activity > 24 hours ago and not explicitly ended).
                 clearLiveSession()
             }
         } else {
