@@ -41,15 +41,14 @@ class UserService: ObservableObject {
 
     // Helper method to get follower counts
     private func getFollowerCounts(for userId: String) async throws -> (followers: Int, following: Int) {
-        async let followersCount = db.collection("users")
-            .document(userId)
-            .collection("followers")
+        // Use the centralized userFollows collection instead of subcollections
+        async let followersCount = db.collection("userFollows")
+            .whereField("followeeId", isEqualTo: userId)
             .count
             .getAggregation(source: .server)
             
-        async let followingCount = db.collection("users")
-            .document(userId)
-            .collection("following")
+        async let followingCount = db.collection("userFollows")
+            .whereField("followerId", isEqualTo: userId)
             .count
             .getAggregation(source: .server)
             
@@ -354,36 +353,26 @@ class UserService: ObservableObject {
         
         // Prevent following oneself
         guard currentUserId != userIdToFollow else {
-
-            return // Or throw an error
+            print("Cannot follow yourself")
+            return
         }
 
         // Check if already following to prevent duplicate follow documents
         let alreadyFollowing = await isUserFollowing(targetUserId: userIdToFollow, currentUserId: currentUserId)
         guard !alreadyFollowing else {
-
+            print("Already following this user")
             return
         }
 
         let followData = UserFollow(followerId: currentUserId, followeeId: userIdToFollow, createdAt: Date())
         
-        // Reference paths for legacy sub-collections (for backward compatibility)
-        let currentUserFollowingRef = db.collection("users").document(currentUserId)
-            .collection("following").document(userIdToFollow)
-        let targetUserFollowersRef = db.collection("users").document(userIdToFollow)
-            .collection("followers").document(currentUserId)
-        
         do {
-            // Store in the new top-level collection
+            // Store only in the centralized userFollows collection
             try await db.collection(userFollowsCollection).addDocument(from: followData)
             
-            // ALSO store in legacy sub-collections so existing UI continues to work
-            try await currentUserFollowingRef.setData(["timestamp": FieldValue.serverTimestamp()])
-            try await targetUserFollowersRef.setData(["timestamp": FieldValue.serverTimestamp()])
-            
+            print("Successfully followed user")
 
-
-            // Optimistically update local counts and refresh profiles - No longer need DispatchQueue.main.async
+            // Optimistically update local counts and refresh profiles
             if var followedUser = self.loadedUsers[userIdToFollow] {
                 followedUser.followersCount += 1
                 self.loadedUsers[userIdToFollow] = followedUser
@@ -395,11 +384,8 @@ class UserService: ObservableObject {
             if self.currentUserProfile?.id == currentUserId {
                 self.currentUserProfile?.followingCount += 1
             }
-            // Consider re-fetching profiles for robustness or relying on Cloud Functions for counters
-            // await fetchUser(id: userIdToFollow)
-            // await fetchUser(id: currentUserId) 
         } catch {
-
+            print("Error following user: \(error)")
             throw error
         }
     }
@@ -416,25 +402,16 @@ class UserService: ObservableObject {
         do {
             let snapshot = try await query.getDocuments()
             guard !snapshot.documents.isEmpty else {
-
-                return // Or throw an error indicating not currently following
+                print("Not currently following this user")
+                return
             }
 
+            // Delete from userFollows collection only
             for document in snapshot.documents {
                 try await db.collection(userFollowsCollection).document(document.documentID).delete()
             }
             
-            // References to legacy documents
-            let currentUserFollowingRef = db.collection("users").document(currentUserId)
-                .collection("following").document(userIdToUnfollow)
-            let targetUserFollowersRef = db.collection("users").document(userIdToUnfollow)
-                .collection("followers").document(currentUserId)
-            
-            // Delete legacy docs if they exist
-            try? await currentUserFollowingRef.delete()
-            try? await targetUserFollowersRef.delete()
-            
-
+            print("Successfully unfollowed user")
 
             // Optimistically update local counts and refresh profiles
             if var unfollowedUser = self.loadedUsers[userIdToUnfollow] {
@@ -448,11 +425,8 @@ class UserService: ObservableObject {
             if self.currentUserProfile?.id == currentUserId {
                 self.currentUserProfile?.followingCount = max(0, (self.currentUserProfile?.followingCount ?? 0) - 1)
             }
-            // Consider re-fetching profiles or relying on Cloud Functions for counters
-            // await fetchUser(id: userIdToUnfollow)
-            // await fetchUser(id: currentUserId)
         } catch {
-
+            print("Error unfollowing user: \(error)")
             throw error
         }
     }

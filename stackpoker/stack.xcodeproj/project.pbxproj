@@ -144,6 +144,7 @@
 				66EA95632DBC1E0B0076E0AD /* Sources */,
 				66EA95642DBC1E0B0076E0AD /* Frameworks */,
 				66EA95652DBC1E0B0076E0AD /* Resources */,
+				66732C382DE55BF800117715 /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -286,6 +287,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		66732C382DE55BF800117715 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Copy pre-built dSYMs from any embedded XCFramework into the archive\n# Runs only when ACTION=install (Archive) so it’s ignored for normal builds\n\nif [ \"$ACTION\" = \"install\" ]; then\n  echo \"├─ Copying binary framework dSYMs…\"\n  find \"${BUILT_PRODUCTS_DIR}\" -name \"*.dSYM\" -type d -print0 | \\\n    while IFS= read -r -d '' BUNDLE; do\n      echo \"│  ▸ $(basename \"$BUNDLE\")\"\n      cp -R \"$BUNDLE\" \"${DWARF_DSYM_FOLDER_PATH}/\" || true\n    done\n  echo \"└─ Done\"\nfi\n\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		66EA95632DBC1E0B0076E0AD /* Sources */ = {
@@ -453,6 +474,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RQVKDAF979;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = stack/Info.plist;
@@ -473,9 +495,13 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = gg.stackpoker.stack;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -488,6 +514,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RQVKDAF979;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = stack/Info.plist;
@@ -508,9 +535,13 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = gg.stackpoker.stack;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};

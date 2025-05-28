@@ -343,8 +343,8 @@ class SessionStore: ObservableObject {
         
         do {
             let docRef = try await db.collection("sessions").addDocument(data: sessionData)
-            // After successful save, clear the live session state
-            clearLiveSession()
+            // After successful save, properly end and clear the live session state
+            endAndClearLiveSession()
             return docRef.documentID // Return the new document ID
         } catch {
 
@@ -355,14 +355,46 @@ class SessionStore: ObservableObject {
     func clearLiveSession() {
         stopLiveSessionTimer()
         
-        // Reset everything immediately
+        // Reset everything immediately to a known clean state.
+        // Assumes LiveSessionData() creates an instance with buyIn = 0 and isEnded = false.
         liveSession = LiveSessionData()
-        enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
+        enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession) // Reinitialize with the new clean liveSession
         showLiveSessionBar = false
         
         // Remove from UserDefaults
         removeLiveSessionState()
         removeEnhancedLiveSessionState()
+    }
+    
+    // Mark session as ended and then clear it
+    func endAndClearLiveSession() {
+        stopLiveSessionTimer()
+        
+        // Mark session as ended before clearing
+        liveSession.isEnded = true
+        saveLiveSessionState() // Save the ended state
+        
+        // Now clear everything
+        clearLiveSession()
+    }
+    
+    // Force clear any stuck session data (useful for debugging or recovery)
+    func forceClearAllSessionData() {
+        stopLiveSessionTimer()
+        
+        // Reset everything immediately
+        liveSession = LiveSessionData()
+        enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
+        showLiveSessionBar = false
+        
+        // Force remove from UserDefaults
+        removeLiveSessionState()
+        removeEnhancedLiveSessionState()
+        
+        // Also clear any other potential keys that might exist
+        UserDefaults.standard.removeObject(forKey: "LiveSession_\(userId)")
+        UserDefaults.standard.removeObject(forKey: "EnhancedLiveSession_\(userId)")
+        UserDefaults.standard.synchronize()
     }
     
     // MARK: - Timer Management
@@ -427,35 +459,61 @@ class SessionStore: ObservableObject {
         if let savedData = UserDefaults.standard.data(forKey: "LiveSession_\(userId)"),
            let loadedSession = try? JSONDecoder().decode(LiveSessionData.self, from: savedData) {
             
-            // Only restore if session is actually in progress (active or paused, not ended)
-            if loadedSession.isActive || loadedSession.lastPausedAt != nil {
-                if loadedSession.isActive, let lastActive = loadedSession.lastActiveAt {
+            // If isEnded is true, it's definitively ended. Clear it and return.
+            // This handles sessions that were correctly marked as ended.
+            if loadedSession.isEnded {
+                clearLiveSession()
+                return
+            }
+
+            // If isEnded is false (either explicitly set so, or by default from missing field in legacy data):
+            // Now check other conditions to see if it should be restored.
+
+            let isPotentiallyRestorable = loadedSession.isActive || loadedSession.lastPausedAt != nil
+            let hasValidBuyIn = loadedSession.buyIn > 0
+
+            // Staleness/Abandoned Check:
+            // If a session wasn't explicitly ended (i.e., isEnded is false),
+            // and its last activity (active, pause, or even start time) was > 24 hours ago,
+            // consider it abandoned and clear it. This helps clean up legacy sessions
+            // or sessions from crashes that were never properly ended.
+            let lastActivityTime = loadedSession.lastActiveAt ?? loadedSession.lastPausedAt ?? loadedSession.startTime
+            let timeSinceLastActivity = Date().timeIntervalSince(lastActivityTime)
+            let isAbandoned = timeSinceLastActivity > (24 * 60 * 60) // 24 hours
+
+            if hasValidBuyIn && isPotentiallyRestorable && !isAbandoned {
+                // This session looks like it should be restored.
+                var sessionToRestore = loadedSession
+                if sessionToRestore.isActive, let lastActive = sessionToRestore.lastActiveAt {
+                    // If it was active, calculate time passed since last active and add to elapsed.
                     let additionalTime = Date().timeIntervalSince(lastActive)
-                    var updatedSession = loadedSession
-                    updatedSession.elapsedTime += additionalTime
-                    updatedSession.lastActiveAt = Date()
-                    liveSession = updatedSession
-                } else {
-                    liveSession = loadedSession
+                    sessionToRestore.elapsedTime += additionalTime
+                    sessionToRestore.lastActiveAt = Date() // Update last active to now
                 }
+                // If it was paused, it's loaded as is.
                 
-                // Restore tournament specific state if it was a tournament
-                if liveSession.isTournament {
-                    // The EnhancedLiveSessionView will pick up these from liveSession
-                    // in its onAppear and set its local @State vars accordingly.
-                }
+                self.liveSession = sessionToRestore
                 
-                if loadedSession.isActive {
+                if self.liveSession.isActive {
                     startLiveSessionTimer()
                 }
-                showLiveSessionBar = true
-                
-                // Load enhanced state if available
-                loadEnhancedLiveSessionState()
+                self.showLiveSessionBar = true
+                loadEnhancedLiveSessionState() // Also load its associated enhanced data
             } else {
-                // If not active or paused, clear any lingering state
+                // Conditions not met for restoration:
+                // - No valid buy-in (effectively an empty or cleared session).
+                // - Not marked as active or paused (e.g., only startTime set, then app quit).
+                // - Considered abandoned (last activity > 24 hours ago and not explicitly ended).
                 clearLiveSession()
             }
+        } else {
+            // No saved data, or decoding failed. Ensure a clean state for a new session.
+            // This implicitly means liveSession is a new LiveSessionData() instance from the @Published declaration,
+            // which should have buyIn = 0 and isEnded = false.
+            self.liveSession = LiveSessionData() // Explicitly ensure it's a default clean session
+            self.enhancedLiveSession = LiveSessionData_Enhanced(basicSession: self.liveSession)
+            self.showLiveSessionBar = false
+            // No need to call clearLiveSession() here as there was nothing to clear from persistence.
         }
     }
     

@@ -256,7 +256,9 @@ struct ProfileView: View {
         .sheet(isPresented: $showEdit) {
             if let profile = userService.currentUserProfile {
                 ProfileEditView(profile: profile) { updatedProfile in
-                    Task { try? await userService.fetchUserProfile() }
+                    Task { 
+                        try? await userService.fetchUserProfile() 
+                    }
                 }
             }
         }
@@ -265,10 +267,16 @@ struct ProfileView: View {
         }
         // .sheet(isPresented: $showingPostDetailSheet) // This was for PostDetailView, now handled by NavigationLink in ActivityContentView
         .sheet(isPresented: $showingFollowersSheet) { // Ensure these are declared
-            FollowListView(userId: userId, listType: .followers)
+            NavigationView {
+                FollowListView(userId: userId, listType: .followers)
+            }
+            .navigationViewStyle(StackNavigationViewStyle())
         }
         .sheet(isPresented: $showingFollowingSheet) { // Ensure these are declared
-            FollowListView(userId: userId, listType: .following)
+            NavigationView {
+                FollowListView(userId: userId, listType: .following)
+            }
+            .navigationViewStyle(StackNavigationViewStyle())
         }
         .fullScreenCover(isPresented: $showActivityDetailView) {
             NavigationView {
@@ -982,11 +990,11 @@ struct ProfileCardView: View {
                                             .clipShape(Circle())
                                             .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
                                 } else {
-                                    placeholderAvatar(size: 60)
+                                    PlaceholderAvatarView(size: 60)
                                 }
                             }
                         } else {
-                            placeholderAvatar(size: 60)
+                            PlaceholderAvatarView(size: 60)
                         }
                             
                             // Middle: Name, Username, Location
@@ -1096,15 +1104,6 @@ struct ProfileCardView: View {
                 Task { try? await userService.fetchUserProfile() }
             }
         }
-    }
-    
-    // Helper for placeholder avatar
-    @ViewBuilder
-    private func placeholderAvatar(size: CGFloat) -> some View {
-        Circle().fill(Color.gray.opacity(0.2))
-            .frame(width: size, height: size)
-            .overlay(Image(systemName: "person.fill").foregroundColor(.gray).font(.system(size: size * 0.4)))
-            .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
     }
 }
 
@@ -1373,22 +1372,22 @@ struct SettingsView: View {
             batch.deleteDocument(doc.reference)
         }
         
-        // Delete user's followers/following
-        let followers = try await db.collection("users")
-            .document(userId)
-            .collection("followers")
+        // Delete user's follow relationships from userFollows collection
+        // Delete where user is a follower (following someone)
+        let followingDocs = try await db.collection("userFollows")
+            .whereField("followerId", isEqualTo: userId)
             .getDocuments()
         
-        for doc in followers.documents {
+        for doc in followingDocs.documents {
             batch.deleteDocument(doc.reference)
         }
         
-        let following = try await db.collection("users")
-            .document(userId)
-            .collection("following")
+        // Delete where user is being followed (someone following them)
+        let followerDocs = try await db.collection("userFollows")
+            .whereField("followeeId", isEqualTo: userId)
             .getDocuments()
         
-        for doc in following.documents {
+        for doc in followerDocs.documents {
             batch.deleteDocument(doc.reference)
         }
         

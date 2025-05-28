@@ -255,7 +255,7 @@ struct PostEditorView: View {
                             .padding(.horizontal)
                             .padding(.bottom, 15)
                         } else {
-                            // Text Editor for regular posts / notes / hands (not a completed session share)
+                            // Text Editor for regular posts / notes / hands / session starts (not a completed session share)
                             ZStack(alignment: .topLeading) {
                                 TextEditor(text: $postText)
                                     .focused($isTextEditorFocused)
@@ -333,7 +333,8 @@ struct PostEditorView: View {
             }
             .onAppear {
                 if !initialText.isEmpty {
-                    if !isNote && !showFullSessionCard {
+                    // Don't populate postText for session start posts since we show the info separately
+                    if !isNote && !showFullSessionCard && !isSessionStartPost {
                         postText = initialText
                     }
                 }
@@ -385,13 +386,15 @@ struct PostEditorView: View {
         }
         // Original logic for other post types
         let isEmpty = postText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let allowEmptyPost = isNote || showFullSessionCard
+        let allowEmptyPost = isNote || showFullSessionCard || isSessionStartPost
         return (isEmpty && !allowEmptyPost) || isLoading || userService.currentUserProfile == nil
     }
 
     private var placeholderText: String {
         if selectedCompletedSession != nil {
             return "Describe your session..." // This won't be used by TextEditor directly if we handle placeholder manually
+        } else if isSessionStartPost {
+            return "Add a comment about starting your session..."
         } else if isSessionPost {
             return "Share your session update..."
         } else if isHandPost {
@@ -641,6 +644,48 @@ struct PostEditorView: View {
         }
     }
 
+    // Add a new computed property to detect session start posts
+    private var isSessionStartPost: Bool {
+        // Check if this is a session start post by looking at the content
+        return initialText.contains("Started a new session") || 
+               (isSessionPost && showFullSessionCard && !isNote && !isHandPost && selectedCompletedSession == nil)
+    }
+
+    // Update the sessionDisplayView to handle session start posts differently
+    @ViewBuilder
+    private var sessionDisplayView: some View {
+        if isSessionStartPost {
+            // Session start - clean text display without the green box
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    
+                    Text("Started Session")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                }
+                
+                // Game and stakes info
+                Text("\(sessionGameName) (\(sessionStakes))")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 16)
+        } else if isSessionPost && sessionId != nil && showFullSessionCard && !isSessionStartPost {
+            // Other session posts with full card (chip updates, etc.)
+            SessionCard(text: extractSessionDetails())
+                .padding(.horizontal)
+                .padding(.bottom, 16)
+        }
+        // No else clause - notes and hands don't show session display here
+    }
+
     // MARK: - View Builders
 
     @ViewBuilder
@@ -711,18 +756,6 @@ struct PostEditorView: View {
                 .font(.system(size: 14))
                 .foregroundColor(.gray)
         }
-    }
-
-    @ViewBuilder
-    private var sessionDisplayView: some View {
-        if isSessionPost && sessionId != nil && showFullSessionCard {
-            // Only show SessionCard if it's a session post AND showFullSessionCard is true
-            SessionCard(text: extractSessionDetails())
-                .padding(.horizontal)
-                .padding(.bottom, 16)
-        }
-        // No else, so no badge is shown here if showFullSessionCard is false.
-        // The main editor UI will be used, and context will be shown in the feed via PostContextTagView.
     }
 
     @ViewBuilder

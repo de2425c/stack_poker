@@ -106,59 +106,45 @@ enum BuyinRange: String, CaseIterable, Identifiable {
 
 // Old IdentifiableDate struct removed (was lines 4-16)
 
-// 1. Event Model (Updated for SimpleDate)
+// 1. Event Model (Updated for enhanced_events collection)
 struct Event: Identifiable, Hashable {
     let id: String 
     let buyin_string: String
-    let casino: String
-    let city: String?
-    let country: String?
-    let state: String?
     let simpleDate: SimpleDate
-    let name: String
-    let series: String?
+    let event_name: String
+    let series_name: String?
+    let description: String?
     let time: String?
+    let buyin_usd: Double? // New field for USD buy-in
 
     init?(document: QueryDocumentSnapshot) {
         let data = document.data()
 
-
-
         guard let docId = Optional(document.documentID), !docId.isEmpty else {
-
             return nil
         }
         self.id = docId
 
         guard let buyinStr = data["buyin_string"] as? String, !buyinStr.isEmpty else { 
-
             return nil 
         }
         self.buyin_string = buyinStr
 
-        guard let casinoStr = data["casino"] as? String, !casinoStr.isEmpty else { 
-
-            return nil
-        }
-        self.casino = casinoStr
-
-        self.city = data["city"] as? String
-        self.country = data["country"] as? String
-        self.state = data["state"] as? String
-        self.series = data["series"] as? String
-
         guard let dateStringFromFirestore = data["date"] as? String,
               let parsedSimpleDate = SimpleDate(from: dateStringFromFirestore) else { 
-
             return nil
         }
         self.simpleDate = parsedSimpleDate
 
-        guard let nameStr = data["name"] as? String, !nameStr.isEmpty else { 
-
+        guard let eventNameStr = data["event_name"] as? String, !eventNameStr.isEmpty else { 
             return nil
         }
-        self.name = nameStr
+        self.event_name = eventNameStr
+
+        // Optional fields
+        self.series_name = data["series_name"] as? String
+        self.description = data["description"] as? String
+        self.buyin_usd = data["buyin_usd"] as? Double // Initialize new field
 
         let timeValue = data["time"] as? String
         if let t = timeValue, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -166,8 +152,6 @@ struct Event: Identifiable, Hashable {
         } else {
             self.time = nil
         }
-        
-
     }
 
     func hash(into hasher: inout Hasher) {
@@ -205,29 +189,12 @@ struct EventCardView: View {
     let event: Event
     var onSelect: (() -> Void)? // Add a callback for when the card is tapped
 
-    private var locationString: String {
-        let city = event.city?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let state = event.state?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let country = event.country?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        var parts: [String] = []
-        if !city.isEmpty { parts.append(city) }
-        if !state.isEmpty { parts.append(state) }
-        if !country.isEmpty { parts.append(country) }
-
-        if parts.isEmpty {
-            return "Location Undisclosed"
-        } else {
-            return parts.joined(separator: ", ")
-        }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
-            Text(event.name)
+            Text(event.event_name)
                 .font(.system(size: 18, weight: .semibold, design: .rounded))
                 .foregroundColor(.white)
-                .lineLimit(2)
+                .lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Rectangle()
@@ -237,11 +204,12 @@ struct EventCardView: View {
 
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 12) {
-                    InfoRow(label: "Casino", value: event.casino, valueFont: .system(size: 15, weight: .medium, design: .rounded))
-                    InfoRow(label: "Location", value: locationString, valueFont: .system(size: 14, weight: .regular, design: .rounded))
+                    if let description = event.description, !description.isEmpty {
+                        InfoRow(label: "Description", value: description, valueFont: .system(size: 14, weight: .regular, design: .rounded))
+                    }
                     
-                    if let series = event.series, !series.isEmpty {
-                        InfoRow(label: "Series", value: series, valueFont: .system(size: 14, weight: .regular, design: .rounded))
+                    if let seriesName = event.series_name, !seriesName.isEmpty {
+                        InfoRow(label: "Series", value: seriesName, valueFont: .system(size: 14, weight: .medium, design: .rounded))
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
@@ -281,6 +249,7 @@ struct EventCardView: View {
                     Text(event.buyin_string)
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundColor(Color(UIColor(red: 100/255, green: 220/255, blue: 100/255, alpha: 1.0)))
+                        .multilineTextAlignment(.trailing)
                 }
                 .frame(minWidth: 80, alignment: .trailing)
             }
@@ -311,68 +280,34 @@ class ExploreViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
     
-    // --- New Filter Properties ---
-    @Published var selectedCountry: String? = "All Countries" { // Default to "All Countries"
-        didSet {
-            // Reset state when country changes and update available states
-            selectedState = nil 
-            updateAvailableStates()
-        }
-    }
-    @Published var selectedState: String? = nil
-    @Published var selectedSeriesSet: Set<String> = [] // NEW: For multi-select series
-    @Published var selectedBuyinRange: BuyinRange = .all // New property for buy-in range
-    @Published var availableCountries: [String] = []
-    @Published var availableStates: [String] = []
-    @Published var availableSeries: [String] = [] // New property for available series
-    // --- End New Filter Properties ---
+    // --- Updated Filter Properties (removed country/state) ---
+    @Published var selectedSeriesSet: Set<String> = [] // For multi-select series
+    @Published var selectedBuyinRange: BuyinRange = .all // Property for buy-in range
+    @Published var availableSeries: [String] = [] // Property for available series
+    // --- End Updated Filter Properties ---
     
     private var db = Firestore.firestore()
     private var cancellables = Set<AnyCancellable>() // For observing changes
 
     init() {
-        // Observe changes to allEvents to update country/state lists
+        // Observe changes to allEvents to update series list
         $allEvents
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.updateAvailableCountries()
-                self?.updateAvailableStates()
-                self?.updateAvailableSeries() // Call new method
+                self?.updateAvailableSeries()
             }
             .store(in: &cancellables)
     }
 
-    private func updateAvailableCountries() {
-        let countries = Set(allEvents.compactMap { $0.country?.trimmingCharacters(in: .whitespacesAndNewlines) }).filter { !$0.isEmpty }
-        self.availableCountries = ["All Countries"] + Array(countries).sorted()
-        // If current selectedCountry is no longer valid or nil, and "All Countries" is not the only option,
-        // you might want to default to "All Countries" or the first actual country.
-        // For now, it will retain selection or be nil.
-    }
-
-    private func updateAvailableStates() {
-        let states: Set<String>
-        if let country = selectedCountry, country != "All Countries" {
-            states = Set(allEvents.filter { $0.country == country }.compactMap { $0.state?.trimmingCharacters(in: .whitespacesAndNewlines) }).filter { !$0.isEmpty }
-        } else {
-            // Show all states if "All Countries" or no country is selected, or only states for selected country if it has states
-            // For simplicity now, if "All Countries" or no country, show all unique states from all events
-            states = Set(allEvents.compactMap { $0.state?.trimmingCharacters(in: .whitespacesAndNewlines) }).filter { !$0.isEmpty }
-        }
-        self.availableStates = ["All States"] + Array(states).sorted()
-        // Similar logic for selectedState if it becomes invalid
-    }
-
     private func updateAvailableSeries() {
         guard !allEvents.isEmpty else {
-            // self.availableSeries = ["All Series"] // "All Series" will be handled by UI logic now
             self.availableSeries = []
             return
         }
 
         var seriesCounts: [String: Int] = [:]
         for event in allEvents {
-            if let series = event.series, !series.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let series = event.series_name, !series.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 seriesCounts[series, default: 0] += 1
             }
         }
@@ -385,7 +320,6 @@ class ExploreViewModel: ObservableObject {
             return item1.key < item2.key // Alphabetical for ties
         }.map { $0.key }
 
-        // self.availableSeries = ["All Series"] + sortedSeries // "All Series" removed from data source
         self.availableSeries = sortedSeries
         
         // If current selectedSeriesSet contains series no longer available, remove them
@@ -394,46 +328,31 @@ class ExploreViewModel: ObservableObject {
     }
 
     func fetchEvents() {
-
         isLoading = true
         errorMessage = nil
         
-        db.collection("events").order(by: "date").getDocuments { [weak self] (querySnapshot, error) in
-
+        db.collection("enhanced_events").order(by: "date").getDocuments { [weak self] (querySnapshot, error) in
             guard let self = self else {
-
                 return
             }
             DispatchQueue.main.async {
                 self.isLoading = false
                 if let error = error {
                     self.errorMessage = "Failed to load events: \(error.localizedDescription)"
-
                     return
                 }
                 guard let documents = querySnapshot?.documents else {
-                    self.errorMessage = "No event documents found in 'events_parsed'."
-
+                    self.errorMessage = "No event documents found in 'enhanced_events'."
                     return
                 }
                 
-
-                
                 let parsedEvents = documents.compactMap { Event(document: $0) }
-
-
                 self.allEvents = parsedEvents
                 
                 if self.allEvents.isEmpty && documents.count > 0 {
                      self.errorMessage = "Event data could not be processed or all events had empty buy-ins/invalid dates. Check console for details."
-
                 } else if self.allEvents.isEmpty {
                     self.errorMessage = "No events available (or all had empty buy-ins/invalid dates)."
-
-                } else {
-
-                    // Optionally clear errorMessage if it was set from a previous failed attempt
-                    // self.errorMessage = nil 
                 }
             }
         }
@@ -585,24 +504,10 @@ struct ExploreView: View {
         }
         // --- End Helper ---
 
-        // --- Apply Country Filter ---
-        if let country = viewModel.selectedCountry, country != "All Countries" {
-            eventsToFilter = eventsToFilter.filter { $0.country == country }
-        }
-
-        // --- Apply State Filter ---
-        // Only apply state filter if a specific country is selected (or adjust if "All States" for "All Countries" has a different meaning)
-        if let country = viewModel.selectedCountry, country != "All Countries", let state = viewModel.selectedState, state != "All States" {
-            eventsToFilter = eventsToFilter.filter { $0.state == state }
-        } else if (viewModel.selectedCountry == nil || viewModel.selectedCountry == "All Countries"), let state = viewModel.selectedState, state != "All States" {
-            // If "All Countries" is selected, filter by state across all countries
-            eventsToFilter = eventsToFilter.filter { $0.state == state }
-        }
-
         // --- Apply Series Filter (Multi-select) ---
         if !viewModel.selectedSeriesSet.isEmpty {
             eventsToFilter = eventsToFilter.filter { seriesName in
-                guard let eventSeries = seriesName.series else { return false }
+                guard let eventSeries = seriesName.series_name else { return false }
                 return viewModel.selectedSeriesSet.contains(eventSeries)
             }
         }
@@ -628,19 +533,8 @@ struct ExploreView: View {
         }
         
         return eventsForSelectedDate.sorted { (event1, event2) -> Bool in
-            // Safely handle optional country
-            let event1Country = event1.country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-            let event2Country = event2.country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-
-            let event1IsAmerican = event1Country == "USA" || event1Country == "UNITED STATES"
-            let event2IsAmerican = event2Country == "USA" || event2Country == "UNITED STATES"
-
-            if event1IsAmerican && !event2IsAmerican {
-                return true
-            } else if !event1IsAmerican && event2IsAmerican {
-                return false
-            }
-            return event1.name.localizedCompare(event2.name) == .orderedAscending
+            // Sort alphabetically by event name
+            return event1.event_name.localizedCompare(event2.event_name) == .orderedAscending
         }
     }
     
@@ -689,60 +583,9 @@ struct ExploreView: View {
                 // if isDatePickerExpanded { ... } // ENTIRE BLOCK REMOVED
                 // --- End Custom Date Picker List ---
                 
-                // --- Filter Pickers (Country, State, AND NOW DATE) ---
+                // --- Filter Pickers (Buy-in Range Only) ---
                 if !viewModel.isLoading && !viewModel.allEvents.isEmpty {
                     HStack(spacing: 10) {
-                        // Country Picker
-                        Picker(selection: $viewModel.selectedCountry) {
-                            ForEach(viewModel.availableCountries, id: \.self) { countryName in
-                                Text(countryName).tag(countryName as String?)
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(viewModel.selectedCountry ?? "All Countries")
-                                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundColor(.gray)
-                            }
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 14)
-                            .background(Color.white.opacity(0.1))
-                            .cornerRadius(10)
-                            .frame(minWidth: 140)
-                        }
-                        .pickerStyle(MenuPickerStyle())
-                        .accentColor(.white)
-                        
-                        // State Picker
-                        if viewModel.selectedCountry != nil && viewModel.selectedCountry != "All Countries" && viewModel.availableStates.count > 1 {
-                            Picker(selection: $viewModel.selectedState) {
-                                ForEach(viewModel.availableStates, id: \.self) { stateName in
-                                    Text(stateName).tag(stateName as String?)
-                                }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Text(viewModel.selectedState ?? "All States")
-                                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-                                    Image(systemName: "chevron.down")
-                                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                        .foregroundColor(.gray)
-                                }
-                                .padding(.vertical, 10)
-                                .padding(.horizontal, 14)
-                                .background(Color.white.opacity(0.1))
-                                .cornerRadius(10)
-                                .frame(minWidth: 110)
-                            }
-                            .pickerStyle(MenuPickerStyle())
-                            .accentColor(.white)
-                            .transition(.opacity.combined(with: .slide))
-                        }
-
                         // Buy-in Picker
                         Picker(selection: $viewModel.selectedBuyinRange) {
                             ForEach(BuyinRange.allCases) { range in
@@ -752,7 +595,7 @@ struct ExploreView: View {
                             HStack(spacing: 6) {
                                 Text(viewModel.selectedBuyinRange.rawValue)
                                     .font(.system(size: 14, weight: .medium, design: .rounded))
-                            .foregroundColor(.white)
+                                    .foregroundColor(.white)
                                     .lineLimit(1)
                                 Image(systemName: "chevron.down")
                                     .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -767,15 +610,13 @@ struct ExploreView: View {
                         .pickerStyle(MenuPickerStyle())
                         .accentColor(.white)
                         
-                        Spacer() // Push pickers to the left
+                        Spacer() // Push picker to the left
                     }
-                    .animation(.easeInOut(duration: 0.2), value: viewModel.selectedCountry)
-                    .animation(.easeInOut(duration: 0.2), value: viewModel.availableStates)
                     .animation(.easeInOut(duration: 0.2), value: viewModel.selectedBuyinRange)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 10)
                 }
-                // --- End Country/State Filter Pickers ---
+                // --- End Buy-in Filter Picker ---
 
                 // --- NEW: Multi-Select Series Horizontal Scroller ---
                 if !viewModel.isLoading && !viewModel.availableSeries.isEmpty {

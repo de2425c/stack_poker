@@ -68,9 +68,12 @@ struct FeedView: View {
             UserSearchView(currentUserId: userId, userService: userService)
         }
         .fullScreenCover(item: $selectedPost) { post in // Changed from .sheet to .fullScreenCover
-            PostDetailView(post: post, userId: userId)
-                .environmentObject(postService)
-                .environmentObject(userService)
+            NavigationView {
+                PostDetailView(post: post, userId: userId)
+                    .environmentObject(postService)
+                    .environmentObject(userService)
+            }
+            .navigationViewStyle(StackNavigationViewStyle())
         }
         .fullScreenCover(isPresented: $showingFullScreenImage) {
             if let imageUrl = selectedImageURL {
@@ -157,15 +160,12 @@ struct FeedView: View {
                                     .clipShape(Circle())
                                     .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
                             } else {
-                                Image(systemName: "person.circle.fill")
-                                    .resizable()
-                                    .frame(width: 36, height: 36)
-                                    .foregroundColor(.gray) // Placeholder color
+                                PlaceholderAvatarView(size: 36)
                             }
                         }
                     } else {
                         // Placeholder if profile is not loaded
-                        Circle().fill(Color.gray.opacity(0.5)).frame(width: 36, height: 36)
+                        PlaceholderAvatarView(size: 36)
                     }
 
                     Button(action: {
@@ -513,7 +513,7 @@ struct BasicPostCardView: View {
                             if let profileImage = post.profileImage {
                                 KFImage(URL(string: profileImage))
                                     .placeholder {
-                                        Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                        PlaceholderAvatarView(size: 40)
                                     }
                                     .resizable()
                                     .scaledToFill()
@@ -524,9 +524,7 @@ struct BasicPostCardView: View {
                                             .stroke(Color.white.opacity(0.1), lineWidth: 1)
                                     )
                             } else {
-                                Circle()
-                                    .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                    .frame(width: 40, height: 40)
+                                PlaceholderAvatarView(size: 40)
                             }
                         }
                     }
@@ -928,7 +926,7 @@ struct PostCardView: View {
                         if let profileImage = post.profileImage {
                             KFImage(URL(string: profileImage))
                                 .placeholder {
-                                    Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                                    PlaceholderAvatarView(size: 40)
                                 }
                                 .resizable()
                                 .scaledToFill()
@@ -939,9 +937,7 @@ struct PostCardView: View {
                                         .stroke(Color.white.opacity(0.1), lineWidth: 1)
                                 )
                         } else {
-                            Circle()
-                                .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                                .frame(width: 40, height: 40)
+                            PlaceholderAvatarView(size: 40)
                         }
                     }
                 }
@@ -1419,27 +1415,28 @@ struct PostDetailView: View {
     private var postHeaderAndBody: some View {
         // Post header with enhanced profile image
         HStack(spacing: 12) {
-            // Profile image
-            Group {
-                if let profileImage = post.profileImage {
-                    KFImage(URL(string: profileImage))
-                        .placeholder {
-                            Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                        }
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 50, height: 50)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
-                } else {
-                    Circle()
-                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                        .frame(width: 50, height: 50)
-                        .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+            // Profile image - Clickable to navigate to user profile
+            NavigationLink(destination: UserProfileView(userId: post.userId).environmentObject(userService)) {
+                Group {
+                    if let profileImage = post.profileImage {
+                        KFImage(URL(string: profileImage))
+                            .placeholder {
+                                PlaceholderAvatarView(size: 50)
+                            }
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 50, height: 50)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                    } else {
+                        PlaceholderAvatarView(size: 50)
+                            .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                    }
                 }
             }
+            .buttonStyle(PlainButtonStyle())
             
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
@@ -1522,6 +1519,7 @@ struct PostDetailView: View {
                 userId: userId,
                 postId: postId,
                 commentToExpandReplies: commentToExpandReplies,
+                userService: userService,
                 onReplyTapped: { comment in
                                 replyingToComment = comment
                                 newCommentText = "@\(comment.username) "
@@ -1548,16 +1546,14 @@ struct PostDetailView: View {
                 if let profileImageURL = userService.currentUserProfile?.avatarURL {
                     KFImage(URL(string: profileImageURL))
                         .placeholder {
-                            Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                            PlaceholderAvatarView(size: 32)
                         }
                         .resizable()
                         .scaledToFill()
                         .frame(width: 32, height: 32)
                         .clipShape(Circle())
                 } else {
-                    Circle()
-                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                        .frame(width: 32, height: 32)
+                    PlaceholderAvatarView(size: 32)
                 }
                 
                 ZStack(alignment: .trailing) {
@@ -1829,17 +1825,30 @@ struct CommentRow: View {
     let onToggleReplies: (() -> Void)?
     let onDelete: () -> Void // REVERTED to original
     let areRepliesExpanded: Bool
+    @EnvironmentObject var userService: UserService // Access to get displayName
     
     @State private var showDeleteConfirm = false
+    @State private var navigateToProfile = false // For programmatic navigation
+    
+    // Get display name from userService if available, fallback to username
+    // TODO: Comments should store displayName to avoid needing to fetch from userService
+    private var displayName: String {
+        if let userProfile = userService.loadedUsers[comment.userId],
+           let profileDisplayName = userProfile.displayName,
+           !profileDisplayName.isEmpty {
+            return profileDisplayName
+        }
+        return comment.username
+    }
     
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            // Profile image with enhanced styling
+            // Profile image with enhanced styling - Tappable to navigate to user profile
             Group {
                 if let profileImage = comment.profileImage {
                     KFImage(URL(string: profileImage))
                         .placeholder {
-                            Circle().fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
+                            PlaceholderAvatarView(size: 36)
                         }
                         .resizable()
                         .scaledToFill()
@@ -1850,21 +1859,24 @@ struct CommentRow: View {
                                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
                         )
                 } else {
-                    Circle()
-                        .fill(Color(UIColor(red: 28/255, green: 28/255, blue: 30/255, alpha: 1.0)))
-                        .frame(width: 36, height: 36)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                        )
+                    PlaceholderAvatarView(size: 36)
                 }
+            }
+            .contentShape(Circle())
+            .onTapGesture {
+                navigateToProfile = true
             }
             
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .center) {
-                    Text(comment.username)
+                    // Make username tappable too
+                    Text(displayName)
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            navigateToProfile = true
+                        }
                     
                     if isCurrentUser {
                         Text("(You)")
@@ -1939,6 +1951,15 @@ struct CommentRow: View {
         .padding(.vertical, 10)
         // Add left padding if it's a reply
         .padding(.leading, isReply ? 30 : 0)
+        // Hidden NavigationLink for programmatic navigation
+        .background(
+            NavigationLink(
+                destination: UserProfileView(userId: comment.userId).environmentObject(userService),
+                isActive: $navigateToProfile,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
     }
 }
 
@@ -2445,6 +2466,7 @@ private struct PostCommentsSectionView: View {
     let userId: String
     let postId: String // Needed for delete action on top-level comments
     let commentToExpandReplies: Comment?
+    let userService: UserService // Added to pass to CommentRow
 
     // Callbacks
     let onReplyTapped: (Comment) -> Void
@@ -2539,6 +2561,7 @@ private struct PostCommentsSectionView: View {
                             },
                             areRepliesExpanded: commentToExpandReplies?.id == comment.id && (replies[comment.id ?? ""]?.isEmpty == false)
                         )
+                        .environmentObject(userService)
                         .padding(.horizontal, 16)
 
                         if commentToExpandReplies?.id == comment.id {
@@ -2550,7 +2573,7 @@ private struct PostCommentsSectionView: View {
                                 }
                                 .padding(.horizontal, 16 + 15)
                             } else if let currentReplies = replies[comment.id ?? ""], !currentReplies.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
+                                VStack(alignment: .leading, spacing: 0) {
                                     ForEach(currentReplies) { reply in
                                         CommentRow(
                                             comment: reply,
@@ -2565,6 +2588,7 @@ private struct PostCommentsSectionView: View {
                                             },
                                             areRepliesExpanded: false
                                         )
+                                        .environmentObject(userService)
                                         
                                         if reply.id != currentReplies.last?.id {
                                             Divider()

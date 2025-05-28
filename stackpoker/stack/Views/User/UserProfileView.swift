@@ -35,11 +35,7 @@ struct UserProfileView: View {
                                     .clipShape(Circle())
                                     .overlay(Circle().stroke(Color.gray.opacity(0.5), lineWidth: 1))
                             } else {
-                                Image(systemName: "person.circle.fill")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 80, height: 80)
-                                    .foregroundColor(.gray)
+                                PlaceholderAvatarView(size: 80)
                             }
                         }
                         

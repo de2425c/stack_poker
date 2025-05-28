@@ -245,11 +245,8 @@ struct GameInfoSection: View {
 // MARK: - Tournament Info Section
 struct TournamentInfoSection: View {
     @Binding var tournamentName: String
-    @Binding var selectedTournamentType: String
-    @Binding var location: String
     var onSelectFromEvents: () -> Void // Closure to signal event selection request
 
-    let tournamentTypes = ["NLH", "PLO"] // Simplified tournament types
     // Colors & Font (assuming these are accessible or passed in if needed)
     private let primaryTextColor = Color(red: 0.98, green: 0.96, blue: 0.94)
     private let secondaryTextColor = Color(red: 0.9, green: 0.87, blue: 0.84)
@@ -292,35 +289,6 @@ struct TournamentInfoSection: View {
                     materialOpacity: materialOpacity
                 ) {
                     TextFieldContent(text: $tournamentName, placeholder: "Enter tournament name...", textColor: primaryTextColor)
-                }
-
-                HStack(spacing: 12) {
-                    GlassyInputField(
-                        icon: "tag",
-                        title: "Tournament Type",
-                        glassOpacity: glassOpacity,
-                        labelColor: secondaryTextColor,
-                        materialOpacity: materialOpacity
-                    ) {
-                        Picker("Tournament Type", selection: $selectedTournamentType) {
-                            ForEach(tournamentTypes, id: \.self) { type in
-                                Text(type).tag(type)
-                            }
-                        }
-                        .pickerStyle(MenuPickerStyle())
-                        .accentColor(primaryTextColor)
-                        .frame(height: 35)
-                    }
-                    
-                    GlassyInputField(
-                        icon: "location.fill",
-                        title: "Location", // Made non-optional
-                        glassOpacity: glassOpacity,
-                        labelColor: secondaryTextColor,
-                        materialOpacity: materialOpacity
-                    ) {
-                        TextFieldContent(text: $location, placeholder: "Enter location...", textColor: primaryTextColor)
-                    }
                 }
             }
         }
@@ -481,146 +449,8 @@ struct StakerConfig: Identifiable {
 }
 
 // New View for individual staker inputs
-struct StakerInputView: View {
-    @Binding var config: StakerConfig
-    @ObservedObject var userService: UserService
-
-    let primaryTextColor: Color
-    let secondaryTextColor: Color
-    let glassOpacity: Double
-    let materialOpacity: Double
-    var onRemove: () -> Void
-
-    @State private var searchDebounceTimer: Timer? = nil
-
-    var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text(config.selectedStaker == nil ? "New Staker" : "Staker: @\(config.selectedStaker!.username)")
-                    .font(.plusJakarta(.subheadline, weight: .semibold))
-                    .foregroundColor(primaryTextColor)
-                Spacer()
-                Button(action: onRemove) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.red.opacity(0.8))
-                        .font(.system(size: 20))
-                }
-            }
-            .padding(.top, 5)
-
-
-            GlassyInputField(
-                icon: "magnifyingglass",
-                title: config.selectedStaker == nil ? "Search for Staker (Username)" : "Change Staker: @\(config.selectedStaker!.username)",
-                glassOpacity: glassOpacity,
-                labelColor: secondaryTextColor,
-                materialOpacity: materialOpacity
-            ) {
-                TextFieldContent(text: $config.searchQuery, placeholder: "Enter username prefix...", textColor: primaryTextColor, prefixColor: secondaryTextColor)
-            }
-            .onChange(of: config.searchQuery) { newValue in
-                if config.selectedStaker != nil && !newValue.isEmpty {
-                    // Allow changing selected staker by clearing it when search query changes
-                    // config.selectedStaker = nil // Decided against auto-clearing to allow modification of existing search
-                }
-                searchDebounceTimer?.invalidate()
-                if newValue.isEmpty {
-                    config.searchResults = []
-                    config.isSearching = false
-                    return
-                }
-                config.isSearching = true
-                searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
-                    performStakerSearch(currentQuery: newValue)
-                }
-            }
-
-            if config.isSearching && config.searchResults.isEmpty && !config.searchQuery.isEmpty {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity)
-            } else if !config.searchResults.isEmpty {
-                List {
-                    ForEach(config.searchResults) { userProfile in
-                        HStack {
-                            Text("@\(userProfile.username)")
-                                .foregroundColor(primaryTextColor)
-                            if let displayName = userProfile.displayName, !displayName.isEmpty {
-                                Text("(\(displayName))")
-                                    .foregroundColor(secondaryTextColor)
-                            }
-                            Spacer()
-                        }
-                        .listRowBackground(Color.clear)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            config.selectedStaker = userProfile
-                            config.searchQuery = "" // Clear search query
-                            config.searchResults = []
-                            config.isSearching = false
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        }
-                    }
-                }
-                .listStyle(PlainListStyle())
-                .frame(height: min(CGFloat(config.searchResults.count * 44), 132)) // Max height for up to 3 items
-                .background(Color.black.opacity(0.1))
-                .cornerRadius(12)
-                .padding(.bottom, 5)
-            }
-
-            GlassyInputField(
-                icon: "percent",
-                title: "Markup (e.g., 1.1 for 10%)",
-                glassOpacity: glassOpacity,
-                labelColor: secondaryTextColor,
-                materialOpacity: materialOpacity
-            ) {
-                TextFieldContent(text: $config.markup, placeholder: "1.0", keyboardType: .decimalPad, textColor: primaryTextColor, prefixColor: secondaryTextColor)
-            }
-
-            GlassyInputField(
-                icon: "chart.pie",
-                title: "Percentage Sold (e.g., 50 for 50%)",
-                glassOpacity: glassOpacity,
-                labelColor: secondaryTextColor,
-                materialOpacity: materialOpacity
-            ) {
-                TextFieldContent(text: $config.percentageSold, placeholder: "0", keyboardType: .decimalPad, textColor: primaryTextColor, prefixColor: secondaryTextColor)
-            }
-             Divider().background(primaryTextColor.opacity(0.2)).padding(.top, 5)
-        }
-        .padding(.bottom, 10)
-    }
-
-    private func performStakerSearch(currentQuery: String) {
-        let query = currentQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else {
-            config.searchResults = []
-            config.isSearching = false
-            return
-        }
-
-        Task {
-            do {
-                let users = try await userService.searchUsersByUsernamePrefix(usernamePrefix: query, limit: 5)
-                DispatchQueue.main.async {
-                    if self.config.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().starts(with: query.lowercased()) {
-                        self.config.searchResults = users
-                    }
-                    self.config.isSearching = false
-                }
-            } catch {
-
-                DispatchQueue.main.async {
-                    self.config.searchResults = []
-                    self.config.isSearching = false
-                }
-            }
-        }
-    }
-}
+// This has been moved to ImprovedStakerInputView.swift - remove the old implementation
+// struct ImprovedStakerInputView: View {... }
 
 struct SessionFormView: View {
     @Environment(\.dismiss) var dismiss
@@ -645,8 +475,6 @@ struct SessionFormView: View {
 
     // Tournament Specific Data
     @State private var tournamentName: String = ""
-    @State private var selectedTournamentType: String = "NLH" // Default to first option
-    @State private var tournamentLocation: String = ""
     @State private var showingEventSelector = false // State to control ExploreView presentation
     @State private var selectedEventSeries: String? = nil // To store series from selected event
     @State private var rebuyCount: Int = 1 // New state for rebuy count
@@ -663,6 +491,7 @@ struct SessionFormView: View {
     @State private var stakerConfigs: [StakerConfig] = [] // New state for multiple stakers
 
     @State private var showStakingSection = false // To toggle visibility of staking fields
+    @State private var showingStakingPopup = false // New state for floating popup
 
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var stakeService = StakeService() // Add StakeService
@@ -737,8 +566,6 @@ struct SessionFormView: View {
                                 .onChange(of: selectedLogType) { _ in // Clear specific fields on type change
                                     if selectedLogType == .cashGame {
                                         tournamentName = ""
-                                        selectedTournamentType = "NLH"
-                                        tournamentLocation = ""
                                         selectedEventSeries = nil // Reset series
                                         baseBuyIn = "" // Reset base buy-in
                                         rebuyCount = 1 // Reset rebuy count
@@ -809,8 +636,6 @@ struct SessionFormView: View {
                                 if selectedLogType == .tournament {
                                     TournamentInfoSection(
                                         tournamentName: $tournamentName,
-                                        selectedTournamentType: $selectedTournamentType,
-                                        location: $tournamentLocation,
                                         onSelectFromEvents: { // Pass the closure action
                                             self.showingEventSelector = true
                                         }
@@ -875,84 +700,9 @@ struct SessionFormView: View {
                                 }
                                 .padding(.horizontal)
 
-                                // Staking Section Toggle
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Button(action: {
-                                        withAnimation {
-                                            showStakingSection.toggle()
-                                            // If opening and no stakers exist, add one
-                                            if showStakingSection && stakerConfigs.isEmpty {
-                                                stakerConfigs.append(StakerConfig())
-                                            }
-                                        }
-                                    }) {
-                                        HStack {
-                                            Text(showStakingSection ? "Hide Staking Details" : "Add Staking Details")
-                                                .font(.plusJakarta(.headline, weight: .medium))
-                                                .foregroundColor(primaryTextColor)
-                                            Spacer()
-                                            Image(systemName: showStakingSection ? "chevron.up" : "chevron.down")
-                                                .foregroundColor(primaryTextColor)
-                                        }
-                                    }
-                                    .padding(.leading, 6)
-                                    .padding(.bottom, showStakingSection ? 10 : 0) // Add bottom padding only when section is open
-                                }
-                                .padding(.horizontal)
+                                // Staking Section Trigger - Extracted to a computed property
+                                stakingSectionTriggerButton
 
-                                // Staking Details Section (Conditional)
-                                if showStakingSection {
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        HStack {
-                                            Text("Staking Info")
-                                                .font(.plusJakarta(.headline, weight: .medium))
-                                                .foregroundColor(primaryTextColor)
-                                            Spacer()
-                                        }
-                                        .padding(.leading, 6)
-                                        .padding(.bottom, 2)
-
-                                        ForEach($stakerConfigs) { $configBinding in // Iterate with bindings
-                                            StakerInputView(
-                                                config: $configBinding,
-                                                userService: userService,
-                                                primaryTextColor: primaryTextColor,
-                                                secondaryTextColor: secondaryTextColor,
-                                                glassOpacity: glassOpacity,
-                                                materialOpacity: materialOpacity,
-                                                onRemove: {
-                                                    if let index = stakerConfigs.firstIndex(where: { $0.id == configBinding.id }) {
-                                                        stakerConfigs.remove(at: index)
-                                                        if stakerConfigs.isEmpty { // if all removed, hide section
-                                                            showStakingSection = false
-                                                        }
-                                                    }
-                                                }
-                                            )
-                                        }
-                                        
-                                        Button(action: {
-                                            stakerConfigs.append(StakerConfig())
-                                        }) {
-                                            HStack {
-                                                Image(systemName: "plus.circle.fill")
-                                                Text("Add Another Staker")
-                                            }
-                                            .font(.plusJakarta(.body, weight: .medium))
-                                            .foregroundColor(primaryTextColor.opacity(0.9))
-                                            .padding(.vertical, 8)
-                                            .frame(maxWidth: .infinity)
-                                            .background(Color.white.opacity(0.1))
-                                            .cornerRadius(10)
-                                        }
-                                        .padding(.top, stakerConfigs.isEmpty ? 0 : 10)
-
-
-                                    }
-                                    .padding(.horizontal)
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
-                                }
-                                
                                 Spacer()
                             }
                         }
@@ -1009,7 +759,6 @@ struct SessionFormView: View {
                         }
                     }
                 }
-                .ignoresSafeArea(.keyboard)
             }
         }
         .sheet(isPresented: $showingAddGame) {
@@ -1037,36 +786,25 @@ struct SessionFormView: View {
         .sheet(isPresented: $showingEventSelector) { // Present ExploreView as a sheet
             NavigationView { // Embed in NavigationView for title/toolbar if ExploreView needs it
                 ExploreView(onEventSelected: { selectedEvent in
-                    self.tournamentName = selectedEvent.name
+                    self.tournamentName = selectedEvent.event_name
                     
-                    if let buyinValue = parseBuyinToDouble(selectedEvent.buyin_string) {
+                    if let usdBuyin = selectedEvent.buyin_usd {
+                        self.baseBuyIn = String(format: "%.2f", usdBuyin)
+                    } else if let buyinValue = parseBuyinToDouble(selectedEvent.buyin_string) {
                         self.baseBuyIn = String(format: "%.2f", buyinValue)
                     } else {
                         self.baseBuyIn = "" // Clear or set to default if parsing fails
-
                     }
                     
-                    self.tournamentLocation = selectedEvent.casino // Prioritize casino
-                    if self.tournamentLocation.isEmpty {
-                         let city = selectedEvent.city?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                         let state = selectedEvent.state?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                         let country = selectedEvent.country?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                         var parts: [String] = []
-                         if !city.isEmpty { parts.append(city) }
-                         if !state.isEmpty { parts.append(state) }
-                         if !country.isEmpty { parts.append(country) }
-                         self.tournamentLocation = parts.joined(separator: ", ")
-                    }
-                    if self.tournamentLocation.isEmpty { // Fallback if casino and geo parts are empty
-                        self.tournamentLocation = "TBD" 
-                    }
+                    // Location and Type are no longer set from the event
+                    // self.tournamentLocation = "" // REMOVED state variable
+                    // self.selectedTournamentType = "NLH" // REMOVED state variable
 
-                    self.selectedTournamentType = inferTournamentType(from: selectedEvent.name, series: selectedEvent.series)
-                    self.selectedEventSeries = selectedEvent.series // Store the series
+                    self.selectedEventSeries = selectedEvent.series_name // Series can still be used for other purposes if needed
 
                     self.selectedLogType = .tournament // Switch to tournament tab
                     self.showingEventSelector = false // Dismiss the sheet
-                }, isSheetPresentation: true) // Pass the new parameter
+                }, isSheetPresentation: true)
                 .navigationTitle("Select Event")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -1080,8 +818,75 @@ struct SessionFormView: View {
                 }
             }
         }
+        .overlay(
+            // Add floating staking popup overlay
+            FloatingStakingPopup(
+                isPresented: $showingStakingPopup,
+                stakerConfigs: $stakerConfigs,
+                userService: userService,
+                primaryTextColor: primaryTextColor,
+                secondaryTextColor: secondaryTextColor,
+                glassOpacity: glassOpacity,
+                materialOpacity: materialOpacity
+            )
+        )
     }
     
+    // Extracted Staking Section Trigger Button
+    private var stakingSectionTriggerButton: some View {
+        Button(action: {
+            // Add initial config if none exist
+            if stakerConfigs.isEmpty {
+                stakerConfigs.append(StakerConfig())
+            }
+            showingStakingPopup = true
+        }) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Staking Configuration")
+                        .font(.plusJakarta(.headline, weight: .medium))
+                        .foregroundColor(primaryTextColor)
+                    
+                    if stakerConfigs.isEmpty {
+                        Text("Tap to add staking details")
+                            .font(.plusJakarta(.caption, weight: .medium))
+                            .foregroundColor(secondaryTextColor)
+                    } else {
+                        Text("\(stakerConfigs.count) staker\(stakerConfigs.count == 1 ? "" : "s") configured")
+                            .font(.plusJakarta(.caption, weight: .medium))
+                            .foregroundColor(.green.opacity(0.8))
+                    }
+                }
+                
+                Spacer()
+                
+                HStack(spacing: 8) {
+                    if !stakerConfigs.isEmpty {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.system(size: 16))
+                    }
+                    
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(primaryTextColor.opacity(0.6))
+                        .font(.system(size: 14, weight: .medium))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(materialOpacity)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(stakerConfigs.isEmpty ? primaryTextColor.opacity(0.2) : Color.green.opacity(0.5), lineWidth: 1)
+            )
+        }
+        .padding(.horizontal)
+    }
+
     private func addSession() {
         isLoading = true
         
@@ -1149,13 +954,6 @@ struct SessionFormView: View {
 
         } else { // Tournament Log
             guard !tournamentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-
-                isLoading = false
-                // TODO: Show alert to user
-                return
-            }
-            guard !tournamentLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-
                 isLoading = false
                 // TODO: Show alert to user
                 return
@@ -1163,24 +961,27 @@ struct SessionFormView: View {
             let trimmedTournamentName = tournamentName.trimmingCharacters(in: .whitespacesAndNewlines)
             sessionDetails["gameType"] = selectedLogType.rawValue // "TOURNAMENT"
             sessionDetails["gameName"] = trimmedTournamentName // Tournament's name
-            sessionDetails["stakes"] = selectedTournamentType  // Tournament's type as stakes info
-            sessionDetails["tournamentType"] = selectedTournamentType // Specific field for tournament type
-            sessionDetails["location"] = tournamentLocation.isEmpty ? NSNull() : tournamentLocation.trimmingCharacters(in: .whitespacesAndNewlines)
-            // buyIn in sessionDetails already correctly represents total buy-in for tournament
-            let totalInvestment = finalBuyIn // buyIn from form is total buy-in
+            
+            // Stakes for a tournament log will be a generic placeholder or based on buy-in.
+            // Type and Location are removed.
+            if let buyInDouble = Double(baseBuyIn) {
+                sessionDetails["stakes"] = "$\(Int(buyInDouble)) Tournament" // e.g., "$1000 Tournament"
+            } else {
+                sessionDetails["stakes"] = "Tournament" // Fallback if buy-in isn't parsed
+            }
+            // sessionDetails["tournamentType"] = ... // REMOVED
+            // sessionDetails["location"] = ... // REMOVED
+            
+            let totalInvestment = finalBuyIn 
             sessionDetails["profit"] = finalCashout - totalInvestment
-            // sessionDetails["notes"] = ... // TODO: If notes field is added to form
-
-            // If tournament was selected from an event, try to get its series
-            // This requires that the selectedEvent is accessible here or its series passed down
-            // For now, let's assume we need to store it when it's selected.
-            // We will add a new @State var to hold the selected event's series temporarily.
+            
             if let eventSeries = selectedEventSeries, !eventSeries.isEmpty {
-                sessionDetails["series"] = eventSeries
+                sessionDetails["series"] = eventSeries // Store series if available
             }
 
             gameNameForStake = trimmedTournamentName
-            stakesForStake = selectedTournamentType
+            // For staking records, stakesForStake can be more descriptive if needed.
+            stakesForStake = selectedEventSeries ?? trimmedTournamentName 
             isStakingTournament = true
             tournamentTotalInvestmentForStake = totalInvestment
             tournamentNameForStakeOptional = trimmedTournamentName
@@ -1359,17 +1160,6 @@ struct SessionFormView: View {
         }
         
         return Double(cleanedString)
-    }
-
-    // Helper to infer tournament type
-    private func inferTournamentType(from name: String, series: String?) -> String {
-        let combinedText = "\(name.lowercased()) \(series?.lowercased() ?? "")"
-        if combinedText.contains("plo") || combinedText.contains("omaha") {
-            return "PLO"
-        } else if combinedText.contains("nlh") || combinedText.contains("holdem") || combinedText.contains("hold'em") {
-            return "NLH"
-        }
-        return "NLH" // Default if no specific type found
     }
 }
 

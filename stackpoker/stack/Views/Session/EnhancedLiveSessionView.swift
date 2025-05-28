@@ -39,6 +39,11 @@ struct EnhancedLiveSessionView: View {
     // Staking State Variables - COPIED FROM SessionFormView
     @State private var stakerConfigs: [StakerConfig] = [] // Array for multiple stakers
     @State private var showStakingSection = false // To toggle visibility of staking fields
+    @State private var showingStakingPopup = false // New state for floating popup
+    
+    // Existing stakes state variables
+    @State private var existingStakes: [Stake] = [] // Stakes for this session
+    @State private var isLoadingStakes = false // Loading state for stakes
     
     // Data model values - initialized onAppear
     @State private var chipUpdates: [ChipStackUpdate] = []
@@ -133,8 +138,6 @@ struct EnhancedLiveSessionView: View {
     @State private var selectedLogType: SessionLogType = .cashGame // Choose between CASH GAME or TOURNAMENT
     // Tournament setup fields
     @State private var tournamentName: String = ""
-    @State private var selectedTournamentType: String = "NLH"
-    @State private var tournamentLocation: String = ""
     @State private var showingEventSelector = false
     @State private var baseBuyInTournament: String = ""
     // Runtime helpers for tournament sessions
@@ -149,8 +152,8 @@ struct EnhancedLiveSessionView: View {
             return "New Session"
         } else {
             if isTournamentSession {
-                let buyInText = baseBuyInForTournament > 0 ? " ($\(Int(baseBuyInForTournament)) Buy-in)" : ""
-                return "\(sessionStore.liveSession.tournamentName ?? "Tournament")\(buyInText)"
+                let buyInText = baseBuyInTournament.isEmpty ? "" : " ($\(baseBuyInTournament) Buy-in)" // Updated to use baseBuyInTournament directly
+                return "\(sessionStore.liveSession.tournamentName ?? tournamentName)\(buyInText)" // Use local tournamentName if store is nil
             } else {
                 return "\(sessionStore.liveSession.stakes) @ \(sessionStore.liveSession.gameName)"
             }
@@ -199,8 +202,23 @@ struct EnhancedLiveSessionView: View {
             mainContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .ignoresSafeArea(.keyboard)
+            // Remove the keyboard from pushing the whole view up - REMOVED ignoresSafeArea(.keyboard)
+            // .ignoresSafeArea(.keyboard, edges: .all)
+            // Navigation modifiers moved to mainContent to avoid duplication
         }
+        // Navigation modifiers moved to mainContent to avoid duplication
+        .overlay(
+            // Add floating staking popup overlay
+            FloatingStakingPopup(
+                isPresented: $showingStakingPopup,
+                stakerConfigs: $stakerConfigs,
+                userService: userService,
+                primaryTextColor: .white,
+                secondaryTextColor: Color.white.opacity(0.7),
+                glassOpacity: 0.01,
+                materialOpacity: 0.2
+            )
+        )
     }
     
     // MARK: - Content Views
@@ -227,7 +245,7 @@ struct EnhancedLiveSessionView: View {
             }
         }
         // Prevent the keyboard from pushing the whole view up
-        .ignoresSafeArea(.keyboard, edges: .all)
+        // .ignoresSafeArea(.keyboard, edges: .all)
         // Restore the original view modifiers that were accidentally removed
         .navigationTitle(sessionTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -482,7 +500,6 @@ struct EnhancedLiveSessionView: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: geometry.size.height, alignment: .top)
             }
-            .ignoresSafeArea(.keyboard)
             .onTapGesture {
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
@@ -495,7 +512,6 @@ struct EnhancedLiveSessionView: View {
             handText: $handHistoryText,
             onSubmit: handleHandHistoryInput
         )
-        .ignoresSafeArea(.keyboard)
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
@@ -589,10 +605,13 @@ struct EnhancedLiveSessionView: View {
             isTournamentSession = sessionStore.liveSession.isTournament
             if isTournamentSession {
                 tournamentName = sessionStore.liveSession.tournamentName ?? "Tournament"
-                selectedTournamentType = sessionStore.liveSession.tournamentType ?? "NLH"
                 baseBuyInForTournament = sessionStore.liveSession.baseTournamentBuyIn ?? 0
                 // Ensure the buyIn field in the view (if used for display in tournament active view) reflects total
                 // For tournaments, liveSession.buyIn in SessionStore tracks the *total* buy-in including rebuys.
+                // If baseBuyInTournament string is needed for UI and not set, set it from baseBuyInForTournament double
+                if self.baseBuyInTournament.isEmpty && baseBuyInForTournament > 0 {
+                    self.baseBuyInTournament = String(format: "%.0f", baseBuyInForTournament)
+                }
             } else {
                 // If it's a new cash session or the initial buy-in hasn't been recorded as a chip update yet
                 if sessionStore.enhancedLiveSession.chipUpdates.isEmpty && sessionStore.liveSession.buyIn > 0 {
@@ -601,6 +620,9 @@ struct EnhancedLiveSessionView: View {
             }
             // Initialize data from session store's enhanced session
             updateLocalDataFromStore() // This will now include Session Started and the initial chip update if just added
+            
+            // Load existing stakes for this session
+            loadExistingStakes()
             
             loadSessionPosts()
             
@@ -785,25 +807,6 @@ struct EnhancedLiveSessionView: View {
                                 materialOpacity: 0.2
                             )
 
-                            HStack(spacing: 12) {
-                                GlassyInputField(
-                                    icon: "tag",
-                                    title: "Type",
-                                    content: AnyGlassyContent(TextFieldContent(text: $selectedTournamentType, isReadOnly: true, textColor: .white)),
-                                    glassOpacity: 0.01,
-                                    labelColor: .gray,
-                                    materialOpacity: 0.2
-                                )
-                                GlassyInputField(
-                                    icon: "location.fill",
-                                    title: "Location",
-                                    content: AnyGlassyContent(TextFieldContent(text: $tournamentLocation, isReadOnly: true, textColor: .white)),
-                                    glassOpacity: 0.01,
-                                    labelColor: .gray,
-                                    materialOpacity: 0.2
-                                )
-                            }
-
                             GlassyInputField(
                                 icon: "dollarsign.circle",
                                 title: "Buy in",
@@ -816,81 +819,58 @@ struct EnhancedLiveSessionView: View {
                         .padding(.horizontal) // Padding for the tournament VStack
                     } // End of Tournament Setup Section
 
-                    // Staking Section Toggle - COPIED FROM SessionFormView
-                    VStack(alignment: .leading, spacing: 10) {
-                        Button(action: {
-                            withAnimation {
-                                showStakingSection.toggle()
-                                // If opening and no stakers exist, add one
-                                if showStakingSection && stakerConfigs.isEmpty {
-                                    stakerConfigs.append(StakerConfig())
-                                }
-                            }
-                        }) {
-                            HStack {
-                                Text(showStakingSection ? "Hide Staking Details" : "Add Staking Details")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white)
-                                Spacer()
-                                Image(systemName: showStakingSection ? "chevron.up" : "chevron.down")
-                                    .foregroundColor(.white)
-                            }
+                    // Staking Section Trigger - NEW FLOATING POPUP
+                    Button(action: {
+                        // Add initial config if none exist
+                        if stakerConfigs.isEmpty {
+                            stakerConfigs.append(StakerConfig())
                         }
-                        .padding(.leading, 6)
-                        .padding(.bottom, showStakingSection ? 10 : 0) // Add bottom padding only when section is open
-                    }
-                    .padding(.horizontal)
-
-                    // Staking Details Section (Conditional) - COPIED FROM SessionFormView
-                    if showStakingSection {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text("Staking Info")
-                                    .font(.system(size: 16, weight: .medium))
+                        showingStakingPopup = true
+                    }) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Staking Configuration")
+                                    .font(.plusJakarta(.headline, weight: .medium))
                                     .foregroundColor(.white)
-                                Spacer()
-                            }
-                            .padding(.leading, 6)
-                            .padding(.bottom, 2)
-
-                            ForEach($stakerConfigs) { $configBinding in // Iterate with bindings
-                                StakerInputView(
-                                    config: $configBinding,
-                                    userService: userService,
-                                    primaryTextColor: .white,
-                                    secondaryTextColor: Color.white.opacity(0.7),
-                                    glassOpacity: 0.01,
-                                    materialOpacity: 0.2,
-                                    onRemove: {
-                                        if let index = stakerConfigs.firstIndex(where: { $0.id == configBinding.id }) {
-                                            stakerConfigs.remove(at: index)
-                                            if stakerConfigs.isEmpty { // if all removed, hide section
-                                                showStakingSection = false
-                                            }
-                                        }
-                                    }
-                                )
+                                
+                                if stakerConfigs.isEmpty {
+                                    Text("Tap to add staking details")
+                                        .font(.plusJakarta(.caption, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.7))
+                                } else {
+                                    Text("\(stakerConfigs.count) staker\(stakerConfigs.count == 1 ? "" : "s") configured")
+                                        .font(.plusJakarta(.caption, weight: .medium))
+                                        .foregroundColor(.green.opacity(0.8))
+                                }
                             }
                             
-                            Button(action: {
-                                stakerConfigs.append(StakerConfig())
-                            }) {
-                                HStack {
-                                    Image(systemName: "plus.circle.fill")
-                                    Text("Add Another Staker")
+                            Spacer()
+                            
+                            HStack(spacing: 8) {
+                                if !stakerConfigs.isEmpty {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                        .font(.system(size: 16))
                                 }
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(.white.opacity(0.9))
-                                .padding(.vertical, 8)
-                                .frame(maxWidth: .infinity)
-                                .background(Color.white.opacity(0.1))
-                                .cornerRadius(10)
+                                
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .font(.system(size: 14, weight: .medium))
                             }
-                            .padding(.top, stakerConfigs.isEmpty ? 0 : 10)
                         }
-                        .padding(.horizontal)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Material.ultraThinMaterial)
+                                .opacity(0.3)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(stakerConfigs.isEmpty ? Color.white.opacity(0.2) : Color.green.opacity(0.5), lineWidth: 1)
+                        )
                     }
+                    .padding(.horizontal)
                     
                     // Start Button Section - FIXED POSITIONING
                     VStack(spacing: 20) {
@@ -975,11 +955,18 @@ struct EnhancedLiveSessionView: View {
         .sheet(isPresented: $showingEventSelector) {
             NavigationView {
                 ExploreView(onEventSelected: { selectedEvent in
-                    self.tournamentName = selectedEvent.name
-                    self.tournamentLocation = selectedEvent.casino.isEmpty ? (selectedEvent.city ?? "") : selectedEvent.casino
-                    self.selectedTournamentType = inferTournamentType(from: selectedEvent.name, series: selectedEvent.series)
-                    if let parsedBuyin = parseBuyinToDouble(selectedEvent.buyin_string) {
+                    self.tournamentName = selectedEvent.event_name
+                    
+                    // Location and Type are no longer set from the event
+                    // self.tournamentLocation = "" // REMOVED state variable
+                    // self.selectedTournamentType = "NLH" // REMOVED state variable
+
+                    if let usdBuyin = selectedEvent.buyin_usd {
+                        self.baseBuyInTournament = String(format: "%.0f", usdBuyin)
+                    } else if let parsedBuyin = parseBuyinToDouble(selectedEvent.buyin_string) {
                         self.baseBuyInTournament = String(format: "%.0f", parsedBuyin)
+                    } else {
+                        self.baseBuyInTournament = ""
                     }
                     self.showingEventSelector = false
                 }, isSheetPresentation: true)
@@ -1198,12 +1185,18 @@ struct EnhancedLiveSessionView: View {
             isTournamentSession = false
         } else {
             guard !tournamentName.isEmpty, let baseAmount = Double(baseBuyInTournament), baseAmount > 0 else { return }
+            let tournamentStakesString: String // Explicitly declared as String
+            if baseAmount > 0 {
+                tournamentStakesString = "$\(Int(baseAmount)) Tournament"
+            } else {
+                tournamentStakesString = "Tournament"
+            }
             sessionStore.startLiveSession(
                 gameName: tournamentName, // This becomes the tournament name
-                stakes: selectedTournamentType, // This becomes the tournament type
+                stakes: tournamentStakesString, // Simplified stakes string
                 buyIn: baseAmount, // This is the base buy-in for the tournament
                 isTournament: true,
-                tournamentDetails: (name: tournamentName, type: selectedTournamentType, baseBuyIn: baseAmount)
+                tournamentDetails: (name: tournamentName, type: "NLH", baseBuyIn: baseAmount) // Added placeholder type "NLH"
             )
             isTournamentSession = true
             baseBuyInForTournament = baseAmount
@@ -1254,6 +1247,12 @@ struct EnhancedLiveSessionView: View {
                     .padding(.horizontal)
                 } else {
                     chipStackSection
+                        .padding(.horizontal)
+                }
+                
+                // Staking Information Section
+                if !existingStakes.isEmpty || !stakerConfigs.isEmpty {
+                    stakingInfoSection
                         .padding(.horizontal)
                 }
                 
@@ -1315,7 +1314,7 @@ struct EnhancedLiveSessionView: View {
                 // For session start updates, share basic session info
                 let postContent: String
                 if self.isTournamentSession {
-                    let buyText = self.baseBuyInForTournament > 0 ? "$\(Int(self.baseBuyInForTournament)) Buy-in" : self.sessionStore.liveSession.stakes
+                    let buyText = self.baseBuyInForTournament > 0 ? "$\(Int(self.baseBuyInForTournament)) Buy-in" : "Tournament"
                     postContent = "Playing \(self.tournamentName) (\(buyText))"
                 } else {
                     postContent = "Started a new session at \(self.sessionStore.liveSession.gameName) (\(self.sessionStore.liveSession.stakes))"
@@ -1550,9 +1549,12 @@ struct EnhancedLiveSessionView: View {
         }
         // Sheet for showing post detail
         .sheet(item: $selectedPost) { post in
-            PostDetailView(post: post, userId: userId)
-                .environmentObject(postService)
-                .environmentObject(userService)
+            NavigationView {
+                PostDetailView(post: post, userId: userId)
+                    .environmentObject(postService)
+                    .environmentObject(userService)
+            }
+            .navigationViewStyle(StackNavigationViewStyle())
         }
     }
     
@@ -1926,7 +1928,7 @@ struct EnhancedLiveSessionView: View {
             let docRef = try await Firestore.firestore().collection("sessions").addDocument(data: sessionData)
             // After successful save, clear the live session state
             await MainActor.run {
-                self.sessionStore.clearLiveSession()
+                self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
                 let sessionId = docRef.documentID // documentID is not optional
                 if let completedSession = self.sessionStore.getSessionById(sessionId) {
@@ -2002,7 +2004,7 @@ struct EnhancedLiveSessionView: View {
             }
 
             await MainActor.run {
-                self.sessionStore.clearLiveSession()
+                self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
                 if allStakesSuccessful && savedStakeCount == configs.count && savedStakeCount > 0 {
 
@@ -2641,7 +2643,6 @@ struct EnhancedLiveSessionView: View {
                  .padding(24)
                  .frame(maxWidth: .infinity, maxHeight: geometry.size.height, alignment: .top)
              }
-             .ignoresSafeArea(.keyboard)
              .onTapGesture {
                  UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
              }
@@ -2728,7 +2729,6 @@ struct EnhancedLiveSessionView: View {
                  .padding(24)
                  .frame(maxWidth: .infinity, maxHeight: geometry.size.height, alignment: .top)
              }
-             .ignoresSafeArea(.keyboard)
              .onTapGesture {
                  UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
              }
@@ -3119,12 +3119,212 @@ struct EnhancedLiveSessionView: View {
         return Double(cleaned)
     }
 
-    private func inferTournamentType(from name: String, series: String?) -> String {
-        let combined = "\(name.lowercased()) \(series?.lowercased() ?? "")"
-        if combined.contains("plo") || combined.contains("omaha") {
-            return "PLO"
+    // Function to load existing stakes for this session
+    private func loadExistingStakes() {
+        guard !sessionStore.liveSession.id.isEmpty else { return }
+        
+        isLoadingStakes = true
+        Task {
+            do {
+                let stakes = try await stakeService.fetchStakesForSession(sessionStore.liveSession.id)
+                
+                await MainActor.run {
+                    self.existingStakes = stakes
+                    
+                    // Convert existing stakes to StakerConfigs for editing
+                    self.stakerConfigs = stakes.compactMap { stake in
+                        // Only include stakes where current user is the staked player
+                        guard stake.stakedPlayerUserId == self.userId else { return nil }
+                        
+                        var config = StakerConfig()
+                        config.markup = String(stake.markup)
+                        config.percentageSold = String(stake.stakePercentage * 100) // Convert back to percentage
+                        
+                        // Try to load the staker's profile
+                        if let stakerProfile = self.userService.loadedUsers[stake.stakerUserId] {
+                            config.selectedStaker = stakerProfile
+                        } else {
+                            // Load staker profile asynchronously
+                            Task {
+                                await self.userService.fetchUser(id: stake.stakerUserId)
+                                await MainActor.run {
+                                    if let fetchedProfile = self.userService.loadedUsers[stake.stakerUserId] {
+                                        // Update the config with the loaded profile
+                                        if let index = self.stakerConfigs.firstIndex(where: { $0.id == config.id }) {
+                                            self.stakerConfigs[index].selectedStaker = fetchedProfile
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        return config
+                    }
+                    
+                    self.isLoadingStakes = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoadingStakes = false
+                    print("Error loading stakes: \(error)")
+                }
+            }
         }
-        return "NLH"
+    }
+    
+    // MARK: - Helper Functions
+    
+    // Staking Information Section
+    private var stakingInfoSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Staking Information")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+                
+                Spacer()
+                
+                Button(action: {
+                    // If no configs exist but stakes do, populate from stakes
+                    if stakerConfigs.isEmpty && !existingStakes.isEmpty {
+                        loadExistingStakes() // This will populate stakerConfigs
+                    }
+                    showingStakingPopup = true
+                }) {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.white.opacity(0.8))
+                }
+            }
+            
+            if isLoadingStakes {
+                HStack {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.8)
+                    Text("Loading staking info...")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                }
+                .padding(.vertical, 8)
+            } else if !existingStakes.isEmpty {
+                VStack(spacing: 12) {
+                    ForEach(existingStakes.filter { $0.stakedPlayerUserId == userId }, id: \.id) { stake in
+                        StakingInfoCard(stake: stake, userService: userService)
+                    }
+                }
+            } else if !stakerConfigs.isEmpty {
+                VStack(spacing: 12) {
+                    ForEach(stakerConfigs, id: \.id) { config in
+                        if let staker = config.selectedStaker,
+                           !config.percentageSold.isEmpty,
+                           !config.markup.isEmpty {
+                            StakingConfigCard(config: config)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+    
+    // MARK: - Helper Functions
+    
+    // Staking Info Card for existing stakes
+    private struct StakingInfoCard: View {
+        let stake: Stake
+        @ObservedObject var userService: UserService
+        
+        var body: some View {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let stakerProfile = userService.loadedUsers[stake.stakerUserId] {
+                        Text("\(stakerProfile.displayName ?? stakerProfile.username)")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                    } else {
+                        Text("Loading staker...")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    
+                    Text("\(Int(stake.stakePercentage * 100))% at \(stake.markup, specifier: "%.2f")x markup")
+                        .font(.system(size: 13))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Status")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                    
+                    Text(stake.status.displayName)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(stake.status == .settled ? .green : .orange)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.white.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+            )
+        }
+    }
+    
+    // Staking Config Card for new/editing configs
+    private struct StakingConfigCard: View {
+        let config: StakerConfig
+        
+        var body: some View {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(config.selectedStaker?.displayName ?? config.selectedStaker?.username ?? "Unknown")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Text("\(config.percentageSold)% at \(config.markup)x markup")
+                        .font(.system(size: 13))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Status")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                    
+                    Text("Configured")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.blue)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.white.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.blue.opacity(0.3), lineWidth: 0.5)
+            )
+        }
     }
 }
 
@@ -3276,7 +3476,8 @@ struct EditNoteView: View {
                 .onTapGesture {
                      UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
-                .ignoresSafeArea(.keyboard) // Ignore keyboard safe area for the ZStack
+                // Remove keyboard safe area handling - REMOVED
+                // .ignoresSafeArea(.keyboard)
             }
         }
     }
