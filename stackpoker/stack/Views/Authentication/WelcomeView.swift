@@ -79,6 +79,7 @@ struct WelcomeView: View {
                     .opacity(textOpacity)
                     .padding(.bottom, 30)
                 }
+                .frame(maxWidth: .infinity) // Add a maximum width for better iPad readability
                 
                 Spacer(minLength: 40) // Further reduced to move buttons up
                 
@@ -106,11 +107,16 @@ struct WelcomeView: View {
                             .cornerRadius(12)
                     }
                 }
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 40)
                 .opacity(buttonsOpacity)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.top) // Add top safe area padding
+            .padding(.bottom) // Add bottom safe area padding
         }
+        .frame(maxWidth: .infinity)
         .onAppear {
             withAnimation(.easeOut(duration: 0.8)) {
                 logoScale = 1.0

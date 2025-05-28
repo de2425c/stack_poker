@@ -45,8 +45,21 @@ struct FloatingStakingPopup: View {
                             .stroke(primaryTextColor.opacity(0.15), lineWidth: 0.5)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .frame(maxWidth: UIScreen.main.bounds.width * 0.9)
-                    .frame(maxHeight: UIScreen.main.bounds.height * 0.75)
+                    .padding(EdgeInsets(top: 20, leading: 15, bottom: 20, trailing: 15))
+                    .background(
+                        ZStack {
+                            // Translucent black background
+                            Color.black.opacity(0.7)
+                            
+                            // Subtle white border
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        }
+                        .cornerRadius(20)
+                        .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5) // Softer shadow
+                    )
+                    .frame(maxWidth: 500) // New: Fixed max width for better iPad compatibility
+                    .padding(.horizontal, 20) // Ensure some padding from screen edges
                     .scaleEffect(showPopup ? 1.0 : 0.8)
                     .offset(y: dragOffset.height)
                     .offset(y: showPopup ? 0 : UIScreen.main.bounds.height * 0.3)
@@ -67,8 +80,6 @@ struct FloatingStakingPopup: View {
                                 }
                             }
                     )
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 60)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(.all)

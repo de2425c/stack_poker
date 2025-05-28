@@ -254,11 +254,33 @@ struct StakeCompactCard: View {
     let currentUserId: String
     let onTap: () -> Void
     
+    @EnvironmentObject var userService: UserService // Access user profiles
+    
+    // Determine role and partner details
+    private var playerIsCurrentUser: Bool { stake.stakedPlayerUserId == currentUserId }
+    private var stakerIsCurrentUser: Bool { stake.stakerUserId == currentUserId }
+    private var partnerId: String { playerIsCurrentUser ? stake.stakerUserId : stake.stakedPlayerUserId }
+    private var partnerName: String {
+        if let profile = userService.loadedUsers[partnerId] {
+            return profile.displayName ?? profile.username
+        } else {
+            return "Unknown"
+        }
+    }
+    private var roleLine: String {
+        if stakerIsCurrentUser {
+            return "You staked \(partnerName)"
+        } else {
+            return "You were staked by \(partnerName)"
+        }
+    }
+    
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
+                // Main info column
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(stake.sessionGameName) - \(stake.sessionStakes)")
+                    Text(roleLine)
                         .font(.plusJakarta(.subheadline, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
@@ -269,6 +291,7 @@ struct StakeCompactCard: View {
                 
                 Spacer()
                 
+                // Amount & status column
                 VStack(alignment: .trailing, spacing: 2) {
                     if stake.amountTransferredAtSettlement == 0 {
                         Text("Even")
@@ -303,6 +326,12 @@ struct StakeCompactCard: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
+        // Fetch partner profile if needed when card appears
+        .onAppear {
+            if !partnerId.isEmpty && userService.loadedUsers[partnerId] == nil {
+                Task { await userService.fetchUser(id: partnerId) }
+            }
+        }
     }
     
     private func formatCurrency(_ amount: Double) -> String {

@@ -228,6 +228,7 @@ struct ProfileSetupView: View {
                         }
                     }
                     .padding(.horizontal, 24)
+                    .frame(maxWidth: 700, alignment: .center)
                 }
                 
                 // Close button

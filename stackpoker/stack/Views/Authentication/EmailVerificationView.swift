@@ -45,6 +45,7 @@ struct EmailVerificationView: View {
                         .multilineTextAlignment(.center)
                         .padding(.top, 8)
                 }
+                .frame(maxWidth: 600)
                 
                 // Action buttons
                 VStack(spacing: 16) {

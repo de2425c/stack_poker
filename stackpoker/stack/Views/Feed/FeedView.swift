@@ -125,7 +125,7 @@ struct FeedView: View {
                 // Empty feed state
                 ScrollView { 
                     VStack(spacing: 0) {
-                        Spacer().frame(height: 45) // Re-added top spacer
+                        // Top spacer removed
                         feedHeader() // Add header here
                         EmptyFeedView(onFindPlayersTapped: {
                             showingUserSearchView = true // Updated action
@@ -237,7 +237,7 @@ struct FeedView: View {
 
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 0) { 
-                    Spacer().frame(height: 45) // Re-added top spacer
+                    // Top spacer removed
                     feedHeader() // Header is now the first item in LazyVStack
 
                     // Add top padding for the first post *below the header*
@@ -668,7 +668,7 @@ struct BasicPostCardView: View {
                                         }
                                         .resizable()
                                         .scaledToFill()
-                                        .frame(width: UIScreen.main.bounds.width - 32, height: 350)
+                                        .frame(height: 350) // Removed UIScreen.main.bounds.width, fixed height
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
                             }
@@ -1083,7 +1083,7 @@ struct PostCardView: View {
                                     }
                                     .resizable()
                                     .scaledToFill()
-                                    .frame(width: UIScreen.main.bounds.width - 32, height: 350)
+                                    .frame(height: 350) // Removed UIScreen.main.bounds.width, fixed height
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
                         }
@@ -1341,8 +1341,7 @@ struct PostDetailView: View {
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, (UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0) - 30) 
-                    .padding(.bottom, 8) 
+                    .padding(.top, 16)
                     .background(Color.clear) 
 
                     ScrollView(showsIndicators: false) {
@@ -2435,14 +2434,8 @@ private struct PostBodyContentView: View {
                                         }
                                         .resizable()
                                         .scaledToFill()
-                                        .frame(width: 250, height: 220)
-                                        .clipShape(Rectangle()) // Changed from RoundedRectangle for image gallery style
-                                        .shadow(color: .black.opacity(0.2), radius: 5, y: 2)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            selectedImageURL = url
-                                            showingFullScreenImage = true
-                                        }
+                                        .frame(height: 350) // Removed UIScreen.main.bounds.width, fixed height
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
                             }
                         }
