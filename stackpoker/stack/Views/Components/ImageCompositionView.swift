@@ -183,7 +183,7 @@ struct ImageCompositionView: View {
                             .padding()
                     }
                 }
-                .padding(.top)
+                .padding(.top, safeAreaInsets.top)
 
                 Spacer()
 
@@ -230,7 +230,8 @@ struct ImageCompositionView: View {
                     .cornerRadius(10)
                     .padding(.horizontal)
                 }
-                .padding(.bottom, 30)
+                .padding(.bottom, safeAreaInsets.bottom + 10)
+                
             }
         }
         .statusBarHidden(true)
@@ -243,7 +244,9 @@ struct ImageCompositionView: View {
             }
         }
     }
-    
+    private var safeAreaInsets: UIEdgeInsets {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets ?? .zero
+    }
     private func prepareAndShareImage() {
         let viewToRender = shareableContentView
             .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height) // Render at screen size

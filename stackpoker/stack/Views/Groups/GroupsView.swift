@@ -26,57 +26,58 @@ struct GroupsView: View {
                 AppBackgroundView()
                     .ignoresSafeArea()
                 
-                ScrollView(showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        // Top spacer to account for safe area
-                        Spacer().frame(height: 45)
+                // MODIFIED: Header is now outside the ScrollView for a fixed position
+                VStack(spacing: 0) { // Outer VStack to hold fixed header and ScrollView
+                    AppHeaderView(
+                        title: "Groups",
+                        showNotificationBadge: !groupService.pendingInvites.isEmpty,
+                        notificationAction: { showingInvites = true },
+                        actionButtonAction: { showingCreateGroup = true }
+                    )
+                    .padding(.horizontal, 16) // Standardized horizontal padding
+                    .padding(.top, 0) // Adjusted top padding to 0 to move header up by 15 points
+                    .padding(.bottom, 8) // Standard bottom padding
 
-                        // Header inside scroll content (behaves like FeedView)
-                        AppHeaderView(
-                            title: "Groups",
-                            showNotificationBadge: !groupService.pendingInvites.isEmpty,
-                            notificationAction: { showingInvites = true },
-                            actionButtonAction: { showingCreateGroup = true }
-                        )
-                        .padding(.bottom, 8)
-
-                        // Refresh controls
-                        RefreshControls(isRefreshing: $isRefreshing) {
-                            Task {
-                                await refreshGroups()
-                                isRefreshing = false
-                            }
-                        }
-                        .padding(.bottom, 8)
-
-                        if groupService.isLoading && groupService.userGroups.isEmpty {
-                            VStack {
-                                Spacer().frame(height: 180)
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.8)))
-                                    .scaleEffect(1.5)
-                            }
-                        } else if groupService.userGroups.isEmpty {
-                            EmptyGroupsView(onCreateTapped: { showingCreateGroup = true })
-                        } else {
-                            VStack(spacing: 20) {
-                                ForEach(groupService.userGroups) { group in
-                                    GroupCard(
-                                        group: group,
-                                        onTap: {
-                                            selectedGroupForChat = group
-                                        },
-                                        onDetailsTap: {
-                                            selectedGroupForDetail = group
-                                        },
-                                        onOptionsTap: {
-                                            groupActionSheet = group
-                                        }
-                                    )
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(spacing: 0) {
+                            // Refresh controls
+                            RefreshControls(isRefreshing: $isRefreshing) {
+                                Task {
+                                    await refreshGroups()
+                                    isRefreshing = false
                                 }
                             }
-                            .padding(.horizontal, 24)
-                            .padding(.bottom, 100)
+                            .padding(.bottom, 8)
+
+                            if groupService.isLoading && groupService.userGroups.isEmpty {
+                                VStack {
+                                    Spacer().frame(height: 180)
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.8)))
+                                        .scaleEffect(1.5)
+                                }
+                            } else if groupService.userGroups.isEmpty {
+                                EmptyGroupsView(onCreateTapped: { showingCreateGroup = true })
+                            } else {
+                                VStack(spacing: 20) {
+                                    ForEach(groupService.userGroups) { group in
+                                        GroupCard(
+                                            group: group,
+                                            onTap: {
+                                                selectedGroupForChat = group
+                                            },
+                                            onDetailsTap: {
+                                                selectedGroupForDetail = group
+                                            },
+                                            onOptionsTap: {
+                                                groupActionSheet = group
+                                            }
+                                        )
+                                    }
+                                }
+                                .padding(.horizontal, 24)
+                                .padding(.bottom, 100)
+                            }
                         }
                     }
                 }

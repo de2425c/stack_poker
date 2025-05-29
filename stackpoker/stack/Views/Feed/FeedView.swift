@@ -125,6 +125,7 @@ struct FeedView: View {
                 // Empty feed state
                 ScrollView { 
                     VStack(spacing: 0) {
+                        Spacer().frame(height: 45)
                         // Top spacer removed
                         feedHeader() // Add header here
                         EmptyFeedView(onFindPlayersTapped: {
@@ -237,6 +238,7 @@ struct FeedView: View {
 
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 0) { 
+                    Spacer().frame(height: 45)
                     // Top spacer removed
                     feedHeader() // Header is now the first item in LazyVStack
 
@@ -1357,7 +1359,7 @@ struct PostDetailView: View {
                 VStack(spacing:0) {
                     Spacer() 
                     commentInputView
-                        .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 45 : 75) 
+                        .padding(.bottom, keyboardHeight) // Fixed: Remove extra padding to make input bar flush with bottom
                         .animation(.easeInOut(duration: 0.25), value: keyboardHeight)
                 }
                 .ignoresSafeArea(.keyboard, edges: .bottom)

@@ -415,8 +415,8 @@ struct GroupChatView: View {
                 // Move up with keyboard using proper animation with extra 5pt padding
                 .offset(y: -keyboardHeight - (isKeyboardVisible ? 5 : 0))
                 .animation(.easeOut(duration: keyboardAnimationDuration), value: keyboardHeight)
-                // Removed bottom safe-area padding so the input bar sits flush at the bottom of the screen
-                .padding(.bottom, 55)
+                // Fixed: Remove bottom padding to make input bar flush with bottom of screen
+                .padding(.bottom, 0)
             }
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)

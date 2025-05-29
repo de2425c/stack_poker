@@ -239,11 +239,12 @@ struct stackApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                Color(.systemBackground)
+                Color(.systemBackground).ignoresSafeArea()
                 MainCoordinator()
                   .environmentObject(authViewModel)
                   .environmentObject(userService)
                   .environmentObject(postService)
+                  
             }
             .onAppear {
                 // Initial check if already signed in and profile is missing
@@ -330,6 +331,5 @@ struct InitialView: View { // Assuming this is where your MainCoordinator starts
                     }
                 }
             }
-            .border(.green, width: 3)
     }
 }

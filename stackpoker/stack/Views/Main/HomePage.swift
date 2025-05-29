@@ -71,7 +71,7 @@ struct HomePage: View {
                             self.gameForDetailView = hostedGame
                             self.showGameDetailView = true
                         })
-                        .padding(.top)
+                        .padding(.top, (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0)
                     }
                     
                     // Live session bar (if active)
@@ -107,7 +107,7 @@ struct HomePage: View {
                                 // Remove extra spacing that could create a black bar
                                 
                                 // FeedView with transparent background
-                                FeedView(userId: userId)
+                                FeedView(userId: userId).edgesIgnoringSafeArea(.top)
                             }
                         }
                         .tag(Tab.feed)
@@ -206,6 +206,7 @@ struct HomePage: View {
                     EmptyView()
                 }
             }
+            .ignoresSafeArea(edges: .bottom)
             .ignoresSafeArea(.keyboard)
             .fullScreenCover(isPresented: $showingReplay) {
                 if let hand = replayHand {
@@ -749,7 +750,6 @@ struct ProfileScreen: View {
                             .padding(.top, 8)
                         }
                         .padding(.vertical, 32)
-                        .frame(maxWidth: 600) // Constrain profile content width on iPad
                         .frame(maxWidth: .infinity)
                         .background(
                             RoundedRectangle(cornerRadius: 32)
@@ -974,7 +974,6 @@ struct AddMenuOverlay: View {
                             .fill(Color(hex: "23262F"))
                     )
                     .padding(.horizontal, 24)
-                    .frame(maxWidth: 500) // Constrain menu width on iPad
                     
                     Spacer()
                 }

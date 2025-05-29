@@ -63,7 +63,7 @@ struct AppHeaderView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, paddingTop)
-            .padding(.bottom, 16)
+            .padding(.bottom, 6)
             
             // Optional search bar can be added below by the parent view
         }

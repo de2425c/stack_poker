@@ -118,10 +118,26 @@ class SessionStore: ObservableObject {
     private var timer: Timer?
     
     init(userId: String) {
-
         self.userId = userId
-        fetchSessions()
+        print("🔄 SESSION STORE: Initializing for user \(userId)")
+        
+        // Initialize with clean defaults
+        self.liveSession = LiveSessionData()
+        self.enhancedLiveSession = LiveSessionData_Enhanced(basicSession: self.liveSession)
+        self.showLiveSessionBar = false
+        
+        // Load any existing session state
         loadLiveSessionState()
+        
+        // Fetch historical sessions
+        fetchSessions()
+        
+        // Validate the loaded state
+        if !validateSessionState() {
+            print("⚠️ SESSION STORE: Initial state validation failed")
+        }
+        
+        print("🔄 SESSION STORE: Initialization complete - isActive: \(liveSession.isActive), showBar: \(showLiveSessionBar)")
     }
     
     // MARK: - Enhanced Session Methods
@@ -352,49 +368,134 @@ class SessionStore: ObservableObject {
         }
     }
     
-    func clearLiveSession() {
-        stopLiveSessionTimer()
-        
-        // Reset everything immediately to a known clean state.
-        // Assumes LiveSessionData() creates an instance with buyIn = 0 and isEnded = false.
-        liveSession = LiveSessionData()
-        enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession) // Reinitialize with the new clean liveSession
-        showLiveSessionBar = false
-        
-        // Remove from UserDefaults
-        removeLiveSessionState()
-        removeEnhancedLiveSessionState()
-    }
-    
     // Mark session as ended and then clear it
     func endAndClearLiveSession() {
         stopLiveSessionTimer()
         
-        // Mark session as ended before clearing
+        // SCORCHED EARTH: Mark session as ended before clearing
         liveSession.isEnded = true
+        liveSession.isActive = false
+        liveSession.lastActiveAt = nil
+        liveSession.lastPausedAt = Date()
         saveLiveSessionState() // Save the ended state
         
-        // Now clear everything
-        clearLiveSession()
+        // SCORCHED EARTH: Complete state clearing with multiple safety checks
+        scorachedEarthSessionClear()
     }
     
-    // Force clear any stuck session data (useful for debugging or recovery)
-    func forceClearAllSessionData() {
+    // SCORCHED EARTH: Complete session clearing with all safety mechanisms
+    func scorachedEarthSessionClear() {
+        print("🔥 SCORCHED EARTH: Starting complete session clearing")
+        
+        // Stop all timers immediately
         stopLiveSessionTimer()
         
-        // Reset everything immediately
+        // Reset all session data to clean state
         liveSession = LiveSessionData()
         enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
         showLiveSessionBar = false
         
-        // Force remove from UserDefaults
-        removeLiveSessionState()
-        removeEnhancedLiveSessionState()
+        // Clear ALL possible UserDefaults keys (current and legacy)
+        let possibleKeys = [
+            "LiveSession_\(userId)",
+            "EnhancedLiveSession_\(userId)",
+            "liveSession_\(userId)",
+            "enhancedLiveSession_\(userId)",
+            "LiveSessionData_\(userId)",
+            "SessionStore_\(userId)",
+            "ActiveSession_\(userId)"
+        ]
         
-        // Also clear any other potential keys that might exist
-        UserDefaults.standard.removeObject(forKey: "LiveSession_\(userId)")
-        UserDefaults.standard.removeObject(forKey: "EnhancedLiveSession_\(userId)")
+        for key in possibleKeys {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        
+        // Force synchronize UserDefaults
         UserDefaults.standard.synchronize()
+        
+        // Triple-check that nothing is left
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            for key in possibleKeys {
+                if UserDefaults.standard.object(forKey: key) != nil {
+                    print("⚠️ SCORCHED EARTH: Found lingering data for key: \(key)")
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+            UserDefaults.standard.synchronize()
+            
+            // Final verification
+            self.verifySessionCleared()
+        }
+        
+        print("🔥 SCORCHED EARTH: Session clearing complete")
+    }
+    
+    // SCORCHED EARTH: Verify session is completely cleared
+    func verifySessionCleared() {
+        let isCleared = liveSession.buyIn == 0 && 
+                       !liveSession.isActive && 
+                       liveSession.isEnded == false && // Default state
+                       !showLiveSessionBar &&
+                       enhancedLiveSession.chipUpdates.isEmpty &&
+                       enhancedLiveSession.notes.isEmpty &&
+                       enhancedLiveSession.handHistories.isEmpty
+        
+        if isCleared {
+            print("✅ SCORCHED EARTH: Session successfully cleared")
+        } else {
+            print("❌ SCORCHED EARTH: Session NOT fully cleared - forcing reset")
+            forceResetSession()
+        }
+    }
+    
+    // SCORCHED EARTH: Force reset if normal clearing failed
+    func forceResetSession() {
+        liveSession = LiveSessionData()
+        enhancedLiveSession = LiveSessionData_Enhanced(basicSession: LiveSessionData())
+        showLiveSessionBar = false
+        timer?.invalidate()
+        timer = nil
+        
+        // Nuclear option: clear ALL UserDefaults for this user
+        if let bundleID = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bundleID)
+            UserDefaults.standard.synchronize()
+        }
+        
+        print("💥 SCORCHED EARTH: Force reset complete")
+    }
+    
+    // Force clear any stuck session data (useful for debugging or recovery)
+    func forceClearAllSessionData() {
+        print("🔥 FORCE CLEAR: Starting emergency session clearing")
+        scorachedEarthSessionClear()
+    }
+    
+    // SCORCHED EARTH: Enhanced session validation
+    func validateSessionState() -> Bool {
+        // Check if session should exist but doesn't make sense
+        if liveSession.buyIn > 0 && liveSession.isEnded {
+            print("⚠️ VALIDATION: Found ended session with buy-in - clearing")
+            scorachedEarthSessionClear()
+            return false
+        }
+        
+        // Check for impossible states
+        if liveSession.isActive && liveSession.buyIn == 0 {
+            print("⚠️ VALIDATION: Found active session with no buy-in - clearing")
+            scorachedEarthSessionClear()
+            return false
+        }
+        
+        // Check for stale sessions (more than 24 hours old)
+        let dayAgo = Date().addingTimeInterval(-24 * 60 * 60)
+        if liveSession.startTime < dayAgo && !liveSession.isEnded {
+            print("⚠️ VALIDATION: Found stale session - clearing")
+            scorachedEarthSessionClear()
+            return false
+        }
+        
+        return true
     }
     
     // MARK: - Timer Management
@@ -449,7 +550,7 @@ class SessionStore: ObservableObject {
     
     // MARK: - State Persistence
     
-    private func saveLiveSessionState() {
+    func saveLiveSessionState() {
         if let encoded = try? JSONEncoder().encode(liveSession) {
             UserDefaults.standard.set(encoded, forKey: "LiveSession_\(userId)")
         }
@@ -459,29 +560,44 @@ class SessionStore: ObservableObject {
         if let savedData = UserDefaults.standard.data(forKey: "LiveSession_\(userId)"),
            let loadedSession = try? JSONDecoder().decode(LiveSessionData.self, from: savedData) {
             
+            // SCORCHED EARTH: Enhanced validation before restoring
+            print("🔍 LOADING: Found saved session data")
+            
             // If isEnded is true, it's definitively ended. Clear it and return.
-            // This handles sessions that were correctly marked as ended.
             if loadedSession.isEnded {
-                clearLiveSession()
+                print("🗑️ LOADING: Session marked as ended - clearing")
+                scorachedEarthSessionClear()
                 return
             }
 
-            // If isEnded is false (either explicitly set so, or by default from missing field in legacy data):
-            // Now check other conditions to see if it should be restored.
+            // SCORCHED EARTH: Check for corrupted or invalid session data
+            if loadedSession.buyIn < 0 || loadedSession.elapsedTime < 0 {
+                print("⚠️ LOADING: Found corrupted session data - clearing")
+                scorachedEarthSessionClear()
+                return
+            }
 
             let isPotentiallyRestorable = loadedSession.isActive || loadedSession.lastPausedAt != nil
             let hasValidBuyIn = loadedSession.buyIn > 0
 
-            // Staleness/Abandoned Check:
-            // If a session wasn't explicitly ended (i.e., isEnded is false),
-            // and its last activity (active, pause, or even start time) was > 24 hours ago,
-            // consider it abandoned and clear it. This helps clean up legacy sessions
-            // or sessions from crashes that were never properly ended.
+            // SCORCHED EARTH: Enhanced staleness check
             let lastActivityTime = loadedSession.lastActiveAt ?? loadedSession.lastPausedAt ?? loadedSession.startTime
             let timeSinceLastActivity = Date().timeIntervalSince(lastActivityTime)
-            let isAbandoned = timeSinceLastActivity > (24 * 60 * 60) // 24 hours
+            let isAbandoned = timeSinceLastActivity > (48 * 60 * 60) // Increased to 48 hours for more lenient restoration
+
+            // SCORCHED EARTH: More aggressive validation
+            let isCorrupted = loadedSession.startTime > Date() || // Future start time
+                             loadedSession.elapsedTime > (7 * 24 * 60 * 60) || // More than 7 days
+                             (loadedSession.isActive && loadedSession.lastActiveAt == nil) // Active but no lastActiveAt
+
+            if isCorrupted {
+                print("💥 LOADING: Detected corrupted session - clearing")
+                scorachedEarthSessionClear()
+                return
+            }
 
             if hasValidBuyIn && isPotentiallyRestorable && !isAbandoned {
+                print("✅ LOADING: Restoring valid session")
                 // This session looks like it should be restored.
                 var sessionToRestore = loadedSession
                 if sessionToRestore.isActive, let lastActive = sessionToRestore.lastActiveAt {
@@ -499,26 +615,65 @@ class SessionStore: ObservableObject {
                 }
                 self.showLiveSessionBar = true
                 loadEnhancedLiveSessionState() // Also load its associated enhanced data
+                
+                // SCORCHED EARTH: Validate the restored session
+                if !validateSessionState() {
+                    print("❌ LOADING: Restored session failed validation")
+                    return
+                }
             } else {
-                // Conditions not met for restoration:
-                // - No valid buy-in (effectively an empty or cleared session).
-                // - Not marked as active or paused (e.g., only startTime set, then app quit).
-                // - Considered abandoned (last activity > 24 hours ago and not explicitly ended).
-                clearLiveSession()
+                print("🗑️ LOADING: Session doesn't meet restoration criteria - clearing")
+                scorachedEarthSessionClear()
             }
         } else {
+            print("📭 LOADING: No saved session data found")
             // No saved data, or decoding failed. Ensure a clean state for a new session.
-            // This implicitly means liveSession is a new LiveSessionData() instance from the @Published declaration,
-            // which should have buyIn = 0 and isEnded = false.
-            self.liveSession = LiveSessionData() // Explicitly ensure it's a default clean session
+            self.liveSession = LiveSessionData()
             self.enhancedLiveSession = LiveSessionData_Enhanced(basicSession: self.liveSession)
             self.showLiveSessionBar = false
-            // No need to call clearLiveSession() here as there was nothing to clear from persistence.
         }
     }
     
-    private func removeLiveSessionState() {
-        UserDefaults.standard.removeObject(forKey: "LiveSession_\(userId)")
+    // SCORCHED EARTH: Add backward compatibility method
+    func clearLiveSession() {
+        scorachedEarthSessionClear()
+    }
+    
+    // SCORCHED EARTH: Emergency session reset function for UI access
+    func emergencySessionReset() {
+        print("🚨 EMERGENCY RESET: User triggered emergency session reset")
+        
+        // Stop all timers
+        timer?.invalidate()
+        timer = nil
+        
+        // Clear all session data
+        liveSession = LiveSessionData()
+        enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
+        showLiveSessionBar = false
+        
+        // Clear all possible UserDefaults keys for this user
+        let allPossibleKeys = [
+            "LiveSession_\(userId)",
+            "LiveSessionEnhanced_\(userId)",
+            "SessionState_\(userId)",
+            "ActiveSession_\(userId)",
+            "CurrentSession_\(userId)"
+        ]
+        
+        for key in allPossibleKeys {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        
+        // Force synchronize UserDefaults
+        UserDefaults.standard.synchronize()
+        
+        // Re-verify everything is clear
+        if UserDefaults.standard.data(forKey: "LiveSession_\(userId)") != nil {
+            print("⚠️ EMERGENCY: UserDefaults still contains session data after clear!")
+        }
+        
+        print("✅ EMERGENCY RESET: Complete")
     }
     
     deinit {

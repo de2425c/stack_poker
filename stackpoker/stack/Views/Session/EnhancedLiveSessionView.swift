@@ -75,6 +75,14 @@ struct EnhancedLiveSessionView: View {
     @State private var showingPostEditor = false
     @State private var showingNoProfileAlert = false
     
+    // Add new state for edit session sheet
+    @State private var showingEditSessionSheet = false
+    
+    // Add states for editing session details
+    @State private var editSessionStartTime = Date()
+    @State private var editGameName = ""
+    @State private var editStakes = ""
+    
     // Add back the share to feed state variables (put them before the showingPostEditor declaration)
     @State private var shareToFeedContent = ""
     @State private var shareToFeedIsHand = false
@@ -219,6 +227,27 @@ struct EnhancedLiveSessionView: View {
                 materialOpacity: 0.2
             )
         )
+        .sheet(isPresented: $showSessionDetailSheet) {
+            if let session = completedSessionToShowInSheet {
+                NavigationView {
+                    SessionDetailView(session: session)
+                        .navigationBarBackButtonHidden(true)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("Done") {
+                                    showSessionDetailSheet = false
+                                    self.dismiss() 
+                                }
+                                .foregroundColor(.white)
+                            }
+                        }
+                }
+                .environmentObject(self.sessionStore) // Ensure SessionStore is injected
+            }
+        }
+        .sheet(isPresented: $showingEditSessionSheet) {
+            editSessionSheet
+        }
     }
     
     // MARK: - Content Views
@@ -322,24 +351,6 @@ struct EnhancedLiveSessionView: View {
         } message: {
             Text("You need to sign in to share content to the feed.")
         }
-        .sheet(isPresented: $showSessionDetailSheet) {
-            if let session = completedSessionToShowInSheet {
-                NavigationView {
-                    SessionDetailView(session: session)
-                        .navigationBarBackButtonHidden(true)
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarLeading) {
-                                Button("Done") {
-                                    showSessionDetailSheet = false
-                                    self.dismiss() 
-                                }
-                                .foregroundColor(.white)
-                            }
-                        }
-                }
-                .environmentObject(self.sessionStore) // Ensure SessionStore is injected
-            }
-        }
     }
     
     private var activeSessionView: some View {
@@ -372,14 +383,15 @@ struct EnhancedLiveSessionView: View {
                     .contentShape(Rectangle())
             }
             .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure TabView uses full available space
             // Add bottom padding to the TabView itself to make space for the floating tab bar
-            // This value should be roughly the height of the customTabBar + its container's bottom padding
-            .padding(.bottom, 80) // Example: 50 for tab bar + 15 for top padding + 15 for bottom container padding
+            // Reduced padding to properly accommodate the tab bar height
+            .padding(.bottom, 70) // Reduced from 80 to account for tab bar height
             
             // Container for the floating tab bar
             customTabBar
                 .padding(.horizontal, 20) // Padding from screen edges
-                .padding(.bottom, 120) // Increased padding from the very bottom of the screen
+                .padding(.bottom, 0) // Fixed: Much reduced padding to position tab bar near bottom, accounting for safe area
         }
         // REMOVE these sheets from here as they are now on activeSessionView
         // .sheet(isPresented: $showingPostShareOptions) { postShareOptionsSheet }
@@ -529,12 +541,28 @@ struct EnhancedLiveSessionView: View {
     // Extracted trailing button to reduce complexity
     @ViewBuilder
     private var trailingToolbarButton: some View {
-        if selectedTab == .notes {
+        if sessionMode == .setup {
+            // No trailing button during setup
+            EmptyView()
+        } else if selectedTab == .notes {
             plusButton(action: { showingSimpleNoteEditor = true })
         } else if selectedTab == .hands {
             plusButton(action: { showingNewHandEntry = true })
         } else if selectedTab == .posts {
             plusButton(action: { showingPostShareOptions = true })
+        } else if selectedTab == .session {
+            // Edit button for session tab
+            Button(action: { 
+                // Initialize edit values with current session data
+                editSessionStartTime = sessionStore.liveSession.startTime
+                editGameName = sessionStore.liveSession.gameName
+                editStakes = sessionStore.liveSession.stakes
+                showingEditSessionSheet = true 
+            }) {
+                Image(systemName: "pencil.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(accentColor)
+            }
         }
     }
     
@@ -834,7 +862,7 @@ struct EnhancedLiveSessionView: View {
                                     .foregroundColor(.white)
                                 
                                 if stakerConfigs.isEmpty {
-                                    Text("Tap to add staking details")
+                                    Text("Tap to add stakers or configure stakes")
                                         .font(.plusJakarta(.caption, weight: .medium))
                                         .foregroundColor(.white.opacity(0.7))
                                 } else {
@@ -852,6 +880,10 @@ struct EnhancedLiveSessionView: View {
                                         .foregroundColor(.green)
                                         .font(.system(size: 16))
                                 }
+                                
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .font(.system(size: 14, weight: .medium))
                                 
                                 Image(systemName: "chevron.right")
                                     .foregroundColor(.white.opacity(0.6))
@@ -3184,16 +3216,37 @@ struct EnhancedLiveSessionView: View {
                 
                 Spacer()
                 
-                Button(action: {
-                    // If no configs exist but stakes do, populate from stakes
-                    if stakerConfigs.isEmpty && !existingStakes.isEmpty {
-                        loadExistingStakes() // This will populate stakerConfigs
+                HStack(spacing: 8) {
+                    // Add Staker Button
+                    Button(action: {
+                        stakerConfigs.append(StakerConfig())
+                        showingStakingPopup = true
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 14))
+                            Text("Add")
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green.opacity(0.2))
+                        .cornerRadius(6)
                     }
-                    showingStakingPopup = true
-                }) {
-                    Image(systemName: "pencil.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(.white.opacity(0.8))
+                    
+                    // Edit Button
+                    Button(action: {
+                        // If no configs exist but stakes do, populate from stakes
+                        if stakerConfigs.isEmpty && !existingStakes.isEmpty {
+                            loadExistingStakes() // This will populate stakerConfigs
+                        }
+                        showingStakingPopup = true
+                    }) {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
                 }
             }
             
@@ -3325,6 +3378,241 @@ struct EnhancedLiveSessionView: View {
                     .stroke(Color.blue.opacity(0.3), lineWidth: 0.5)
             )
         }
+    }
+    
+
+    
+    // MARK: - Edit Session Sheet
+    
+    private var editSessionSheet: some View {
+        NavigationView {
+            GeometryReader { geometry in
+                ZStack {
+                    AppBackgroundView()
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                    
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Header
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Edit Session Details")
+                                    .font(.plusJakarta(.title2, weight: .bold))
+                                    .foregroundColor(.white)
+                                
+                                Text("Modify session information and staking configuration")
+                                    .font(.plusJakarta(.subheadline))
+                                    .foregroundColor(.gray)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            
+                            // Session Start Time Section
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Session Start Time")
+                                    .font(.plusJakarta(.headline, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 6)
+                                
+                                DatePicker(
+                                    "Start Time",
+                                    selection: $editSessionStartTime,
+                                    displayedComponents: [.date, .hourAndMinute]
+                                )
+                                .datePickerStyle(.compact)
+                                .colorScheme(.dark)
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Material.ultraThinMaterial)
+                                        .opacity(0.2)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                            .padding(.horizontal)
+                            
+                            // Game Details Section
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Game Details")
+                                    .font(.plusJakarta(.headline, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 6)
+                                
+                                GlassyInputField(
+                                    icon: "gamecontroller",
+                                    title: "Game Name",
+                                    content: AnyGlassyContent(TextFieldContent(
+                                        text: $editGameName,
+                                        textColor: .white
+                                    )),
+                                    glassOpacity: 0.01,
+                                    labelColor: .gray,
+                                    materialOpacity: 0.2
+                                )
+                                
+                                GlassyInputField(
+                                    icon: "dollarsign.circle",
+                                    title: "Stakes",
+                                    content: AnyGlassyContent(TextFieldContent(
+                                        text: $editStakes,
+                                        textColor: .white
+                                    )),
+                                    glassOpacity: 0.01,
+                                    labelColor: .gray,
+                                    materialOpacity: 0.2
+                                )
+                            }
+                            .padding(.horizontal)
+                            
+                            // Staking Configuration Section
+                            VStack(alignment: .leading, spacing: 16) {
+                                HStack {
+                                    Text("Staking Configuration")
+                                        .font(.plusJakarta(.headline, weight: .medium))
+                                        .foregroundColor(.white)
+                                    
+                                    Spacer()
+                                    
+                                    HStack(spacing: 8) {
+                                        // Add New Staker Button
+                                        Button(action: {
+                                            stakerConfigs.append(StakerConfig())
+                                            showingStakingPopup = true
+                                        }) {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "plus.circle.fill")
+                                                    .font(.system(size: 12))
+                                                Text("Add Staker")
+                                            }
+                                            .font(.plusJakarta(.caption, weight: .semibold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(Color.green.opacity(0.2))
+                                            .cornerRadius(8)
+                                        }
+                                        
+                                        // Edit Existing Stakes Button
+                                        if !stakerConfigs.isEmpty || !existingStakes.isEmpty {
+                                            Button(action: {
+                                                if stakerConfigs.isEmpty {
+                                                    stakerConfigs.append(StakerConfig())
+                                                }
+                                                showingStakingPopup = true
+                                            }) {
+                                                Text("Edit Stakes")
+                                                    .font(.plusJakarta(.caption, weight: .semibold))
+                                                    .foregroundColor(.white.opacity(0.9))
+                                                    .padding(.horizontal, 10)
+                                                    .padding(.vertical, 6)
+                                                    .background(Color.white.opacity(0.1))
+                                                    .cornerRadius(8)
+                                            }
+                                        }
+                                    }
+                                }
+                                .padding(.leading, 6)
+                                
+                                if stakerConfigs.isEmpty && existingStakes.isEmpty {
+                                    Text("No staking configuration set")
+                                        .font(.plusJakarta(.subheadline))
+                                        .foregroundColor(.gray)
+                                        .padding()
+                                        .frame(maxWidth: .infinity)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(Color.white.opacity(0.05))
+                                        )
+                                } else {
+                                    VStack(spacing: 12) {
+                                        // Show existing stakes
+                                        ForEach(existingStakes.filter { $0.stakedPlayerUserId == userId }, id: \.id) { stake in
+                                            StakingInfoCard(stake: stake, userService: userService)
+                                        }
+                                        
+                                        // Show configured stakes
+                                        ForEach(stakerConfigs, id: \.id) { config in
+                                            if let staker = config.selectedStaker,
+                                               !config.percentageSold.isEmpty,
+                                               !config.markup.isEmpty {
+                                                StakingConfigCard(config: config)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                            
+                            // Save Button
+                            Button(action: saveSessionChanges) {
+                                Text("Save Changes")
+                                    .font(.plusJakarta(.body, weight: .bold))
+                                    .foregroundColor(.black)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 16)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .fill(Color.white)
+                                    )
+                            }
+                            .padding(.horizontal)
+                            .padding(.bottom, 20)
+                        }
+                        .padding(.top, 20)
+                    }
+                }
+            }
+            .navigationTitle("Edit Session")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        showingEditSessionSheet = false
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+        .overlay(
+            // Add floating staking popup overlay specifically to the edit session sheet
+            FloatingStakingPopup(
+                isPresented: $showingStakingPopup,
+                stakerConfigs: $stakerConfigs,
+                userService: userService,
+                primaryTextColor: .white,
+                secondaryTextColor: Color.white.opacity(0.7),
+                glassOpacity: 0.01,
+                materialOpacity: 0.2
+            )
+        )
+    }
+    
+    // MARK: - Save Session Changes
+    
+    private func saveSessionChanges() {
+        // Update session store with new values
+        sessionStore.liveSession.startTime = editSessionStartTime
+        sessionStore.liveSession.gameName = editGameName
+        sessionStore.liveSession.stakes = editStakes
+        
+        // Recalculate elapsed time based on new start time
+        if sessionStore.liveSession.isActive {
+            sessionStore.liveSession.elapsedTime = Date().timeIntervalSince(editSessionStartTime)
+        } else if let lastPausedAt = sessionStore.liveSession.lastPausedAt {
+            sessionStore.liveSession.elapsedTime = lastPausedAt.timeIntervalSince(editSessionStartTime)
+        }
+        
+        // Save the updated session state
+        sessionStore.saveLiveSessionState()
+        
+        // Close the edit sheet
+        showingEditSessionSheet = false
     }
 }
 

@@ -575,8 +575,8 @@ struct ExploreView: View {
                     }
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, isSheetPresentation ? 75 : 35) // Add extra top padding when presented as sheet
-                .padding(.bottom, 10) // Reduced bottom padding for header
+                .padding(.top, 0) // Adjusted top padding to 0 to move header up by 15 points
+                .padding(.bottom, 8) // Standardized bottom padding
                 // --- End Header ---
                 
                 // --- Custom Date Picker List ---

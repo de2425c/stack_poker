@@ -73,6 +73,8 @@ struct ProfileView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
+                // Spacer().frame(height: 45) // REMOVED: This was causing the downward shift
+                
                 // Top bar with title and settings button
                 HStack {
                     Text("Profile")
@@ -93,8 +95,8 @@ struct ProfileView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 16)
-                .padding(.top, 20) // Added top padding specifically to this HStack
+                .padding(.top, 0) // Adjusted top padding to 0 to move header up by 15 points
+                .padding(.bottom, 8) // Consistent bottom padding
                 
                 // Profile Card - Always visible
                 ProfileCardView(
@@ -125,29 +127,29 @@ struct ProfileView: View {
                 // ScrollView for Navigation Cards
                 ScrollView {
                     VStack(spacing: 16) {
-                        // Recent Activity Card
-                        navigationCard(
-                            title: "Recent Activity",
-                            iconName: "list.bullet.below.rectangle",
-                            baseColor: Color.blue, 
-                            action: { showActivityDetailView = true }
-                        ) {
-                            Text("View your latest posts and interactions.")
-                                .font(.plusJakarta(.subheadline)) // Apply Jakarta font
-                                .foregroundColor(.white.opacity(0.85))
-                        }
+                        // Recent Activity Card and Analytics Card side-by-side
+                        HStack(alignment: .top, spacing: 3) {
+                            compactNavigationCard(
+                                title: "Recent Activity",
+                                iconName: "list.bullet.below.rectangle",
+                                baseColor: Color.blue, 
+                                action: { showActivityDetailView = true }
+                            ) {
+                                Text("View your latest posts.")
+                            }
+                            .frame(maxWidth: .infinity)
 
-                        // Analytics Card
-                        navigationCard(
-                            title: "Analytics",
-                            iconName: "chart.bar.xaxis",
-                            baseColor: Color.green, 
-                            action: { showAnalyticsDetailView = true }
-                        ) {
-                            Text("Track your performance stats.")
-                                .font(.plusJakarta(.subheadline)) // Apply Jakarta font
-                                .foregroundColor(.white.opacity(0.85))
+                            compactNavigationCard(
+                                title: "Analytics",
+                                iconName: "chart.bar.xaxis",
+                                baseColor: Color.green, 
+                                action: { showAnalyticsDetailView = true }
+                            ) {
+                                Text("Track your performance stats.")
+                            }
+                            .frame(maxWidth: .infinity)
                         }
+                        .padding(.horizontal, -4)
 
                         // Hands Card
                         navigationCard(
@@ -250,7 +252,6 @@ struct ProfileView: View {
                     .padding(.top, 3) // Added 3 points of top padding to the VStack of cards
                 }
             }
-            .padding(.top, 20) // Added top padding to the main VStack
         }
         // Removed .onChange(of: selectedTab)
         .sheet(isPresented: $showEdit) {
@@ -328,6 +329,7 @@ struct ProfileView: View {
                 ZStack {
                     AppBackgroundView().ignoresSafeArea()
                     HandsTab(handStore: handStore)
+                        .padding(.top, -35)
                 }
                 .navigationTitle("Hands")
                 .navigationBarTitleDisplayMode(.inline)
@@ -352,6 +354,7 @@ struct ProfileView: View {
                 ZStack {
                     AppBackgroundView().ignoresSafeArea()
                     SessionsTab(sessionStore: sessionStore)
+                        .padding(.top, -33)
                 }
                 .navigationTitle("Sessions")
                 .navigationBarTitleDisplayMode(.inline)
@@ -374,6 +377,7 @@ struct ProfileView: View {
         .fullScreenCover(isPresented: $showStakingDashboardView) {
             NavigationView {
                 StakingDashboardView()
+                    .padding(.top, -30)
                     .navigationTitle("Staking Dashboard")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
@@ -443,7 +447,7 @@ struct ProfileView: View {
         @ViewBuilder previewContent: () -> PreviewContent
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 16) {
+            HStack(spacing: 10) {
                 Image(systemName: iconName)
                     .font(.system(size: 22, weight: .medium))
                     .foregroundColor(baseColor.opacity(0.9))
@@ -453,9 +457,15 @@ struct ProfileView: View {
                     Text(title)
                         .font(.system(size: 17, weight: .bold))
                         .foregroundColor(.white) 
+                        .lineLimit(1) 
                     
                     previewContent()
+                        .font(.plusJakarta(.subheadline))
+                        .foregroundColor(.white.opacity(0.85))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .layoutPriority(1)
                 
                 Spacer()
                 
@@ -463,8 +473,7 @@ struct ProfileView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white.opacity(0.6))
             }
-            .padding(EdgeInsets(top: 17, leading: 20, bottom: 15, trailing: 20))
-            // Ensure background doesn't block touches, and contentShape defines the hit area clearly.
+            .padding(EdgeInsets(top: 14, leading: 20, bottom: 12, trailing: 20))
             .background(
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color.clear) 
@@ -473,10 +482,66 @@ struct ProfileView: View {
                             .stroke(baseColor.opacity(0.25), lineWidth: 1)
                     )
             )
-            .contentShape(RoundedRectangle(cornerRadius: 20)) // Apply contentShape after background
+            .contentShape(RoundedRectangle(cornerRadius: 20))
             .shadow(color: baseColor.opacity(0.15), radius: 4, x: 0, y: 2) 
         }
-        .buttonStyle(PlainButtonStyle()) // PlainButtonStyle is important for custom button interactions
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    // NEW function for compact side-by-side cards
+    @ViewBuilder
+    private func compactNavigationCard<PreviewContent: View>(
+        title: String,
+        iconName: String,
+        baseColor: Color, 
+        action: @escaping () -> Void,
+        @ViewBuilder previewContent: () -> PreviewContent
+    ) -> some View {
+        Button(action: action) {
+            ZStack { // Wrap content in ZStack for better centering when stretched
+                // Background is applied below, to the ZStack i
+            //tself or Button
+
+                HStack(alignment: .center, spacing: 10) { // Explicit .center for items
+                    Image(systemName: iconName)
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(baseColor.opacity(0.9))
+                        .frame(width: 25)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .lineLimit(2)
+                        
+                        previewContent()
+                            .font(.system(size: 13))
+                            .foregroundColor(.white.opacity(0.8))
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .layoutPriority(1)
+                    
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                .padding(EdgeInsets(top: 14, leading: 20, bottom: 12, trailing: 20))
+                .frame(maxHeight: .infinity, alignment: .center) // ensure card stretches to full row height
+            }
+            .background( // Apply background to the ZStack (or Button)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.clear) 
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(baseColor.opacity(0.25), lineWidth: 1)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(color: baseColor.opacity(0.1), radius: 3, x: 0, y: 1)
+        }
+        .buttonStyle(PlainButtonStyle())
     }
     
     // MARK: - Analytics Helper Properties (Unchanged, used by analyticsDetailContent)
@@ -1159,7 +1224,7 @@ struct ActivityContentView: View {
                     .padding(.top, 0) // Removed vertical padding, posts will be closer to the top
                 }
                 .padding(.top, 8) // Reduced top padding for the ScrollView
-                .padding(.top, 50) // Added 40 points of top padding to the ScrollView
+                .padding(.top, 10) // Reduced from 50 to 10 points to minimize space under header
             }
         }
         .padding(.bottom, 8) // Reduced bottom padding for the entire ActivityContentView
@@ -1174,11 +1239,13 @@ struct ActivityContentView: View {
 struct SettingsView: View {
     let userId: String
     @EnvironmentObject var authViewModel: AuthViewModel
+    @EnvironmentObject var sessionStore: SessionStore // Add SessionStore
     @State private var showDeleteConfirmation = false
     @State private var showFinalDeleteConfirmation = false
     @State private var deleteError: String? = nil
     @State private var isDeleting = false
     @State private var pushNotificationsEnabled: Bool = true // Added for push notification toggle
+    @State private var showEmergencyResetConfirmation = false // Add confirmation state
     
     var body: some View {
         ZStack {
@@ -1216,6 +1283,28 @@ struct SettingsView: View {
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
                 )
+                .padding(.horizontal, 20)
+                
+                // Emergency Session Reset Button
+                Button(action: { showEmergencyResetConfirmation = true }) {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundColor(.orange)
+                        Text("Reset Session Data")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.orange)
+                        Spacer()
+                        Text("Emergency")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                    )
+                }
                 .padding(.horizontal, 20)
                 
                 Spacer()
@@ -1298,6 +1387,14 @@ struct SettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(deleteError ?? "An unknown error occurred")
+        }
+        .alert("Reset Session Data?", isPresented: $showEmergencyResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                sessionStore.emergencySessionReset()
+            }
+        } message: {
+            Text("This will clear all session data if you're experiencing issues with stuck sessions. Use this only if sessions appear active when they shouldn't be.")
         }
     }
     

@@ -101,7 +101,7 @@ struct FollowListView: View {
                     }
                 }
             }
-            .padding(.top, 60)
+            .padding(.top, 0)
             .navigationTitle(listType == .followers ? "Followers" : "Following")
             .navigationBarTitleDisplayMode(.inline)
         }
