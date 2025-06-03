@@ -769,9 +769,11 @@ struct GroupInvitesView: View {
                             Spacer()
                                 .frame(height: 40)
                             
-                            LottieView(name: "empty-notifications", loopMode: .loop)
+                            Image(systemName: "bell.badge.fill") // Placeholder replacement
+                                .font(.system(size: 50, design: .default))
+                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
                                 .frame(width: 200, height: 200)
-                            
+
                             Text("No Pending Invites")
                                 .font(.system(size: 22, weight: .bold, design: .default))
                                 .foregroundColor(.white)
@@ -1018,27 +1020,6 @@ struct InviteCard: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: date, relativeTo: Date())
-    }
-}
-
-// LottieView placeholder - you would need to add the Lottie package
-// This is a simplified version until you add the real implementation
-struct LottieView: View {
-    let name: String
-    let loopMode: LoopMode
-    
-    enum LoopMode {
-        case loop
-        case playOnce
-    }
-    
-    var body: some View {
-        // Placeholder until Lottie is implemented
-        VStack {
-            Image(systemName: "bell.slash")
-                .font(.system(size: 50, design: .default))
-                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-        }
     }
 }
 

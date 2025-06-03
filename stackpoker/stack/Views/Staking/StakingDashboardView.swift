@@ -31,6 +31,9 @@ struct StakingDashboardView: View {
     @State private var isLoading = true
     @State private var errorMessage: String? = nil
     @StateObject private var sheetManager = StakingSheetManager()
+    @State private var selectedPartnerStakes: [Stake] = []
+    @State private var selectedPartnerName: String = ""
+    @State private var showingPartnerStakes = false
 
     private var currentUserId: String? {
         userService.currentUserProfile?.id
@@ -66,6 +69,37 @@ struct StakingDashboardView: View {
         return Double(winningStakes) / Double(totalStakes) * 100
     }
     
+    // Analytics where user is the staked player
+    private var backedPerformanceStakes: [Stake] {
+        stakes.filter { $0.stakedPlayerUserId == currentUserId && $0.status == .settled }
+    }
+    
+    private var totalBackedProfit: Double {
+        backedPerformanceStakes.reduce(0) { total, stake in
+            // From player's perspective, profit is negative of amountTransferredAtSettlement
+            total - stake.amountTransferredAtSettlement
+        }
+    }
+    
+    private var totalPlayerCost: Double {
+        backedPerformanceStakes.reduce(0) { total, stake in
+            let playerCost = stake.totalPlayerBuyInForSession * (1 - stake.stakePercentage)
+            return total + playerCost
+        }
+    }
+    
+    private var backedROI: Double {
+        guard totalPlayerCost > 0 else { return 0 }
+        return (totalBackedProfit / totalPlayerCost) * 100
+    }
+    
+    private var backedWinRate: Double {
+        let total = backedPerformanceStakes.count
+        guard total > 0 else { return 0 }
+        let wins = backedPerformanceStakes.filter { (-$0.amountTransferredAtSettlement) > 0 }.count
+        return Double(wins) / Double(total) * 100
+    }
+    
     // Group stakes by month for card display
     private var stakesByMonth: [(String, [Stake])] {
         let dateFormatter = DateFormatter()
@@ -76,6 +110,48 @@ struct StakingDashboardView: View {
         }
         
         return grouped.sorted { $0.key > $1.key }.map { ($0.key, $0.value) }
+    }
+
+    // Group by partner
+    private struct PartnerGroup: Identifiable {
+        let key: String
+        let stakes: [Stake]
+        var id: String { key }
+    }
+    
+    private var stakesByPartner: [PartnerGroup] {
+        guard let currentUserId = currentUserId else { return [] }
+        var grouped: [String: [Stake]] = [:]
+        for stake in stakes {
+            let partnerKey: String
+            if stake.isOffAppStake == true {
+                let manualName = stake.manualStakerDisplayName ?? "Manual Staker"
+                partnerKey = "manual_" + manualName
+            } else {
+                partnerKey = (stake.stakedPlayerUserId == currentUserId) ? stake.stakerUserId : stake.stakedPlayerUserId
+            }
+            grouped[partnerKey, default: []].append(stake)
+        }
+        return grouped.map { key, val in PartnerGroup(key: key, stakes: val) }
+            .sorted { lhs, rhs in
+                let lhsDate = lhs.stakes.first?.sessionDate ?? Date.distantPast
+                let rhsDate = rhs.stakes.first?.sessionDate ?? Date.distantPast
+                return lhsDate > rhsDate
+            }
+    }
+    
+    private func partnerName(for stakes: [Stake]) -> String {
+        guard let sample = stakes.first else { return "Unknown" }
+        if sample.isOffAppStake == true, let manualName = sample.manualStakerDisplayName, !manualName.isEmpty {
+            return manualName
+        }
+        guard let currentUserId = currentUserId else { return "Unknown" }
+        let partnerId = (sample.stakedPlayerUserId == currentUserId) ? sample.stakerUserId : sample.stakedPlayerUserId
+        if let profile = userService.loadedUsers[partnerId] {
+            return profile.displayName ?? profile.username
+        } else {
+            return "Unknown User"
+        }
     }
 
     var body: some View {
@@ -100,25 +176,19 @@ struct StakingDashboardView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 20) {
-                            // Staking Performance Analytics
+                            // Performance Analytics
                             stakingPerformanceView
+                            backedPerformanceView
                             
-                            // Monthly stake cards
+                            // Partner summary cards
                             LazyVStack(spacing: 16) {
-                                ForEach(stakesByMonth, id: \.0) { month, monthStakes in
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text(month)
-                                            .font(.plusJakarta(.title2, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .padding(.leading, 16)
-                                        
-                                        ForEach(monthStakes) { stake in
-                                            StakeCompactCard(stake: stake, currentUserId: currentUserId ?? "") {
-                                                sheetManager.presentStakeDetail(stake: stake)
-                                            }
-                                            .padding(.horizontal, 16)
-                                        }
+                                ForEach(stakesByPartner) { group in
+                                    PartnerStakeSummaryCard(stakes: group.stakes, currentUserId: currentUserId ?? "") {
+                                        selectedPartnerStakes = group.stakes
+                                        selectedPartnerName = partnerName(for: group.stakes)
+                                        showingPartnerStakes = true
                                     }
+                                    .padding(.horizontal, 16)
                                 }
                             }
                         }
@@ -157,6 +227,16 @@ struct StakingDashboardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(AppBackgroundView().ignoresSafeArea())
             }
+        }
+        // Sheet showing all stakes with a particular partner
+        .sheet(isPresented: $showingPartnerStakes) {
+            PartnerStakesListView(
+                partnerName: selectedPartnerName,
+                stakes: selectedPartnerStakes.sorted { $0.sessionDate > $1.sessionDate },
+                currentUserId: currentUserId ?? "",
+                stakeService: stakeService,
+                userService: userService
+            )
         }
     }
     
@@ -197,6 +277,61 @@ struct StakingDashboardView: View {
                         .font(.plusJakarta(.caption, weight: .medium))
                         .foregroundColor(.gray)
                     Text("\(stakingWinRate, specifier: "%.1f")%")
+                        .font(.plusJakarta(.title2, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                    )
+            )
+        }
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder
+    private var backedPerformanceView: some View {
+        VStack(spacing: 12) {
+            Text("Your Backed Performance")
+                .font(.plusJakarta(.title2, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            HStack(spacing: 16) {
+                // Total Profit for backed
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Total Profit")
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text(formatCurrency(totalBackedProfit))
+                        .font(.plusJakarta(.title2, weight: .bold))
+                        .foregroundColor(totalBackedProfit >= 0 ? .green : .red)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                // ROI
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ROI")
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text("\(backedROI, specifier: "%.1f")%")
+                        .font(.plusJakarta(.title2, weight: .bold))
+                        .foregroundColor(backedROI >= 0 ? .green : .red)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                // Win Rate
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Win Rate")
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text("\(backedWinRate, specifier: "%.1f")%")
                         .font(.plusJakarta(.title2, weight: .bold))
                         .foregroundColor(.white)
                 }
@@ -260,11 +395,14 @@ struct StakeCompactCard: View {
     private var playerIsCurrentUser: Bool { stake.stakedPlayerUserId == currentUserId }
     private var stakerIsCurrentUser: Bool { stake.stakerUserId == currentUserId }
     private var partnerId: String { playerIsCurrentUser ? stake.stakerUserId : stake.stakedPlayerUserId }
+    
     private var partnerName: String {
-        if let profile = userService.loadedUsers[partnerId] {
+        if stake.isOffAppStake == true, let manualName = stake.manualStakerDisplayName, !manualName.isEmpty {
+            return manualName
+        } else if let profile = userService.loadedUsers[partnerId] {
             return profile.displayName ?? profile.username
         } else {
-            return "Unknown"
+            return "Unknown App User"
         }
     }
     private var roleLine: String {
@@ -328,9 +466,335 @@ struct StakeCompactCard: View {
         .buttonStyle(PlainButtonStyle())
         // Fetch partner profile if needed when card appears
         .onAppear {
-            if !partnerId.isEmpty && userService.loadedUsers[partnerId] == nil {
+            if stake.isOffAppStake != true, !partnerId.isEmpty && userService.loadedUsers[partnerId] == nil {
                 Task { await userService.fetchUser(id: partnerId) }
             }
+        }
+    }
+    
+    private func formatCurrency(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencySymbol = "$"
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: amount)) ?? String(format: "$%.2f", amount)
+    }
+}
+
+// New aggregated partner summary card
+struct PartnerStakeSummaryCard: View {
+    let stakes: [Stake]
+    let currentUserId: String
+    let onTap: () -> Void
+    
+    @EnvironmentObject var userService: UserService
+    
+    private var partnerId: String {
+        guard let sample = stakes.first else { return "" }
+        return (sample.stakedPlayerUserId == currentUserId) ? sample.stakerUserId : sample.stakedPlayerUserId
+    }
+    private var isManualStake: Bool {
+        stakes.first?.isOffAppStake == true
+    }
+    private var partnerName: String {
+        if isManualStake, let manualName = stakes.first?.manualStakerDisplayName, !manualName.isEmpty {
+            return manualName
+        } else if let profile = userService.loadedUsers[partnerId] {
+            return profile.displayName ?? profile.username
+        } else {
+            return "Unknown User"
+        }
+    }
+    // Net across ALL stakes (settled + unsettled) for color reference
+    private var totalProfit: Double {
+        stakes.reduce(0) { total, stake in
+            let isCurrentUserStaker = stake.stakerUserId == currentUserId
+            let amount = stake.amountTransferredAtSettlement
+            return total + (isCurrentUserStaker ? amount : -amount)
+        }
+    }
+    // Outstanding (unsettled) amount still owed
+    private var outstandingNet: Double {
+        stakes.filter { $0.status != .settled }.reduce(0) { total, stake in
+            let isCurrentUserStaker = stake.stakerUserId == currentUserId
+            let amount = stake.amountTransferredAtSettlement
+            return total + (isCurrentUserStaker ? amount : -amount)
+        }
+    }
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                // Avatar
+                Group {
+                    if let profile = userService.loadedUsers[partnerId],
+                       let avatarURL = profile.avatarURL, !avatarURL.isEmpty,
+                       let url = URL(string: avatarURL) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img
+                                    .resizable()
+                                    .scaledToFill()
+                            default:
+                                Image(systemName: "person.crop.circle.fill")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                        }
+                        .frame(width: 40, height: 40)
+                        .clipShape(Circle())
+                    } else {
+                        Circle()
+                            .fill(Color.white.opacity(0.2))
+                            .overlay(
+                                Text(String(partnerName.prefix(1)))
+                                    .font(.plusJakarta(.headline, weight: .bold))
+                                    .foregroundColor(.white)
+                            )
+                            .frame(width: 40, height: 40)
+                    }
+                }
+                .shadow(radius: 2)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(partnerName)
+                        .font(.plusJakarta(.subheadline, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Text("\(stakes.count) stake\(stakes.count == 1 ? "" : "s")")
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    if outstandingNet != 0 {
+                        Text(outstandingNet > 0 ? "They Owe You" : "You Owe Them")
+                            .font(.plusJakarta(.caption2, weight: .medium))
+                            .foregroundColor(.gray)
+                        Text(formatCurrency(abs(outstandingNet)))
+                            .font(.plusJakarta(.callout, weight: .bold))
+                            .foregroundColor(outstandingNet > 0 ? .green : .red)
+                    } else {
+                        Text("Settled")
+                            .font(.plusJakarta(.caption2, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            if !isManualStake && !partnerId.isEmpty && userService.loadedUsers[partnerId] == nil {
+                Task { await userService.fetchUser(id: partnerId) }
+            }
+        }
+    }
+    
+    private func formatCurrency(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencySymbol = "$"
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: amount)) ?? String(format: "$%.2f", amount)
+    }
+}
+
+// View listing all stakes with a particular partner
+struct PartnerStakesListView: View {
+    let partnerName: String
+    let stakes: [Stake]
+    let currentUserId: String
+    @ObservedObject var stakeService: StakeService
+    @ObservedObject var userService: UserService
+    
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var sheetManager = StakingSheetManager()
+    
+    // MARK: - Settled/unsettled splits
+    private var settledStakes: [Stake] { stakes.filter { $0.status == .settled } }
+    private var unsettledStakes: [Stake] { stakes.filter { $0.status != .settled } }
+
+    private var settledAsStaker: [Stake] { settledStakes.filter { $0.stakerUserId == currentUserId } }
+    private var settledAsPlayer: [Stake] { settledStakes.filter { $0.stakedPlayerUserId == currentUserId } }
+
+    private var unsettledNet: Double {
+        unsettledStakes.reduce(0) { total, stake in
+            let isCurrentUserStaker = stake.stakerUserId == currentUserId
+            let amount = stake.amountTransferredAtSettlement
+            return total + (isCurrentUserStaker ? amount : -amount)
+        }
+    }
+
+    // Staker aggregates
+    private var stakerProfit: Double { settledAsStaker.reduce(0) { $0 + $1.amountTransferredAtSettlement } }
+    private var stakerCost: Double { settledAsStaker.reduce(0) { $0 + $1.stakerCost } }
+    private var stakerROI: Double { stakerCost > 0 ? (stakerProfit / stakerCost) * 100 : 0 }
+    private var stakerWinRate: Double { 
+        let total = settledAsStaker.filter { $0.status == .settled }
+        guard !total.isEmpty else { return 0 }
+        let wins = total.filter { $0.amountTransferredAtSettlement > 0 }.count
+        return Double(wins) / Double(total.count) * 100
+    }
+
+    // Player aggregates
+    private var playerProfit: Double { settledAsPlayer.reduce(0) { $0 - $1.amountTransferredAtSettlement } }
+    private var playerCost: Double { settledAsPlayer.reduce(0) { $0 + ($1.totalPlayerBuyInForSession * (1 - $1.stakePercentage)) } }
+    private var playerROI: Double { playerCost > 0 ? (playerProfit / playerCost) * 100 : 0 }
+    private var playerWinRate: Double {
+        let total = settledAsPlayer.filter { $0.status == .settled }
+        guard !total.isEmpty else { return 0 }
+        let wins = total.filter { (-$0.amountTransferredAtSettlement) > 0 }.count
+        return Double(wins) / Double(total.count) * 100
+    }
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                AppBackgroundView().ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Aggregated stats
+                        statsHeader
+                        
+                        LazyVStack(spacing: 16) {
+                            ForEach(stakes) { stake in
+                                StakeCompactCard(stake: stake, currentUserId: currentUserId) {
+                                    sheetManager.presentStakeDetail(stake: stake)
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 20)
+                }
+            }
+            .navigationTitle(partnerName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Done") { dismiss() }
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .sheet(isPresented: $sheetManager.showingStakeDetail, onDismiss: {
+            sheetManager.dismissStakeDetail()
+        }) {
+            if let stake = sheetManager.selectedStake {
+                StakeDetailViewWrapper(
+                    stake: stake,
+                    currentUserId: currentUserId,
+                    stakeService: stakeService,
+                    userService: userService,
+                    onUpdate: {
+                        sheetManager.dismissStakeDetail()
+                    }
+                )
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var statsHeader: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            outstandingBanner
+            Text("Summary vs \(partnerName)")
+                .font(.plusJakarta(.title2, weight: .bold))
+                .foregroundColor(.white)
+            
+            // Cards
+            VStack(spacing: 12) {
+                if !settledAsStaker.isEmpty {
+                    roleStatsCard(title: "As Staker", profit: stakerProfit, roi: stakerROI, winRate: stakerWinRate)
+                }
+                if !settledAsPlayer.isEmpty {
+                    roleStatsCard(title: "As Player", profit: playerProfit, roi: playerROI, winRate: playerWinRate)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+    
+    private func roleStatsCard(title: String, profit: Double, roi: Double, winRate: Double) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.plusJakarta(.headline, weight: .bold))
+                .foregroundColor(.white)
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Total Profit")
+                        .font(.plusJakarta(.caption2, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text(formatCurrency(profit))
+                        .font(.plusJakarta(.callout, weight: .bold))
+                        .foregroundColor(profit >= 0 ? .green : .red)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ROI")
+                        .font(.plusJakarta(.caption2, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text("\(roi, specifier: "%.1f")%")
+                        .font(.plusJakarta(.callout, weight: .bold))
+                        .foregroundColor(roi >= 0 ? .green : .red)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Win Rate")
+                        .font(.plusJakarta(.caption2, weight: .medium))
+                        .foregroundColor(.gray)
+                    Text("\(winRate, specifier: "%.1f")%")
+                        .font(.plusJakarta(.callout, weight: .bold))
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                )
+        )
+    }
+    
+    @ViewBuilder
+    private var outstandingBanner: some View {
+        if unsettledNet != 0 {
+            let youAreOwed = unsettledNet > 0
+            HStack {
+                Image(systemName: youAreOwed ? "arrow.down.circle" : "arrow.up.circle")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(youAreOwed ? .green : .red)
+                Text(youAreOwed ? "They currently owe you" : "You currently owe them")
+                    .font(.plusJakarta(.subheadline, weight: .medium))
+                Spacer()
+                Text(formatCurrency(abs(unsettledNet)))
+                    .font(.plusJakarta(.headline, weight: .bold))
+                    .foregroundColor(youAreOwed ? .green : .red)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.08))
+            )
+            .padding(.horizontal, 16)
         }
     }
     
@@ -363,6 +827,11 @@ struct StakeDetailView: View {
         stake.stakerUserId == currentUserId
     }
     
+    // Determine if the stake involves an off-app (manual) staker
+    private var isManualStake: Bool {
+        stake.isOffAppStake == true
+    }
+
     var body: some View {
         ZStack {
             AppBackgroundView().ignoresSafeArea()
@@ -417,8 +886,19 @@ struct StakeDetailView: View {
     private var roleAndTermsView: some View {
         let partnerId = playerIsCurrentUser ? stake.stakerUserId : stake.stakedPlayerUserId
         let partnerProfile = showUserDetails[partnerId]
-        let partnerName = partnerProfile?.displayName ?? partnerProfile?.username ?? "The Other Party"
-        let finalPartnerName = partnerId.isEmpty ? "Unknown Party" : partnerName
+        
+        // Compute partner name in a single expression to avoid non-View statements inside ViewBuilder
+        let partnerNameDisplay: String = {
+            if isManualStake, let manualName = stake.manualStakerDisplayName, !manualName.isEmpty {
+                return manualName
+            } else if let profile = partnerProfile {
+                return profile.displayName ?? profile.username
+            } else {
+                return partnerId == Stake.OFF_APP_STAKER_ID ? "Manual Staker" : "The Other Party"
+            }
+        }()
+        
+        let finalPartnerName = partnerId.isEmpty ? "Unknown Party" : partnerNameDisplay
 
         VStack(alignment: .leading, spacing: 8) {
             Text("Stake Details")
@@ -488,7 +968,7 @@ struct StakeDetailView: View {
         let (owingParty, owedParty, absAmount, isEven) = determineSettlementParties(
             amount: amount,
             playerName: showUserDetails[stake.stakedPlayerUserId]?.displayName ?? showUserDetails[stake.stakedPlayerUserId]?.username ?? "Player",
-            stakerName: showUserDetails[stake.stakerUserId]?.displayName ?? showUserDetails[stake.stakerUserId]?.username ?? "Staker",
+            stakerName: (isManualStake ? stake.manualStakerDisplayName : (showUserDetails[stake.stakerUserId]?.displayName ?? showUserDetails[stake.stakerUserId]?.username)) ?? "Staker",
             youArePlayer: playerIsCurrentUser,
             youAreStaker: stakerIsCurrentUser
         )
@@ -526,7 +1006,10 @@ struct StakeDetailView: View {
     
     @ViewBuilder
     private var actionButton: some View {
-        if stake.status == .awaitingSettlement {
+        // No action button for manual/off-app stakes as they are auto-settled
+        if isManualStake {
+            EmptyView()
+        } else if stake.status == .awaitingSettlement {
             Button(action: { initiateSettlement() }) {
                 HStack {
                     if isSettling {
@@ -638,7 +1121,8 @@ struct StakeDetailView: View {
 
     private func fetchNeededUserProfiles() {
         let partnerId = playerIsCurrentUser ? stake.stakerUserId : stake.stakedPlayerUserId
-        if showUserDetails[partnerId] == nil && !partnerId.isEmpty {
+        // Only fetch if it's not a manual stake and partnerId is not the placeholder
+        if !isManualStake && partnerId != Stake.OFF_APP_STAKER_ID && showUserDetails[partnerId] == nil && !partnerId.isEmpty {
             Task {
                 if let cachedUser = userService.loadedUsers[partnerId] {
                     DispatchQueue.main.async {

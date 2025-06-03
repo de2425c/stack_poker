@@ -446,6 +446,10 @@ struct StakerConfig: Identifiable {
     var isSearching: Bool = false
     var markup: String = "1.0" // Default markup
     var percentageSold: String = ""
+
+    // New fields for manual staker entry
+    var isManualEntry: Bool = false
+    var manualStakerName: String = ""
 }
 
 // New View for individual staker inputs
@@ -489,6 +493,7 @@ struct SessionFormView: View {
     // @State private var stakeMarkup = ""
     // @State private var stakePercentageSold = ""
     @State private var stakerConfigs: [StakerConfig] = [] // New state for multiple stakers
+    @State private var stakerConfigsForPopup: [StakerConfig] = [] // Temporary copy for the popup
 
     @State private var showStakingSection = false // To toggle visibility of staking fields
     @State private var showingStakingPopup = false // New state for floating popup
@@ -822,7 +827,7 @@ struct SessionFormView: View {
             // Add floating staking popup overlay
             FloatingStakingPopup(
                 isPresented: $showingStakingPopup,
-                stakerConfigs: $stakerConfigs,
+                stakerConfigs: $stakerConfigsForPopup, // Pass the copy here
                 userService: userService,
                 primaryTextColor: primaryTextColor,
                 secondaryTextColor: secondaryTextColor,
@@ -830,15 +835,31 @@ struct SessionFormView: View {
                 materialOpacity: materialOpacity
             )
         )
+        .onChange(of: showingStakingPopup) { newValue in
+            // When the popup is dismissed (newValue is false and was true)
+            // or more simply, whenever it becomes false after being true.
+            // We check the previous value indirectly by only acting when it becomes false.
+            if !newValue {
+                // Update the main stakerConfigs from the popup's copy
+                // This ensures the parent's ForEach (if any) updates cleanly after the popup is gone.
+                print("[SessionFormView] Popup dismissed. Syncing stakerConfigs.")
+                print("[SessionFormView] Before sync, main stakerConfigs count: \(stakerConfigs.count)")
+                print("[SessionFormView] Popup copy stakerConfigsForPopup count: \(stakerConfigsForPopup.count)")
+                self.stakerConfigs = self.stakerConfigsForPopup
+                print("[SessionFormView] After sync, main stakerConfigs count: \(stakerConfigs.count)")
+            }
+        }
     }
     
     // Extracted Staking Section Trigger Button
     private var stakingSectionTriggerButton: some View {
         Button(action: {
-            // Add initial config if none exist
+            // Add initial config if none exist for the main list
             if stakerConfigs.isEmpty {
-                stakerConfigs.append(StakerConfig())
+                stakerConfigs.append(StakerConfig()) // Add to main list if it was empty
             }
+            stakerConfigsForPopup = stakerConfigs // Make a fresh copy for the popup
+            print("[SessionFormView] Staking trigger tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
             showingStakingPopup = true
         }) {
             HStack {
@@ -1014,11 +1035,20 @@ struct SessionFormView: View {
 
         // Filter out configs that are truly empty or invalid before deciding to save session only or with stakes.
         let validConfigs = stakerConfigs.filter { config in
-            guard let _ = config.selectedStaker, // Must have a staker
-                  let percentage = Double(config.percentageSold), percentage > 0, // Percentage must be valid and > 0
-                  let _ = Double(config.markup), // Markup must be a valid double (can be 0 or more)
-                  actualBuyInForStaking > 0 else { // Session buy-in must be > 0 for staking
-                return false
+            if config.isManualEntry {
+                guard !config.manualStakerName.isEmpty else { return false }
+            } else {
+                guard let _ = config.selectedStaker else { return false } // Must have an app staker
+            }
+            guard let percentage = Double(config.percentageSold), percentage > 0, percentage <= 100 else { return false } // Percentage must be valid and > 0
+            guard let markup = Double(config.markup), markup >= 1.0 else { return false } // Markup must be a valid double (>= 1.0)
+            // Session buy-in must be > 0 for staking calculations to make sense.
+            // Note: For 0% stakes or freebuys where player is staked, this check might be too strict if actualBuyInForStaking is 0.
+            // However, most staking calculations rely on a positive buy-in.
+            guard actualBuyInForStaking > 0 else { 
+                // If buy-in is zero, we might still want to log a $0 stake if percentage is 0?
+                // For now, require positive buy-in if there's a percentage.
+                return percentage == 0 // Allow if percentage is 0, effectively a $0 stake log.
             }
             return true
         }
@@ -1089,13 +1119,30 @@ struct SessionFormView: View {
                 var savedStakeCount = 0
 
                 for config in configs {
-                    // Basic validation already done in handleStakingAndSave,
-                    // but ensure crucial parts are still present for constructing Stake object.
-                    guard let stakerProfile = config.selectedStaker,
-                          let percentageSoldDouble = Double(config.percentageSold),
+                    guard let percentageSoldDouble = Double(config.percentageSold),
                           let markupDouble = Double(config.markup) else {
-
                         allStakesSuccessful = false
+                        continue
+                    }
+                    
+                    let stakerIdToUse: String
+                    let manualName: String?
+                    let isOffApp: Bool
+
+                    if config.isManualEntry {
+                        guard !config.manualStakerName.isEmpty else {
+                            allStakesSuccessful = false
+                            continue
+                        }
+                        stakerIdToUse = Stake.OFF_APP_STAKER_ID
+                        manualName = config.manualStakerName
+                        isOffApp = true
+                    } else if let stakerProfile = config.selectedStaker {
+                        stakerIdToUse = stakerProfile.id
+                        manualName = nil
+                        isOffApp = false
+                    } else {
+                        allStakesSuccessful = false // Should not happen if validConfigs filter is correct
                         continue
                     }
 
@@ -1104,14 +1151,16 @@ struct SessionFormView: View {
                         sessionGameName: tournamentName ?? gameName,
                         sessionStakes: stakes,
                         sessionDate: startDateTime,
-                        stakerUserId: stakerProfile.id, // Use ID from config
+                        stakerUserId: stakerIdToUse, 
                         stakedPlayerUserId: self.userId,
                         stakePercentage: percentageSoldDouble / 100.0, // Convert to decimal
                         markup: markupDouble,
                         totalPlayerBuyInForSession: actualSessionBuyInForStaking,
                         playerCashoutForSession: sessionCashout,
-                        status: .awaitingSettlement,
-                        isTournamentSession: isTournamentStake
+                        // status: .awaitingSettlement, // Status is now handled in Stake init based on isOffAppStake
+                        isTournamentSession: isTournamentStake,
+                        manualStakerDisplayName: manualName,
+                        isOffAppStake: isOffApp
                     )
                     do {
                         _ = try await stakeService.addStake(newStake)

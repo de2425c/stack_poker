@@ -260,13 +260,14 @@ struct EmptyPromptView: View {
 struct SearchResultsView: View {
     let users: [UserProfile]
     let currentUserId: String
-    let userService: UserService // Changed to let rather than @EnvironmentObject
-    
+    let userService: UserService // Passed from parent
+    let onUserTapped: (UserProfile) -> Void // NEW callback
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 4) {
                 ForEach(users) { user in
-                    NavigationLink(destination: UserProfileView(userId: user.id).environmentObject(userService)) {
+                    Button(action: { onUserTapped(user) }) {
                         EnhancedUserRow(user: user, currentUserId: currentUserId, userService: userService)
                             .padding(.horizontal)
                             .padding(.vertical, 8)
@@ -292,9 +293,11 @@ struct UserSearchView: View {
     @FocusState private var isSearchFieldFocused: Bool // For keyboard focus
     @State private var animateBackground = false
     let currentUserId: String
+    let onUserSelected: (String) -> Void // NEW callback
 
-    init(currentUserId: String, userService: UserService) {
+    init(currentUserId: String, userService: UserService, onUserSelected: @escaping (String) -> Void) {
         self.currentUserId = currentUserId
+        self.onUserSelected = onUserSelected
         _viewModel = StateObject(wrappedValue: UserSearchViewModel(userService: userService))
     }
     
@@ -347,9 +350,13 @@ struct UserSearchView: View {
             }
             else if !viewModel.searchResults.isEmpty {
                 SearchResultsView(
-                    users: viewModel.searchResults, 
+                    users: viewModel.searchResults,
                     currentUserId: currentUserId,
-                    userService: passedUserService // Pass the userService
+                    userService: passedUserService,
+                    onUserTapped: { user in
+                        onUserSelected(user.id)
+                        dismiss() // Close search view before navigating
+                    }
                 )
                 .transition(.opacity)
             }

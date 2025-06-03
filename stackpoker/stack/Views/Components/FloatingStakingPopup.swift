@@ -107,27 +107,23 @@ struct FloatingStakingPopup: View {
                 .padding(.horizontal, 24)
                 
                 // Staker configurations
-                LazyVStack(spacing: 20) {
-                    ForEach($stakerConfigs) { $configBinding in
-                        ImprovedStakerInputView(
-                            config: $configBinding,
-                            userService: userService,
-                            primaryTextColor: primaryTextColor,
-                            secondaryTextColor: secondaryTextColor,
-                            glassOpacity: glassOpacity,
-                            materialOpacity: materialOpacity * 0.6,
-                            onRemove: {
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    if let index = stakerConfigs.firstIndex(where: { $0.id == configBinding.id }) {
-                                        stakerConfigs.remove(at: index)
-                                        if stakerConfigs.isEmpty {
-                                            dismissPopup()
-                                        }
-                                    }
+                VStack(spacing: 20) {
+                    ForEach(stakerConfigs) { config in
+                        if let idx = stakerConfigs.firstIndex(where: { $0.id == config.id }) {
+                            ImprovedStakerInputView(
+                                config: $stakerConfigs[idx],
+                                userService: userService,
+                                primaryTextColor: primaryTextColor,
+                                secondaryTextColor: secondaryTextColor,
+                                glassOpacity: glassOpacity,
+                                materialOpacity: materialOpacity * 0.6,
+                                onRemove: {
+                                    removeStaker(id: config.id)
                                 }
-                            }
-                        )
-                        .padding(.horizontal, 24)
+                            )
+                            .id(config.id)
+                            .padding(.horizontal, 24)
+                        }
                     }
                 }
                 
@@ -194,6 +190,27 @@ struct FloatingStakingPopup: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             isPresented = false
             dragOffset = .zero
+        }
+    }
+    
+    private func removeStaker(id idToRemove: UUID) {
+        print("--- Staker Removal Attempt (id path) ---")
+        print("[\\(Date())] removeStaker called for id: \\(idToRemove)")
+        // Defer the removal slightly to allow SwiftUI to finish any in-flight updates for this view.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                if let safeIndex = stakerConfigs.firstIndex(where: { $0.id == idToRemove }) {
+                    stakerConfigs.remove(at: safeIndex)
+                }
+            }
+            print("[\\(Date())] After delayed removal, stakerConfigs count: \\(stakerConfigs.count), IDs: \\(stakerConfigs.map { $0.id })")
+            if stakerConfigs.isEmpty {
+                DispatchQueue.main.async {
+                    dismissPopup()
+                }
+            }
         }
     }
 } 

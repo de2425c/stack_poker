@@ -30,18 +30,12 @@ struct ImageCompositionView: View {
     let session: Session
     let backgroundImage: UIImage
 
-    // State for card manipulation
-    @State private var interactiveCardScale: CGFloat = 0.8 // Renamed for clarity, for user interaction
-    @State private var interactiveCardOffset: CGSize = .zero // Renamed for clarity
-
-    // Gesture states
-    @State private var currentMagnification: CGFloat = 0
+    // State for card manipulation (drag and scale)
+    @State private var interactiveCardOffset: CGSize = .zero
     @State private var currentDragOffset: CGSize = .zero
+    @State private var cardScale: CGFloat = 0.8 // Initial scale for the card
+    @State private var currentMagnification: CGFloat = 0 // For live pinch gesture
     
-    // Define a fixed scale and offset for the actual shared image
-    private let sharedCardRenderScale: CGFloat = 0.9 // Example: card takes 90% of image width
-    private let sharedCardRenderOffset: CGSize = .zero // Centered
-
     // Card Customization States
     struct ColorOption: Identifiable, Hashable {
         let id = UUID()
@@ -89,11 +83,11 @@ struct ImageCompositionView: View {
         ZStack {
             Image(uiImage: backgroundImage)
                 .resizable()
-                .scaledToFill()
+                .scaledToFit() // Match on-screen aspect ratio to avoid stretching
                 .clipped()
 
             FinishedSessionCardView(
-                gameName: session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)",
+                gameName: session.gameName,
                 stakes: session.stakes,
                 location: session.gameName, // location is already removed from its visual display
                 date: session.startDate,
@@ -103,12 +97,9 @@ struct ImageCompositionView: View {
                 cardBackgroundColor: selectedCardColor,
                 cardOpacity: cardOpacity
             )
-            // Use fixed scale and offset for rendering the shared image
-            .scaleEffect(sharedCardRenderScale) 
-            .offset(sharedCardRenderOffset)
-            // Add a fixed width to the card for consistent rendering if needed, 
-            // or ensure it's centered within the ZStack. 
-            // For now, ZStack centers it, and scaleEffect handles size.
+            .scaleEffect(cardScale + currentMagnification) // Include live magnification state
+            .offset(x: interactiveCardOffset.width + currentDragOffset.width, // Include live drag state
+                    y: interactiveCardOffset.height + currentDragOffset.height)
         }
     }
 
@@ -118,12 +109,13 @@ struct ImageCompositionView: View {
 
             Image(uiImage: backgroundImage)
                 .resizable()
-                .scaledToFill()
+                .scaledToFit() // Match on-screen aspect ratio to avoid stretching
+                .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
                 .edgesIgnoringSafeArea(.all)
                 .clipped()
 
             FinishedSessionCardView(
-                gameName: session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)",
+                gameName: session.gameName,
                 stakes: session.stakes,
                 location: session.gameName, // location is already removed from its visual display
                 date: session.startDate,
@@ -133,9 +125,9 @@ struct ImageCompositionView: View {
                 cardBackgroundColor: selectedCardColor,
                 cardOpacity: cardOpacity
             )
-            // Use interactive scale and offset for the live preview
-            .scaleEffect(interactiveCardScale + currentMagnification) 
-            .offset(x: interactiveCardOffset.width + currentDragOffset.width, y: interactiveCardOffset.height + currentDragOffset.height)
+            .scaleEffect(cardScale + currentMagnification) // Interactive scaling
+            .offset(x: interactiveCardOffset.width + currentDragOffset.width,
+                    y: interactiveCardOffset.height + currentDragOffset.height)
             .gesture(
                 DragGesture()
                     .onChanged { value in
@@ -150,88 +142,90 @@ struct ImageCompositionView: View {
             .gesture(
                 MagnificationGesture()
                     .onChanged { value in
-                        currentMagnification = value - 1 
+                        self.currentMagnification = value - 1
                     }
                     .onEnded { value in
-                        interactiveCardScale += value - 1
-                        currentMagnification = 0
-                        interactiveCardScale = max(0.3, min(interactiveCardScale, 2.0)) // Clamp scale
+                        self.cardScale += (value - 1)
+                        self.currentMagnification = 0
+                        self.cardScale = max(0.2, min(self.cardScale, 2.5)) // Clamp scale
                     }
             )
 
-            // Controls Overlay
-            VStack {
-                // Top Controls (Dismiss and Share)
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title)
-                            .foregroundColor(.white)
-                            .shadow(radius: 3)
-                            .padding()
-                    }
-                    Spacer()
-                    Button {
-                        prepareAndShareImage()
-                    } label: {
-                        Image(systemName: "square.and.arrow.up.circle.fill")
-                            .font(.title)
-                            .foregroundColor(.white)
-                            .shadow(radius: 3)
-                            .padding()
-                    }
-                }
-                .padding(.top, safeAreaInsets.top)
-
-                Spacer()
-
-                // Bottom Controls (Card Customization)
-                VStack(spacing: 15) {
-                    // Opacity Slider
+            // Controls Overlay – wrapped in GeometryReader to respect dynamic safe-area insets
+            GeometryReader { proxy in
+                VStack {
+                    // Top Controls (Dismiss and Share)
                     HStack {
-                        Image(systemName: "slider.horizontal.3").foregroundColor(.white).padding(.leading)
-                        Slider(value: $cardOpacity, in: 0.1...1.0)
-                            .padding(.horizontal)
-                         Text("\(Int(cardOpacity * 100))%")
-                            .foregroundColor(.white)
-                            .padding(.trailing)
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title)
+                                .foregroundColor(.white)
+                                .shadow(radius: 3)
+                                .padding()
+                        }
+                        Spacer()
+                        Button {
+                            prepareAndShareImage()
+                        } label: {
+                            Image(systemName: "square.and.arrow.up.circle.fill")
+                                .font(.title)
+                                .foregroundColor(.white)
+                                .shadow(radius: 3)
+                                .padding()
+                        }
                     }
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.5))
-                    .cornerRadius(10)
-                    .padding(.horizontal)
-                    
-                    // Color Selection
-                    HStack(spacing: 15) {
-                        ForEach(cardColorOptions) { option in
-                            Button {
-                                selectedCardColor = option.color
-                            } label: {
-                                ZStack {
-                                    Circle()
-                                        .fill(option.color)
-                                        .frame(width: 40, height: 40)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(selectedCardColor == option.color ? Color.yellow : Color.white, lineWidth: selectedCardColor == option.color ? 3 : 1)
-                                        )
-                                    if selectedCardColor == option.color {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(.yellow)
+                    .padding(.top, proxy.safeAreaInsets.top)
+
+                    Spacer()
+
+                    // Bottom Controls (Card Customization)
+                    VStack(spacing: 15) {
+                        // Opacity Slider
+                        HStack {
+                            Image(systemName: "slider.horizontal.3").foregroundColor(.white).padding(.leading)
+                            Slider(value: $cardOpacity, in: 0.1...1.0)
+                                .padding(.horizontal)
+                             Text("\(Int(cardOpacity * 100))%")
+                                .foregroundColor(.white)
+                                .padding(.trailing)
+                        }
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.5))
+                        .cornerRadius(10)
+                        .padding(.horizontal)
+                        
+                        // Color Selection
+                        HStack(spacing: 15) {
+                            ForEach(cardColorOptions) { option in
+                                Button {
+                                    selectedCardColor = option.color
+                                } label: {
+                                    ZStack {
+                                        Circle()
+                                            .fill(option.color)
+                                            .frame(width: 40, height: 40)
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(selectedCardColor == option.color ? Color.yellow : Color.white, lineWidth: selectedCardColor == option.color ? 3 : 1)
+                                            )
+                                        if selectedCardColor == option.color {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(.yellow)
+                                        }
                                     }
                                 }
                             }
                         }
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.5))
+                        .cornerRadius(10)
+                        .padding(.horizontal)
                     }
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.5))
-                    .cornerRadius(10)
-                    .padding(.horizontal)
+                    .padding(.bottom, proxy.safeAreaInsets.bottom + 10)
                 }
-                .padding(.bottom, safeAreaInsets.bottom + 10)
-                
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
         .statusBarHidden(true)
@@ -244,15 +238,32 @@ struct ImageCompositionView: View {
             }
         }
     }
-    private var safeAreaInsets: UIEdgeInsets {
-        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets ?? .zero
-    }
     private func prepareAndShareImage() {
+        // Capture exactly what the user sees on screen by using the current screen size
+        let screenWidth = UIScreen.main.bounds.width
+        let screenHeight = UIScreen.main.bounds.height
+
+        // Calculate the actual size of the background image after .scaledToFit
+        let imageAspectRatio = backgroundImage.size.width / backgroundImage.size.height
+        let screenAspectRatio = screenWidth / screenHeight
+
+        var finalRenderWidth: CGFloat
+        var finalRenderHeight: CGFloat
+
+        if imageAspectRatio > screenAspectRatio { // Image is wider than screen (letterboxed)
+            finalRenderWidth = screenWidth
+            finalRenderHeight = screenWidth / imageAspectRatio
+        } else { // Image is taller than screen (pillarboxed)
+            finalRenderHeight = screenHeight
+            finalRenderWidth = screenHeight * imageAspectRatio
+        }
+
         let viewToRender = shareableContentView
-            .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height) // Render at screen size
+            .frame(width: finalRenderWidth, height: finalRenderHeight) // Render at the size of the fitted image
 
         let renderer = ImageRenderer(content: viewToRender)
-        renderer.scale = displayScale // Use screen scale for high quality
+        // Use device scale for crisp output
+        renderer.scale = UIScreen.main.scale
 
         if let image = renderer.uiImage {
             self.imageToShare = image

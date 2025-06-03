@@ -48,28 +48,35 @@ struct SignInView: View {
                                 }
                                 
                                 Button(action: signIn) {
-                                    if isLoading {
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .black))
-                                            .scaleEffect(0.8)
-                                    } else {
+                                    ZStack {
                                         Text("Sign In")
                                             .font(.custom("PlusJakartaSans-SemiBold", size: 18))
+                                            .foregroundColor(.black)
+                                            .opacity(isLoading ? 0 : 1)
+
+                                        if isLoading {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                                .scaleEffect(0.8)
+                                        }
                                     }
+                                    .frame(maxWidth: .infinity, minHeight: 56)
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 56)
                                 .background(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                .foregroundColor(.black)
                                 .cornerRadius(12)
                                 .disabled(isLoading)
+                                .contentShape(Rectangle())
                                 
                                 // Sign up button
                                 Button(action: { showingSignUp = true }) {
-                                    Text("Don't have an account? Sign up")
+                                    Text("Don\'t have an account? Sign up")
                                         .font(.custom("PlusJakartaSans-Medium", size: 14))
                                         .foregroundColor(.white.opacity(0.7))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 8)
                                 }
                                 .padding(.top, 8)
+                                .contentShape(Rectangle())
                             }
                             .padding(.top, 12)
                         }

@@ -93,6 +93,9 @@ struct GroupChatView: View {
     
     @State private var isShowingGroupDetail = false
     
+    // Global image viewer state for full-screen images
+    @State private var viewerImageURL: String? = nil
+    
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
@@ -171,7 +174,8 @@ struct GroupChatView: View {
                                 .padding(.horizontal, 12)
                                 .padding(.top, 8)
                             } else if let pinnedGame = pinnedHomeGame {
-                                NavigationLink(destination: HomeGameDetailView(game: pinnedGame)) {
+                                NavigationLink(destination: HomeGameDetailView(game: pinnedGame)
+                                    .environmentObject(sessionStore)) {
                                     HStack {
                                         // Game icon
                                         ZStack {
@@ -269,7 +273,9 @@ struct GroupChatView: View {
                                             // Message groups with proper spacing
                                             LazyVStack(spacing: 8) {
                                                 ForEach(groupedMessages, id: \.id) { messageGroup in
-                                                    MessageGroupView(messageGroup: messageGroup)
+                                                    MessageGroupView(messageGroup: messageGroup, onImageTapped: { url in
+                                                        viewerImageURL = url
+                                                    })
                                                         .id(messageGroup.id)
                                                         .padding(.horizontal, 16)
                                                 }
@@ -540,6 +546,10 @@ struct GroupChatView: View {
 
         }
         .preference(key: ViewRenderTimeKey.self, value: Date())
+        // Global full-screen image viewer
+        .fullScreenCover(item: $viewerImageURL) { url in
+            FullScreenImageView(imageURL: url, onDismiss: { viewerImageURL = nil })
+        }
     }
     
     // Setup Combine subscription to observe messages
@@ -873,6 +883,7 @@ class MessageGroup: Identifiable {
 // View for a group of messages
 struct MessageGroupView: View {
     let messageGroup: MessageGroup
+    var onImageTapped: (String) -> Void
     
     // Check if the current user is the sender
     private var isCurrentUser: Bool {
@@ -924,7 +935,7 @@ struct MessageGroupView: View {
                 // Individual messages in the group
                 VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 3) {
                     ForEach(messageGroup.messages, id: \.id) { message in
-                        SingleMessageView(message: message, isCurrentUser: isCurrentUser)
+                        SingleMessageView(message: message, isCurrentUser: isCurrentUser, onImageTapped: onImageTapped)
                     }
                 }
                 
@@ -947,8 +958,27 @@ struct MessageGroupView: View {
 struct SingleMessageView: View {
     let message: GroupMessage
     let isCurrentUser: Bool
+    var onImageTapped: (String) -> Void
     
+    // Environment objects
+    @EnvironmentObject private var userService: UserService
+    @EnvironmentObject private var handStore: HandStore
+    @EnvironmentObject private var sessionStore: SessionStore
+    @EnvironmentObject private var postService: PostService
+    @EnvironmentObject private var tabBarVisibility: TabBarVisibilityManager
+    
+    // No local state for full-screen viewer; handled by parent.
+    
+    // MARK: - Body
     var body: some View {
+        ZStack {
+            messageContent
+        }
+    }
+    
+    // MARK: - Message Content
+    @ViewBuilder
+    private var messageContent: some View {
         switch message.messageType {
         case .text:
             if let text = message.text {
@@ -959,13 +989,14 @@ struct SingleMessageView: View {
                     .padding(.horizontal, 12)
                     .background(
                         RoundedRectangle(cornerRadius: 18)
-                            .fill(isCurrentUser ? 
-                                  Color(UIColor(red: 30/255, green: 100/255, blue: 50/255, alpha: 1.0)) : 
+                            .fill(isCurrentUser ?
+                                  Color(UIColor(red: 30/255, green: 100/255, blue: 50/255, alpha: 1.0)) :
                                   Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
                             .shadow(color: .black.opacity(0.1), radius: 1, y: 1)
                     )
+            } else {
+                EmptyView()
             }
-            
         case .image:
             if let imageURL = message.imageURL, let url = URL(string: imageURL) {
                 KFImage(url)
@@ -974,21 +1005,32 @@ struct SingleMessageView: View {
                     .frame(maxWidth: 200, maxHeight: 150)
                     .cornerRadius(16)
                     .shadow(color: .black.opacity(0.2), radius: 3, y: 2)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onImageTapped(imageURL)
+                    }
+            } else {
+                EmptyView()
             }
-            
         case .hand:
             if let handId = message.handHistoryId {
-                // Hand message view
                 HandMessageView(handId: handId, ownerUserId: message.handOwnerUserId ?? message.senderId)
                     .frame(maxWidth: .infinity, alignment: isCurrentUser ? .trailing : .leading)
+            } else {
+                EmptyView()
             }
-            
         case .homeGame:
             if let gameId = message.homeGameId {
-                // Home game preview
-                HomeGamePreview(gameId: gameId, 
-                               ownerId: message.senderId, 
-                               groupId: message.groupId)
+                HomeGamePreview(gameId: gameId,
+                                ownerId: message.senderId,
+                                groupId: message.groupId)
+                    .environmentObject(userService)
+                    .environmentObject(handStore)
+                    .environmentObject(sessionStore)
+                    .environmentObject(postService)
+                    .environmentObject(tabBarVisibility)
+            } else {
+                EmptyView()
             }
         }
     }

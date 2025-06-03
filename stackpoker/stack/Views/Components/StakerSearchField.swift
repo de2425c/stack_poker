@@ -15,21 +15,64 @@ struct StakerSearchField: View {
     
     var body: some View {
         VStack(spacing: 8) {
-            // Search field with selected user display
-            if let selectedStaker = config.selectedStaker {
-                // Show selected staker with option to change
-                selectedStakerView(selectedStaker)
-            } else {
-                // Show search field
-                searchFieldView
+            // Toggle for manual entry
+            Toggle(isOn: $config.isManualEntry.animation()) {
+                Text("Enter Staker Manually")
+                    .font(.plusJakarta(.caption, weight: .medium))
+                    .foregroundColor(secondaryTextColor)
             }
-            
-            // Search results overlay
-            if showingSearchResults && !config.searchResults.isEmpty {
-                searchResultsView
+            .padding(.horizontal, 4)
+
+            if config.isManualEntry {
+                manualEntryField
+            } else {
+                // Search field with selected user display
+                if let selectedStaker = config.selectedStaker {
+                    // Show selected staker with option to change
+                    selectedStakerView(selectedStaker)
+                } else {
+                    // Show search field
+                    searchFieldView
+                }
+                
+                // Search results overlay
+                if showingSearchResults && !config.searchResults.isEmpty {
+                    searchResultsView
+                }
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showingSearchResults)
+        .animation(.easeInOut(duration: 0.2), value: config.isManualEntry)
+    }
+    
+    @ViewBuilder
+    private var manualEntryField: some View {
+        GlassyInputField(
+            icon: "person.fill.badge.plus",
+            title: "Manual Staker Name",
+            glassOpacity: glassOpacity,
+            labelColor: secondaryTextColor,
+            materialOpacity: materialOpacity
+        ) {
+            HStack(spacing: 8) {
+                TextField("Enter staker's name...", text: $config.manualStakerName)
+                    .font(.plusJakarta(.body, weight: .regular))
+                    .foregroundColor(primaryTextColor)
+                    .focused($isSearchFocused)
+                
+                if !config.manualStakerName.isEmpty {
+                    Button(action: {
+                        config.manualStakerName = ""
+                        isSearchFocused = false // Optionally dismiss focus
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(secondaryTextColor.opacity(0.7))
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
     }
     
     @ViewBuilder
@@ -87,7 +130,7 @@ struct StakerSearchField: View {
     private var searchFieldView: some View {
         GlassyInputField(
             icon: "magnifyingglass",
-            title: "Search for Staker",
+            title: "Search for Staker (App User)",
             glassOpacity: glassOpacity,
             labelColor: secondaryTextColor,
             materialOpacity: materialOpacity

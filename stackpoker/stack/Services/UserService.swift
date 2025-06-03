@@ -372,18 +372,9 @@ class UserService: ObservableObject {
             
             print("Successfully followed user")
 
-            // Optimistically update local counts and refresh profiles
-            if var followedUser = self.loadedUsers[userIdToFollow] {
-                followedUser.followersCount += 1
-                self.loadedUsers[userIdToFollow] = followedUser
-            }
-            if var currentUser = self.loadedUsers[currentUserId] {
-                currentUser.followingCount += 1
-                self.loadedUsers[currentUserId] = currentUser
-            }
-            if self.currentUserProfile?.id == currentUserId {
-                self.currentUserProfile?.followingCount += 1
-            }
+            // Removed optimistic refresh of loadedUsers/currentUserProfile counts to avoid
+            // triggering large-scale view updates (can be refreshed explicitly where needed).
+
         } catch {
             print("Error following user: \(error)")
             throw error
@@ -413,18 +404,8 @@ class UserService: ObservableObject {
             
             print("Successfully unfollowed user")
 
-            // Optimistically update local counts and refresh profiles
-            if var unfollowedUser = self.loadedUsers[userIdToUnfollow] {
-                unfollowedUser.followersCount = max(0, unfollowedUser.followersCount - 1)
-                self.loadedUsers[userIdToUnfollow] = unfollowedUser
-            }
-            if var currentUser = self.loadedUsers[currentUserId] {
-                currentUser.followingCount = max(0, currentUser.followingCount - 1)
-                self.loadedUsers[currentUserId] = currentUser
-            }
-            if self.currentUserProfile?.id == currentUserId {
-                self.currentUserProfile?.followingCount = max(0, (self.currentUserProfile?.followingCount ?? 0) - 1)
-            }
+            // Removed optimistic local count updates – rely on explicit refreshes instead.
+
         } catch {
             print("Error unfollowing user: \(error)")
             throw error

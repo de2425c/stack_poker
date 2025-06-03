@@ -4,6 +4,7 @@ import FirebaseFirestore
 import FirebaseStorage
 import Charts
 import UIKit
+import UniformTypeIdentifiers
 
 // A transparent navigation container that provides navigation context without UI side effects
 struct TransparentNavigationView<Content: View>: UIViewControllerRepresentable {
@@ -38,6 +39,8 @@ struct ProfileView: View {
     @EnvironmentObject private var userService: UserService
     @StateObject private var sessionStore: SessionStore
     @StateObject private var handStore: HandStore
+    @StateObject private var challengeService: ChallengeService
+    @StateObject private var challengeProgressTracker: ChallengeProgressTracker
     @EnvironmentObject private var postService: PostService
     @State private var showEdit = false
     @State private var showSettings = false
@@ -50,15 +53,28 @@ struct ProfileView: View {
     @State private var showHandsDetailView = false
     @State private var showSessionsDetailView = false
     @State private var showStakingDashboardView = false // New state for Staking Dashboard
+    @State private var showChallengesDetailView = false // New state for Challenges Dashboard
     
     // Analytics specific state (remains for analyticsDetailContent)
     @State private var selectedTimeRange = 1 // Default to 1W (index 1) for Analytics
+    @State private var selectedCarouselIndex = 0 // For carousel page selection
     private let timeRanges = ["24H", "1W", "1M", "6M", "1Y", "All"] // Used by analyticsDetailContent
+    
+    // Chart interaction states
+    @State private var selectedDataPoint: (date: Date, profit: Double)? = nil
+    @State private var touchLocation: CGPoint = .zero
+    @State private var showTooltip: Bool = false
     
     init(userId: String) {
         self.userId = userId
-        _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId))
-        _handStore = StateObject(wrappedValue: HandStore(userId: userId))
+        let sessionStore = SessionStore(userId: userId)
+        let handStore = HandStore(userId: userId)
+        let challengeService = ChallengeService(userId: userId)
+        
+        _sessionStore = StateObject(wrappedValue: sessionStore)
+        _handStore = StateObject(wrappedValue: handStore)
+        _challengeService = StateObject(wrappedValue: challengeService)
+        _challengeProgressTracker = StateObject(wrappedValue: ChallengeProgressTracker(challengeService: challengeService, sessionStore: sessionStore))
     }
     
     // Removed ProfileTab enum and tabItems
@@ -72,60 +88,56 @@ struct ProfileView: View {
             AppBackgroundView()
                 .ignoresSafeArea()
             
-            VStack(spacing: 0) {
-                // Spacer().frame(height: 45) // REMOVED: This was causing the downward shift
-                
-                // Top bar with title and settings button
-                HStack {
-                    Text("Profile")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        showSettings = true
-                    }) {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 20))
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Top bar with title and settings button (scrolls with content)
+                    HStack {
+                        Text("Profile")
+                            .font(.system(size: 24, weight: .bold))
                             .foregroundColor(.white)
-                            .padding(10)
-                            .background(Color.black.opacity(0.3))
-                            .clipShape(Circle())
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            showSettings = true
+                        }) {
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(.white)
+                                .padding(10)
+                                .background(Color.black.opacity(0.3))
+                                .clipShape(Circle())
+                        }
                     }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 0) // Adjusted top padding to 0 to move header up by 15 points
-                .padding(.bottom, 8) // Consistent bottom padding
-                
-                // Profile Card - Always visible
-                ProfileCardView(
-                    userId: userId,
-                    showEdit: $showEdit,
-                    showingFollowersSheet: $showingFollowersSheet, // These bindings need to be declared
-                    showingFollowingSheet: $showingFollowingSheet  // These bindings need to be declared
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 20) // Add some space before cards
-                
-                // Invisible NavigationLink for programmatic post navigation (if needed at this level)
-                // This was for the old tab structure. ActivityContentView now handles its navigation internally
-                // when wrapped in NavigationView.
-                if let postToNavigate = selectedPostForNavigation {
-                    NavigationLink(
-                        destination: PostDetailView(post: postToNavigate, userId: userId),
-                        isActive: Binding<Bool>(
-                           get: { selectedPostForNavigation?.id == postToNavigate.id },
-                           set: { if !$0 { selectedPostForNavigation = nil } }
-                        ),
-                        label: { EmptyView() }
-                    )
-                    .hidden()
-                    .frame(width: 0, height: 0)
-                }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 0)
+                    .padding(.bottom, 8)
 
-                // ScrollView for Navigation Cards
-                ScrollView {
+                    // Profile Card
+                    ProfileCardView(
+                        userId: userId,
+                        showEdit: $showEdit,
+                        showingFollowersSheet: $showingFollowersSheet,
+                        showingFollowingSheet: $showingFollowingSheet
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+
+                    // Invisible NavigationLink for programmatic post navigation
+                    if let postToNavigate = selectedPostForNavigation {
+                        NavigationLink(
+                            destination: PostDetailView(post: postToNavigate, userId: userId),
+                            isActive: Binding<Bool>(
+                               get: { selectedPostForNavigation?.id == postToNavigate.id },
+                               set: { if !$0 { selectedPostForNavigation = nil } }
+                            ),
+                            label: { EmptyView() }
+                        )
+                        .hidden()
+                        .frame(width: 0, height: 0)
+                    }
+
+                    // Navigation cards / buttons
                     VStack(spacing: 16) {
                         // Recent Activity Card and Analytics Card side-by-side
                         HStack(alignment: .top, spacing: 3) {
@@ -246,9 +258,48 @@ struct ProfileView: View {
                                 .foregroundColor(.white.opacity(0.85))
                         }
 
+                        // Challenges Dashboard Card (New)
+                        navigationCard(
+                            title: "Challenges (\(challengeService.activeChallenges.count))",
+                            iconName: "trophy.fill",
+                            baseColor: Color.pink,
+                            action: { showChallengesDetailView = true }
+                        ) {
+                            if !challengeService.activeChallenges.isEmpty {
+                                if let firstChallenge = challengeService.activeChallenges.first {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Capsule()
+                                                .fill(Color.pink.opacity(0.7))
+                                                .frame(width: 3)
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text(firstChallenge.title)
+                                                    .font(.plusJakarta(.callout, weight: .semibold))
+                                                    .foregroundColor(.white.opacity(0.9))
+                                                    .lineLimit(1)
+                                                Text("\(Int(firstChallenge.progressPercentage))% complete")
+                                                    .font(.plusJakarta(.caption2, weight: .medium))
+                                                    .foregroundColor(.gray)
+                                            }
+                                        }
+                                        // Removed mini progress bar to keep profile clean
+                                        if challengeService.activeChallenges.count > 1 {
+                                            Text("and \(challengeService.activeChallenges.count - 1) more active")
+                                                .font(.plusJakarta(.footnote))
+                                                .foregroundColor(.white.opacity(0.7))
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text("Set goals and track your poker journey.")
+                                    .font(.plusJakarta(.subheadline))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
+                        }
+
                     }
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 30) // For tab bar space
+                    .padding(.bottom, 120) // Extra space so last buttons clear the tab bar
                     .padding(.top, 3) // Added 3 points of top padding to the VStack of cards
                 }
             }
@@ -401,11 +452,37 @@ struct ProfileView: View {
             .environmentObject(userService) 
             .environmentObject(StakeService()) 
         }
+        .fullScreenCover(isPresented: $showChallengesDetailView) {
+            NavigationView {
+                ChallengeDashboardView(userId: userId)
+                    .navigationTitle("Challenges")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button(action: { showChallengesDetailView = false }) {
+                                Image(systemName: "chevron.backward")
+                                    .foregroundColor(.white)
+                            }
+                        }
+                    }
+            }
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .background(AppBackgroundView().ignoresSafeArea(.all))
+            .accentColor(.white)
+            .environmentObject(challengeService)
+            .environmentObject(sessionStore)
+            .environmentObject(userService)
+            .environmentObject(challengeProgressTracker)
+            .environmentObject(handStore)
+            .environmentObject(postService)
+        }
         .navigationBarHidden(true)
         .environmentObject(userService)
         .environmentObject(postService)
         .environmentObject(sessionStore)
         .environmentObject(handStore)
+        .environmentObject(challengeService)
         .onAppear {
             if userService.currentUserProfile == nil {
                 Task { try? await userService.fetchUserProfile() }
@@ -603,52 +680,236 @@ struct ProfileView: View {
         return nil
     }
     
+    // MARK: - New Analytics Helper Properties
+    private var totalHoursPlayed: Double {
+        return sessionStore.sessions.reduce(0) { $0 + $1.hoursPlayed }
+    }
+
+    private var averageSessionLength: Double {
+        if totalSessions == 0 { return 0 }
+        return totalHoursPlayed / Double(totalSessions)
+    }
+
+    private var highestCashoutToBuyInRatio: (ratio: Double, session: Session)? {
+        guard !sessionStore.sessions.isEmpty else { return nil }
+        
+        var maxRatio: Double = 0
+        var sessionWithMaxRatio: Session? = nil
+        
+        for session in sessionStore.sessions {
+            if session.buyIn > 0 { // Avoid division by zero
+                let ratio = session.cashout / session.buyIn
+                if ratio > maxRatio {
+                    maxRatio = ratio
+                    sessionWithMaxRatio = session
+                }
+            }
+        }
+        
+        if let session = sessionWithMaxRatio {
+            return (maxRatio, session)
+        }
+        return nil
+    }
+
+    enum TimeOfDayCategory: String, CaseIterable {
+        case morning = "Morning Pro" // 5 AM - 12 PM
+        case afternoon = "Afternoon Grinder" // 12 PM - 5 PM
+        case evening = "Evening Shark" // 5 PM - 9 PM
+        case night = "Night Owl" // 9 PM - 5 AM
+        case unknown = "Versatile Player"
+
+        var icon: String {
+            switch self {
+            case .morning: return "sun.max.fill"
+            case .afternoon: return "cloud.sun.fill"
+            case .evening: return "moon.stars.fill"
+            case .night: return "zzz"
+            case .unknown: return "questionmark.circle.fill"
+            }
+        }
+    }
+
+    private var pokerPersona: (category: TimeOfDayCategory, dominantHours: String) {
+        guard !sessionStore.sessions.isEmpty else {
+            return (.unknown, "N/A")
+        }
+
+        var morningSessions = 0 // 5 AM - 11:59 AM
+        var afternoonSessions = 0 // 12 PM - 4:59 PM
+        var eveningSessions = 0   // 5 PM - 8:59 PM
+        var nightSessions = 0     // 9 PM - 4:59 AM
+
+        let calendar = Calendar.current
+        for session in sessionStore.sessions {
+            let hour = calendar.component(.hour, from: session.startTime)
+            switch hour {
+            case 5..<12: morningSessions += 1
+            case 12..<17: afternoonSessions += 1
+            case 17..<21: eveningSessions += 1
+            case 21..<24, 0..<5: nightSessions += 1
+            default: break
+            }
+        }
+
+        let counts = [
+            "Morning": morningSessions,
+            "Afternoon": afternoonSessions,
+            "Evening": eveningSessions,
+            "Night": nightSessions
+        ]
+        
+        let totalPlaySessions = Double(morningSessions + afternoonSessions + eveningSessions + nightSessions)
+        if totalPlaySessions == 0 { return (.unknown, "N/A")}
+
+        var persona: TimeOfDayCategory = .unknown
+        var maxCount = 0
+        var dominantPeriodName = "N/A"
+
+        if morningSessions > maxCount { maxCount = morningSessions; persona = .morning; dominantPeriodName = "Morning" }
+        if afternoonSessions > maxCount { maxCount = afternoonSessions; persona = .afternoon; dominantPeriodName = "Afternoon"}
+        if eveningSessions > maxCount { maxCount = eveningSessions; persona = .evening; dominantPeriodName = "Evening" }
+        if nightSessions > maxCount { maxCount = nightSessions; persona = .night; dominantPeriodName = "Night"}
+        
+        let percentage = (Double(maxCount) / totalPlaySessions * 100)
+        let dominantHoursString = "\(dominantPeriodName): \(String(format: "%.0f%%", percentage))"
+        
+        return (persona, dominantHoursString)
+    }
+    
+    private var topLocation: (location: String, count: Int)? {
+        guard !sessionStore.sessions.isEmpty else { return nil }
+        
+        // Consider gameName as a fallback if location is nil or empty
+        let locationsFromSessions = sessionStore.sessions.map { session -> String? in
+            let trimmedLocation = session.location?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let loc = trimmedLocation, !loc.isEmpty {
+                return loc
+            }
+            let trimmedGameName = session.gameName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedGameName.isEmpty {
+                return trimmedGameName // Use gameName as fallback
+            }
+            return nil
+        }
+
+        let validLocations = locationsFromSessions.compactMap { $0 }.filter { !$0.isEmpty }
+        if validLocations.isEmpty { return nil }
+        
+        let locationCounts = validLocations.reduce(into: [:]) { counts, location in counts[location, default: 0] += 1 }
+        
+        if let (topLoc, count) = locationCounts.max(by: { $0.value < $1.value }) {
+            return (topLoc, count)
+        }
+        return nil
+    }
+    
+    private var carouselHighlights: [CarouselHighlight] {
+        var items: [CarouselHighlight] = []
+
+        // Top Location (Hot Spot) - FIRST
+        if let locData = topLocation {
+            items.append(CarouselHighlight(
+                type: .location,
+                title: "Hot Spot",
+                iconName: "mappin.and.ellipse",
+                primaryText: locData.location,
+                secondaryText: "Played \(locData.count) times",
+                tertiaryText: nil
+            ))
+        }
+
+        // Best Multiplier
+        if let ratioData = highestCashoutToBuyInRatio {
+            items.append(CarouselHighlight(
+                type: .multiplier,
+                title: "Best Multiplier",
+                iconName: "flame.fill",
+                primaryText: String(format: "%.1fx", ratioData.ratio),
+                secondaryText: "Buy-in: $\(Int(ratioData.session.buyIn).formattedWithCommas)",
+                tertiaryText: "Cash-out: $\(Int(ratioData.session.cashout).formattedWithCommas)"
+            ))
+        }
+
+        // Poker Persona
+        items.append(CarouselHighlight(
+            type: .persona,
+            title: "Your Style",
+            iconName: pokerPersona.category.icon,
+            primaryText: pokerPersona.category.rawValue,
+            secondaryText: pokerPersona.dominantHours,
+            tertiaryText: nil
+        ))
+
+        return items.filter { !$0.primaryText.isEmpty || $0.type == .persona }
+    }
+    
     // Content for Analytics Detail View (extracted from old tabContent)
     @ViewBuilder
     private func analyticsDetailContent() -> some View {
         // This ScrollView will be part of the NavigationView in fullScreenCover
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 15) { // Reduced main spacing
                 // Bankroll section with past month profit/loss indicator
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Bankroll")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.gray)
                     
-                    Text("$\(Int(totalBankroll).formattedWithCommas)")
-                        .font(.system(size: 36, weight: .bold))
+                    // Show selected data point profit or total bankroll
+                    Text(selectedDataPoint != nil ? 
+                         "$\(Int(selectedDataPoint!.profit).formattedWithCommas)" : 
+                         "$\(Int(totalBankroll).formattedWithCommas)")
+                        .font(.system(size: selectedDataPoint != nil ? 40 : 36, weight: .bold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedDataPoint?.profit)
         
                     HStack(spacing: 4) {
-                        // Get profit from selected time range instead of hardcoded month
-                        let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
-                        let timeRangeProfit = filteredSessions.reduce(0) { $0 + $1.profit }
-                        
-                        Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(timeRangeProfit >= 0 ? 
-                                Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
-                        
-                        Text("$\(abs(Int(timeRangeProfit)).formattedWithCommas)")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(timeRangeProfit >= 0 ? 
-                                Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
-                        
-                        Text(getTimeRangeLabel(for: selectedTimeRange))
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
+                        if let selectedData = selectedDataPoint {
+                            // Show selected date indicator
+                            Image(systemName: selectedData.profit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(selectedData.profit >= 0 ? 
+                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                            
+                            Text("at \(formatTooltipDate(selectedData.date))")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(selectedData.profit >= 0 ? 
+                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                        } else {
+                            // Show time range indicator (original)
+                            let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                            let timeRangeProfit = filteredSessions.reduce(0) { $0 + $1.profit }
+                            
+                            Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(timeRangeProfit >= 0 ? 
+                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                            
+                            Text("$\(abs(Int(timeRangeProfit)).formattedWithCommas)")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(timeRangeProfit >= 0 ? 
+                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                            
+                            Text(getTimeRangeLabel(for: selectedTimeRange))
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                        }
                         
                         Spacer()
                     }
                     .padding(.top, 2)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedDataPoint != nil)
                 }
                 .padding(.horizontal, 20)
                 
                 // Chart display with time selectors at bottom
-                VStack(spacing: 10) {
+                VStack(spacing: 8) { // Reduced spacing
                     if sessionStore.sessions.isEmpty {
                         Text("No sessions recorded")
                             .foregroundColor(.gray)
@@ -666,6 +927,19 @@ struct ProfileView: View {
                                             .background(Color.gray.opacity(0.1))
                                     }
                                 }
+                                
+                                // Beautiful background gradient overlay
+                                LinearGradient(
+                                    gradient: Gradient(stops: [
+                                        .init(color: Color.clear, location: 0),
+                                        .init(color: Color.white.opacity(0.02), location: 0.3),
+                                        .init(color: Color.white.opacity(0.03), location: 0.7),
+                                        .init(color: Color.clear, location: 1)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                                .blendMode(.overlay)
                                 
                                 // Simple line chart - use green or red based on profit/loss for the selected time range
                                 let selectedSessions = filteredSessionsForTimeRange(selectedTimeRange)
@@ -728,10 +1002,18 @@ struct ProfileView: View {
                                     }
                                 }
                                 .stroke(
-                                    chartColor,
-                                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            chartColor.opacity(0.9),
+                                            chartColor,
+                                            chartColor.opacity(0.95)
+                                        ]),
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    ),
+                                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
                                 )
-                                .shadow(color: chartColor.opacity(0.3), radius: 3, y: 1)
+                                .shadow(color: chartColor.opacity(0.4), radius: 4, y: 2)
                                 
                                 // Add chart area fill with gradient
                                 Path { path in
@@ -796,17 +1078,58 @@ struct ProfileView: View {
                                 }
                                 .fill(
                                     LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            chartColor.opacity(0.3),
-                                            chartColor.opacity(0.05)
+                                        gradient: Gradient(stops: [
+                                            .init(color: chartColor.opacity(0.35), location: 0),
+                                            .init(color: chartColor.opacity(0.15), location: 0.4),
+                                            .init(color: chartColor.opacity(0.08), location: 0.7),
+                                            .init(color: Color.clear, location: 1)
                                         ]),
                                         startPoint: .top,
                                         endPoint: .bottom
                                     )
                                 )
+                                
+                                // Interactive overlay for touch detection
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .contentShape(Rectangle())
+                                    .gesture(
+                                        DragGesture(minimumDistance: 0)
+                                            .onChanged { value in
+                                                handleChartTouch(at: value.location, in: geometry)
+                                            }
+                                            .onEnded { _ in
+                                                withAnimation(.easeOut(duration: 0.3)) {
+                                                    showTooltip = false
+                                                    selectedDataPoint = nil
+                                                }
+                                            }
+                                    )
+                                
+                                // Unified touch indicator with line and dot
+                                if showTooltip {
+                                    // Vertical indicator line with gradient
+                                    Rectangle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(stops: [
+                                                    .init(color: Color.clear, location: 0),
+                                                    .init(color: Color.white.opacity(0.6), location: 0.1),
+                                                    .init(color: Color.white.opacity(0.8), location: 0.5),
+                                                    .init(color: Color.white.opacity(0.6), location: 0.9),
+                                                    .init(color: Color.clear, location: 1)
+                                                ]),
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            )
+                                        )
+                                        .frame(width: 1)
+                                        .position(x: touchLocation.x, y: geometry.size.height / 2)
+                                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                                }
                             }
                         }
-                        .frame(height: 220)
+                        .frame(height: 200) // Adjusted height for chart
                         
                         // Time period selector
                         HStack {
@@ -829,152 +1152,469 @@ struct ProfileView: View {
                         .padding(.horizontal, 20)
                     }
                 }
-                .padding(.top, 10) // Add some space above the chart section
+                .padding(.top, 5) // Reduced top padding
                 
-                // Stats cards in grid layout
-                Text("MORE STATS")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.gray)
+                // Premium Highlights Carousel Section
+                Text("HIGHLIGHTS")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
-                    .padding(.top, 20) // Increased top padding
-                
-                VStack(spacing: 12) {
-                    // Win Rate
-                    HStack {
+                    .padding(.top, 12) // Slightly reduced spacing
+
+                // HStack containing Carousel and Win Rate Wheel
+                VStack(spacing: 8) {
+                    // STEP 1: Calculate proper height based on screen width
+                    // Formula: ~50pt padding + (6/3)y + y = screen_width = ~50pt + 3y
+                    // Solving: y = (screen_width - 50) / 3
+                    let screenWidth = UIScreen.main.bounds.width
+                    let squareSize: CGFloat = (screenWidth - 50) / 3
+                    
+                    // STEP 2: Carousel width is 6/3 (=2) times the square size for 60% screen
+                    let carouselWidth: CGFloat = 2.0 * squareSize
+                    
+                    // STEP 3: Carousel content height matches square size (excluding page indicators)
+                    let carouselContentHeight: CGFloat = squareSize
+                    
+                    // Main content row - carousel and win rate with same height
+                    HStack(spacing: 20) {
+                        // Carousel content only (no page indicators)
+                        TabView(selection: $selectedCarouselIndex) {
+                            ForEach(carouselHighlights.indices, id: \.self) { index in
+                                let highlight = carouselHighlights[index]
+                                
+                                VStack(alignment: .leading, spacing: 12) {
+                                    // Header
+                                    HStack(spacing: 10) {
+                                        Image(systemName: highlight.iconName)
+                                            .font(.system(size: 20, weight: .semibold))
+                                            .foregroundColor(highlight.type == .multiplier ? .orange : (highlight.type == .persona ? .cyan : .pink))
+                                            .frame(width: 28, height: 28)
+                                        
+                                        Text(highlight.title)
+                                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                                            .foregroundColor(.white.opacity(0.9))
+                                    
+                                        Spacer()
+                                    }
+                                    
+                                    // Primary content
+                                    Text(highlight.primaryText)
+                                        .font(.system(size: highlight.type == .multiplier ? 38 : 26, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.7)
+                                    
+                                    // Secondary and tertiary content - for multiplier, show buy-in and cashout adjacent
+                                    if highlight.type == .multiplier {
+                                        if let secondaryText = highlight.secondaryText, let tertiaryText = highlight.tertiaryText {
+                                            HStack(spacing: 12) {
+                                                Text(secondaryText)
+                                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                                    .foregroundColor(.white.opacity(0.75))
+                                                Text(tertiaryText)
+                                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                                    .foregroundColor(.white.opacity(0.75))
+                                            }
+                                        }
+                                    } else {
+                                        // For other types, show normally
+                                        if let secondaryText = highlight.secondaryText {
+                                            Text(secondaryText)
+                                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                                .foregroundColor(.white.opacity(0.75))
+                                        }
+                                        
+                                        if let tertiaryText = highlight.tertiaryText {
+                                            Text(tertiaryText)
+                                                .font(.system(size: 13, weight: .regular, design: .rounded))
+                                                .foregroundColor(.white.opacity(0.65))
+                                        }
+                                    }
+                                    
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                                .background(
                         ZStack {
-                            Circle()
-                                .stroke(Color.gray.opacity(0.2), lineWidth: 4)
-                                .frame(width: 44, height: 44)
-                            
-                            Circle()
-                                .trim(from: 0, to: CGFloat(winRate) / 100)
-                                .stroke(
-                                    Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)),
-                                    style: StrokeStyle(lineWidth: 4, lineCap: .round) // Added lineCap
+                                        RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
+                                            .fill(Material.ultraThinMaterial)
+                                            .opacity(0.08) 
+                                        
+                                        RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
+                                            .fill(Color.white.opacity(0.02))
+                                        
+                                        RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
+                                            .stroke(
+                                                LinearGradient(
+                                                    gradient: Gradient(colors: [
+                                                        Color.white.opacity(0.15),
+                                                        Color.white.opacity(0.05),
+                                                        Color.clear
+                                                    ]),
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ),
+                                                lineWidth: 0.7
+                                            )
+                                    }
                                 )
-                                .frame(width: 44, height: 44)
-                                .rotationEffect(.degrees(-90))
-                            
-                            Text("\(Int(winRate))%")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
+                                .tag(index)
+                            }
                         }
+                        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                        .frame(width: carouselWidth, height: carouselContentHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
                         
-                        Text("Win Rate")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white)
-                        
-                        Spacer()
+                        // Win-rate square (height = width = carousel height)
+                        WinRateCard(winRate: winRate)
+                            .frame(width: squareSize, height: squareSize)
                     }
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 16)
-                    .background(Color.black.opacity(0.3))
-                    .cornerRadius(12)
+                    
+                    // Page indicators below the main content
+                    if carouselHighlights.count > 1 {
+                        HStack {
+                            // Spacer to center indicators under carousel
+                            HStack(spacing: 7) {
+                                ForEach(carouselHighlights.indices, id: \.self) { index in
+                                    Capsule()
+                                        .fill(selectedCarouselIndex == index ? Color.white.opacity(0.85) : Color.white.opacity(0.3))
+                                        .frame(width: selectedCarouselIndex == index ? 20 : 7, height: 7)
+                                        .animation(.spring(response: 0.35, dampingFraction: 0.65), value: selectedCarouselIndex)
+                                }
+                            }
+                            .frame(width: carouselWidth)
+                            
+                            Spacer()
+                        }
+                    }
+                }
+                .frame(height: (UIScreen.main.bounds.width - 50) / 3 + 20) // Dynamic height + small buffer
+                .padding(.horizontal, 20)
+                .padding(.bottom, 0)
+
+                // Slim Performance lines (no boxes)
+                Text("PERFORMANCE STATS")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.gray.opacity(0.8))
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
                     
-                    // Average Profit, Best Session, Total Sessions
                     VStack(spacing: 12) {
-                        // Average Profit
-                        HStack {
-                            ZStack {
-                                Circle()
-                                    .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.15)))
-                                    .frame(width: 24, height: 24)
-                                
-                                Image(systemName: "chart.line.uptrend.xyaxis")
-                                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                    .font(.system(size: 12))
-                            }
-                            
-                            Text("Average Profit")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.white)
-                            
-                            Spacer()
-                            
-                            Text("$\(Int(averageProfit).formattedWithCommas)")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                            
-                            Text("/session")
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
-                        }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 16)
-                        .background(Color.black.opacity(0.3))
-                        .cornerRadius(12)
+                    performanceLine(icon: "dollarsign.circle.fill", color: .green, title: "Avg. Profit", value: "$\(Int(averageProfit).formattedWithCommas) / session")
+                    Divider().background(Color.white.opacity(0.1))
+                    performanceLine(icon: "star.fill", color: .yellow, title: "Best Session", value: "$\(Int(bestSession?.profit ?? 0).formattedWithCommas)")
+                    Divider().background(Color.white.opacity(0.1))
+                    performanceLine(icon: "list.star", color: .orange, title: "Sessions", value: "\(totalSessions)")
+                    Divider().background(Color.white.opacity(0.1))
+                    performanceLine(icon: "clock.fill", color: .purple, title: "Hours", value: "\(Int(totalHoursPlayed))")
+                    Divider().background(Color.white.opacity(0.1))
+                    performanceLine(icon: "timer", color: .pink, title: "Avg. Session Length", value: String(format: "%.1f hrs", averageSessionLength))
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
+            }
+            .padding(.bottom, 24) // Slightly reduced bottom padding
+        }
+        .background(AppBackgroundView().ignoresSafeArea())
+    }
+
+    // MARK: - Adaptive Stat Card
+    @ViewBuilder
+    private func adaptiveStatCard<Content: View>(
+        title: String,
+        icon: String,
+        // height: CGFloat, // Removed fixed height
+        accentColor: Color, // Added accent color
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) { // Reduced spacing
+            HStack(spacing: 6) { // Reduced spacing
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .medium)) // Adjusted size
+                    .foregroundColor(accentColor) // Use accent color
+                    .frame(width: 14, alignment: .center) // Adjusted size
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded)) // Adjusted size
+                    .foregroundColor(.white.opacity(0.75)) // Brighter
+                Spacer()
+            }
+            
+            Spacer(minLength: 4) // Reduced minLength
+            
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Spacer(minLength: 4) // Reduced minLength
+        }
+        .padding(10) // Slightly less padding for more transparency
+        .frame(maxWidth: .infinity) // Allow horizontal expansion
+        .fixedSize(horizontal: false, vertical: true) // Allow vertical adaptation
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(0.1) // More transparent glass
+                  
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(Color.white.opacity(0.02)) // Softer overlay
+                
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                accentColor.opacity(0.3), // Use accent color in border
+                                Color.white.opacity(0.04),
+                                Color.clear
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.75 // Thinner border
+                    )
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    // MARK: - Carousel Support Types
+    private struct CarouselHighlight: Identifiable {
+        let id = UUID()
+        let type: HighlightType
+        var title: String
+        var iconName: String
+        var primaryText: String
+        var secondaryText: String?
+        var tertiaryText: String?
+    }
+
+    private enum HighlightType {
+        case multiplier, persona, location
+    }
+
+    // MARK: - Premium Highlights Carousel
+    @ViewBuilder
+    private func PremiumHighlightsCarousel(
+        highestCashoutToBuyInRatio: (ratio: Double, session: Session)?,
+        pokerPersona: (category: TimeOfDayCategory, dominantHours: String),
+        topLocation: (location: String, count: Int)?
+    ) -> some View {
+        
+        let highlights: [CarouselHighlight] = {
+            var items: [CarouselHighlight] = []
+
+            // Top Location (Hot Spot) - FIRST
+            if let locData = topLocation {
+                items.append(CarouselHighlight(
+                    type: .location,
+                    title: "Hot Spot",
+                    iconName: "mappin.and.ellipse",
+                    primaryText: locData.location,
+                    secondaryText: "Played \(locData.count) times",
+                    tertiaryText: nil
+                ))
+            }
+
+            // Best Multiplier
+            if let ratioData = highestCashoutToBuyInRatio {
+                items.append(CarouselHighlight(
+                    type: .multiplier,
+                    title: "Best Multiplier",
+                    iconName: "flame.fill", // Using system flame
+                    primaryText: String(format: "%.1fx", ratioData.ratio),
+                    secondaryText: "Buy-in: $\(Int(ratioData.session.buyIn).formattedWithCommas)",
+                    tertiaryText: "Cash-out: $\(Int(ratioData.session.cashout).formattedWithCommas)"
+                ))
+            }
+
+            // Poker Persona
+            items.append(CarouselHighlight(
+                type: .persona,
+                title: "Your Style",
+                iconName: pokerPersona.category.icon,
+                primaryText: pokerPersona.category.rawValue,
+                secondaryText: pokerPersona.dominantHours,
+                tertiaryText: nil
+            ))
+
+            return items.filter { !$0.primaryText.isEmpty || $0.type == .persona } // Ensure persona always shows if available
+        }()
+
+        @State var selectedIndex = 0
+
+        if highlights.isEmpty {
+            VStack {
+                Text("More insights available as you log sessions")
+                    .font(.system(size: 14, weight: .medium, design: .rounded)) // Adjusted size
+                    .foregroundColor(.gray.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity) // Fill available space
+            .background(
+                RoundedRectangle(cornerRadius: 24) // Softer radius
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(0.1) // More subtle
+            )
+        } else {
+            VStack(spacing: 8) {
+                // TabView content - this should match win rate card height exactly
+                TabView(selection: $selectedIndex) {
+                    ForEach(highlights.indices, id: \.self) { index in
+                        let highlight = highlights[index]
                         
-                        // Best Session
-                        HStack {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.blue.opacity(0.15))
-                                    .frame(width: 24, height: 24)
+                        VStack(alignment: .leading, spacing: 12) { // Adjusted spacing
+                            // Header
+                            HStack(spacing: 10) { // Adjusted spacing
+                                Image(systemName: highlight.iconName)
+                                    .font(.system(size: 20, weight: .semibold)) // Adjusted size
+                                    .foregroundColor(highlight.type == .multiplier ? .orange : (highlight.type == .persona ? .cyan : .pink)) // Example colors
+                                    .frame(width: 28, height: 28) // Adjusted size
                                 
-                                Image(systemName: "star.fill")
-                                    .foregroundColor(.blue)
-                                    .font(.system(size: 12))
-                            }
-                            
-                            Text("Best Session")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.white)
+                                Text(highlight.title)
+                                    .font(.system(size: 15, weight: .bold, design: .rounded)) // Adjusted size
+                                    .foregroundColor(.white.opacity(0.9))
                             
                             Spacer()
-                            
-                            Text("$\(Int(bestSession?.profit ?? 0).formattedWithCommas)")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                            
-                            Text("Profit")
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
-                        }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 16)
-                        .background(Color.black.opacity(0.3))
-                        .cornerRadius(12)
-                        
-                        // Total Sessions
-                        HStack {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.orange.opacity(0.15))
-                                    .frame(width: 24, height: 24)
-                                
-                                Image(systemName: "calendar")
-                                    .foregroundColor(.orange)
-                                    .font(.system(size: 12))
                             }
                             
-                            Text("Total Sessions")
-                                .font(.system(size: 14, weight: .medium))
+                            // Primary content
+                            Text(highlight.primaryText)
+                                .font(.system(size: highlight.type == .multiplier ? 38 : 26, weight: .bold, design: .rounded)) // Adjusted sizes
                                 .foregroundColor(.white)
+                                .lineLimit(1) // Ensure it fits
+                                .minimumScaleFactor(0.7)
                             
-                            Spacer()
+                            // Secondary content
+                            if let secondaryText = highlight.secondaryText {
+                                Text(secondaryText)
+                                    .font(.system(size: 14, weight: .medium, design: .rounded)) // Adjusted size
+                                    .foregroundColor(.white.opacity(0.75))
+                            }
                             
-                            Text("\(totalSessions)")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
+                            // Tertiary content
+                            if let tertiaryText = highlight.tertiaryText {
+                                Text(tertiaryText)
+                                    .font(.system(size: 13, weight: .regular, design: .rounded)) // Adjusted size
+                                    .foregroundColor(.white.opacity(0.65))
+                            }
                             
-                            Text("Played")
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
+                            Spacer(minLength: 0) // Ensure content pushes up
                         }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 16)
-                        .background(Color.black.opacity(0.3))
-                        .cornerRadius(12)
+                        .padding(20) // Adjusted padding
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .background(
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 24) // Softer radius
+                                    .fill(Material.ultraThinMaterial)
+                                    .opacity(0.08) 
+                                
+                                RoundedRectangle(cornerRadius: 24)
+                                    .fill(Color.white.opacity(0.02))
+                                
+                                RoundedRectangle(cornerRadius: 24)
+                                    .stroke(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color.white.opacity(0.15),
+                                                Color.white.opacity(0.05),
+                                                Color.clear
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 0.7 // Thinner
+                                    )
+                            }
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 24))
+                        .tag(index)
                     }
-                    .padding(.horizontal, 20) // This was applying to the VStack of stats, correct
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .frame(maxWidth: .infinity, maxHeight: .infinity) // Fill the exact frame given to carousel
+                
+                // Enhanced page indicator
+                if highlights.count > 1 {
+                    HStack(spacing: 7) { // Adjusted spacing
+                        ForEach(highlights.indices, id: \.self) { index in
+                            Capsule()
+                                .fill(selectedIndex == index ? Color.white.opacity(0.85) : Color.white.opacity(0.3))
+                                .frame(width: selectedIndex == index ? 20 : 7, height: 7) // Adjusted sizes
+                                .animation(.spring(response: 0.35, dampingFraction: 0.65), value: selectedIndex)
+                        }
+                    }
                 }
             }
-            .padding(.bottom, 30) // Overall padding for the ScrollView content
-            .background(AppBackgroundView().ignoresSafeArea()) // Ensure background matches
         }
-        .background(AppBackgroundView().ignoresSafeArea()) // Match app background
+    }
+
+    // New ViewBuilder function for a single stat card with glassy effect
+    @ViewBuilder
+    private func analyticsStatCard<Content: View>(
+        title: String,
+        icon: String,
+        iconColor: Color,
+        statDetailColor: Color, // Color for icon and subtle accents
+        height: CGFloat = 100, // Default height, can be overridden
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .medium)) // Slightly smaller icon
+                    .foregroundColor(statDetailColor.opacity(0.85))
+                    .frame(width: 18, alignment: .center) // Slightly smaller frame
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded)) // Slightly smaller title
+                    .foregroundColor(Color.white.opacity(0.75))
+                Spacer()
+            }
+            
+            content() // This will contain the main stat value/display
+                .frame(maxWidth: .infinity, alignment: .leading) 
+                .padding(.top, 5) // Increased padding a bit for content separation
+
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: height) 
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 20) // Slightly larger radius
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(0.35) // Increased transparency (material is more see-through)
+                
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.black.opacity(0.05)) // Very subtle darker overlay for content pop
+
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                statDetailColor.opacity(0.45), // Adjusted opacity for stroke
+                                statDetailColor.opacity(0.15), 
+                                Color.white.opacity(0.05) // More subtle white highlight
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1 // Thinner stroke
+                    )
+                
+                // Optional: Softer Inner Glow instead of shadow for a smoother look
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(statDetailColor)
+                    .blur(radius: 25) // Large blur for a glow effect
+                    .opacity(0.1) // Very subtle glow
+                    .blendMode(.overlay)
+                    .allowsHitTesting(false)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4) // Adjusted shadow
     }
     
     private func getTimeRangeLabel(for index: Int) -> String {
@@ -1008,6 +1648,201 @@ struct ProfileView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated // e.g., "1h ago", "2d ago"
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+    
+    // Chart interaction helper functions
+    private func handleChartTouch(at location: CGPoint, in geometry: GeometryProxy) {
+        let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange).sorted(by: { $0.startDate < $1.startDate })
+        
+        guard !filteredSessions.isEmpty else { return }
+        
+        // Get ALL sessions sorted by date to calculate true cumulative bankroll
+        let allSessionsSorted = sessionStore.sessions.sorted(by: { $0.startDate < $1.startDate })
+        
+        // Calculate cumulative data for filtered sessions but with true bankroll totals
+        var cumulativeData: [(date: Date, profit: Double)] = []
+        
+        for session in filteredSessions {
+            // Find this session's position in all sessions to calculate true cumulative
+            let sessionsUpToThisPoint = allSessionsSorted.filter { $0.startDate <= session.startDate }
+            let trueAccumulated = sessionsUpToThisPoint.reduce(0) { $0 + $1.profit }
+            cumulativeData.append((date: session.startDate, profit: trueAccumulated))
+        }
+        
+        // Find the closest data point to touch location
+        let touchX = location.x
+        let stepX = cumulativeData.count > 1 ? geometry.size.width / CGFloat(cumulativeData.count - 1) : geometry.size.width
+        
+        // Calculate which data point index is closest
+        let index = Int(round(touchX / stepX))
+        let clampedIndex = max(0, min(index, cumulativeData.count - 1))
+        
+        let dataPoint = cumulativeData[clampedIndex]
+        let actualX = CGFloat(clampedIndex) * stepX
+        
+        // Calculate Y position using the SAME logic as the chart line
+        let cumulativeProfits = cumulativeData.map { $0.profit }
+        let minProfit = cumulativeProfits.min() ?? 0
+        let maxProfit = max(cumulativeProfits.max() ?? 1, 1)
+        let range = max(maxProfit - minProfit, 1)
+        
+        // Use exact same Y calculation as the chart path
+        let normalized = range == 0 ? 0.5 : (dataPoint.profit - minProfit) / range
+        let actualY = geometry.size.height * (1 - CGFloat(normalized))
+        
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+            selectedDataPoint = dataPoint
+            touchLocation = CGPoint(x: actualX, y: actualY)
+            showTooltip = true
+        }
+        
+        // Haptic feedback
+        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+        impactFeedback.impactOccurred()
+    }
+    
+    private func formatTooltipDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        
+        switch selectedTimeRange {
+        case 0: // 24H
+            formatter.dateFormat = "MMM d, HH:mm"
+        case 1: // 1W
+            formatter.dateFormat = "MMM d"
+        case 2: // 1M
+            formatter.dateFormat = "MMM d"
+        case 3, 4: // 6M, 1Y
+            formatter.dateFormat = "MMM d, yyyy"
+        default: // All
+            formatter.dateFormat = "MMM d, yyyy"
+        }
+        
+        return formatter.string(from: date)
+    }
+
+    // MARK: - Existing helpers/components
+
+    // MARK: - Highlight Card
+    @ViewBuilder
+    private func highlightCard(title: String, icon: String, primary: String, secondary: String, tertiary: String, accent: Color, width: CGFloat, height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(accent)
+                Text(title)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Spacer()
+            }
+            Text(primary)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            if !secondary.isEmpty {
+                Text(secondary)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            if !tertiary.isEmpty {
+                Text(tertiary)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            Spacer()
+        }
+        .padding(16)
+        .frame(width: width, height: height, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Material.ultraThinMaterial)
+                .opacity(0.08)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.white.opacity(0.05), lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    // MARK: - Performance Line
+    @ViewBuilder
+    private func performanceLine(icon: String, color: Color, title: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(color)
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.white.opacity(0.8))
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
+        }
+    }
+
+    // MARK: - Win Rate Card (square)
+    private struct WinRateCard: View {
+        let winRate: Double
+
+        var body: some View {
+            let squareSize: CGFloat = (UIScreen.main.bounds.width - 50) / 3
+            let dynamicRadius: CGFloat = squareSize * 0.15
+            
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "chart.pie.fill")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.cyan)
+                        .frame(width: 14)
+                    Text("Win Rate")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.75))
+                    Spacer()
+                }
+
+                GeometryReader { proxy in
+                    let availableSize = min(proxy.size.width, proxy.size.height)
+                    let wheelSize = availableSize * 0.95 // Reduced from 1 to 0.95 for slightly smaller wheel
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.12), lineWidth: 8)
+                            .frame(width: wheelSize, height: wheelSize)
+                        Circle()
+                            .trim(from: 0, to: CGFloat(winRate) / 100)
+                            .stroke(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.cyan, Color.cyan.opacity(0.6)]),
+                                    startPoint: .top, endPoint: .bottom),
+                                style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: wheelSize, height: wheelSize)
+                        Text("\(Int(winRate))%")
+                            .font(.system(size: min(wheelSize * 0.25, 28), weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
+
+            }
+            .padding(10)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: dynamicRadius)
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(0.1)
+                    RoundedRectangle(cornerRadius: dynamicRadius)
+                        .fill(Color.white.opacity(0.02))
+                    RoundedRectangle(cornerRadius: dynamicRadius)
+                        .stroke(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.cyan.opacity(0.3), Color.white.opacity(0.04), Color.clear]),
+                                startPoint: .topLeading, endPoint: .bottomTrailing),
+                            lineWidth: 0.75)
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: dynamicRadius))
+        }
     }
 }
 
@@ -1245,7 +2080,20 @@ struct SettingsView: View {
     @State private var deleteError: String? = nil
     @State private var isDeleting = false
     @State private var pushNotificationsEnabled: Bool = true // Added for push notification toggle
+    @State private var showCSVImporter: Bool = false // For Pokerbase import
+    @State private var importStatusMessage: String? = nil // Shows success/failure
     @State private var showEmergencyResetConfirmation = false // Add confirmation state
+    @State private var showPAImporter: Bool = false // Poker Analytics
+    @State private var paStatusMessage: String? = nil
+    @State private var showPBTImporter: Bool = false // Poker Bankroll Tracker
+    @State private var pbtStatusMessage: String? = nil
+    
+    // Add enum and state for consolidated file import
+    enum ImportType {
+        case pokerbase, pokerAnalytics, pbt
+    }
+    @State private var currentImportType: ImportType = .pokerbase
+    @State private var showFileImporter: Bool = false
     
     var body: some View {
         ZStack {
@@ -1295,6 +2143,87 @@ struct SettingsView: View {
                             .foregroundColor(.orange)
                         Spacer()
                         Text("Emergency")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                    )
+                }
+                .padding(.horizontal, 20)
+                
+                // Import from Pokerbase Button
+                Button(action: { 
+                    print("Pokerbase import button tapped")
+                    currentImportType = .pokerbase
+                    showFileImporter = true
+                    print("showFileImporter set to: \(showFileImporter) for type: \(currentImportType)")
+                }) {
+                    HStack {
+                        Image(systemName: "tray.and.arrow.down")
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                        Text("Import from Pokerbase")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                        Spacer()
+                        Text("CSV")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                    )
+                }
+                .padding(.horizontal, 20)
+                
+                // Import from Poker Analytics 6 Button
+                Button(action: { 
+                    print("Poker Analytics import button tapped")
+                    currentImportType = .pokerAnalytics
+                    showFileImporter = true
+                    print("showFileImporter set to: \(showFileImporter) for type: \(currentImportType)")
+                }) {
+                    HStack {
+                        Image(systemName: "tray.and.arrow.down")
+                            .foregroundColor(.cyan)
+                        Text("Import from Poker Analytics")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.cyan)
+                        Spacer()
+                        Text("TSV/CSV")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                    )
+                }
+                .padding(.horizontal, 20)
+                
+                // Import from Poker Bankroll Tracker Button
+                Button(action: { 
+                    print("PBT import button tapped")
+                    currentImportType = .pbt
+                    showFileImporter = true
+                    print("showFileImporter set to: \(showFileImporter) for type: \(currentImportType)")
+                }) {
+                    HStack {
+                        Image(systemName: "tray.and.arrow.down")
+                            .foregroundColor(.purple)
+                        Text("Import from Poker Bankroll Tracker")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.purple)
+                        Spacer()
+                        Text("CSV")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.gray)
                     }
@@ -1395,6 +2324,67 @@ struct SettingsView: View {
             }
         } message: {
             Text("This will clear all session data if you're experiencing issues with stuck sessions. Use this only if sessions appear active when they shouldn't be.")
+        }
+        .alert("Import Result", isPresented: Binding(get: { importStatusMessage != nil }, set: { if !$0 { importStatusMessage = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(importStatusMessage ?? "")
+        }
+        .alert("Poker Analytics Import", isPresented: Binding(get: { paStatusMessage != nil }, set: { if !$0 { paStatusMessage = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(paStatusMessage ?? "")
+        }
+        .alert("PBT Import Result", isPresented: Binding(get: { pbtStatusMessage != nil }, set: { if !$0 { pbtStatusMessage = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(pbtStatusMessage ?? "")
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.commaSeparatedText, .tabSeparatedText, .text, .data]) { result in
+            print("Consolidated file importer triggered for type: \(currentImportType)")
+            switch result {
+            case .success(let url):
+                print("File selected: \(url)")
+                switch currentImportType {
+                case .pokerbase:
+                    sessionStore.importSessionsFromPokerbaseCSV(fileURL: url) { importResult in
+                        switch importResult {
+                        case .success(let count):
+                            importStatusMessage = "Successfully imported \(count) session" + (count == 1 ? "" : "s") + " from Pokerbase."
+                        case .failure(let error):
+                            importStatusMessage = "Pokerbase import failed: \(error.localizedDescription)"
+                        }
+                    }
+                case .pokerAnalytics:
+                    sessionStore.importSessionsFromPokerAnalyticsCSV(fileURL: url) { res in
+                        switch res {
+                        case .success(let count):
+                            paStatusMessage = "Imported \(count) session" + (count == 1 ? "" : "s") + " from Poker Analytics."
+                        case .failure(let err):
+                            paStatusMessage = "Poker Analytics import failed: \(err.localizedDescription)"
+                        }
+                    }
+                case .pbt:
+                    sessionStore.importSessionsFromPBTCSV(fileURL: url) { res in
+                        switch res {
+                        case .success(let count):
+                            pbtStatusMessage = "Imported \(count) session" + (count == 1 ? "" : "s") + " from PBT."
+                        case .failure(let err):
+                            pbtStatusMessage = "PBT import failed: \(err.localizedDescription)"
+                        }
+                    }
+                }
+            case .failure(let error):
+                print("File picker error: \(error)")
+                switch currentImportType {
+                case .pokerbase:
+                    importStatusMessage = "Failed to pick Pokerbase file: \(error.localizedDescription)"
+                case .pokerAnalytics:
+                    paStatusMessage = "Failed to pick Poker Analytics file: \(error.localizedDescription)"
+                case .pbt:
+                    pbtStatusMessage = "Failed to pick PBT file: \(error.localizedDescription)"
+                }
+            }
         }
     }
     

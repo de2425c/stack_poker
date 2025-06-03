@@ -8,7 +8,7 @@ struct Stake: Codable, Identifiable {
     let sessionStakes: String   // To display on the dashboard easily
     let sessionDate: Date       // To display on the dashboard easily
 
-    let stakerUserId: String
+    let stakerUserId: String // For app users, or Stake.OFF_APP_STAKER_ID for manual stakers
     let stakedPlayerUserId: String
 
     let stakePercentage: Double // e.g., 0.10 for 10%
@@ -67,6 +67,12 @@ struct Stake: Codable, Identifiable {
     var lastUpdatedAt: Date
     var isTournamentSession: Bool? // Added for differentiating stake type
 
+    // New fields for off-app stakers
+    var manualStakerDisplayName: String? = nil
+    var isOffAppStake: Bool? = false
+
+    static let OFF_APP_STAKER_ID = "manual_off_app_staker_placeholder_id"
+
     enum StakeStatus: String, Codable {
         case pendingAcceptance = "pending_acceptance" // Might not be used for manually logged past games
         case active = "active"                        // Might not be used for manually logged past games
@@ -100,10 +106,13 @@ struct Stake: Codable, Identifiable {
         case settledAt
         case lastUpdatedAt
         case isTournamentSession
+        case manualStakerDisplayName
+        case isOffAppStake
     }
     
     // Initializer for creating a new stake (e.g., from SessionFormView)
     init(
+        id: String? = nil, // Allow passing ID for specific cases, though Firestore generates if nil
         sessionId: String,
         sessionGameName: String,
         sessionStakes: String,
@@ -119,8 +128,11 @@ struct Stake: Codable, Identifiable {
         lastUpdatedAt: Date = Date(),
         settlementInitiatorUserId: String? = nil, // Initializer param
         settlementConfirmerUserId: String? = nil,  // Initializer param
-        isTournamentSession: Bool? = nil         // Added to initializer
+        isTournamentSession: Bool? = nil,         // Added to initializer
+        manualStakerDisplayName: String? = nil,   // New initializer param
+        isOffAppStake: Bool? = false              // New initializer param
     ) {
+        self.id = id
         self.sessionId = sessionId
         self.sessionGameName = sessionGameName
         self.sessionStakes = sessionStakes
@@ -131,13 +143,26 @@ struct Stake: Codable, Identifiable {
         self.markup = markup
         self.totalPlayerBuyInForSession = totalPlayerBuyInForSession
         self.playerCashoutForSession = playerCashoutForSession
-        self.status = status
         self.proposedAt = proposedAt
-        self.acceptedAt = (status == .awaitingSettlement || status == .active || status == .awaitingConfirmation) ? Date() : nil 
         self.lastUpdatedAt = lastUpdatedAt
         self.settlementInitiatorUserId = settlementInitiatorUserId
         self.settlementConfirmerUserId = settlementConfirmerUserId
-        self.isTournamentSession = isTournamentSession // Initialize the new property
+        self.isTournamentSession = isTournamentSession
+        self.manualStakerDisplayName = manualStakerDisplayName
+        self.isOffAppStake = isOffAppStake
+
+        if isOffAppStake == true {
+            self.status = .settled
+            self.settledAt = Date()
+            self.acceptedAt = Date() // For off-app, consider it accepted immediately
+        } else {
+            self.status = status // Use the provided status or its default
+            if status == .awaitingSettlement || status == .active || status == .awaitingConfirmation || status == .settled {
+                 self.acceptedAt = Date()
+            } else {
+                 self.acceptedAt = nil
+            }
+        }
     }
 }
 

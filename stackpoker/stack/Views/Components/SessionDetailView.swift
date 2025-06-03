@@ -114,7 +114,7 @@ struct SessionDetailView: View {
                 AppBackgroundView().ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .center, spacing: 15) { // Reduced spacing a bit
+                    VStack(alignment: .center, spacing: 30) { // Increased spacing from 25 to 30
                         Text("Tap card to customize & share")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
@@ -130,7 +130,9 @@ struct SessionDetailView: View {
                             buyIn: session.buyIn,
                             cashOut: session.cashout
                         )
+                        .frame(maxHeight: 500) // Constrain the card height
                         .padding(.horizontal)
+                        .padding(.bottom, 25) // Increased bottom padding from 10 to 25
                         .onTapGesture {
                             if #available(iOS 16.0, *) {
                                 showingImagePicker = true
@@ -138,6 +140,11 @@ struct SessionDetailView: View {
 
                             }
                         }
+                        
+                        // Visual separator to ensure clear separation
+                        Divider()
+                            .opacity(0) // Invisible but creates space
+                            .padding(.vertical, 10)
                         
                         // Edit Session Button - Placed here and styled
                         Button(action: {
@@ -152,7 +159,7 @@ struct SessionDetailView: View {
                         }
                         .modifier(GlassyButtonStyling())
                         .padding(.horizontal) // Padding for the button itself within the VStack
-                        .padding(.top, 5) // Space above the button
+                        .padding(.top, 25) // Increased space above the button from 15 to 25
                         
                         handsSectionView()
                         notesSectionView()

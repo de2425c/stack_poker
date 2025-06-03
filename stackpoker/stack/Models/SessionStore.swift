@@ -1,6 +1,14 @@
 import Foundation
 import FirebaseFirestore
 import SwiftUI
+import FirebaseStorage
+
+// Helper extension for string checks
+extension String? {
+    var isNilOrEmpty: Bool {
+        return self?.isEmpty != false
+    }
+}
 
 // Provide an alias so existing references remain valid within the module
 typealias LiveSessionData_Enhanced = LiveSessionData.Enhanced
@@ -117,9 +125,21 @@ class SessionStore: ObservableObject {
     private let userId: String
     private var timer: Timer?
     
+    // Maximum length (in seconds) that a live session is allowed to run (120 hours).
+    private let maximumSessionDuration: TimeInterval = 120 * 60 * 60
+    
     init(userId: String) {
         self.userId = userId
         print("🔄 SESSION STORE: Initializing for user \(userId)")
+
+        guard !userId.isEmpty else {
+            print("SessionStore: userId is empty, skipping load/fetch during account creation")
+            // Initialize with clean defaults even if userId is empty, then return.
+            self.liveSession = LiveSessionData()
+            self.enhancedLiveSession = LiveSessionData_Enhanced(basicSession: self.liveSession)
+            self.showLiveSessionBar = false
+            return
+        }
         
         // Initialize with clean defaults
         self.liveSession = LiveSessionData()
@@ -379,8 +399,8 @@ class SessionStore: ObservableObject {
         liveSession.lastPausedAt = Date()
         saveLiveSessionState() // Save the ended state
         
-        // SCORCHED EARTH: Complete state clearing with multiple safety checks
-        scorachedEarthSessionClear()
+        // Use the emergency reset for maximum reliability - prevents any stuck sessions
+        emergencySessionReset()
     }
     
     // SCORCHED EARTH: Complete session clearing with all safety mechanisms
@@ -487,9 +507,9 @@ class SessionStore: ObservableObject {
             return false
         }
         
-        // Check for stale sessions (more than 24 hours old)
-        let dayAgo = Date().addingTimeInterval(-24 * 60 * 60)
-        if liveSession.startTime < dayAgo && !liveSession.isEnded {
+        // Check for stale sessions that have exceeded the maximum allowed duration
+        let maxDurationAgo = Date().addingTimeInterval(-maximumSessionDuration)
+        if liveSession.startTime < maxDurationAgo && !liveSession.isEnded {
             print("⚠️ VALIDATION: Found stale session - clearing")
             scorachedEarthSessionClear()
             return false
@@ -583,11 +603,11 @@ class SessionStore: ObservableObject {
             // SCORCHED EARTH: Enhanced staleness check
             let lastActivityTime = loadedSession.lastActiveAt ?? loadedSession.lastPausedAt ?? loadedSession.startTime
             let timeSinceLastActivity = Date().timeIntervalSince(lastActivityTime)
-            let isAbandoned = timeSinceLastActivity > (48 * 60 * 60) // Increased to 48 hours for more lenient restoration
+            let isAbandoned = timeSinceLastActivity > maximumSessionDuration // 120-hour abandonment window
 
             // SCORCHED EARTH: More aggressive validation
             let isCorrupted = loadedSession.startTime > Date() || // Future start time
-                             loadedSession.elapsedTime > (7 * 24 * 60 * 60) || // More than 7 days
+                             loadedSession.elapsedTime > maximumSessionDuration || // Exceeds maximum duration
                              (loadedSession.isActive && loadedSession.lastActiveAt == nil) // Active but no lastActiveAt
 
             if isCorrupted {
@@ -674,6 +694,452 @@ class SessionStore: ObservableObject {
         }
         
         print("✅ EMERGENCY RESET: Complete")
+    }
+    
+    // MARK: - Pokerbase CSV Import
+    /// Imports sessions from a Pokerbase-formatted CSV file and saves the raw file to Firebase Storage for record-keeping.
+    /// - Parameters:
+    ///   - fileURL: Local URL to the CSV file selected by the user.
+    ///   - completion: Completion handler returning the number of sessions imported on success, or an error.
+    func importSessionsFromPokerbaseCSV(fileURL: URL, completion: @escaping (Result<Int, Error>) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Ensure we can access the file (needed for Files-app / iCloud picks)
+            let needsSecurity = fileURL.startAccessingSecurityScopedResource()
+            defer {
+                if needsSecurity { fileURL.stopAccessingSecurityScopedResource() }
+            }
+
+            do {
+                let data = try Data(contentsOf: fileURL)
+                guard let content = String(data: data, encoding: .utf8) else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to decode file as UTF-8"])) )
+                    }
+                    return
+                }
+
+                // Split into non-empty rows
+                let rows = content.components(separatedBy: CharacterSet.newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                guard rows.count > 1 else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -2, userInfo: [NSLocalizedDescriptionKey: "CSV appears to have no data rows"])) )
+                    }
+                    return
+                }
+
+                // Determine header columns (robust approach – trim BOM, spaces, quotes, case-insensitive)
+                func columnsFromLine(_ line: String) -> [String] {
+                    // Replace likely alternate delimiters with commas
+                    let replaced = line.replacingOccurrences(of: ";", with: ",").replacingOccurrences(of: "'", with: ",")
+                    return replaced.split(separator: ",", omittingEmptySubsequences: false).map { String($0) }
+                }
+
+                let rawHeaders = columnsFromLine(rows[0])
+                let headers = rawHeaders.map { raw -> String in
+                    var cleaned = String(raw)
+                    cleaned = cleaned.replacingOccurrences(of: "\u{FEFF}", with: "") // Remove BOM if present
+                    cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: " \"'\t\r\n")).lowercased()
+                    return cleaned
+                }
+
+                func index(where predicate: (String) -> Bool) -> Int? {
+                    return headers.firstIndex(where: predicate)
+                }
+
+                // Accept several possible header variants
+                guard let startIdx = index(where: { $0.starts(with: "start") }),
+                      let endIdx = index(where: { $0.starts(with: "end") }),
+                      let locationIdx = index(where: { $0.contains("location") }),
+                      let profitIdx = index(where: { $0.contains("profit") || $0.contains("result") || $0.contains("net") }) else {
+                     DispatchQueue.main.async {
+                         completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV is missing required columns (start, end, location, profit/result/net). Found headers: \(headers)"])) )
+                     }
+                     return
+                }
+
+                // Helper to parse numeric strings like "$1,234.56" or "-100"
+                func parseDouble(_ str: String) -> Double? {
+                    let cleaned = str.replacingOccurrences(of: "[^0-9.-]", with: "", options: .regularExpression)
+                    return Double(cleaned)
+                }
+
+                let isoFormatter = ISO8601DateFormatter()
+                var importedCount = 0
+                let group = DispatchGroup()
+
+                for row in rows.dropFirst() {
+                    let columns = columnsFromLine(row).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    guard columns.count >= headers.count else { continue }
+
+                    // Date parsing (ISO 8601 with timezone)
+                    guard let startDate = isoFormatter.date(from: columns[startIdx]),
+                          let endDate = isoFormatter.date(from: columns[endIdx]) else { continue }
+
+                    guard let profitVal = parseDouble(columns[profitIdx]) else { continue }
+
+                    let hours = endDate.timeIntervalSince(startDate) / 3600.0
+
+                    let sessionData: [String: Any] = [
+                        "userId": self.userId,
+                        "gameType": SessionLogType.cashGame.rawValue,
+                        "gameName": columns[locationIdx],
+                        "stakes": "", // Not provided in CSV
+                        "startDate": Timestamp(date: startDate),
+                        "startTime": Timestamp(date: startDate),
+                        "endTime": Timestamp(date: endDate),
+                        "hoursPlayed": hours,
+                        "buyIn": 0,
+                        "cashout": profitVal,
+                        "profit": profitVal,
+                        "createdAt": FieldValue.serverTimestamp(),
+                        "location": columns[locationIdx]
+                    ]
+
+                    group.enter()
+                    self.addSession(sessionData) { error in
+                        if error == nil { importedCount += 1 }
+                        group.leave()
+                    }
+                }
+
+                group.wait()
+
+                // After importing, refresh local sessions and upload the CSV file for archival.
+                self.fetchSessions()
+
+                let storageRef = Storage.storage().reference().child("pokerbaseImports/\(self.userId)/\(UUID().uuidString).csv")
+                storageRef.putData(data, metadata: nil) { _, _ in }
+
+                DispatchQueue.main.async {
+                    completion(.success(importedCount))
+                }
+
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+    
+    // MARK: - Poker Analytics 6 Import (tab- or comma-separated)
+    /// Imports sessions from a Poker Analytics 6 export. Only essential columns are used.
+    /// Expected headers (case-insensitive): "Start Date", "End Date", "Buyin", "Cashed Out", "Net", "Location", "Blinds", "Type".
+    /// - Note: Delimiter may be tab or comma. The importer auto-detects.
+    func importSessionsFromPokerAnalyticsCSV(fileURL: URL, completion: @escaping (Result<Int, Error>) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let needsSecurity = fileURL.startAccessingSecurityScopedResource()
+            defer { if needsSecurity { fileURL.stopAccessingSecurityScopedResource() } }
+
+            do {
+                let data = try Data(contentsOf: fileURL)
+                guard let rawContent = String(data: data, encoding: .utf8) else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to decode file as UTF-8"])) )
+                    }
+                    return
+                }
+
+                // Normalize newlines, split rows
+                let rows = rawContent.replacingOccurrences(of: "\r", with: "").split(separator: "\n").map { String($0) }
+                guard rows.count > 1 else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -2, userInfo: [NSLocalizedDescriptionKey: "CSV appears empty"])) )
+                    }
+                    return
+                }
+
+                // Delimiter detection – tab preferred, else comma.
+                let delimiter: Character = rows[0].contains("\t") ? "\t" : ","
+
+                func split(_ line: String) -> [String] {
+                    return line.split(separator: delimiter, omittingEmptySubsequences: false).map {
+                        var s = String($0)
+                        s = s.trimmingCharacters(in: CharacterSet(charactersIn: " \t\r\n\"'"))
+                        return s
+                    }
+                }
+
+                let headerRaw = split(rows[0])
+                let headers = headerRaw.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \"'" )).lowercased() }
+
+                // Normalized headers: remove all non-letters for flexible matching
+                let normalized: [String] = headers.map { $0.replacingOccurrences(of: "[^a-z]", with: "", options: .regularExpression) }
+
+                func idx(_ variants: [String]) -> Int? {
+                    for variant in variants {
+                        if let i = normalized.firstIndex(of: variant) { return i }
+                    }
+                    return nil
+                }
+
+                guard let startIdx = idx(["startdate", "start"]),
+                      let endIdx = idx(["enddate", "end"]),
+                      let buyInIdx = idx(["buyin", "buy"]),
+                      let cashedIdx = idx(["cashedout", "cashout", "cashouttotal", "winning"]),
+                      let netIdx = idx(["net", "result", "profit"]),
+                      let locationIdx = idx(["location", "venue"]) else {
+                     DispatchQueue.main.async {
+                         completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV missing required columns. Found headers: \(headerRaw)"])) )
+                     }
+                     return
+                }
+
+                let blindsIdx = idx(["blinds", "stakes"])
+                let typeIdx = idx(["type", "gametype"])
+
+                // Date formatter for Poker Analytics (MM/dd/yyyy HH:mm:ss)
+                let df = DateFormatter()
+                df.dateFormat = "MM/dd/yyyy HH:mm:ss"
+                df.timeZone = TimeZone.current
+
+                // Currency / number parsing helper
+                func num(_ str: String) -> Double? {
+                    let cleaned = str.replacingOccurrences(of: "[^0-9.-]", with: "", options: .regularExpression)
+                    return Double(cleaned)
+                }
+
+                var imported = 0
+                let group = DispatchGroup()
+
+                for row in rows.dropFirst() where !row.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let cols = split(row)
+                    guard cols.count >= headers.count else { continue }
+
+                    guard let sDate = df.date(from: cols[startIdx]),
+                          let eDate = df.date(from: cols[endIdx]) else { continue }
+
+                    let buyIn = num(cols[buyInIdx]) ?? 0
+                    let cashOut = num(cols[cashedIdx]) ?? 0
+                    let netProvided = num(cols[netIdx])
+                    let profit = netProvided ?? (cashOut - buyIn)
+
+                    let location = cols[locationIdx]
+                    let stakes = blindsIdx != nil ? cols[blindsIdx!] : ""
+                    let typeStr = typeIdx != nil ? cols[typeIdx!].lowercased() : "cash game"
+
+                    let isTournament = typeStr.contains("tournament")
+
+                    let hours = eDate.timeIntervalSince(sDate) / 3600.0
+
+                    let sessionData: [String: Any] = [
+                        "userId": self.userId,
+                        "gameType": isTournament ? SessionLogType.tournament.rawValue : SessionLogType.cashGame.rawValue,
+                        "gameName": location,
+                        "stakes": stakes,
+                        "startDate": Timestamp(date: sDate),
+                        "startTime": Timestamp(date: sDate),
+                        "endTime": Timestamp(date: eDate),
+                        "hoursPlayed": hours,
+                        "buyIn": buyIn,
+                        "cashout": cashOut,
+                        "profit": profit,
+                        "createdAt": FieldValue.serverTimestamp(),
+                        "location": location,
+                        "tournamentType": isTournament ? stakes : nil
+                    ]
+
+                    group.enter()
+                    self.addSession(sessionData) { error in
+                        if error == nil { imported += 1 }
+                        group.leave()
+                    }
+                }
+
+                group.wait()
+                self.fetchSessions()
+
+                // Archive raw file
+                let storageRef = Storage.storage().reference().child("pokerAnalyticsImports/\(self.userId)/\(UUID().uuidString).csv")
+                storageRef.putData(data, metadata: nil) { _, _ in }
+
+                DispatchQueue.main.async {
+                    completion(.success(imported))
+                }
+
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+    
+    // MARK: - Poker Bankroll Tracker (PBT) Import
+    /// Imports sessions from Poker Bankroll Tracker export format.
+    /// Expected format: CSV with headers like id,starttime,endtime,variant,game,limit,location,type,buyin,cashout,netprofit...
+    func importSessionsFromPBTCSV(fileURL: URL, completion: @escaping (Result<Int, Error>) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let needsSecurity = fileURL.startAccessingSecurityScopedResource()
+            defer { if needsSecurity { fileURL.stopAccessingSecurityScopedResource() } }
+
+            do {
+                let data = try Data(contentsOf: fileURL)
+                guard let content = String(data: data, encoding: .utf8) else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to decode file as UTF-8"])) )
+                    }
+                    return
+                }
+
+                var lines = content.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                
+                // Skip PBT header if present
+                if let firstLine = lines.first, firstLine.contains("---PBT Bankroll Export---") {
+                    lines.removeFirst()
+                }
+                
+                guard lines.count > 1 else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -2, userInfo: [NSLocalizedDescriptionKey: "CSV appears to have no data rows"])) )
+                    }
+                    return
+                }
+
+                func parseCSVLine(_ line: String) -> [String] {
+                    var result: [String] = []
+                    var current = ""
+                    var inQuotes = false
+                    
+                    for char in line {
+                        if char == "\"" {
+                            inQuotes.toggle()
+                        } else if char == "," && !inQuotes {
+                            result.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+                            current = ""
+                        } else {
+                            current.append(char)
+                        }
+                    }
+                    result.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+                    return result
+                }
+
+                let headerRow = parseCSVLine(lines[0])
+                let headers = headerRow.map { $0.lowercased() }
+                
+                func idx(_ name: String) -> Int? {
+                    return headers.firstIndex(of: name.lowercased())
+                }
+
+                guard let startIdx = idx("starttime"),
+                      let endIdx = idx("endtime"),
+                      let variantIdx = idx("variant"),
+                      let gameIdx = idx("game"),
+                      let locationIdx = idx("location"),
+                      let buyinIdx = idx("buyin"),
+                      let cashoutIdx = idx("cashout"),
+                      let netprofitIdx = idx("netprofit") else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV missing required PBT columns. Found headers: \(headers)"])) )
+                    }
+                    return
+                }
+
+                let limitIdx = idx("limit")
+                let typeIdx = idx("type")
+                let smallBlindIdx = idx("smallblind")
+                let bigBlindIdx = idx("bigblind")
+                let mttNameIdx = idx("mttname")
+                let sessionNoteIdx = idx("sessionnote")
+
+                // Date formatter for PBT format: "2025-05-30 12:24:00"
+                let df = DateFormatter()
+                df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                df.timeZone = TimeZone.current
+
+                func num(_ str: String) -> Double? {
+                    let cleaned = str.replacingOccurrences(of: "[^0-9.-]", with: "", options: .regularExpression)
+                    return cleaned.isEmpty ? nil : Double(cleaned)
+                }
+
+                var imported = 0
+                let group = DispatchGroup()
+
+                for line in lines.dropFirst() {
+                    let cols = parseCSVLine(line)
+                    guard cols.count >= headers.count else { continue }
+
+                    guard let startDate = df.date(from: cols[startIdx]),
+                          let endDate = df.date(from: cols[endIdx]) else { continue }
+
+                    let variant = cols[variantIdx].lowercased()
+                    let isTournament = variant.contains("tournament")
+                    let gameType = isTournament ? SessionLogType.tournament.rawValue : SessionLogType.cashGame.rawValue
+                    
+                    let game = cols[gameIdx]
+                    let location = cols[locationIdx]
+                    let type = typeIdx != nil ? cols[typeIdx!] : ""
+                    
+                    // Build stakes from limit or blinds
+                    var stakes = ""
+                    if let limitIdx = limitIdx, !cols[limitIdx].isEmpty {
+                        stakes = cols[limitIdx]
+                    } else if let sbIdx = smallBlindIdx, let bbIdx = bigBlindIdx {
+                        let sb = cols[sbIdx]
+                        let bb = cols[bbIdx]
+                        if !sb.isEmpty || !bb.isEmpty {
+                            stakes = "\(sb)/\(bb)"
+                        }
+                    }
+                    
+                    let buyIn = num(cols[buyinIdx]) ?? 0
+                    let cashOut = num(cols[cashoutIdx]) ?? 0
+                    let netProfit = num(cols[netprofitIdx]) ?? (cashOut - buyIn)
+                    
+                    let hours = endDate.timeIntervalSince(startDate) / 3600.0
+                    
+                    // Combine game name with type for better context
+                    let gameName = type.isEmpty ? game : "\(game) (\(type))"
+                    let tournamentName = isTournament && mttNameIdx != nil ? cols[mttNameIdx!] : nil
+                    let sessionNote = sessionNoteIdx != nil ? cols[sessionNoteIdx!] : nil
+                    
+                    var notes: [String] = []
+                    if let note = sessionNote, !note.isEmpty {
+                        notes.append(note)
+                    }
+
+                    let sessionData: [String: Any] = [
+                        "userId": self.userId,
+                        "gameType": gameType,
+                        "gameName": !tournamentName.isNilOrEmpty ? tournamentName! : gameName,
+                        "stakes": stakes,
+                        "startDate": Timestamp(date: startDate),
+                        "startTime": Timestamp(date: startDate),
+                        "endTime": Timestamp(date: endDate),
+                        "hoursPlayed": hours,
+                        "buyIn": buyIn,
+                        "cashout": cashOut,
+                        "profit": netProfit,
+                        "createdAt": FieldValue.serverTimestamp(),
+                        "location": location,
+                        "tournamentType": isTournament ? stakes : nil,
+                        "notes": notes.isEmpty ? nil : notes
+                    ]
+
+                    group.enter()
+                    self.addSession(sessionData) { error in
+                        if error == nil { imported += 1 }
+                        group.leave()
+                    }
+                }
+
+                group.wait()
+                self.fetchSessions()
+
+                let storageRef = Storage.storage().reference().child("pbtImports/\(self.userId)/\(UUID().uuidString).csv")
+                storageRef.putData(data, metadata: nil) { _, _ in }
+
+                DispatchQueue.main.async {
+                    completion(.success(imported))
+                }
+
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
     }
     
     deinit {

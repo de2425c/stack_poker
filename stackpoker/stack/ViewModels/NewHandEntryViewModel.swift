@@ -2,13 +2,74 @@ import Foundation
 import Combine
 import SwiftUI
 
+// MARK: - LLM Parsing Models
+struct LLMParsedResponse: Codable {
+    let players: [LLMPlayerDetail]?
+    let preflop: LLMStreetDetail?
+    let flop: LLMStreetDetail?
+    let turn: LLMStreetDetail?
+    let river: LLMStreetDetail?
+}
+
+struct LLMPlayerDetail: Codable {
+    let position: String
+    var cards: String? // Keep as String?
+
+    // Add custom decoder
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        position = try container.decode(String.self, forKey: .position)
+        
+        // Try to decode 'cards' as a String. If it's not a string (e.g., an empty array),
+        // this will fail, and we'll catch it and set cards to nil.
+        do {
+            cards = try container.decodeIfPresent(String.self, forKey: .cards)
+        } catch {
+            // If decoding as String fails (e.g. it's an array like `[]` or another type),
+            // set cards to nil.
+            cards = nil
+        }
+    }
+    
+    // Add CodingKeys if not already present, or ensure they are compatible
+    enum CodingKeys: String, CodingKey {
+        case position
+        case cards
+    }
+}
+
+struct LLMStreetDetail: Codable {
+    let cards: [String]? // e.g., ["T", "7", "2"] or ["Ts", "7d", "2c"] - will need robust parsing
+    let actions: [LLMActionDetail]?
+}
+
+struct LLMActionDetail: Codable {
+    let position: String // Position of the player making the action
+    let action: String   // e.g., "raise", "call", "bet", "fold", "check"
+    let amount: String?  // e.g., "15" or "0" or null
+}
+
 class NewHandEntryViewModel: ObservableObject {
     // Session ID for associating the hand
     let sessionId: String?
 
     // Stakes
-    @Published var smallBlind: Double = 1.0
-    @Published var bigBlind: Double = 2.0
+    @Published var smallBlind: Double = 1.0 {
+        didSet {
+            // Ensure small blind is never negative, but allow 0 for deletion
+            if smallBlind < 0 {
+                smallBlind = 0
+            }
+        }
+    }
+    @Published var bigBlind: Double = 2.0 {
+        didSet {
+            // Ensure big blind is never negative, but allow 0 for deletion
+            if bigBlind < 0 {
+                bigBlind = 0
+            }
+        }
+    }
     @Published var straddle: Double? = nil
     @Published var ante: Double? = nil
 
@@ -23,7 +84,7 @@ class NewHandEntryViewModel: ObservableObject {
             updatePreflopStateAndFirstActor()
         }
     }
-    @Published var effectiveStackType: EffectiveStackType = .bigBlinds
+    @Published var effectiveStackType: EffectiveStackType = .dollars // Default to dollars
     @Published var effectiveStackAmount: Double = 100
     @Published var hasAnte: Bool = false
     @Published var hasStraddle: Bool = false
@@ -384,46 +445,113 @@ class NewHandEntryViewModel: ObservableObject {
     private var turnActionQueue: PlayerActionQueue?
     private var riverActionQueue: PlayerActionQueue?
 
+    // LLM Parsing Properties
+    @Published var llmInputText: String = ""
+    @Published var isParsingLLM: Bool = false
+    @Published var llmError: String? = nil
+    @Published var showingLLMParsingSection: Bool = false // To toggle visibility
+
+    let pokerPositions = ["SB", "BB", "UTG", "UTG+1", "MP1", "MP2", "HJ", "CO", "BTN"] // ViewModel's internal reference
+    private var cancellables = Set<AnyCancellable>() // For subscribers
+
     init(sessionId: String? = nil) { // Add sessionId to init, default to nil
         self.sessionId = sessionId // Store sessionId
 
-        if !availablePositions.contains(heroPosition) {
-            heroPosition = availablePositions.first ?? "BTN"
-        }
-        setupInitialPlayers()
-        // Post blinds after initialization to avoid re-entrancy issues during init
+        // Initialize players before calling functions that depend on them
+        self.players = initialPlayers()
+        updateAvailablePositions() // Ensure this exists or is handled
+        
+        // Post blinds and setup first actor after basic setup
+        // Defer UI-related or complex logic if possible
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-
             self.updatePreflopStateAndFirstActor()
         }
+        
+        setupSubscribers() // Setup reactive subscriptions
+        determineNextPlayerAndUpdateState() // Initial determination of who acts
     }
 
-    func setupInitialPlayers() {
+    // Placeholder for updateAvailablePositions if it was more than just the computed property
+    // For now, the computed `availablePositions` should suffice for player initialization.
+    func updateAvailablePositions() {
+        // This function might have updated UI-specific state for position pickers.
+        // If `players` array and `heroPosition` are the source of truth for available positions,
+        // the computed `availablePositions` property might be sufficient.
+        // For the errors reported, ensuring it's callable is the first step.
+        // Logic to update a specific @Published property for a picker could go here if needed.
+        objectWillChange.send()
+    }
 
+    func setupSubscribers() {
+        // Example: React to table size or hero position changes if they affect more than PlayerInput array
+        $tableSize
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.setupInitialPlayers() // Re-setup players
+                self?.updatePreflopStateAndFirstActor() // Re-evaluate blinds and first actor
+            }
+            .store(in: &cancellables)
+
+        $heroPosition
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.setupInitialPlayers() // Re-setup players
+                self?.updatePreflopStateAndFirstActor() // Re-evaluate blinds and first actor
+            }
+            .store(in: &cancellables)
+        
+        // Add other necessary subscribers here, for example, to recalculate effective stack amounts
+        Publishers.CombineLatest($effectiveStackType, $effectiveStackAmount)
+            .dropFirst()
+            .sink { [weak self] _, _ in
+                self?.updatePlayerStacksBasedOnEffectiveStack()
+            }
+            .store(in: &cancellables)
+
+        Publishers.CombineLatest($smallBlind, $bigBlind)
+            .dropFirst()
+            .debounce(for: .milliseconds(100), scheduler: RunLoop.main) // Debounce to avoid rapid updates
+            .sink { [weak self] _, _ in
+                self?.updatePlayerStacksBasedOnEffectiveStack() // If stacks depend on BB
+                self?.updatePreflopStateAndFirstActor()     // Blinds changed, re-post and find first actor
+            }
+            .store(in: &cancellables)
+    }
+
+    // Initial player setup based on table size and hero position
+    func initialPlayers() -> [PlayerInput] {
         let currentHeroPos = self.heroPosition
-        players = availablePositions.map {
+        let stackAmount = effectiveStackType == .bigBlinds ? effectiveStackAmount * bigBlind : effectiveStackAmount
+        
+        let createdPlayers = availablePositions.map {
             PlayerInput(position: $0, 
-                        isActive: $0 == currentHeroPos, // Initially only hero is active
-                        stack: effectiveStackType == .bigBlinds ? effectiveStackAmount * bigBlind : effectiveStackAmount, 
+                        isActive: $0 == currentHeroPos, 
+                        stack: stackAmount, 
                         heroPosition: currentHeroPos)
         }
+        return createdPlayers
+    }
+
+    // The LLM processing will then activate the ones involved.
+    func setupInitialPlayers() {
+        let currentHeroPos = self.heroPosition
+        let stackAmount = effectiveStackType == .bigBlinds ? effectiveStackAmount * bigBlind : effectiveStackAmount
         
-        // Print active player information
-        let activePlayers = players.filter { $0.isActive }
-
-        for player in activePlayers {
-
+        players = availablePositions.map {
+            PlayerInput(position: $0, 
+                        isActive: $0 == currentHeroPos, // Hero is active by default
+                        stack: stackAmount, 
+                        heroPosition: currentHeroPos)
         }
-        
-        if !players.contains(where: { $0.isHero }) {
-            if !players.isEmpty {
-                self.heroPosition = players[0].position 
-                players[0].isActive = true
-                for i in 0..<players.count { players[i].updateHeroPosition(self.heroPosition) }
+        // Ensure all non-hero players start as inactive. LLM data will activate them later.
+        for i in 0..<players.count {
+            if !players[i].isHero {
+                players[i].isActive = false
             }
         }
         updatePlayerStacksBasedOnEffectiveStack()
+        updateAvailablePositions() 
     }
     
     func updatePlayerStacksBasedOnEffectiveStack() {
@@ -533,13 +661,13 @@ class NewHandEntryViewModel: ObservableObject {
     // 3. If player is inactive, automatically fold them and display the fold
     // 4. If player is active, create pending action and prompt user
     // 5. When betting round is complete, advance to next street if possible
-    private func determineNextPlayerAndUpdateState() {
+    func determineNextPlayerAndUpdateState() {
 
         
         if currentActionStreet == .preflop && preflopActions.isEmpty && !isPostingBlinds {
-
-            postBlinds()
-            return // postBlinds will trigger this function again
+            // If no preflop actions and not currently posting blinds, post blinds first.
+            postBlinds() // This will set actions and then trigger this method again via didSet.
+            return
         }
 
 
@@ -884,11 +1012,10 @@ class NewHandEntryViewModel: ObservableObject {
                streetOrder.filter { !activePositions.contains($0) }
     }
     
-    // Fix getPreflopActionOrder to ensure SB acts first
+    // Fix getPreflopActionOrder to ensure proper straddle action order
     private func getPreflopActionOrder() -> [String] {
         // Preflop action order is: UTG, MP, CO, BTN, SB, BB
-        // For auto-adds (i.e. SB and BB blind posts), we handle those separately in postBlinds()
-        // This method returns the order of positions who need to act after blinds
+        // BUT if straddle is active, UTG acts as straddle and UTG+1 (or next position) acts first
         let positions = self.availablePositions
         
         // Start with all positions except for blinds
@@ -902,7 +1029,31 @@ class NewHandEntryViewModel: ObservableObject {
             return idx1 < idx2
         }
         
-        // Then add SB, BB
+        // STRADDLE LOGIC: If straddle is active, UTG acts as straddler (like a blind)
+        // and UTG+1 (or next available position) acts first
+        if hasStraddle && straddle != nil && straddle! > 0 {
+            // Find UTG position (straddler)
+            if let utgIndex = nonBlinds.firstIndex(of: "UTG") {
+                // Remove UTG from action order since they're now acting as a blind
+                nonBlinds.remove(at: utgIndex)
+                
+                // The remaining players in nonBlinds will act first, then blinds + straddler
+        var actionOrder = nonBlinds
+                
+                // Add blinds and straddler in order: SB, BB, UTG (straddler)
+        if positions.contains("SB") {
+            actionOrder.append("SB")
+        }
+        if positions.contains("BB") {
+            actionOrder.append("BB")
+        }
+                actionOrder.append("UTG") // UTG acts last as straddler
+                
+                return actionOrder
+            }
+        }
+        
+        // Normal action order (no straddle): UTG first, then blinds last
         var actionOrder = nonBlinds
         if positions.contains("SB") {
             actionOrder.append("SB")
@@ -910,7 +1061,6 @@ class NewHandEntryViewModel: ObservableObject {
         if positions.contains("BB") {
             actionOrder.append("BB")
         }
-        
 
         return actionOrder
     }
@@ -1028,21 +1178,44 @@ class NewHandEntryViewModel: ObservableObject {
     func updatePotDisplay() {
         var runningPot = calculateAntePot() // Start with antes if any
         
-        // Preflop
-        runningPot += preflopActions.reduce(0) { $0 + ($1.amount ?? 0) }
+        // Preflop - calculate net contributions per player
+        runningPot += calculateNetContributions(for: preflopActions)
         currentPotPreflop = runningPot
         
         // Flop
-        runningPot += flopActions.reduce(0) { $0 + ($1.amount ?? 0) }
+        runningPot += calculateNetContributions(for: flopActions)
         currentPotFlop = runningPot
         
         // Turn
-        runningPot += turnActions.reduce(0) { $0 + ($1.amount ?? 0) }
+        runningPot += calculateNetContributions(for: turnActions)
         currentPotTurn = runningPot
         
         // River
-        runningPot += riverActions.reduce(0) { $0 + ($1.amount ?? 0) }
+        runningPot += calculateNetContributions(for: riverActions)
         currentPotRiver = runningPot
+    }
+    
+    // Helper function to calculate net contributions per player for a street
+    private func calculateNetContributions(for actions: [ActionInput]) -> Double {
+        var playerContributions: [String: Double] = [:]
+        
+        for action in actions {
+            switch action.actionType {
+            case .bet, .raise:
+                // For bets and raises, the amount is the total bet size for that player on this street
+                playerContributions[action.playerName] = action.amount ?? 0
+            case .call:
+                // For calls, we need to determine what they're calling to
+                let currentBet = playerContributions.values.max() ?? 0
+                playerContributions[action.playerName] = currentBet
+            case .fold, .check:
+                // Folds and checks don't add money (player keeps whatever they already put in)
+                break
+            }
+        }
+        
+        // Sum up all player contributions for this street
+        return playerContributions.values.reduce(0, +)
     }
 
     private func calculateAntePot() -> Double {
@@ -1145,15 +1318,31 @@ class NewHandEntryViewModel: ObservableObject {
     private func createPlayersArrayForHistory() -> [Player] {
         var seatCounter = 1
         return self.players.map { pInput -> Player in
+            // Get the current cards for this player
+            var playerCards: [String]? = nil
+            var playerFinalCards: [String]? = nil
+            
+            if pInput.isHero {
+                // For hero, use the heroCard1 and heroCard2 from ViewModel
+                let heroCards = [heroCard1, heroCard2].compactMap { $0 }
+                playerCards = heroCards.isEmpty ? nil : heroCards
+                playerFinalCards = playerCards // Hero cards are both hole cards and final cards
+            } else {
+                // For villains, use the card1 and card2 from the PlayerInput
+                let villainCards = [pInput.card1, pInput.card2].compactMap { $0 }
+                playerCards = villainCards.isEmpty ? nil : villainCards
+                playerFinalCards = playerCards // Villain cards are both hole cards and final cards
+            }
+            
             let player = Player(
                 name: pInput.name,
                 seat: seatCounter, // Assign seat based on order in `players` array
                 stack: pInput.stack, // Initial stack
                 position: pInput.position,
                 isHero: pInput.isHero,
-                cards: pInput.isHero ? [heroCard1, heroCard2].compactMap { $0 } : nil, // Only hero cards for now
+                cards: playerCards, // Current hole cards from ViewModel state
                 finalHand: nil, // To be determined by evaluator or post-processing
-                finalCards: nil // To be determined by evaluator or post-processing
+                finalCards: playerFinalCards // Same as cards for now, used in hand evaluation
             )
             seatCounter += 1
             return player
@@ -1167,24 +1356,31 @@ class NewHandEntryViewModel: ObservableObject {
         let preflopMappedActions = mapActionInputsToActions(preflopActions)
         streets.append(Street(name: "preflop", cards: [], actions: preflopMappedActions))
 
-        // Flop
-        let flopCards = [flopCard1, flopCard2, flopCard3].compactMap { $0 }
-        if !flopCards.isEmpty || !flopActions.isEmpty {
+        // Flop - use current ViewModel state for cards
+        let currentFlopCards = [flopCard1, flopCard2, flopCard3].compactMap { $0 }
+        if !currentFlopCards.isEmpty || !flopActions.isEmpty {
             let flopMappedActions = mapActionInputsToActions(flopActions)
-            streets.append(Street(name: "flop", cards: flopCards.count == 3 ? flopCards : [], actions: flopMappedActions))
+            // Only include flop cards if all 3 are present
+            let flopCardsToInclude = currentFlopCards.count == 3 ? currentFlopCards : []
+            streets.append(Street(name: "flop", cards: flopCardsToInclude, actions: flopMappedActions))
         }
 
-        // Turn (only if Flop has cards)
-        if !flopCards.isEmpty, (turnCard != nil || !turnActions.isEmpty) {
+        // Turn - use current ViewModel state for cards
+        if !currentFlopCards.isEmpty, (turnCard != nil || !turnActions.isEmpty) {
             let turnMappedActions = mapActionInputsToActions(turnActions)
-            streets.append(Street(name: "turn", cards: [turnCard].compactMap { $0 }, actions: turnMappedActions))
+            // Include turn card if it exists
+            let turnCardsToInclude = turnCard != nil ? [turnCard!] : []
+            streets.append(Street(name: "turn", cards: turnCardsToInclude, actions: turnMappedActions))
         }
 
-        // River (only if Turn has cards)
+        // River - use current ViewModel state for cards
         if turnCard != nil, (riverCard != nil || !riverActions.isEmpty) {
             let riverMappedActions = mapActionInputsToActions(riverActions)
-            streets.append(Street(name: "river", cards: [riverCard].compactMap { $0 }, actions: riverMappedActions))
+            // Include river card if it exists
+            let riverCardsToInclude = riverCard != nil ? [riverCard!] : []
+            streets.append(Street(name: "river", cards: riverCardsToInclude, actions: riverMappedActions))
         }
+        
         return streets
     }
     
@@ -1192,60 +1388,185 @@ class NewHandEntryViewModel: ObservableObject {
         return inputs.map { input in
             // Find the player name from the `players` array based on position string
             let playerName = players.first { $0.position == input.playerName }?.name ?? input.playerName
-            return Action(playerName: playerName, action: input.actionType.rawValue, amount: input.amount ?? 0, cards: nil)
+            
+            // Convert action type to the format expected by HandReplayView
+            let actionString: String
+            switch input.actionType {
+            case .fold:
+                actionString = "folds"
+            case .check:
+                actionString = "checks"
+            case .call:
+                actionString = "calls"
+            case .bet:
+                // For blinds, use specific blind posting format
+                if input.isSystemAction && input.playerName == "SB" {
+                    actionString = "posts small blind"
+                } else if input.isSystemAction && input.playerName == "BB" {
+                    actionString = "posts big blind"
+                } else if input.isSystemAction && hasStraddle && input.amount == straddle {
+                    actionString = "posts"
+                } else {
+                    actionString = "bets"
+                }
+            case .raise:
+                actionString = "raises"
+            }
+            
+            return Action(
+                playerName: playerName, 
+                action: actionString, 
+                amount: input.amount ?? 0, 
+                cards: nil
+            )
         }
     }
     
     // Placeholder for pot calculation logic
     private func calculatePotAndDistribution(players: [Player], streets: [Street]) -> (potAmount: Double, heroPnl: Double, distribution: [PotDistribution]?) {
-        // This is a very simplified version. Real pot/PnL requires detailed action processing.
+        // Calculate total pot using the same logic as updatePotDisplay
         var totalPot: Double = 0
-        var contributions: [String: Double] = [:] // PlayerName: Amount
-
-        for street in streets {
-            for action in street.actions {
-                totalPot += action.amount // Assumes amount is net contribution for bets/raises/calls
-                contributions[action.playerName, default: 0] += action.amount
-            }
+        
+        // Add antes if any
+        if let anteAmount = self.ante, anteAmount > 0 {
+            let activePlayerCount = self.players.filter { $0.isActive }.count
+            totalPot += anteAmount * Double(activePlayerCount)
         }
         
-        // Simplified PnL: if hero is only one left or wins at showdown (not implemented here)
-        // For now, just return 0 PnL and no distribution
-        // A more complex version would use PokerCalculator.calculateHandHistoryPnL
-        let hero = players.first(where: { $0.isHero })
-        let heroContribution = hero != nil ? contributions[hero!.name, default: 0] : 0
-        
-        // Basic win condition: if hero is the only one not folded by the end of all actions
-        var activePlayerNames = Set(players.map { $0.name })
+        // Calculate net contributions per street
         for street in streets {
-            for action in street.actions {
-                if action.action.lowercased() == "folds" {
-                    activePlayerNames.remove(action.playerName)
+            totalPot += calculateNetContributionsForStreet(street.actions)
+        }
+        
+        // Determine winner using HandEvaluator if we have a showdown
+        let showdownOccurred = didShowdownOccur(streets: streets, activePlayers: players.filter { playerInvolvedInHand($0, streets: streets) })
+        
+        var distribution: [PotDistribution]? = nil
+        var heroPnl: Double = 0
+        
+        if showdownOccurred {
+            // Get active players at showdown (those who didn't fold)
+            let foldedPlayers = Set(streets.flatMap { $0.actions }
+                .filter { $0.action.lowercased() == "folds" }
+                .map { $0.playerName })
+            
+            let activePlayersAtShowdown = players.filter { !foldedPlayers.contains($0.name) }
+            
+            if activePlayersAtShowdown.count > 1 {
+                // Use HandEvaluator to determine winner
+                let communityCards = streets.flatMap { $0.cards }
+                var playerHands: [(playerName: String, cards: [String])] = []
+                
+                for player in activePlayersAtShowdown {
+                    var playerCards: [String] = []
+                    
+                    // Get player's hole cards
+                    if let cards = player.cards, !cards.isEmpty {
+                        playerCards.append(contentsOf: cards)
+                    }
+                    
+                    // Add community cards
+                    playerCards.append(contentsOf: communityCards)
+                    
+                    if playerCards.count >= 5 { // Need at least 5 cards for evaluation
+                        playerHands.append((player.name, playerCards))
+                    }
                 }
+                
+                if !playerHands.isEmpty {
+                    let results = HandEvaluator.determineWinner(hands: playerHands)
+                    let winners = results.filter { $0.winner }
+                    
+                    if !winners.isEmpty {
+                        let winnerShare = totalPot / Double(winners.count)
+                        distribution = winners.map { result in
+                            PotDistribution(
+                                playerName: result.playerName,
+                                amount: winnerShare,
+                                hand: result.handDescription,
+                                cards: playerHands.first { $0.playerName == result.playerName }?.cards.prefix(2).map { String($0) } ?? []
+                            )
+                        }
+                    }
+                }
+            } else if activePlayersAtShowdown.count == 1 {
+                // Only one player left, they win by default
+                let winner = activePlayersAtShowdown.first!
+                distribution = [PotDistribution(
+                    playerName: winner.name,
+                    amount: totalPot,
+                    hand: "Winner by fold",
+                    cards: winner.cards ?? []
+                )]
+            }
+            } else {
+            // No showdown - someone won by everyone else folding
+            let foldedPlayers = Set(streets.flatMap { $0.actions }
+                .filter { $0.action.lowercased() == "folds" }
+                .map { $0.playerName })
+            
+            let remainingPlayers = players.filter { !foldedPlayers.contains($0.name) }
+            
+            if remainingPlayers.count == 1 {
+                let winner = remainingPlayers.first!
+                distribution = [PotDistribution(
+                    playerName: winner.name,
+                    amount: totalPot,
+                    hand: "Winner by fold",
+                    cards: winner.cards ?? []
+                )]
             }
         }
         
-        var calculatedHeroPnl = -heroContribution // Starts by losing what was put in
-        var finalDistribution: [PotDistribution]? = nil
-
-        if let heroName = hero?.name, activePlayerNames.contains(heroName) {
-            if activePlayerNames.count == 1 { // Hero is the only one left
-                calculatedHeroPnl = totalPot - heroContribution
-                finalDistribution = [PotDistribution(playerName: heroName, amount: totalPot, hand: "Winner by fold", cards: hero?.cards ?? [])]
-            } else {
-                // Showdown scenario - for now, assume hero loses if other active players
-                // This needs full hand evaluation to be correct.
-                // If a simple showdown is assumed and hero wins (e.g. user indicates manually)
-                // calculatedHeroPnl = totalPot - heroContribution;
-                // For now, leave as loss if not sole winner by fold.
+        // Calculate hero PnL using PokerCalculator
+        if let hero = players.first(where: { $0.isHero }) {
+            // Create a temporary RawHandHistory for PnL calculation
+            let tempGameInfo = GameInfo(
+                tableSize: self.tableSize,
+                smallBlind: self.smallBlind,
+                bigBlind: self.bigBlind,
+                ante: self.hasAnte ? self.ante : nil,
+                straddle: self.hasStraddle ? self.straddle : nil,
+                dealerSeat: 1
+            )
+            
+            let tempHand = RawHandHistory(
+                gameInfo: tempGameInfo,
+                players: players,
+                streets: streets,
+                pot: Pot(amount: totalPot, distribution: distribution, heroPnl: 0),
+                showdown: showdownOccurred
+            )
+            
+            heroPnl = PokerCalculator.calculateHandHistoryPnL(hand: tempHand)
+        }
+        
+        return (totalPot, heroPnl, distribution)
+    }
+    
+    // Helper function to calculate net contributions for a street's actions (similar to the one in updatePotDisplay)
+    private func calculateNetContributionsForStreet(_ actions: [Action]) -> Double {
+        var playerContributions: [String: Double] = [:]
+        
+        for action in actions {
+            switch action.action.lowercased() {
+            case "bets", "raises", "posts small blind", "posts big blind", "posts":
+                // For bets, raises, and posts, the amount is the total bet size for that player on this street
+                playerContributions[action.playerName] = action.amount
+            case "calls":
+                // For calls, we need to determine what they're calling to
+                let currentBet = playerContributions.values.max() ?? 0
+                playerContributions[action.playerName] = currentBet
+            case "folds", "checks":
+                // Folds and checks don't add money (player keeps whatever they already put in)
+                break
+            default:
+                break
             }
         }
-        // If PNL calculation makes pot negative, PNL is just -contribution.
-        if calculatedHeroPnl + heroContribution < 0 {
-            calculatedHeroPnl = -heroContribution
-        }
-
-        return (totalPot, calculatedHeroPnl, finalDistribution)
+        
+        // Sum up all player contributions for this street
+        return playerContributions.values.reduce(0, +)
     }
 
     // Improve didShowdownOccur function to better detect showdown scenarios
@@ -1746,6 +2067,807 @@ class NewHandEntryViewModel: ObservableObject {
             }
         }
     }
+
+    // MARK: - LLM Parsing Logic
+
+    private func mapLLMPositionToViewModelPosition(_ llmPosition: String, tableSize: Int, availableViewModelPositions: [String]) -> String {
+        let lowerLLMPos = llmPosition.lowercased()
+        
+        // First check for direct matches (case insensitive)
+        if let directMatch = availableViewModelPositions.first(where: { $0.lowercased() == lowerLLMPos }) {
+            return directMatch
+        }
+
+        // Create a comprehensive mapping for all possible LLM position variations
+        let positionMappings: [String: [String]] = [
+            "SB": ["sb", "small", "small blind", "smallblind"],
+            "BB": ["bb", "big", "big blind", "bigblind"],
+            "UTG": ["utg", "under the gun", "underthegun"],
+            "UTG+1": ["utg+1", "utg1", "utg plus 1", "utg plus one"],
+            "MP": ["mp", "middle", "middle position", "hj", "hijack", "lj", "lojack"], // In 6-max, HJ often becomes MP
+            "MP1": ["mp1", "middle1", "lj", "lojack"],
+            "MP2": ["mp2", "middle2"],
+            "HJ": ["hj", "hijack", "mp"], // In larger games, HJ is distinct
+            "CO": ["co", "cutoff", "cut off"],
+            "BTN": ["btn", "button", "dealer", "d"]
+        ]
+        
+        // Find the best match based on available positions
+        for (viewModelPos, variations) in positionMappings {
+            if availableViewModelPositions.contains(viewModelPos) && variations.contains(lowerLLMPos) {
+                return viewModelPos
+            }
+        }
+        
+        // Special handling for ambiguous positions based on table size
+        
+        
+        switch lowerLLMPos {
+        case "hj", "hijack":
+            if availableViewModelPositions.contains("HJ") {
+                return "HJ"
+            } else if availableViewModelPositions.contains("MP") {
+                return "MP" // In 6-max, HJ becomes MP
+            } else if availableViewModelPositions.contains("CO") {
+                return "CO" // In smaller games, might be CO
+            }
+        case "lj", "lojack":
+            if availableViewModelPositions.contains("MP1") {
+                return "MP1"
+            } else if availableViewModelPositions.contains("MP") {
+                return "MP"
+            } else if availableViewModelPositions.contains("UTG+1") {
+                return "UTG+1"
+            }
+        default:
+            break // No special handling needed for other positions
+        }
+        
+        print("Warning: No mapping found for LLM position '\(llmPosition)' at table size \(tableSize). Available positions: \(availableViewModelPositions). Using uppercase as fallback.")
+        return llmPosition.uppercased()
+    }
+
+    func parseHandWithLLM() async {
+        guard !llmInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            await MainActor.run {
+                llmError = "Please enter hand history text."
+            }
+            return
+        }
+
+        await MainActor.run {
+            isParsingLLM = true
+            llmError = nil
+        }
+
+        // RE-ENABLED: HTTP request to LLM API
+        let urlString = "https://europe-west1-stack-24dea.cloudfunctions.net/parse_poker_hand"
+        guard let url = URL(string: urlString) else {
+            await MainActor.run {
+                llmError = "Invalid URL for LLM parsing."
+                isParsingLLM = false
+            }
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let requestBody = ["handDescription": llmInputText] // Changed "text" to "handDescription"
+        do {
+            request.httpBody = try JSONEncoder().encode(requestBody)
+        } catch {
+            await MainActor.run {
+                llmError = "Failed to encode request: \\(error.localizedDescription)"
+                isParsingLLM = false
+            }
+            return
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                let responseDataString = String(data: data, encoding: .utf8) ?? "No parsable response data"
+                
+                print("--- LLM Parsing HTTP Error ---")
+                print("Status Code: \(statusCode)")
+                print("Response Data: \(responseDataString)")
+                print("-----------------------------")
+                
+                let clientErrorMessage = "LLM parsing failed (Status: \(statusCode)). Check console for details."
+                await MainActor.run {
+                    llmError = clientErrorMessage
+                    isParsingLLM = false
+                }
+                return
+            }
+
+            // Print raw response for successful (200) but potentially unparsable JSON
+            let rawSuccessfulResponse = String(data: data, encoding: .utf8) ?? "Could not decode successful response to string"
+            print("--- LLM Parsing Success (Raw Response) ---")
+            print(rawSuccessfulResponse)
+            print("-----------------------------------------")
+
+            let decodedResponse = try JSONDecoder().decode(LLMParsedResponse.self, from: data)
+            await MainActor.run {
+                applyLLMParsedData(decodedResponse)
+                isParsingLLM = false
+            }
+        } catch {
+            print("--- LLM Parsing Decoding Error ---")
+            print("Error: \(error)")
+            print("Localized Description: \(error.localizedDescription)")
+            // If you want to see what data caused the decoding error:
+            // if let dataString = String(data: data, encoding: .utf8) { // `data` is not in this catch block's scope
+            //    print("Data causing error: \(dataString)") 
+            // }
+            print("---------------------------------")
+            await MainActor.run {
+                llmError = "LLM parsing error: \(error.localizedDescription). Check console."
+                isParsingLLM = false
+            }
+        }
+
+        // COMMENTED OUT: Testing mode for JSON input
+        /*
+        // TESTING MODE: Parse llmInputText directly as JSON
+        do {
+            print("--- Testing Mode: Parsing JSON directly ---")
+            print("Input JSON: \(llmInputText)")
+            print("------------------------------------------")
+            
+            guard let jsonData = llmInputText.data(using: .utf8) else {
+                await MainActor.run {
+                    llmError = "Could not convert input text to data."
+                    isParsingLLM = false
+                }
+                return
+            }
+            
+            let decodedResponse = try JSONDecoder().decode(LLMParsedResponse.self, from: jsonData)
+            print("--- JSON Parsing Success ---")
+            print("Decoded response: \(decodedResponse)")
+            print("----------------------------")
+            
+            await MainActor.run {
+                applyLLMParsedData(decodedResponse)
+                isParsingLLM = false
+            }
+        } catch {
+            print("--- JSON Parsing Error ---")
+            print("Error: \(error)")
+            print("Localized Description: \(error.localizedDescription)")
+            if let decodingError = error as? DecodingError {
+                print("Decoding Error Details: \(decodingError)")
+            }
+            print("Input text: \(llmInputText)")
+            print("-------------------------")
+            
+            await MainActor.run {
+                llmError = "JSON parsing error: \(error.localizedDescription). Check console for details."
+                isParsingLLM = false
+            }
+        }
+        */
+    }
+
+    private func applyLLMParsedData(_ llmData: LLMParsedResponse) {
+        // 1. Reset board, player cards, and all action arrays
+        resetBoardAndPlayerCards()
+        resetAllActions() // Clears preflopActions, flopActions etc. & pendingActionInput
+        
+        // 2. Baseline Player Setup (Hero active, others inactive, stacks set)
+        setupInitialPlayers()
+        
+        let currentViewModelPositions = self.availablePositions // For mapping LLM pos to VM pos
+
+        // 3. Process LLM Players: Activate them and assign cards
+        if let llmPlayers = llmData.players {
+            for llmPlayer in llmPlayers {
+                let viewModelPosition = mapLLMPositionToViewModelPosition(llmPlayer.position, tableSize: self.tableSize, availableViewModelPositions: currentViewModelPositions)
+                
+                if let playerIndex = players.firstIndex(where: { $0.position == viewModelPosition }) {
+                    players[playerIndex].isActive = true // Activate player specified by LLM
+                    if let cardsString = llmPlayer.cards, !cardsString.isEmpty {
+                        let parsedCards = parseCardString(cardsString)
+                        if players[playerIndex].isHero {
+                            heroCard1 = parsedCards.card1
+                            heroCard2 = parsedCards.card2
+                        } else {
+                            players[playerIndex].card1 = parsedCards.card1
+                            players[playerIndex].card2 = parsedCards.card2
+                        }
+                    }
+                } else if viewModelPosition == heroPosition { // LLM might specify hero by actual position
+                    if let heroPlayerIndex = players.firstIndex(where: { $0.isHero }) {
+                        players[heroPlayerIndex].isActive = true // Ensure hero is active
+                        if let cardsString = llmPlayer.cards, !cardsString.isEmpty {
+                            let parsedCards = parseCardString(cardsString)
+                            heroCard1 = parsedCards.card1
+                            heroCard2 = parsedCards.card2
+                        }
+                    }
+                }
+            }
+        }
+        // Ensure Hero is marked active if not explicitly in llmPlayers but is the designated hero
+        if let heroIdx = players.firstIndex(where: {$0.isHero}) { 
+            players[heroIdx].isActive = true 
+            // If hero cards were in llmData.players for hero's position, they are already set.
+            // If not, heroCard1/2 remain as they were (nil or previously set).
+        }
+
+        // IMPORTANT: Also activate any players who appear in LLM actions but weren't in llmData.players
+        // This handles cases where LLM mentions actions but doesn't list all players in the players section
+        var allLLMActionPositions = Set<String>()
+        
+        // Collect all positions mentioned in any LLM actions
+        if let preflopActions = llmData.preflop?.actions {
+            for action in preflopActions {
+                let mappedPosition = mapLLMPositionToViewModelPosition(action.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
+                allLLMActionPositions.insert(mappedPosition)
+            }
+        }
+        if let flopActions = llmData.flop?.actions {
+            for action in flopActions {
+                let mappedPosition = mapLLMPositionToViewModelPosition(action.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
+                allLLMActionPositions.insert(mappedPosition)
+            }
+        }
+        if let turnActions = llmData.turn?.actions {
+            for action in turnActions {
+                let mappedPosition = mapLLMPositionToViewModelPosition(action.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
+                allLLMActionPositions.insert(mappedPosition)
+            }
+        }
+        if let riverActions = llmData.river?.actions {
+            for action in riverActions {
+                let mappedPosition = mapLLMPositionToViewModelPosition(action.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
+                allLLMActionPositions.insert(mappedPosition)
+            }
+        }
+        
+        // Activate any players who appear in actions
+        for position in allLLMActionPositions {
+            if let playerIndex = players.firstIndex(where: { $0.position == position }) {
+                players[playerIndex].isActive = true
+            }
+        }
+
+        // Debug: Print active players after LLM processing
+        print("--- Active Players After LLM Processing ---")
+        let activePlayers = players.filter { $0.isActive }
+        print("Active players: \(activePlayers.map { "\($0.position)(\($0.isHero ? "Hero" : "Villain"))" }.joined(separator: ", "))")
+        print("All LLM action positions: \(allLLMActionPositions.sorted())")
+        print("-------------------------------------------")
+
+        // 4. Apply LLM Board Cards
+        if let flopCardData = llmData.flop?.cards { // This can be ["A", "K", "Q"] or ["AKQ"]
+            if !flopCardData.isEmpty {
+                if flopCardData.count == 1 && flopCardData[0].count > 1 && flopCardData[0].count <= 3 { // Likely a single string e.g. "AKQ" or "T72"
+                    let singleStringCards = Array(flopCardData[0])
+                    flopCard1 = singleStringCards.indices.contains(0) ? normalizeCard(String(singleStringCards[0])) : nil
+                    flopCard2 = singleStringCards.indices.contains(1) ? normalizeCard(String(singleStringCards[1])) : nil
+                    flopCard3 = singleStringCards.indices.contains(2) ? normalizeCard(String(singleStringCards[2])) : nil
+                } else { // Likely an array of individual card strings/ranks e.g. ["A", "K", "Q"]
+                    flopCard1 = flopCardData.indices.contains(0) ? normalizeCard(flopCardData[0]) : nil
+                    flopCard2 = flopCardData.indices.contains(1) ? normalizeCard(flopCardData[1]) : nil
+                    flopCard3 = flopCardData.indices.contains(2) ? normalizeCard(flopCardData[2]) : nil
+                }
+            }
+        }
+        // Assuming turn and river are single cards if present
+        if let turnCardData = llmData.turn?.cards, !turnCardData.isEmpty {
+            turnCard = normalizeCard(turnCardData[0])
+        }
+        if let riverCardData = llmData.river?.cards, !riverCardData.isEmpty {
+            riverCard = normalizeCard(riverCardData[0])
+        }
+
+        // --- Action processing will continue from here in the next step ---
+        // For now, just print the state after player/card setup
+        print("--- After LLM Player/Card Processing ---")
+        printPlayersStateForDebug()
+        printBoardCardsForDebug()
+
+        // 5. NEW PREFLOP ACTION PROCESSING: Initialize players with their actions and process in queue order
+        
+        // 5A. Parse LLM preflop actions and group by player
+        var playerActionQueues: [String: [ActionInput]] = [:] // Actions for each player position
+        
+        if let rawLLMPreflopActions = llmData.preflop?.actions {
+            for llmAction in rawLLMPreflopActions {
+                let viewModelPosition = mapLLMPositionToViewModelPosition(llmAction.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
+                
+                // Convert LLM action to ActionInput
+                let normalizedActionName = normalizeActionName(llmAction.action)
+                guard let actionType = PokerActionType(rawValue: normalizedActionName) else {
+                    print("Unknown LLM action type: \(llmAction.action) (normalized: \(normalizedActionName))")
+                    continue
+                }
+                
+                var finalAmount: Double? = nil
+                if let amountString = llmAction.amount, !amountString.isEmpty {
+                    finalAmount = Double(amountString)
+                }
+                
+                // Set amount based on action type
+                switch actionType {
+                case .call, .bet, .raise:
+                    finalAmount = finalAmount ?? 0.0
+                case .fold, .check:
+                    finalAmount = nil
+                }
+                
+                let actionInput = ActionInput(
+                    playerName: viewModelPosition,
+                    actionType: actionType,
+                    amount: finalAmount,
+                    isSystemAction: false
+                )
+                
+                // Add to player's action queue
+                if playerActionQueues[viewModelPosition] == nil {
+                    playerActionQueues[viewModelPosition] = []
+                }
+                playerActionQueues[viewModelPosition]?.append(actionInput)
+            }
+        }
+        
+        // 5B. Initialize all players with their appropriate actions
+        let preflopOrder = getPreflopActionOrder()
+        
+        for position in self.availablePositions {
+            if playerActionQueues[position] == nil {
+                playerActionQueues[position] = []
+            }
+            
+            let isActivePlayer = players.first(where: { $0.position == position })?.isActive ?? false
+            
+            // Add blinds for SB/BB (whether active or not)
+            if position == "SB" {
+                let blindAction = ActionInput(playerName: position, actionType: .bet, amount: smallBlind, isSystemAction: true)
+                playerActionQueues[position]?.insert(blindAction, at: 0) // Insert at beginning
+            } else if position == "BB" {
+                let blindAction = ActionInput(playerName: position, actionType: .bet, amount: bigBlind, isSystemAction: true)
+                playerActionQueues[position]?.insert(blindAction, at: 0) // Insert at beginning
+            }
+            
+            // Add straddle if applicable
+        if hasStraddle, let straddleAmount = straddle, straddleAmount > 0 {
+                // Find UTG or first non-blind position for straddle
+                let nonBlindPositions = preflopOrder.filter { $0 != "SB" && $0 != "BB" }
+                if let straddlePos = nonBlindPositions.first, position == straddlePos {
+                    let straddleAction = ActionInput(playerName: position, actionType: .bet, amount: straddleAmount, isSystemAction: true)
+                    playerActionQueues[position]?.insert(straddleAction, at: 0) // Insert at beginning
+                }
+            }
+            
+            // Add fold for inactive players (except if they only have blind actions)
+            if !isActivePlayer {
+                let hasNonBlindActions = playerActionQueues[position]?.contains(where: { !$0.isSystemAction }) ?? false
+                if !hasNonBlindActions || (playerActionQueues[position]?.count ?? 0) > 1 {
+                    // Add fold action for inactive players
+                    let foldAction = ActionInput(playerName: position, actionType: .fold, isSystemAction: true)
+                    playerActionQueues[position]?.append(foldAction)
+                }
+            }
+        }
+        
+        // 5C. Process actions in preflop order: BLINDS FIRST, then action order
+        var finalPreflopActions: [ActionInput] = []
+        
+        // Step 1: Post blinds first (SB, BB, Straddle if any)
+        let blindOrder = ["SB", "BB"] // Blinds always come first
+        for position in blindOrder {
+            if let actions = playerActionQueues[position], !actions.isEmpty {
+                // Take only the blind action (first action which should be the blind)
+                let blindAction = actions.first!
+                if blindAction.isSystemAction && blindAction.actionType == .bet {
+                    finalPreflopActions.append(blindAction)
+                    playerActionQueues[position]?.removeFirst()
+                    print("Posted blind: \(position) \(blindAction.actionType.rawValue) \(blindAction.amount ?? 0)")
+                }
+            }
+        }
+        
+        // Handle straddle if present (after BB)
+        if hasStraddle, let straddleAmount = straddle, straddleAmount > 0 {
+            let nonBlindPositions = preflopOrder.filter { $0 != "SB" && $0 != "BB" }
+            if let straddlePos = nonBlindPositions.first {
+                if let actions = playerActionQueues[straddlePos], !actions.isEmpty {
+                    let straddleAction = actions.first!
+                    if straddleAction.isSystemAction && straddleAction.actionType == .bet && straddleAction.amount == straddleAmount {
+                        finalPreflopActions.append(straddleAction)
+                        playerActionQueues[straddlePos]?.removeFirst()
+                        print("Posted straddle: \(straddlePos) \(straddleAction.actionType.rawValue) \(straddleAction.amount ?? 0)")
+                    }
+                }
+            }
+        }
+        
+        // Step 2: Process remaining actions in preflop order
+        var playersStillInQueue = preflopOrder.filter { (playerActionQueues[$0]?.count ?? 0) > 0 }
+        
+        // Debug: Print initial player action queues (after blinds posted)
+        print("--- Player Action Queues After Blinds Posted ---")
+        for position in self.availablePositions {
+            if let actions = playerActionQueues[position], !actions.isEmpty {
+                let actionStrings = actions.map { "\($0.actionType.rawValue)(\($0.amount ?? -1))" }
+                print("  \(position): [\(actionStrings.joined(separator: ", "))]")
+            }
+        }
+        print("Preflop order: \(preflopOrder)")
+        print("Players in queue: \(playersStillInQueue)")
+        print("-------------------------------------------")
+        
+        while !playersStillInQueue.isEmpty {
+            var playersToRemove: [String] = []
+            
+            print("--- Processing round ---")
+            for position in preflopOrder {
+                guard playersStillInQueue.contains(position),
+                      let playerActions = playerActionQueues[position],
+                      !playerActions.isEmpty else { continue }
+                
+                // Take the first action for this player
+                let nextAction = playerActions.first!
+                finalPreflopActions.append(nextAction)
+                print("  \(position): \(nextAction.actionType.rawValue) \(nextAction.amount ?? 0)")
+                
+                // Remove the action from the player's queue
+                playerActionQueues[position]?.removeFirst()
+                
+                // If player has no more actions, remove from queue
+                if playerActionQueues[position]?.isEmpty ?? true {
+                    playersToRemove.append(position)
+                    print("    (removed from queue)")
+                }
+            }
+            
+            // Remove players with no more actions
+            for position in playersToRemove {
+                playersStillInQueue.removeAll { $0 == position }
+            }
+            print("Players still in queue: \(playersStillInQueue)")
+        }
+        
+        self.preflopActions = finalPreflopActions
+        
+        // 6. Postflop Action Construction (Simpler: order is from LLM)
+        if let rawLLMFlop = llmData.flop?.actions {
+            self.flopActions = convertLLMActions(rawLLMFlop, forStreet: .flop)
+        }
+        if let rawLLMTurn = llmData.turn?.actions {
+            self.turnActions = convertLLMActions(rawLLMTurn, forStreet: .turn)
+        }
+        if let rawLLMRiver = llmData.river?.actions {
+            self.riverActions = convertLLMActions(rawLLMRiver, forStreet: .river)
+        }
+
+        // Print actions for debugging before queue fast-forwarding
+        print("--- Raw Actions after LLM processing ---")
+        print("Preflop Actions: \(self.preflopActions.map { action in "[P:\(action.playerName) A:\(action.actionType.rawValue) Amt:\(action.amount ?? -1.0)]" })")
+        print("Flop Actions:    \(self.flopActions.map { action in "[P:\(action.playerName) A:\(action.actionType.rawValue) Amt:\(action.amount ?? -1.0)]" })")
+        print("Turn Actions:    \(self.turnActions.map { action in "[P:\(action.playerName) A:\(action.actionType.rawValue) Amt:\(action.amount ?? -1.0)]" })")
+        print("River Actions:   \(self.riverActions.map { action in "[P:\(action.playerName) A:\(action.actionType.rawValue) Amt:\(action.amount ?? -1.0)]" })")
+
+        // 7. Fast-forward Queues: Process ALL actions (blinds + LLM) into their respective queues
+        //    The `getOrCreateActionQueue` with `force: true` rebuilds the queue based on current players.
+        //    Then we iterate through our combined action list and feed it to the queue.
+
+        let preflopQueue = getOrCreateActionQueue(for: .preflop, force: true)
+        print("Processing \(self.preflopActions.count) preflop actions into queue...")
+        for action in self.preflopActions { 
+            let isBlindOrStraddle = action.isSystemAction && action.actionType == .bet && (action.playerName == "SB" || action.playerName == "BB" || (self.hasStraddle && players.first(where:{$0.position == action.playerName}) != nil))
+            print("  Processing Preflop: \(action.playerName) \(action.actionType) \(action.amount ?? -1) Blind/Straddle: \(isBlindOrStraddle)")
+            preflopQueue.processAction(player: action.playerName, action: action.actionType, betAmount: action.amount, isBlindOrStraddle: isBlindOrStraddle)
+        }
+        print("Preflop Queue after processing: \(preflopQueue.debugQueueState)")
+
+        if !self.flopActions.isEmpty || flopCard1 != nil {
+            let flopQueue = getOrCreateActionQueue(for: .flop, force: true)
+            print("Processing \(self.flopActions.count) flop actions into queue...")
+            for action in self.flopActions {
+                 print("  Processing Flop: \(action.playerName) \(action.actionType) \(action.amount ?? -1)")
+                flopQueue.processAction(player: action.playerName, action: action.actionType, betAmount: action.amount, isBlindOrStraddle: false)
+            }
+            print("Flop Queue after processing: \(flopQueue.debugQueueState)")
+        }
+
+        if !self.turnActions.isEmpty || turnCard != nil {
+            let turnQueue = getOrCreateActionQueue(for: .turn, force: true)
+            print("Processing \(self.turnActions.count) turn actions into queue...")
+            for action in self.turnActions {
+                print("  Processing Turn: \(action.playerName) \(action.actionType) \(action.amount ?? -1)")
+                turnQueue.processAction(player: action.playerName, action: action.actionType, betAmount: action.amount, isBlindOrStraddle: false)
+            }
+            print("Turn Queue after processing: \(turnQueue.debugQueueState)")
+        }
+
+        if !self.riverActions.isEmpty || riverCard != nil {
+            let riverQueue = getOrCreateActionQueue(for: .river, force: true)
+            print("Processing \(self.riverActions.count) river actions into queue...")
+            for action in self.riverActions {
+                 print("  Processing River: \(action.playerName) \(action.actionType) \(action.amount ?? -1)")
+                riverQueue.processAction(player: action.playerName, action: action.actionType, betAmount: action.amount, isBlindOrStraddle: false)
+            }
+            print("River Queue after processing: \(riverQueue.debugQueueState)")
+        }
+        
+        // 8. Determine Current State (which street are we on now, after all LLM info?)
+        if riverCard != nil || !self.riverActions.isEmpty { currentActionStreet = .river }
+        else if turnCard != nil || !self.turnActions.isEmpty { currentActionStreet = .turn }
+        else if flopCard1 != nil || !self.flopActions.isEmpty { currentActionStreet = .flop }
+        else { currentActionStreet = .preflop } 
+        print("Final currentActionStreet determined as: \(currentActionStreet)")
+        
+        // 9. Call determineNextPlayerAndUpdateState to set up UI for next action OR complete street/hand.
+        //    This will use the fast-forwarded queues.
+        determineNextPlayerAndUpdateState() 
+        objectWillChange.send() 
+    }
+
+    func printPlayersStateForDebug() {
+        print("Players State:")
+        for player in players {
+            let cards = [player.card1, player.card2].compactMap { $0 }.joined(separator: "")
+            print("- Pos: \(player.position), Active: \(player.isActive), Hero: \(player.isHero), Stack: \(player.stack), Cards: \(cards.isEmpty ? "N/A" : cards)")
+        }
+        print("Hero cards (direct): \(heroCard1 ?? "nil") \(heroCard2 ?? "nil")")
+    }
+
+    func printBoardCardsForDebug() {
+        print("Board Cards:")
+        let f = [flopCard1, flopCard2, flopCard3].compactMap{$0}.joined(separator: " ")
+        print("Flop: \(f.isEmpty ? "N/A" : f)")
+        print("Turn: \(turnCard ?? "N/A")")
+        print("River: \(riverCard ?? "N/A")")
+    }
+
+    // Modify setupInitialPlayers to set non-hero players to inactive by default.
+    // ... existing code ...
+
+    private func normalizeCard(_ cardStr: String) -> String? {
+        guard !cardStr.isEmpty else { return nil }
+        let ranks = "23456789TJQKA"
+        let suits = "shdc" // spades, hearts, diamonds, clubs
+
+        var rank = ""
+        var suit = ""
+
+        if cardStr.count == 1 { // e.g., "T"
+            rank = String(cardStr.prefix(1)).uppercased()
+            // Cannot determine suit, so we'll leave it empty.
+            // This means the card selector might be needed or we assume a default/placeholder.
+            // For now, return as is, UI might show "?" for suit.
+            // Or, we could try to find a suit that isn't used yet.
+            // For simplicity, let's return rank + a placeholder like 'x' if only rank is given.
+            // However, the LLM output for board is ["T", "7", "2"]. This implies ranks only.
+            // We need to assign suits. The best approach is to have the LLM return full card strings.
+            // Assuming for now the LLM gives full cards for players, but ranks for board.
+            // This is a tricky part. If only rank, we can't form a unique card.
+            // Let's try to find an unused suit for this rank.
+            let potentialSuits = ["s", "h", "d", "c"]
+            let currentUsedCards = self.usedCards // Get all currently known cards
+            for s_char in potentialSuits {
+                let testCard = rank + s_char
+                if !currentUsedCards.contains(testCard) {
+                    return testCard // Found an unused suit
+                }
+            }
+            // If all suits for this rank are somehow used (unlikely for board cards), return with a default or nil.
+            return rank + "s" // Default to spades if all else fails, though this is not ideal.
+        } else if cardStr.count == 2 { // e.g., "Ts"
+            rank = String(cardStr.prefix(1)).uppercased()
+            suit = String(cardStr.suffix(1)).lowercased()
+            if ranks.contains(rank) && suits.contains(suit) {
+                return rank + suit
+            }
+        }
+        return nil // Invalid card string
+    }
+
+
+    private func parseCardString(_ cards: String) -> (card1: String?, card2: String?) {
+        let trimmedCards = cards.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCards.isEmpty else { return (nil, nil) }
+
+        var c1: String? = nil
+        var c2: String? = nil
+
+        // Handle cases like "AsKd", "AhQc", "T9s", "76o", "AK" (implies offsuit)
+        // More robust parsing needed for "o" and "s" if LLM uses them.
+        // Assuming LLM gives "JsTs" or "ATo" -> "AT"
+        // "ATo" -> ATo, T is card1, o is card2? No. A is rank1, T is rank2, o is offsuit.
+        // "JsTs" -> Js is card1, Ts is card2.
+        
+        let cardChars = Array(trimmedCards)
+        
+        if cardChars.count == 4 { // e.g., AsKd
+            let firstCardRank = String(cardChars[0]).uppercased()
+            let firstCardSuit = String(cardChars[1]).lowercased()
+            let secondCardRank = String(cardChars[2]).uppercased()
+            let secondCardSuit = String(cardChars[3]).lowercased()
+            if isValidRank(firstCardRank) && isValidSuit(firstCardSuit) {
+                c1 = firstCardRank + firstCardSuit
+            }
+            if isValidRank(secondCardRank) && isValidSuit(secondCardSuit) {
+                c2 = secondCardRank + secondCardSuit
+            }
+        } else if cardChars.count == 3 { // e.g., T9s, AJo. Assume ranks + s/o
+            let rank1 = String(cardChars[0]).uppercased()
+            let rank2 = String(cardChars[1]).uppercased()
+            let suffix = String(cardChars[2]).lowercased()
+
+            if isValidRank(rank1) && isValidRank(rank2) {
+                if suffix == "s" { // Suited
+                    // Assign first available suit to both, ensuring they are the same.
+                    // This is complex if other cards are known. For now, default to 's'.
+                    // A better LLM output would be "Ts9s".
+                    c1 = rank1 + "s"
+                    c2 = rank2 + "s"
+                } else if suffix == "o" { // Offsuit
+                    // Assign different suits. Default to 's' and 'h'.
+                    // A better LLM output would be "Ts9h".
+                    c1 = rank1 + "s"
+                    c2 = rank2 + "h"
+                    if c1 == c2 { c2 = rank2 + "d" } // Ensure different
+                } else { // Could be a single card like "Adx" or "Ad" if one card given
+                    let suit = String(cardChars[2]).lowercased()
+                     if isValidSuit(suit) {
+                        c1 = rank1 + suit // Assume rank1 + suit, and rank2 is part of the name
+                    }
+                }
+            }
+        } else if cardChars.count == 2 { // Could be one card "As" or two ranks "AK"
+             let rank1 = String(cardChars[0]).uppercased()
+             let char2 = String(cardChars[1])
+
+            if isValidRank(rank1) {
+                if isValidSuit(char2.lowercased()) { // Single card, e.g., "As"
+                    c1 = rank1 + char2.lowercased()
+                } else if isValidRank(char2.uppercased()) { // Two ranks, e.g., "AK" (assume offsuit)
+                    c1 = rank1 + "s" // Default suit 1
+                    c2 = char2.uppercased() + "h" // Default suit 2
+                     if c1 == c2 { c2 = char2.uppercased() + "d" } // Ensure different
+                }
+            }
+        } else if cardChars.count == 1 && isValidRank(String(cardChars[0]).uppercased()) { // Single rank, e.g. "A"
+             // Cannot determine full card.
+        }
+
+
+        return (normalizeCard(c1 ?? ""), normalizeCard(c2 ?? ""))
+    }
+    
+    private func isValidRank(_ rank: String) -> Bool {
+        return "23456789TJQKA".contains(rank.uppercased())
+    }
+
+    private func isValidSuit(_ suit: String) -> Bool {
+        return "shdc".contains(suit.lowercased())
+    }
+
+
+    private func normalizeActionName(_ actionName: String) -> String {
+        let lowercased = actionName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Handle multiple variations of action names
+        switch lowercased {
+        case "fold", "folds":
+            return "fold"
+        case "check", "checks":
+            return "check"
+        case "call", "calls":
+            return "call"
+        case "bet", "bets":
+            return "bet"
+        case "raise", "raises":
+            return "raise"
+        case "all-in", "allin", "all in", "shove", "shoves", "all in bet", "all in raise":
+            return "bet" // Treat all-in as a bet for now
+        default:
+            return lowercased
+        }
+    }
+
+    private func convertLLMActions(_ llmActions: [LLMActionDetail], forStreet street: StreetIdentifier) -> [ActionInput] {
+        var convertedActions: [ActionInput] = []
+        for llmAction in llmActions {
+            // Handle multiple possible action name variations
+            let normalizedActionName = normalizeActionName(llmAction.action)
+            guard let actionType = PokerActionType(rawValue: normalizedActionName) else {
+                print("Unknown LLM action type: \(llmAction.action) (normalized: \(normalizedActionName))")
+                continue
+            }
+            
+            // Map LLM position to ViewModel's standard position name
+            let viewModelPlayerPosition = mapLLMPositionToViewModelPosition(llmAction.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
+
+            // Determine the playerName to use in ActionInput, preferring heroPosition if player is hero.
+            let playerNameForActionInput: String
+            if let player = players.first(where: { $0.position == viewModelPlayerPosition }) {
+                // If the LLM-specified player is the hero (matched by mapped position),
+                // use the canonical heroPosition string (which might be "Hero" or the actual position string from hero picker).
+                // Otherwise, use the player's standard position string.
+                playerNameForActionInput = player.isHero ? self.heroPosition : player.position 
+            } else if self.heroPosition == viewModelPlayerPosition { 
+                // This case covers if the hero is identified by their specific position name (e.g. hero picked "BTN" and LLM says "BTN" acted)
+                playerNameForActionInput = self.heroPosition
+            } else {
+                // Fallback if no player matches the mapped ViewModel position.
+                // This might happen if LLM provides a position not in current table setup or an error in mapping.
+                print("LLM Action: Could not find an active player for mapped VM position '\(viewModelPlayerPosition)' (from LLM pos '\(llmAction.position)\') for action. Using mapped position as fallback.")
+                playerNameForActionInput = viewModelPlayerPosition 
+            }
+
+            // Parse amount from LLM string, handling nil and invalid strings
+            var finalAmount: Double? = nil
+            if let amountString = llmAction.amount, !amountString.isEmpty {
+                finalAmount = Double(amountString)
+            }
+            
+            // Special handling for all-in actions without amount
+            let isAllIn = llmAction.action.lowercased().contains("all") || llmAction.action.lowercased().contains("shove")
+            if isAllIn && finalAmount == nil {
+                // For all-in actions without amount, use the player's stack
+                let playerPosition = mapLLMPositionToViewModelPosition(llmAction.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
+                if let player = players.first(where: { $0.position == playerPosition }) {
+                    finalAmount = player.stack
+                }
+            }
+            
+            // Set amount based on action type
+            switch actionType {
+            case .call, .bet, .raise:
+                // For betting actions, use the parsed amount or default to 0
+                finalAmount = finalAmount ?? 0.0
+            case .fold, .check:
+                // Folds and checks have no amount
+                finalAmount = nil
+            }
+
+            let actionInput = ActionInput(
+                playerName: playerNameForActionInput,
+                actionType: actionType,
+                amount: finalAmount,
+                // street: street, // This will be set correctly by the calling context
+                isSystemAction: false // LLM parsed actions are not system actions
+            )
+            convertedActions.append(actionInput)
+            
+            // Debug logging
+            print("LLM Action Converted: \(llmAction.position) -> \(playerNameForActionInput), \(llmAction.action) -> \(actionType.rawValue), amount: \(llmAction.amount ?? "nil") -> \(finalAmount ?? -999)")
+        }
+        return convertedActions
+    }
+
+    private func resetBoardAndPlayerCards() {
+        heroCard1 = nil
+        heroCard2 = nil
+        flopCard1 = nil
+        flopCard2 = nil
+        flopCard3 = nil
+        turnCard = nil
+        riverCard = nil
+        for i in 0..<players.count {
+            players[i].card1 = nil
+            players[i].card2 = nil
+            // Do not reset isActive here, applyLLMParsedData will manage it.
+        }
+    }
+    
+    private func resetAllActions() {
+        preflopActions.removeAll()
+        flopActions.removeAll()
+        turnActions.removeAll()
+        riverActions.removeAll()
+        pendingActionInput = nil // Reset pending action as well
+    }
 }
 
 // Enum for effective stack type
@@ -1805,11 +2927,11 @@ struct ActionInput: Identifiable, Equatable {
 }
 
 enum PokerActionType: String, CaseIterable, Identifiable {
-    case fold = "Folds"
-    case check = "Checks"
-    case bet = "Bets"
-    case call = "Calls"
-    case raise = "Raises"
+    case fold = "fold" // Was "Folds"
+    case check = "check" // Was "Checks"
+    case bet = "bet"   // Was "Bets"
+    case call = "call"  // Was "Calls"
+    case raise = "raise" // Was "Raises"
     // Posts might be handled automatically or as a specific type if needed
 
     var id: String { self.rawValue }

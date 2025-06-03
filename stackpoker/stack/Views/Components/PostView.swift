@@ -6,30 +6,44 @@ struct PostView: View {
     let onLike: () -> Void
     let onComment: () -> Void
     let userId: String
+    var onImageTapped: ((String) -> Void)?
     @State private var showingReplay = false
     @State private var isLiked: Bool
     @State private var authorProfile: UserProfile?
     
     @EnvironmentObject private var userService: UserService
     
-    init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, userId: String) {
+    init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, userId: String, onImageTapped: ((String) -> Void)? = nil) {
         self.post = post
         self.onLike = onLike
         self.onComment = onComment
         self.userId = userId
+        self.onImageTapped = onImageTapped
         // Initialize isLiked from the post's state
         _isLiked = State(initialValue: post.isLiked)
     }
     
     var body: some View {
         VStack(spacing: 0) {
-            if post.postType == .text {
+            // Check if this is a challenge-related post first
+            if let challengeInfo = extractChallengeInfo() {
+                ChallengePostView(
+                    post: post,
+                    challengeInfo: challengeInfo,
+                    onLike: onLike,
+                    onComment: onComment,
+                    isCurrentUser: post.userId == userId,
+                    onImageTapped: onImageTapped,
+                    openPostDetail: onComment
+                )
+            } else if post.postType == .text {
                 BasicPostCardView(
                     post: post,
                     onLike: onLike,
                     onComment: onComment,
                     onDelete: {},
                     isCurrentUser: post.userId == userId,
+                    onImageTapped: onImageTapped,
                     openPostDetail: onComment,
                     onReplay: post.postType == .hand ? { showingReplay = true } : nil
                 )
@@ -53,6 +67,141 @@ struct PostView: View {
         .onAppear {
             loadAuthorProfile()
         }
+    }
+    
+    // MARK: - Challenge Detection
+    
+    private func extractChallengeInfo() -> ChallengePostInfo? {
+        let content = post.content
+        
+        // Check for challenge start posts
+        if content.contains("🎯 Started a new challenge:") && content.contains("#PokerChallenge") {
+            return parseChallengeStartPost(content)
+        }
+        
+        // Check for challenge progress posts
+        if content.contains("Challenge Progress:") || content.contains("🎯 Challenge Update:") {
+            return parseChallengeProgressPost(content)
+        }
+        
+        // Check for challenge completion posts
+        if content.contains("🎉 Challenge Completed!") || content.contains("🏆 Goal Achieved!") {
+            return parseChallengeCompletionPost(content)
+        }
+        
+        return nil
+    }
+    
+    private func parseChallengeStartPost(_ content: String) -> ChallengePostInfo? {
+        // Extract challenge title
+        guard let titleRange = content.range(of: "Started a new challenge: "),
+              let titleEnd = content.range(of: "\n", range: titleRange.upperBound..<content.endIndex) else {
+            return nil
+        }
+        
+        let title = String(content[titleRange.upperBound..<titleEnd.lowerBound])
+        
+        // Extract target and current values
+        let targetValue = extractValue(from: content, prefix: "Target: ")
+        let currentValue = extractValue(from: content, prefix: "Current: ")
+        
+        // Extract deadline if present
+        let deadline = extractDeadline(from: content)
+        
+        // Provide default values if extraction fails
+        let target = targetValue ?? 0.0
+        let current = currentValue ?? 0.0
+        
+        // Determine challenge type from hashtags
+        let challengeType: ChallengeType
+        if content.contains("#BankrollGoal") {
+            challengeType = .bankroll
+        } else if content.contains("#HandsGoal") {
+            challengeType = .hands
+        } else if content.contains("#SessionGoal") {
+            challengeType = .session
+        } else {
+            challengeType = .bankroll // Default
+        }
+        
+        return ChallengePostInfo(
+            type: .challengeStart,
+            challengeTitle: title,
+            challengeType: challengeType,
+            currentValue: current,
+            targetValue: target,
+            progressPercentage: target > 0 ? (current / target) * 100 : 0,
+            isCompact: false,
+            deadline: deadline
+        )
+    }
+    
+    private func parseChallengeProgressPost(_ content: String) -> ChallengePostInfo? {
+        // Similar parsing logic for progress posts
+        let targetValue = extractValue(from: content, prefix: "Target: ") ?? extractValue(from: content, prefix: "Goal: ")
+        let currentValue = extractValue(from: content, prefix: "Current: ") ?? extractValue(from: content, prefix: "Progress: ")
+        
+        let deadline = extractDeadline(from: content)
+        
+        guard let target = targetValue, let current = currentValue else { return nil }
+        
+        return ChallengePostInfo(
+            type: .challengeProgress,
+            challengeTitle: "Challenge Progress",
+            challengeType: .bankroll,
+            currentValue: current,
+            targetValue: target,
+            progressPercentage: (current / target) * 100,
+            isCompact: true,
+            deadline: deadline
+        )
+    }
+    
+    private func parseChallengeCompletionPost(_ content: String) -> ChallengePostInfo? {
+        let targetValue = extractValue(from: content, prefix: "Target: ") ?? extractValue(from: content, prefix: "Goal: ")
+        let currentValue = extractValue(from: content, prefix: "Final: ") ?? extractValue(from: content, prefix: "Achieved: ")
+        
+        let deadline = extractDeadline(from: content)
+        
+        guard let target = targetValue, let current = currentValue else { return nil }
+        
+        return ChallengePostInfo(
+            type: .challengeCompletion,
+            challengeTitle: "Challenge Completed!",
+            challengeType: .bankroll,
+            currentValue: current,
+            targetValue: target,
+            progressPercentage: 100,
+            isCompact: false,
+            deadline: deadline
+        )
+    }
+    
+    private func extractValue(from content: String, prefix: String) -> Double? {
+        guard let range = content.range(of: prefix) else { return nil }
+        
+        let remainingContent = String(content[range.upperBound...])
+        let valueString = remainingContent.components(separatedBy: CharacterSet.whitespacesAndNewlines).first ?? ""
+        
+        // Remove currency symbols and commas
+        let cleanedValue = valueString.replacingOccurrences(of: "$", with: "")
+            .replacingOccurrences(of: ",", with: "")
+        
+        return Double(cleanedValue)
+    }
+    
+    private func extractDeadline(from content: String) -> Date? {
+        // Look for deadline in various formats
+        let lines = content.components(separatedBy: "\n")
+        for line in lines {
+            if line.hasPrefix("Deadline: ") {
+                let dateString = line.replacingOccurrences(of: "Deadline: ", with: "")
+                let formatter = DateFormatter()
+                formatter.dateStyle = .medium
+                return formatter.date(from: dateString)
+            }
+        }
+        return nil
     }
     
     private func loadAuthorProfile() {
@@ -351,6 +500,296 @@ extension Date {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: self, relativeTo: Date())
+    }
+}
+
+// MARK: - Challenge Post Info
+
+struct ChallengePostInfo {
+    enum PostType {
+        case challengeStart
+        case challengeProgress
+        case challengeCompletion
+    }
+    
+    let type: PostType
+    let challengeTitle: String
+    let challengeType: ChallengeType
+    let currentValue: Double
+    let targetValue: Double
+    let progressPercentage: Double
+    let isCompact: Bool
+    let deadline: Date?
+    
+    var daysRemaining: Int? {
+        guard let deadline = deadline else { return nil }
+        let calendar = Calendar.current
+        let days = calendar.dateComponents([.day], from: Date(), to: deadline).day
+        return max(days ?? 0, 0)
+    }
+}
+
+// MARK: - Challenge Post View
+
+struct ChallengePostView: View {
+    let post: Post
+    let challengeInfo: ChallengePostInfo
+    let onLike: () -> Void
+    let onComment: () -> Void
+    let isCurrentUser: Bool
+    var onImageTapped: ((String) -> Void)?
+    var openPostDetail: (() -> Void)?
+    
+    @State private var isLiked: Bool
+    @State private var animateLike = false
+    @EnvironmentObject private var userService: UserService
+    
+    init(post: Post, challengeInfo: ChallengePostInfo, onLike: @escaping () -> Void, onComment: @escaping () -> Void, isCurrentUser: Bool, onImageTapped: ((String) -> Void)? = nil, openPostDetail: (() -> Void)? = nil) {
+        self.post = post
+        self.challengeInfo = challengeInfo
+        self.onLike = onLike
+        self.onComment = onComment
+        self.isCurrentUser = isCurrentUser
+        self.onImageTapped = onImageTapped
+        self.openPostDetail = openPostDetail
+        _isLiked = State(initialValue: post.isLiked)
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Challenge context tag
+            HStack(spacing: 6) {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.orange)
+                Text(challengeContextText)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.orange)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+            
+            // Header with user info
+            HStack(alignment: .top, spacing: 10) {
+                NavigationLink(destination: UserProfileView(userId: post.userId).environmentObject(userService)) {
+                    Group {
+                        if let profileImage = post.profileImage {
+                            KFImage(URL(string: profileImage))
+                                .placeholder {
+                                    PlaceholderAvatarView(size: 40)
+                                }
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 40, height: 40)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                        } else {
+                            PlaceholderAvatarView(size: 40)
+                        }
+                    }
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .center, spacing: 4) {
+                        Text(post.displayName ?? post.username)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.white)
+                            
+                        Text("@\(post.username)")
+                            .font(.system(size: 13))
+                            .foregroundColor(.gray.opacity(0.8))
+                    }
+                    
+                    Text(post.createdAt.timeAgo())
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray.opacity(0.6))
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+            
+            // Post content (text before the challenge component)
+            if !cleanedPostContent.isEmpty {
+                Text(cleanedPostContent)
+                    .font(.system(size: 16))
+                    .foregroundColor(.white.opacity(0.95))
+                    .lineSpacing(5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
+            
+            // Challenge Progress Component
+            ChallengeProgressComponent(
+                challengeTitle: challengeInfo.challengeTitle,
+                challengeType: challengeInfo.challengeType,
+                currentValue: challengeInfo.currentValue,
+                targetValue: challengeInfo.targetValue,
+                isCompact: challengeInfo.isCompact
+            )
+            .padding(.horizontal, 16)
+            
+            // Deadline info if present
+            if let daysRemaining = challengeInfo.daysRemaining {
+                HStack {
+                    Image(systemName: "calendar.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.orange)
+                    
+                    if daysRemaining > 0 {
+                        Text("\(daysRemaining) days left to complete")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.orange)
+                    } else if daysRemaining == 0 {
+                        Text("Due today!")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.red)
+                    } else {
+                        Text("Overdue")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.red)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            } else {
+                Spacer()
+                    .frame(height: 12)
+            }
+            
+            // Images if any
+            if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(imageURLs, id: \.self) { url in
+                            if let imageUrl = URL(string: url) {
+                                KFImage(imageUrl)
+                                    .placeholder {
+                                        Rectangle()
+                                            .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                            .overlay(
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                            )
+                                    }
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(height: 350)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        onImageTapped?(url)
+                                    }
+                            }
+                        }
+                    }
+                    .padding(.leading, 8)
+                    .padding(.trailing, 8)
+                }
+                .padding(.top, 10)
+                .padding(.bottom, 14)
+            }
+            
+            // Actions bar
+            HStack(spacing: 36) {
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        animateLike = true
+                        isLiked.toggle()
+                        onLike()
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            animateLike = false
+                        }
+                    }
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: isLiked ? "heart.fill" : "heart")
+                            .font(.system(size: 16))
+                            .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
+                            .scaleEffect(animateLike ? 1.3 : 1.0)
+                        
+                        Text("\(post.likes)")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.7))
+                    }
+                }
+                
+                Button(action: {
+                    if let postDetailAction = openPostDetail {
+                        postDetailAction()
+                    }
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bubble.left")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray.opacity(0.7))
+                        
+                        Text("\(post.comments)")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.7))
+                    }
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    // Share action
+                }) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray.opacity(0.7))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(Color.clear)
+    }
+    
+    private var challengeContextText: String {
+        switch challengeInfo.type {
+        case .challengeStart:
+            return "Challenge Started"
+        case .challengeProgress:
+            return "Challenge Update"
+        case .challengeCompletion:
+            return "Challenge Completed!"
+        }
+    }
+    
+    private var cleanedPostContent: String {
+        var content = post.content
+        
+        // Remove challenge-specific formatting but keep the main message
+        content = content.replacingOccurrences(of: "🎯 Started a new challenge:", with: "")
+        content = content.replacingOccurrences(of: "🎯 Challenge Update:", with: "")
+        content = content.replacingOccurrences(of: "🎉 Challenge Completed!", with: "")
+        content = content.replacingOccurrences(of: "🏆 Goal Achieved!", with: "")
+        
+        // Remove technical details that are shown in the component
+        let lines = content.components(separatedBy: "\n")
+        let filteredLines = lines.filter { line in
+            !line.contains("Target:") &&
+            !line.contains("Current:") &&
+            !line.contains("Goal:") &&
+            !line.contains("Progress:") &&
+            !line.contains("Final:") &&
+            !line.contains("Achieved:") &&
+            !line.hasPrefix("#")
+        }
+        
+        return filteredLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

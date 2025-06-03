@@ -19,6 +19,14 @@ struct FeedView: View {
     @State private var selectedImageURL: String? = nil
     @State private var showingComments = false
     
+    // Global image viewer state
+    @State private var viewerImageURL: String? = nil
+    @State private var playLottieAnimation = false // Added for Lottie control
+    
+    // Holds the profile to navigate to after search dismisses
+    @State private var userIdToOpen: String? = nil
+    @State private var navigateToProfile = false
+    
     let userId: String
     
     init(userId: String = Auth.auth().currentUser?.uid ?? "") {
@@ -65,7 +73,12 @@ struct FeedView: View {
           }
         }
         .fullScreenCover(isPresented: $showingUserSearchView) {
-            UserSearchView(currentUserId: userId, userService: userService)
+            UserSearchView(currentUserId: userId,
+                           userService: userService,
+                           onUserSelected: { id in
+                               userIdToOpen = id
+                               navigateToProfile = true
+                           })
         }
         .fullScreenCover(item: $selectedPost) { post in // Changed from .sheet to .fullScreenCover
             NavigationView {
@@ -75,11 +88,35 @@ struct FeedView: View {
             }
             .navigationViewStyle(StackNavigationViewStyle())
         }
-        .fullScreenCover(isPresented: $showingFullScreenImage) {
-            if let imageUrl = selectedImageURL {
-                FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
+        // Overlay for full-screen image display (replaces fullScreenCover)
+        .overlay(
+            Group {
+                if showingFullScreenImage, let imageUrl = selectedImageURL {
+                    FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
+                        .transition(.opacity)
+                        .zIndex(2)
+                }
             }
+        )
+        // Global image viewer for all post images
+        .fullScreenCover(item: $viewerImageURL) { url in
+            FullScreenImageView(imageURL: url, onDismiss: { viewerImageURL = nil })
         }
+        // Push profile once search sheet closes and `userIdToOpen` is set
+        .background(
+            NavigationLink(
+                destination: Group {
+                    if let id = userIdToOpen {
+                        UserProfileView(userId: id)
+                            .environmentObject(userService)
+                            .environmentObject(postService)
+                    }
+                },
+                isActive: $navigateToProfile,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
         .onAppear {
             // Load posts when the view appears
             if postService.posts.isEmpty {
@@ -101,26 +138,20 @@ struct FeedView: View {
     private var contentView: some View {
         Group {
             if postService.isLoading && postService.posts.isEmpty {
-                // Loading state
-                VStack {
-                    Spacer()
-                    ZStack {
-                        Circle()
-                            .fill(Color.black.opacity(0.1))
-                            .frame(width: 80, height: 80)
-                        
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
-                            .scaleEffect(1.5)
-                    }
-                    .shadow(color: Color.black.opacity(0.2), radius: 5)
+                // Restructured Loading state with Lottie animation
+                ZStack {
+                    LottieView(name: "lottie_white", loopMode: .loop, play: $playLottieAnimation) // Switch back to lottie_white
+                        .ignoresSafeArea() // Make Lottie animation itself full screen
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     
-                    Text("Loading Feed")
+                    Text("Loading Feed...")
                         .font(.system(size: 18, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.8))
-                        .padding(.top, 16)
-                    Spacer()
+                        .padding(.top, 100) // Adjust padding to position text over animation
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure ZStack fills the space
+                .onAppear { self.playLottieAnimation = true }
+                .onDisappear { self.playLottieAnimation = false }
             } else if postService.posts.isEmpty {
                 // Empty feed state
                 ScrollView { 
@@ -262,7 +293,10 @@ struct FeedView: View {
                                     selectedPost = post
                                     showingComments = true
                                 },
-                                userId: userId
+                                userId: userId,
+                                onImageTapped: { url in
+                                    viewerImageURL = url
+                                }
                             )
                             Divider() 
                                 .frame(height: 0.5) 
@@ -296,7 +330,7 @@ struct FeedView: View {
     // Refresh the feed
     private func refreshFeed() async {
         isRefreshing = true
-        try? await postService.fetchPosts()
+        try? await postService.forceRefresh() // Use forceRefresh to bypass cache
         isRefreshing = false
     }
     
@@ -363,6 +397,7 @@ struct BasicPostCardView: View {
     let onComment: () -> Void
     let onDelete: () -> Void
     let isCurrentUser: Bool
+    var onImageTapped: ((String) -> Void)?
     var openPostDetail: (() -> Void)?
     var onReplay: (() -> Void)?
     @State private var isLiked: Bool
@@ -370,12 +405,13 @@ struct BasicPostCardView: View {
     @State private var showDeleteConfirm = false
     @EnvironmentObject private var userService: UserService // Added to pass along to destination view
 
-    init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, onDelete: @escaping () -> Void, isCurrentUser: Bool, openPostDetail: (() -> Void)? = nil, onReplay: (() -> Void)? = nil) {
+    init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, onDelete: @escaping () -> Void, isCurrentUser: Bool, onImageTapped: ((String) -> Void)? = nil, openPostDetail: (() -> Void)? = nil, onReplay: (() -> Void)? = nil) {
         self.post = post
         self.onLike = onLike
         self.onComment = onComment
         self.onDelete = onDelete
         self.isCurrentUser = isCurrentUser
+        self.onImageTapped = onImageTapped
         self.openPostDetail = openPostDetail
         self.onReplay = onReplay
         _isLiked = State(initialValue: post.isLiked)
@@ -672,6 +708,10 @@ struct BasicPostCardView: View {
                                         .scaledToFill()
                                         .frame(height: 350) // Removed UIScreen.main.bounds.width, fixed height
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .contentShape(Rectangle()) // Ensure the whole area is tappable
+                                        .onTapGesture {
+                                            onImageTapped?(url)
+                                        }
                                 }
                             }
                         }
@@ -1087,6 +1127,8 @@ struct PostCardView: View {
                                     .scaledToFill()
                                     .frame(height: 350) // Removed UIScreen.main.bounds.width, fixed height
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .contentShape(Rectangle()) // Ensure the whole area is tappable
+                                    // PostCardView doesn't handle image taps
                             }
                         }
                     }
@@ -1279,8 +1321,6 @@ struct PostDetailView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var postService: PostService
     @EnvironmentObject var userService: UserService
-    @State private var showingFullScreenImage = false
-    @State private var selectedImageURL: String? = nil
     @State private var showingReplay = false
     @State private var isLiked: Bool
     @State private var animateLike = false
@@ -1297,7 +1337,10 @@ struct PostDetailView: View {
     @State private var showDeleteConfirm = false
     @FocusState private var isCommentFieldFocused: Bool
     @State private var keyboardHeight: CGFloat = 0 // Added for manual keyboard handling
-    @State private var showingMailView = false
+    @State private var showFlaggedAlert = false
+    
+    // Global image viewer state for this detail view
+    @State private var viewerImageURL: String? = nil
     
     init(post: Post, userId: String) {
         self.post = post
@@ -1324,7 +1367,7 @@ struct PostDetailView: View {
                         }
                         Spacer()
                         // Report button
-                        Button(action: { showingMailView = true }) {
+                        Button(action: { showFlaggedAlert = true }) {
                             Image(systemName: "flag")
                                 .font(.system(size: 18))
                                 .foregroundColor(.white.opacity(0.7))
@@ -1382,18 +1425,19 @@ struct PostDetailView: View {
         .onTapGesture {
             isCommentFieldFocused = false
         }
-        .fullScreenCover(isPresented: $showingFullScreenImage) {
-            if let imageUrl = selectedImageURL {
-                FullScreenImageView(imageURL: imageUrl, onDismiss: { showingFullScreenImage = false })
-            }
+        // Global image viewer using .fullScreenCover
+        .fullScreenCover(item: $viewerImageURL) { imageURL in
+            FullScreenImageView(imageURL: imageURL, onDismiss: { viewerImageURL = nil })
         }
         .sheet(isPresented: $showingReplay) {
             if let hand = post.handHistory {
                 HandReplayView(hand: hand, userId: userId)
             }
         }
-        .sheet(isPresented: $showingMailView) {
-            MailView(isShowing: $showingMailView, recipient: "support@stackpoker.gg", subject: "Report Post ID: \(post.id ?? "N/A")", body: "Please describe the issue with the post below:\n\n")
+        .alert("Flagged for Review", isPresented: $showFlaggedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("This post has been flagged for review.")
         }
         .onAppear {
             loadComments()
@@ -1460,7 +1504,13 @@ struct PostDetailView: View {
         .padding(.horizontal, 16)
         .padding(.top, 20) // This padding is within the ScrollView now
         
-        PostBodyContentView(post: post, showingReplay: $showingReplay, selectedImageURL: $selectedImageURL, showingFullScreenImage: $showingFullScreenImage)
+        PostBodyContentView(
+            post: post, 
+            showingReplay: $showingReplay,
+            onImageTapped: { imageURL in
+                viewerImageURL = imageURL
+            }
+        )
     }
     
     // Extracted ViewBuilder for Post Actions and Comments
@@ -2001,94 +2051,6 @@ struct ImagesGalleryView: View {
     }
 }
 
-// Full Screen Image View
-struct FullScreenImageView: View {
-    let imageURL: String
-    let onDismiss: () -> Void
-    @State private var scale: CGFloat = 1.0
-    @State private var lastScale: CGFloat = 1.0
-    @State private var offset = CGSize.zero
-    @State private var lastOffset = CGSize.zero
-    
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            
-            if let url = URL(string: imageURL) {
-                KFImage(url)
-                    .resizable()
-                    .placeholder {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .scaleEffect(1.5)
-                    }
-                    .scaledToFit()
-                    .scaleEffect(scale)
-                    .offset(offset)
-                    .gesture(
-                        MagnificationGesture()
-                            .onChanged { value in
-                                let delta = value / lastScale
-                                lastScale = value
-                                scale = min(max(scale * delta, 1), 5)
-                            }
-                            .onEnded { _ in
-                                lastScale = 1.0
-                            }
-                    )
-                    .gesture(
-                        DragGesture()
-                            .onChanged { gesture in
-                                offset = CGSize(
-                                    width: lastOffset.width + gesture.translation.width,
-                                    height: lastOffset.height + gesture.translation.height
-                                )
-                            }
-                            .onEnded { _ in
-                                lastOffset = offset
-                            }
-                    )
-                    .onTapGesture(count: 2) {
-                        withAnimation {
-                            scale = scale > 1 ? 1 : 2
-                            if scale == 1 {
-                                offset = .zero
-                                lastOffset = .zero
-                            }
-                        }
-                    }
-            } else {
-                Text("Invalid image URL")
-                    .foregroundColor(.white)
-            }
-            
-            // Close button
-            VStack {
-                HStack {
-                    Spacer()
-                    Button(action: onDismiss) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(12)
-                            .background(Color.black.opacity(0.5))
-                            .clipShape(Circle())
-                    }
-                    .padding(.trailing, 20)
-                    .padding(.top, 40)
-                }
-                Spacer()
-            }
-        }
-        .ignoresSafeArea()
-        .gesture(
-            TapGesture()
-                .onEnded { _ in
-                    onDismiss()
-                }
-        )
-    }
-}
 
 // Add this extension at the end of the file
 extension View {
@@ -2324,8 +2286,7 @@ private func extractNoteContent(from content: String) -> String {
 private struct PostBodyContentView: View {
     let post: Post
     @Binding var showingReplay: Bool
-    @Binding var selectedImageURL: String?
-    @Binding var showingFullScreenImage: Bool
+    var onImageTapped: ((String) -> Void)?
 
     // Helper functions like isNote, extractSessionInfo, extractCommentContent,
     // extractNoteContent, parseSessionContent should be accessible here.
@@ -2337,6 +2298,34 @@ private struct PostBodyContentView: View {
             // Parse completed session info first
             let (parsedCompletedSession, commentTextForCompletedSession) = parseCompletedSessionInfo(from: post.content)
 
+            // Check for challenge posts first
+            let challengeStartedInfo = parseChallengeStartFromPost(post.content)
+            let challengeUpdateInfo = parseChallengeUpdateFromPost(post.content)
+
+            if let challengeInfo = challengeStartedInfo ?? challengeUpdateInfo { // Prioritize started, then update
+                VStack(alignment: .leading, spacing: 12) {
+                    // Show any text content before the challenge info
+                    if let additionalText = extractAdditionalTextFromChallengePost(post.content), !additionalText.isEmpty {
+                        Text(additionalText)
+                            .font(.system(size: 17))
+                            .foregroundColor(.white.opacity(0.95))
+                            .lineSpacing(6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                    }
+                    
+                    // Challenge progress component
+                    ChallengeProgressComponent(
+                        challengeTitle: challengeInfo.title,
+                        challengeType: challengeInfo.type,
+                        currentValue: challengeInfo.currentValue,
+                        targetValue: challengeInfo.targetValue,
+                        isCompact: false, // Always show full detail in PostDetailView context
+                        deadline: challengeInfo.deadline
+                    )
+                    .padding(.horizontal, 16)
+                }
+            } else 
             if let completedInfo = parsedCompletedSession {
                 CompletedSessionFeedCardView(sessionInfo: completedInfo)
                     .padding(.horizontal, 16) // Added horizontal padding for detail view context
@@ -2438,6 +2427,10 @@ private struct PostBodyContentView: View {
                                         .scaledToFill()
                                         .frame(height: 350) // Removed UIScreen.main.bounds.width, fixed height
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .contentShape(Rectangle()) // Ensure the whole area is tappable
+                                        .onTapGesture {
+                                            onImageTapped?(url)
+                                        }
                                 }
                             }
                         }
@@ -2812,5 +2805,120 @@ private struct SessionStartedCardView: View {
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
     }
+}
+
+// Allow using a String directly in `fullScreenCover(item:)`
+extension String: Identifiable {
+    public var id: String { self }
+}
+
+// Helper functions for challenge detection in PostBodyContentView
+private func parseChallengeUpdateFromPost(_ content: String) -> (title: String, type: ChallengeType, currentValue: Double, targetValue: Double, deadline: Date?)? {
+    guard content.contains("🎯 Challenge Update:") else { return nil }
+    
+    // Extract title
+    let lines = content.components(separatedBy: "\n")
+    guard let firstLine = lines.first else { return nil }
+    
+    let title = firstLine.replacingOccurrences(of: "🎯 Challenge Update: ", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+    
+    // Extract progress and target values
+    var currentValue: Double = 0
+    var targetValue: Double = 0
+    var challengeType: ChallengeType = .bankroll
+    var deadline: Date? = nil
+    
+    for line in lines {
+        if line.hasPrefix("Progress: ") {
+            let valueStr = line.replacingOccurrences(of: "Progress: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
+            currentValue = Double(valueStr) ?? 0
+        }
+        if line.hasPrefix("Target: ") {
+            let valueStr = line.replacingOccurrences(of: "Target: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
+            targetValue = Double(valueStr) ?? 0
+        }
+        if line.hasPrefix("Deadline: ") {
+            let dateString = line.replacingOccurrences(of: "Deadline: ", with: "")
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            deadline = formatter.date(from: dateString)
+        }
+        if line.contains("#BankrollGoal") {
+            challengeType = .bankroll
+        } else if line.contains("#HandsGoal") {
+            challengeType = .hands
+        } else if line.contains("#SessionGoal") {
+            challengeType = .session
+        }
+    }
+    
+    return (title: title, type: challengeType, currentValue: currentValue, targetValue: targetValue, deadline: deadline)
+}
+
+private func parseChallengeStartFromPost(_ content: String) -> (title: String, type: ChallengeType, currentValue: Double, targetValue: Double, deadline: Date?)? {
+    guard content.contains("🎯 Started a new challenge:") else { return nil }
+
+    let lines = content.components(separatedBy: "\n")
+    guard let firstLine = lines.first else { return nil }
+
+    let title = firstLine.replacingOccurrences(of: "🎯 Started a new challenge: ", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+    var currentValue: Double = 0
+    var targetValue: Double = 0
+    var challengeType: ChallengeType = .bankroll // Default
+    var deadline: Date? = nil
+
+    for line in lines {
+        if line.hasPrefix("Current: ") {
+            let valueStr = line.replacingOccurrences(of: "Current: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
+            currentValue = Double(valueStr) ?? 0
+        }
+        if line.hasPrefix("Target: ") {
+            let valueStr = line.replacingOccurrences(of: "Target: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
+            targetValue = Double(valueStr) ?? 0
+        }
+        if line.hasPrefix("Deadline: ") {
+            let dateString = line.replacingOccurrences(of: "Deadline: ", with: "")
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            deadline = formatter.date(from: dateString)
+        }
+        if line.contains("#BankrollGoal") {
+            challengeType = .bankroll
+        } else if line.contains("#HandsGoal") {
+            challengeType = .hands
+        } else if line.contains("#SessionGoal") {
+            challengeType = .session
+        }
+    }
+    // For "started" posts, if current value is 0 and target is also 0 (error in parsing or bad data), it's not valid.
+    // A valid started challenge should have a target.
+    if targetValue == 0 { return nil }
+
+    return (title: title, type: challengeType, currentValue: currentValue, targetValue: targetValue, deadline: deadline)
+}
+
+private func extractAdditionalTextFromChallengePost(_ content: String) -> String? {
+    let lines = content.components(separatedBy: "\n")
+    var additionalLines: [String] = []
+    var inMetadata = false
+    
+    for line in lines {
+        let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Skip the title line and metadata lines
+        if trimmedLine.hasPrefix("🎯 Challenge Update:") ||
+           trimmedLine.hasPrefix("Progress:") ||
+           trimmedLine.hasPrefix("Target:") ||
+           trimmedLine.hasPrefix("#") ||
+           trimmedLine.isEmpty {
+            continue
+        }
+        
+        additionalLines.append(line)
+    }
+    
+    let result = additionalLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    return result.isEmpty ? nil : result
 }
 

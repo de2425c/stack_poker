@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // EXTREMELY PERMISSIVE RULES FOR DEBUGGING
+    // Allow authenticated users to do anything
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Challenges collection
+    match /challenges/{challengeId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Challenge Progress tracking
+    match /challengeProgress/{progressId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // User's active challenges subcollection (add to your existing users rules)
+    match /users/{userId}/activeChallenges/{challengeId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // User's challenge history subcollection (add to your existing users rules)
+    match /users/{userId}/challengeHistory/{challengeId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+} 

@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseAuth
 import Kingfisher // For displaying avatar image
+import FirebaseFirestore
 
 struct UserProfileView: View {
     let userId: String // The ID of the profile being viewed
@@ -10,6 +11,13 @@ struct UserProfileView: View {
     // State for the follow button
     @State private var isFollowing: Bool = false // Placeholder: actual value needs to be fetched
     @State private var isProcessingFollow: Bool = false
+
+    // Local follower/following counts so we don't need to mutate `userService.loadedUsers` each time
+    @State private var localFollowersCount: Int = 0
+    @State private var localFollowingCount: Int = 0
+    
+    // Active challenges for the user
+    @State private var activeChallenges: [Challenge] = []
 
     private var loggedInUserId: String? {
         Auth.auth().currentUser?.uid
@@ -53,8 +61,8 @@ struct UserProfileView: View {
 
                     // Follow/Edit Profile Button & Stats
                     HStack(spacing: 20) {
-                        StatView(count: user.followersCount, label: "Followers")
-                        StatView(count: user.followingCount, label: "Following")
+                        StatView(count: localFollowersCount, label: "Followers")
+                        StatView(count: localFollowingCount, label: "Following")
                         Spacer()
                         if !isCurrentUserProfile {
                             Button(action: toggleFollow) {
@@ -109,6 +117,28 @@ struct UserProfileView: View {
                             .lineLimit(nil) // Allow multi-line bio
                     }
                     
+                    // Active Challenges Section
+                    if !activeChallenges.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Active Challenges")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal)
+                            
+                            ForEach(activeChallenges) { challenge in
+                                ChallengeProgressComponent(
+                                    challengeTitle: challenge.title,
+                                    challengeType: challenge.type,
+                                    currentValue: challenge.currentValue,
+                                    targetValue: challenge.targetValue,
+                                    isCompact: true
+                                )
+                                .padding(.horizontal)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    
                     Divider().padding(.horizontal)
                     
                     // Changed from "User's Posts"
@@ -160,13 +190,23 @@ struct UserProfileView: View {
                 if userService.loadedUsers[userId] == nil {
                     await userService.fetchUser(id: userId) // Fetch user details if not already loaded
                 }
+
+                // Initialize local counts from fetched user profile if available
+                if let profile = userService.loadedUsers[userId] {
+                    self.localFollowersCount = profile.followersCount
+                    self.localFollowingCount = profile.followingCount
+                }
+
                 // Fetch initial follow state
                 if let currentLoggedInUserId = loggedInUserId {
                     self.isFollowing = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
                 }
+
                 // Fetch user's posts
                 try? await profilePostService.fetchPosts(forUserId: userId)
-
+                
+                // Fetch user's active challenges
+                await fetchActiveChallenges()
             }
         }
     }
@@ -175,33 +215,56 @@ struct UserProfileView: View {
         guard let currentLoggedInUserId = loggedInUserId, userId != currentLoggedInUserId else { return }
         
         isProcessingFollow = true
-        let actionIsFollow = !isFollowing // The action we are about to perform
 
         Task {
             do {
-                if actionIsFollow {
-                    try await userService.followUser(userIdToFollow: userId)
-                } else {
+                if isFollowing {
+                    // Currently following –> unfollow
                     try await userService.unfollowUser(userIdToUnfollow: userId)
+                    await MainActor.run {
+                        self.localFollowersCount = max(0, self.localFollowersCount - 1)
+                    }
+                } else {
+                    // Not following –> follow
+                    try await userService.followUser(userIdToFollow: userId)
+                    await MainActor.run {
+                        self.localFollowersCount += 1
+                    }
                 }
 
-                
-                // Refresh both user profiles to get updated counts
-                await userService.fetchUser(id: userId) 
-                await userService.fetchUser(id: currentLoggedInUserId) 
-                if userService.currentUserProfile?.id == currentLoggedInUserId {
-                     try? await userService.fetchUserProfile() 
+                // Optimistically flip local UI state on the main actor
+                await MainActor.run {
+                    self.isFollowing.toggle()
+                    self.isProcessingFollow = false
                 }
-
-                // Re-fetch the follow status from the source of truth
-                self.isFollowing = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
-
             } catch {
-
-                // Optionally, revert optimistic UI update if server operation failed
-                // self.isFollowing = !actionIsFollow 
+                // On error just clear processing flag; state stays unchanged
+                await MainActor.run {
+                    self.isProcessingFollow = false
+                }
             }
-            isProcessingFollow = false
+        }
+    }
+    
+    private func fetchActiveChallenges() async {
+        do {
+            let challengeService = ChallengeService(userId: userId)
+            // Create a simple query to get public challenges for this user
+            let db = Firestore.firestore()
+            let snapshot = try await db.collection("challenges")
+                .whereField("userId", isEqualTo: userId)
+                .whereField("isPublic", isEqualTo: true)
+                .whereField("status", isEqualTo: "active")
+                .limit(to: 3) // Show max 3 challenges
+                .getDocuments()
+            
+            let challenges = snapshot.documents.compactMap { Challenge(document: $0) }
+            
+            await MainActor.run {
+                self.activeChallenges = challenges
+            }
+        } catch {
+            print("❌ Error fetching challenges: \(error)")
         }
     }
 }
@@ -219,6 +282,71 @@ struct StatView: View {
             Text(label)
                 .font(.caption)
                 .foregroundColor(.gray)
+        }
+    }
+}
+
+// Challenge Progress View for user profiles
+struct ChallengeProgressView: View {
+    let challenge: Challenge
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: challenge.type.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(colorForType(challenge.type))
+                
+                Text(challenge.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                
+                Spacer()
+                
+                Text("\(Int(challenge.progressPercentage))%")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(colorForType(challenge.type))
+            }
+            
+            // Progress Bar
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(height: 4)
+                    
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(colorForType(challenge.type))
+                        .frame(width: geometry.size.width * CGFloat(challenge.progressPercentage / 100), height: 4)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: challenge.progressPercentage)
+                }
+            }
+            .frame(height: 4)
+            
+            Text("\(formattedValue(challenge.currentValue, type: challenge.type)) / \(formattedValue(challenge.targetValue, type: challenge.type))")
+                .font(.system(size: 12))
+                .foregroundColor(.gray)
+        }
+        .padding(.vertical, 8)
+    }
+    
+    private func colorForType(_ type: ChallengeType) -> Color {
+        switch type {
+        case .bankroll: return .green
+        case .hands: return .purple
+        case .session: return .orange
+        }
+    }
+    
+    private func formattedValue(_ value: Double, type: ChallengeType) -> String {
+        switch type {
+        case .bankroll:
+            return "$\(Int(value).formattedWithCommas)"
+        case .hands:
+            return "\(Int(value))"
+        case .session:
+            return "\(Int(value))"
         }
     }
 }

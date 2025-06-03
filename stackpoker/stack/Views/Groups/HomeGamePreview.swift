@@ -25,6 +25,7 @@ struct HomeGamePreview: View {
     @State private var isProcessingAction = false
     
     @StateObject private var homeGameService = HomeGameService()
+    @EnvironmentObject var sessionStore: SessionStore
     
     // Helper to determine if current user is the game creator
     private var isGameCreator: Bool {
@@ -247,6 +248,7 @@ struct HomeGamePreview: View {
                             setupLiveUpdates()  // Refresh the current preview when returning
                         })
                         .navigationBarBackButtonHidden(true)  // Hide default back button
+                        .environmentObject(sessionStore)
                     }
                 },
                 isActive: $showingGameDetail
@@ -2884,7 +2886,8 @@ struct SaveHomeGameSessionView: View {
     var body: some View {
         ZStack {
             // Background
-            Color.black.edgesIgnoringSafeArea(.all)
+            AppBackgroundView()
+                .ignoresSafeArea()
             
             // Main content
             VStack(spacing: 0) {
@@ -2995,70 +2998,34 @@ struct SaveHomeGameSessionView: View {
                             }
                             .padding(.bottom, 4)
                             
-                            // Name input
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("SESSION NAME")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.gray)
-                                
+                            // Name input using GlassyInputField
+                            GlassyInputField(
+                                icon: "gamecontroller.fill",
+                                title: "SESSION NAME",
+                                labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
+                            ) {
                                 TextField("", text: $sessionName)
                                     .placeholder(when: sessionName.isEmpty) {
                                         Text("e.g., Friday Night Game").foregroundColor(.gray.opacity(0.7))
                                     }
+                                    .font(.system(size: 17))
+                                    .padding(.vertical, 10)
                                     .foregroundColor(.white)
-                                    .padding(16)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(
-                                                LinearGradient(
-                                                    gradient: Gradient(colors: [
-                                                        Color.white.opacity(0.1),
-                                                        Color.clear,
-                                                        Color.clear
-                                                    ]),
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                ),
-                                                lineWidth: 1
-                                            )
-                                    )
                             }
                             
-                            // Stakes input
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("STAKES")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.gray)
-                                
+                            // Stakes input using GlassyInputField
+                            GlassyInputField(
+                                icon: "dollarsign.circle.fill",
+                                title: "STAKES",
+                                labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
+                            ) {
                                 TextField("", text: $sessionStakes)
                                     .placeholder(when: sessionStakes.isEmpty) {
                                         Text("e.g., 1/2 NLH").foregroundColor(.gray.opacity(0.7))
                                     }
+                                    .font(.system(size: 17))
+                                    .padding(.vertical, 10)
                                     .foregroundColor(.white)
-                                    .padding(16)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(
-                                                LinearGradient(
-                                                    gradient: Gradient(colors: [
-                                                        Color.white.opacity(0.1),
-                                                        Color.clear,
-                                                        Color.clear
-                                                    ]),
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                ),
-                                                lineWidth: 1
-                                            )
-                                    )
                             }
                         }
                         .padding(20)
@@ -3086,11 +3053,18 @@ struct SaveHomeGameSessionView: View {
                         // Save button for larger screens
                         Button(action: saveSession) {
                             HStack {
-                                Text("Save Session")
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundColor(.black)
-                                    .padding(.horizontal, 20)
-                                    .frame(maxWidth: .infinity)
+                                if isSaving {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                        .frame(width: 20, height: 20)
+                                        .padding(.horizontal, 10)
+                                } else {
+                                    Text("Save Session")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundColor(.black)
+                                        .padding(.horizontal, 20)
+                                        .frame(maxWidth: .infinity)
+                                }
                             }
                             .frame(height: 54)
                             .background(

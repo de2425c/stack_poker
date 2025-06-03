@@ -47,7 +47,7 @@ extension Color {
     static let cardBackground = Color(white: 0.18)
     static let cardHighlight = Color.accentBlue.opacity(0.7)
     static let inputBackground = Color(white: 0.13)
-    static let sectionHeader = Color.accentGreen.opacity(0.9) // Changed to green
+    static let sectionHeader = Color(red: 0.4, green: 0.7, blue: 1.0) // Changed to a nice blue
     static let dividerColor = Color(white: 0.2)
     // Suit colors
     static let spadeColor = Color.white
@@ -86,23 +86,32 @@ extension View {
     }
 }
 
+// New Enum for multi-step entry process
+enum HandEntryStep: Identifiable {
+    case gameSetup
+    case llmInput
+    case summary
+
+    var id: Int { hashValue }
+}
+
 struct NewHandEntryView: View {
     @StateObject var viewModel: NewHandEntryViewModel
     @StateObject private var handStore = HandStore(userId: Auth.auth().currentUser?.uid ?? "")
     @Environment(\.presentationMode) var presentationMode
     @State private var isSaving = false
     @State private var cardSelectionTarget: CardSelectionTarget? = nil
-    @State private var showingCardSelectorSheet = false
     @State private var showingTableSetup = false
     @FocusState private var isBetAmountFieldFocused: Bool
+    @State private var playLottieAnimation = false
     
-    // Add sessionId property
+    // State for managing the current step in the hand entry process
+    @State private var currentStep: HandEntryStep = .gameSetup
+    
     private let sessionId: String?
 
-    // Initializer to accept sessionId
     init(sessionId: String? = nil) {
         self.sessionId = sessionId
-        // Initialize viewModel with the sessionId
         _viewModel = StateObject(wrappedValue: NewHandEntryViewModel(sessionId: sessionId))
     }
     
@@ -111,10 +120,41 @@ struct NewHandEntryView: View {
         formatter.numberStyle = .decimal
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 2
+        formatter.minimum = nil  // Remove minimum constraint to allow deletion
+        formatter.maximum = 999999  // Allow large stack sizes
+        formatter.usesGroupingSeparator = false  // Prevent comma separators that might cause issues
+        formatter.allowsFloats = true
+        formatter.generatesDecimalNumbers = false
         return formatter
     }
     
-    // Card design helper functions
+    private var optionalDoubleFormatter: NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        formatter.usesGroupingSeparator = false
+        formatter.allowsFloats = true
+        formatter.generatesDecimalNumbers = false
+        // No minimum or maximum - allows completely empty values
+        return formatter
+    }
+    
+    // Helper to create optional bindings for the blind inputs
+    private var smallBlindBinding: Binding<Double?> {
+        Binding<Double?>(
+            get: { viewModel.smallBlind == 0 ? nil : viewModel.smallBlind },
+            set: { viewModel.smallBlind = $0 ?? 0 }
+        )
+    }
+    
+    private var bigBlindBinding: Binding<Double?> {
+        Binding<Double?>(
+            get: { viewModel.bigBlind == 0 ? nil : viewModel.bigBlind },
+            set: { viewModel.bigBlind = $0 ?? 0 }
+        )
+    }
+    
     private func cardSymbol(for card: String?) -> (String, Color) {
         guard let card = card, card.count == 2 else {
             return ("?", Color.textSecondary)
@@ -139,67 +179,380 @@ struct NewHandEntryView: View {
 
     var body: some View {
         ZStack {
-            // Color.primaryBackground.edgesIgnoringSafeArea(.all) // Replaced
-            AppBackgroundView().edgesIgnoringSafeArea(.all) // Use AppBackgroundView
+            AppBackgroundView().edgesIgnoringSafeArea(.all)
 
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) { // Main content VStack
-                    // Add title at the top
-                    Text("Save Hand")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.accentGreen)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 8)
-                    
-                    // Game setup info
-                    gameInfoPanel
-                        .padding(.horizontal, 16)
-                    
-                    // Players section with more space
-                    playersSectionView
-                        .padding(.horizontal, 16)
-                    
-                    // Board and actions with more space
-                    boardAndActionSection
-                        .padding(.horizontal, 16)
-                    
-                    // Error message if any
-                    if let errorMessage = viewModel.errorMessage {
-                        Text(errorMessage)
-                            .font(.system(size: 14, weight: .medium))
+            VStack(spacing: 0) {
+                // Custom Navigation / Title Bar
+                HStack {
+                    if currentStep != .gameSetup { // Show back button for steps after game setup
+                        Button(action: { navigateBack() }) {
+                            Image(systemName: "chevron.left")
+                                .foregroundColor(Color.textSecondary)
+                                .font(.system(size: 18, weight: .semibold))
+                        }
+                        .padding(.leading)
+                    }
+                    Spacer()
+                    Text(titleForStep(currentStep))
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                    Spacer()
+                    // Close button always visible
+                    Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                        Image(systemName: "xmark")
+                            .foregroundColor(Color.textSecondary)
+                            .font(.system(size: 16))
+                    }
+                    .padding(.trailing)
+                }
+                .padding(.vertical, 10)
+                .frame(height: 50)
+                .background(Color.secondaryBackground.opacity(0.5))
+                // .overlay(Divider(), alignment: .bottom) // Optional divider
+
+                // Main content based on current step
+                switch currentStep {
+                case .gameSetup:
+                    gameSetupScreenView
+                case .llmInput:
+                    llmInputScreenView
+                case .summary:
+                    summaryScreenView
+                }
+            }
+            
+            // NEW: Full-screen Lottie loading view
+            if viewModel.isParsingLLM {
+                ZStack {
+                    // Color.black.edgesIgnoringSafeArea(.all) // Full screen black background
+                    AppBackgroundView().edgesIgnoringSafeArea(.all) // USE AppBackgroundView
+                    VStack {
+                        LottieView(name: "lottie_white", loopMode: .loop, play: $playLottieAnimation)
+                            // .frame(width: 250, height: 250) // REMOVED to allow full screen
+                        Text("Parsing hand...")
+                            .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(.white)
-                            .padding(10)
-                            .background(
+                            .padding(.top, 20)
+                    }
+                }
+                .zIndex(1) // Ensure it's on top
+                .onAppear {
+                    self.playLottieAnimation = true
+                }
+                .onDisappear {
+                    self.playLottieAnimation = false
+                }
+            }
+        }
+        .onTapGesture {
+            // Dismiss keyboard when tapping outside of input fields
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        .sheet(item: $cardSelectionTarget) { target in // Still needed if summary allows card edits
+            cardSelectorSheet(for: target)
+                .preferredColorScheme(.dark)
+        }
+        // Removed .toolbar for custom navigation handling
+    }
+
+    // MARK: - Step Navigation and Titles
+    private func titleForStep(_ step: HandEntryStep) -> String {
+        switch step {
+        case .gameSetup: return "Game Setup"
+        case .llmInput: return "Parse Hand (AI)"
+        case .summary: return "Summary & Save"
+        }
+    }
+
+    private func navigateBack() {
+        withAnimation {
+            switch currentStep {
+            case .llmInput:
+                currentStep = .gameSetup
+            case .summary:
+                currentStep = .llmInput
+            default:
+                break // Should not happen from a back button
+            }
+        }
+    }
+
+    // MARK: - Screen Views (Stubs for now, will populate)
+    @ViewBuilder
+    private var gameSetupScreenView: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                // Blinds Section
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Blinds")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.sectionHeader)
+                    
+                    HStack(spacing: 12) {
+                        // Small Blind
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Small Blind")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.textSecondary)
+                            
+                            HStack(spacing: 6) {
+                                Text("$")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                                
+                                TextField("", value: smallBlindBinding, formatter: doubleFormatter)
+                                    .keyboardType(.decimalPad)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textPrimary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(Color.white.opacity(0.1))
+                                    .cornerRadius(8)
+                                    .overlay(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.accentRed.opacity(0.2))
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
+                        }
+                        
+                        // Big Blind
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Big Blind")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.textSecondary)
+                            
+                            HStack(spacing: 6) {
+                                Text("$")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                                
+                                TextField("", value: bigBlindBinding, formatter: doubleFormatter)
+                                    .keyboardType(.decimalPad)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textPrimary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(Color.white.opacity(0.1))
+                                    .cornerRadius(8)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.accentRed.opacity(0.5), lineWidth: 1)
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
                                     )
-                            )
-                            .padding(.horizontal, 16)
-                    }
-                    
-                    Spacer(minLength: 30)
-                    
-                    // Save Button - floating style
-                    Button(action: saveHand) {
-                        HStack {
-                            Spacer()
-                            if isSaving {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: Color.white))
-                            } else {
-                                Image(systemName: "square.and.arrow.down.fill")
-                                    .font(.system(size: 16, weight: .bold))
-                                Text("SAVE")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .tracking(0.5)
                             }
-                            Spacer()
                         }
+                    }
+                }
+                .glassySectionStyle()
+                
+                // Position and Table Size Section (Side by Side)
+                HStack(spacing: 16) {
+                    // Hero Position
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Hero Position")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.sectionHeader)
+                        
+                        Menu {
+                            ForEach(viewModel.availablePositions, id: \.self) { position in
+                                Button(position) {
+                                    viewModel.heroPosition = position
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Image(systemName: "location")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                                
+                                Text(viewModel.heroPosition)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textPrimary)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    // Table Size
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Table Size")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.sectionHeader)
+                        
+                        Menu {
+                            Button("2 players") { viewModel.tableSize = 2 }
+                            Button("6 players") { viewModel.tableSize = 6 }
+                            Button("9 players") { viewModel.tableSize = 9 }
+                        } label: {
+                        HStack {
+                                Image(systemName: "person.2")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                                
+                                Text("\(viewModel.tableSize) players")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textPrimary)
+                                
+                            Spacer()
+                                
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .glassySectionStyle()
+                
+                // Effective Stack Section
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Effective Stack")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.sectionHeader)
+                    
+                    HStack(spacing: 8) {
+                        Image(systemName: "banknote")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.textSecondary)
+                        
+                        TextField("200", value: $viewModel.effectiveStackAmount, formatter: doubleFormatter)
+                            .keyboardType(.decimalPad)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.textPrimary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                            .onChange(of: viewModel.effectiveStackAmount) { newValue in
+                                viewModel.updatePlayerStacksBasedOnEffectiveStack()
+                            }
+                    }
+                }
+                .glassySectionStyle()
+                
+                // Ante and Straddle Section (Side by Side when enabled)
+                HStack(spacing: 16) {
+                    // Ante Section
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Ante")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.sectionHeader)
+                            
+                            Spacer()
+                            
+                            Toggle("", isOn: $viewModel.hasAnte.animation())
+                                .labelsHidden()
+                                .toggleStyle(SwitchToggleStyle(tint: .accentGreen))
+                        }
+                        
+                        if viewModel.hasAnte {
+                            HStack(spacing: 6) {
+                                Text("$")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                                
+                                TextField("", value: $viewModel.ante, formatter: doubleFormatter)
+                                    .keyboardType(.decimalPad)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textPrimary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(Color.white.opacity(0.1))
+                                    .cornerRadius(8)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
+                            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    // Straddle Section
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Straddle")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.sectionHeader)
+                            
+                            Spacer()
+                            
+                            Toggle("", isOn: $viewModel.hasStraddle.animation())
+                                .labelsHidden()
+                                .toggleStyle(SwitchToggleStyle(tint: .accentGreen))
+                        }
+                        
+                        if viewModel.hasStraddle {
+                            HStack(spacing: 6) {
+                                Text("$")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                                
+                                TextField("", value: $viewModel.straddle, formatter: doubleFormatter)
+                                    .keyboardType(.decimalPad)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textPrimary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(Color.white.opacity(0.1))
+                                    .cornerRadius(8)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
+                            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .glassySectionStyle()
+                
+                Spacer(minLength: 20)
+                
+                // Next Button
+                Button(action: {
+                    withAnimation { currentStep = .llmInput }
+                }) {
+                    HStack(spacing: 10) {
+                        Text("Next")
+                            .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(.white)
-                        .frame(height: 50)
+                        
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity)
                         .background(
                             LinearGradient(
                                 gradient: Gradient(colors: [Color.accentBlue, Color.accentPurple]),
@@ -207,48 +560,279 @@ struct NewHandEntryView: View {
                                 endPoint: .trailing
                             )
                         )
-                        .cornerRadius(25)
-                        .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
-                    }
-                    .disabled(isSaving)
-                    .padding(.horizontal, 25)
-                    .padding(.bottom, 25)
-                }
-                .padding(.top, 16)
-            }
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {
-                        presentationMode.wrappedValue.dismiss()
-                    }) {
-                        Image(systemName: "xmark")
-                            .foregroundColor(Color.textSecondary)
-                            .font(.system(size: 16))
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        showingTableSetup.toggle()
-                    }) {
-                        Image(systemName: "gearshape.fill")
-                            .foregroundColor(Color.accentGreen)
-                            .font(.system(size: 16))
-                    }
+                    .cornerRadius(10)
+                    .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
                 }
             }
-            .sheet(isPresented: $showingTableSetup) {
-                tableSetupSheet
-            }
-            .sheet(item: $cardSelectionTarget) { target in
-                cardSelectorSheet(for: target)
-                    .preferredColorScheme(.dark)
-            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 20)
         }
     }
-    
-    // Reorganized game info panel with ante/straddle below
+
+    @ViewBuilder
+    private var llmInputScreenView: some View {
+        ScrollView {
+            VStack(spacing: 28) {
+                // Hero instruction section with improved design
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("AI Hand Parser")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text("Describe your hand in natural language and let AI parse the actions, positions, and cards automatically.")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.textSecondary)
+                            .lineSpacing(1)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.04))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                )
+                
+                // Input section with enhanced design
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        Text("Hand History")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        if !viewModel.llmInputText.isEmpty {
+                            Text("\(viewModel.llmInputText.count) characters")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.textSecondary)
+                        }
+                    }
+                    
+                    ZStack(alignment: .topLeading) {
+                        // Background with subtle gradient
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.white.opacity(0.06))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                            )
+                            .frame(minHeight: 140)
+                        
+                        TextEditor(text: $viewModel.llmInputText)
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundColor(.textPrimary)
+                            .background(Color.clear)
+                            .scrollContentBackground(.hidden)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 18)
+                        
+                        if viewModel.llmInputText.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Describe your hand here...")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.textSecondary.opacity(0.7))
+                                
+                                Text("e.g., \"Hero raises to 6bb from CO with AKo, BB calls...\"")
+                                    .font(.system(size: 14, weight: .regular))
+                                    .foregroundColor(.textSecondary.opacity(0.5))
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 22)
+                            .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(minHeight: 140)
+                    
+                    // Enhanced example section
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Image(systemName: "lightbulb")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.yellow.opacity(0.8))
+                            
+                            Text("Example Format")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            ExampleTextRow(text: "Utg raises 20 w AsKd, btn calls, bb calls w 44.")
+                            ExampleTextRow(text: "Flop is A26, bb checks, utg checks, bb checks")
+                            ExampleTextRow(text: "Turn is a 3, bb checks, utg bets 30, btn folds, bb calls.")
+                            ExampleTextRow(text: "River is a 4, bb checks, utg checks.")
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.white.opacity(0.03))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                )
+                        )
+                    }
+                    
+                    // Status messages
+                    if let llmError = viewModel.llmError {
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.red)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Parsing Error")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                                
+                                Text(llmError)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.red.opacity(0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                    }
+                    
+                    // Enhanced parse button
+                    Button(action: {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        Task {
+                            await viewModel.parseHandWithLLM()
+                            if viewModel.llmError == nil {
+                                withAnimation {
+                                    currentStep = .summary
+                                }
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 12) {
+                            if viewModel.isParsingLLM {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.9)
+                            } else {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.system(size: 18, weight: .semibold))
+                            }
+                            
+                            Text(viewModel.isParsingLLM ? "Parsing..." : "Parse Hand & Continue")
+                                .font(.system(size: 17, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.vertical, 18)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.blue.opacity(0.8),
+                                    Color.purple.opacity(0.6)
+                                ]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(16)
+                        .shadow(color: Color.blue.opacity(0.3), radius: 10, x: 0, y: 5)
+                    }
+                    .disabled(viewModel.isParsingLLM || viewModel.llmInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .opacity((viewModel.isParsingLLM || viewModel.llmInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? 0.6 : 1.0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color.white.opacity(0.03))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        )
+                )
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 24)
+        }
+    }
+
+    // Helper view for example text rows
+    @ViewBuilder
+    private func ExampleTextRow(text: String) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color.white.opacity(0.3))
+                .frame(width: 4, height: 4)
+            
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.textSecondary.opacity(0.9))
+        }
+    }
+
+    @ViewBuilder
+    private var summaryScreenView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Review Parsed Hand")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.sectionHeader)
+                    .padding(.bottom, 5)
+
+                // Display summarized game info (from viewModel)
+                summaryGameInfoView
+                
+                // Display players involved (from viewModel)
+                summaryPlayersView
+
+                // Display board cards (from viewModel)
+                summaryBoardView
+                
+                // Display actions (from viewModel)
+                summaryActionsView
+                    
+                Spacer(minLength: 30)
+                    
+                Button(action: saveHand) { // Existing saveHand action
+                    HStack {
+                        Spacer()
+                        if isSaving {
+                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: Color.white))
+                        } else {
+                            Image(systemName: "square.and.arrow.down.fill")
+                            Text("SAVE HAND")
+                        }
+                        Spacer()
+                    }
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(LinearGradient(gradient: Gradient(colors: [Color.accentGreen, Color.accentGreen.opacity(0.7)]), startPoint: .leading, endPoint: .trailing))
+                    .cornerRadius(10)
+                    .shadow(color: Color.black.opacity(0.2), radius: 3, x: 0, y: 2)
+                }
+                .disabled(isSaving)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+        }
+    }
+
+    // MARK: - Reused UI Components (from existing view)
+    // These will be used by the new screen views
     private var gameInfoPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             // Top row: Blinds and Table Size
@@ -271,7 +855,7 @@ struct NewHandEntryView: View {
                             
                             Spacer(minLength: 5)
                             
-                            TextField("", value: $viewModel.smallBlind, formatter: doubleFormatter)
+                            TextField("", value: smallBlindBinding, formatter: doubleFormatter)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .font(.system(size: 14, weight: .semibold))
@@ -297,7 +881,7 @@ struct NewHandEntryView: View {
                             
                             Spacer(minLength: 5)
                             
-                            TextField("", value: $viewModel.bigBlind, formatter: doubleFormatter)
+                            TextField("", value: bigBlindBinding, formatter: doubleFormatter)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .font(.system(size: 14, weight: .semibold))
@@ -323,21 +907,18 @@ struct NewHandEntryView: View {
                         .foregroundColor(.accentGreen)
                     
                     Picker("", selection: $viewModel.tableSize) {
-                        Text("2-max").tag(2)
-                        Text("6-max").tag(6)
-                        Text("9-max").tag(9)
+                        Text("2 players").tag(2)
+                        Text("6 players").tag(6)
+                        Text("9 players").tag(9)
                     }
                     .pickerStyle(SegmentedPickerStyle())
                     .frame(minWidth: 150, idealWidth: 180)
                 }
             }
 
-            // Divider for visual separation
             Divider().background(Color.dividerColor.opacity(0.5)).padding(.vertical, 4)
 
-            // Ante and Straddle Section - Side by Side for a cleaner look
             HStack(alignment: .top, spacing: 20) {
-                // Ante Section
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text("Ante")
@@ -348,24 +929,22 @@ struct NewHandEntryView: View {
                             .labelsHidden()
                             .toggleStyle(SwitchToggleStyle(tint: .accentGreen))
                     }
-                    .frame(width: 130) // Constrain width for better alignment with potential slider
-
+                    .frame(width: 130)
                     if viewModel.hasAnte {
                         HStack(spacing: 8) {
                             Slider(value: Binding(
                                 get: { viewModel.ante ?? 0 },
                                 set: { viewModel.ante = $0 }
-                            ), in: 0...(viewModel.bigBlind * 0.5), step: 0.1) // Max ante typically related to BB
+                            ), in: 0...(viewModel.bigBlind * 0.5), step: 0.1)
                                 .accentColor(Color.accentGreen)
                             inputField(label: "", value: $viewModel.ante, width: 50, showLabel: false)
                         }
                         .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
-                        .padding(.top, -4) // Reduce space slightly after toggle
+                        .padding(.top, -4)
                     }
                 }
-                .frame(minWidth: 0, maxWidth: .infinity) // Allow this VStack to expand
+                .frame(minWidth: 0, maxWidth: .infinity)
 
-                // Straddle Section
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text("Straddle")
@@ -377,13 +956,12 @@ struct NewHandEntryView: View {
                             .toggleStyle(SwitchToggleStyle(tint: .accentGreen))
                     }
                     .frame(width: 130)
-
                     if viewModel.hasStraddle {
                         HStack(spacing: 8) {
                             Slider(value: Binding(
                                 get: { viewModel.straddle ?? viewModel.bigBlind * 2 },
                                 set: { viewModel.straddle = $0 }
-                            ), in: viewModel.bigBlind...(viewModel.bigBlind * 3), step: viewModel.bigBlind) // Straddle related to BB
+                            ), in: viewModel.bigBlind...(viewModel.bigBlind * 3), step: viewModel.bigBlind)
                                 .accentColor(Color.accentGreen)
                             inputField(label: "", value: $viewModel.straddle, width: 50, showLabel: false)
                         }
@@ -391,38 +969,495 @@ struct NewHandEntryView: View {
                         .padding(.top, -4)
                     }
                 }
-                .frame(minWidth: 0, maxWidth: .infinity) // Allow this VStack to expand
+                .frame(minWidth: 0, maxWidth: .infinity)
+            }
+
+            // Hero Position (part of game setup)
+                HStack(alignment: .center, spacing: 10) {
+                Text("HERO IS AT:")
+                    .font(.system(size: 13, weight: .semibold)) // Consistent with other labels
+                            .foregroundColor(.accentGreen)
+                            .lineLimit(1)
+                    .frame(width: 100, alignment: .leading) // Increased width for label
+                        
+                Picker("Hero Position", selection: $viewModel.heroPosition) {
+                            ForEach(viewModel.availablePositions, id: \.self) { position in
+                                Text(position).tag(position)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                .frame(minWidth: 80, maxWidth: .infinity) // Allow picker to take available space
+            }.padding(.top, 8) // Increased top padding
+
+            // Effective Stack (part of game setup)
+            HStack(spacing: 10) { // Added spacing for better visual separation
+                Text("EFFECTIVE STACK:")
+                    .font(.system(size: 13, weight: .semibold)) // Consistent styling
+                    .foregroundColor(.accentGreen) // Use accent color for headers
+                            .lineLimit(1)
+                    .frame(width: 140, alignment: .leading) // Adjusted width
+                        
+                TextField("Amount", value: $viewModel.effectiveStackAmount, formatter: doubleFormatter)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.textPrimary)
+                    .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)) // Increased padding
+                    .frame(minWidth: 60, maxWidth: 80) // Adjusted frame for text field
+                            .background(Color.inputBackground)
+                    .cornerRadius(6)
+                    .onChange(of: viewModel.effectiveStackAmount) { newValue in // Use newValue
+                                viewModel.updatePlayerStacksBasedOnEffectiveStack()
+                        // viewModel.effectiveStackType = .dollars // Consider if this should always reset
+                    }
+                Text("$") // Indicate currency unit more clearly
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.textSecondary)
+                            
+                Spacer() // Push to left
+            }.padding(.top, 8) // Increased top padding
+            }
+            .glassySectionStyle()
+    }
+
+    // MARK: - Summary Screen Components (New)
+    @ViewBuilder
+    private var summaryGameInfoView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Game Details")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.sectionHeader)
+            
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Table:")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.textPrimary)
+                    Spacer()
+                    Text("\(viewModel.tableSize)-max")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.textSecondary) 
+                }
+                
+                HStack { 
+                    Text("Blinds:")
+                        .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.textPrimary)
+                    Spacer() 
+                    Text(String(format: "$%.2f / $%.2f", viewModel.smallBlind, viewModel.bigBlind))
+                        .font(.system(size: 14, weight: .regular))
+                                .foregroundColor(.textSecondary)
+                }
+                            
+                if viewModel.hasAnte, let ante = viewModel.ante { 
+                    HStack { 
+                        Text("Ante:")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.textPrimary)
+                            Spacer()
+                        Text(String(format: "$%.2f", ante))
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundColor(.textSecondary) 
+                    } 
+                }
+                
+                if viewModel.hasStraddle, let straddle = viewModel.straddle { 
+                    HStack { 
+                        Text("Straddle:")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.textPrimary)
+                        Spacer() 
+                        Text(String(format: "$%.2f", straddle))
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundColor(.textSecondary) 
+                    } 
+                }
+                
+                HStack { 
+                    Text("Hero Position:")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.textPrimary)
+                    Spacer() 
+                    Text(viewModel.heroPosition)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.sectionHeader) 
+                }
+                
+                HStack { 
+                    Text("Effective Stack:")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.textPrimary)
+                    Spacer() 
+                    Text(String(format: "$%.0f", viewModel.effectiveStackAmount))
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.textSecondary) 
+                }
             }
         }
-        .glassySectionStyle()
+        .padding(16)
+                        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
+    @ViewBuilder
+    private var summaryPlayersView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Players & Cards")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.sectionHeader)
+            
+            VStack(spacing: 10) {
+                ForEach(viewModel.players.filter { $0.isActive }) { player in
+                    HStack(spacing: 12) {
+                        // Position and Hero indicator
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(player.position)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(player.isHero ? .sectionHeader : .textPrimary)
+                            
+                            if player.isHero {
+                                Text("(Hero)")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.sectionHeader.opacity(0.8))
+                            }
+                        }
+                        .frame(width: 60, alignment: .leading)
+                        
+                        // Cards - make them editable
+                        HStack(spacing: 8) {
+                            let card1 = player.isHero ? viewModel.heroCard1 : player.card1
+                            let card2 = player.isHero ? viewModel.heroCard2 : player.card2
+                            
+                        Button(action: {
+                                if player.isHero {
+                                    cardSelectionTarget = .heroHand
+                                } else {
+                                    cardSelectionTarget = .villainHand(playerId: player.id)
+                                }
+                            }) {
+                                HStack(spacing: 4) {
+                                    cardDisplayView(card: card1)
+                                    cardDisplayView(card: card2)
+                                    
+                                    Image(systemName: "pencil.circle")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.sectionHeader.opacity(0.7))
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.white.opacity(0.05))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                        )
+                                )
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        // Stack size
+                        Text(String(format: "($%.0f)", player.stack))
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.textSecondary.opacity(0.8))
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+        .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
+    @ViewBuilder
+    private var summaryBoardView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Board Cards")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.sectionHeader)
+            
+            VStack(spacing: 10) {
+                // Flop
+                HStack(spacing: 12) {
+                    Text("Flop:")
+                        .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.textPrimary)
+                        .frame(width: 50, alignment: .leading)
+                    
+                    Button(action: {
+                        cardSelectionTarget = .flopTriplet
+                    }) {
+                    HStack(spacing: 4) {
+                            cardDisplayView(card: viewModel.flopCard1)
+                            cardDisplayView(card: viewModel.flopCard2)
+                            cardDisplayView(card: viewModel.flopCard3)
+                            
+                            Image(systemName: "pencil.circle")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.sectionHeader.opacity(0.7))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                    .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.05))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                )
+                        )
+                    }
+                    
+                    Spacer()
+                }
+                
+                // Turn
+                HStack(spacing: 12) {
+                    Text("Turn:")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.textPrimary)
+                        .frame(width: 50, alignment: .leading)
+                    
+                    Button(action: {
+                        cardSelectionTarget = .turnCard
+                    }) {
+                        HStack(spacing: 4) {
+                            cardDisplayView(card: viewModel.turnCard)
+                            
+                            Image(systemName: "pencil.circle")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.sectionHeader.opacity(0.7))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.05))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                )
+                        )
+                    }
+                    
+                                Spacer()
+                }
+                
+                // River
+                HStack(spacing: 12) {
+                    Text("River:")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.textPrimary)
+                        .frame(width: 50, alignment: .leading)
+                    
+                                Button(action: {
+                        cardSelectionTarget = .riverCard
+                    }) {
+                        HStack(spacing: 4) {
+                            cardDisplayView(card: viewModel.riverCard)
+                            
+                            Image(systemName: "pencil.circle")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.sectionHeader.opacity(0.7))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.05))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                )
+                        )
+                    }
+                    
+                    Spacer()
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
+    @ViewBuilder
+    private var summaryActionsView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Actions Log")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.sectionHeader)
+
+            VStack(spacing: 8) {
+                if !viewModel.preflopActions.isEmpty {
+                    DisclosureGroup("Preflop (Pot: \(String(format: "$%.0f", viewModel.currentPotPreflop)))") {
+                        VStack(spacing: 4) {
+                            ForEach(viewModel.preflopActions) { action in 
+                                summaryActionRow(action) 
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.textPrimary)
+                }
+                
+                if !viewModel.flopActions.isEmpty {
+                    DisclosureGroup("Flop (Pot: \(String(format: "$%.0f", viewModel.currentPotFlop)))") {
+                        VStack(spacing: 4) {
+                            ForEach(viewModel.flopActions) { action in 
+                                summaryActionRow(action) 
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.textPrimary)
+                }
+                
+                if !viewModel.turnActions.isEmpty {
+                    DisclosureGroup("Turn (Pot: \(String(format: "$%.0f", viewModel.currentPotTurn)))") {
+                        VStack(spacing: 4) {
+                            ForEach(viewModel.turnActions) { action in 
+                                summaryActionRow(action) 
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.textPrimary)
+                }
+                
+                if !viewModel.riverActions.isEmpty {
+                    DisclosureGroup("River (Pot: \(String(format: "$%.0f", viewModel.currentPotRiver)))") {
+                VStack(spacing: 4) {
+                            ForEach(viewModel.riverActions) { action in 
+                                summaryActionRow(action) 
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.textPrimary)
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
     }
     
-    // Helper for styled input fields to reduce repetition and ensure consistency
+    @ViewBuilder
+    private func summaryActionRow(_ action: ActionInput) -> some View {
+        HStack(spacing: 8) {
+            Text("\(action.playerName):")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(viewModel.players.first(where: {$0.position == action.playerName})?.isHero ?? false ? .sectionHeader : .textPrimary)
+            
+            Text(action.actionType.rawValue.capitalized)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(actionColor(for: action.actionType))
+            
+            if let amount = action.amount, amount > 0 {
+                Text(String(format: "$%.2f", amount))
+                    .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.textSecondary)
+            }
+                    
+                    Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.white.opacity(0.02))
+        )
+    }
+
+    // Helper view for displaying individual cards
+    @ViewBuilder
+    private func cardDisplayView(card: String?) -> some View {
+        if let card = card {
+            let (cardText, cardColor) = cardSymbol(for: card)
+            Text(cardText)
+                    .font(.system(size: 14, weight: .bold))
+                .foregroundColor(cardColor)
+                .frame(width: 28, height: 20)
+                    .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.black.opacity(0.3))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(cardColor.opacity(0.3), lineWidth: 1)
+                        )
+                )
+        } else {
+            Text("?")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.textSecondary.opacity(0.5))
+                .frame(width: 28, height: 20)
+        .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.05))
+                .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                )
+        }
+    }
+
+    // Helper for styled input fields
     @ViewBuilder
     private func inputField(label: String, value: Binding<Double?>, width: CGFloat = 55, showLabel: Bool = true) -> some View {
         HStack(spacing: showLabel ? 10 : 0) {
             if showLabel {
-                Text(label)
+            Text(label)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.textSecondary)
             }
             TextField("", value: value, formatter: doubleFormatter)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
-                .font(.system(size: 14, weight: .semibold)) // Bolder input text
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.textPrimary)
-                .padding(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6)) // Adjusted padding
+                .padding(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
                 .frame(width: width)
                 .background(Color.inputBackground)
-                .cornerRadius(6) // Slightly softer corners
+                .cornerRadius(6)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.dividerColor.opacity(0.7), lineWidth: 0.5) // Subtle border
+                        .stroke(Color.dividerColor.opacity(0.7), lineWidth: 0.5)
                 )
         }
     }
     
-    // Helper for Binding<Double?> from Binding<Double>
     private func optionalBinding(for binding: Binding<Double>) -> Binding<Double?> {
         Binding<Double?>(
             get: { binding.wrappedValue },
@@ -430,671 +1465,12 @@ struct NewHandEntryView: View {
         )
     }
     
-    // Overload for Binding<Double>
     @ViewBuilder
     private func inputField(label: String, value: Binding<Double>, width: CGFloat = 50, showLabel: Bool = true) -> some View {
         inputField(label: label, value: optionalBinding(for: value), width: width, showLabel: showLabel)
     }
-    
-    // Fix hero section to be truly one line with more space for position picker
-    private var playersSectionView: some View {
-        VStack(spacing: 12) { // Reduced spacing between player sub-sections for compactness
-            // Hero section - all in one line
-            VStack(alignment: .leading, spacing: 8) { // Wrap Hero content for glassy style
-                HStack {
-                    Image(systemName: "person.crop.circle.fill")
-                        .foregroundColor(.accentGreen)
-                    Text("Hero Details")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.textPrimary)
-                    Spacer()
-                }
-                HStack(alignment: .center, spacing: 10) {
-                    // Hero position with more space - complete redesign
-                    HStack(spacing: 0) {
-                        Text("HERO")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.accentGreen)
-                            .lineLimit(1)
-                            .frame(width: 40, alignment: .leading)
-                        
-                        Spacer(minLength: 10)
-                        
-                        Picker("", selection: $viewModel.heroPosition) {
-                            ForEach(viewModel.availablePositions, id: \.self) { position in
-                                Text(position).tag(position)
-                            }
-                        }
-                        .pickerStyle(MenuPickerStyle())
-                        .frame(width: 80)
-                    }
-                    .frame(width: 130)
-                    
-                    // Hero cards
-                    HStack(spacing: 4) {
-                        ForEach([viewModel.heroCard1, viewModel.heroCard2], id: \.self) { card in
-                            let (symbol, color) = cardSymbol(for: card)
-                            Button(action: { cardSelectionTarget = .heroHand }) {
-                                Text(symbol)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(color)
-                                    .frame(width: 32, height: 38)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 5)
-                                            .fill(card == nil ? Color.cardBackground.opacity(0.5) : Color.cardBackground)
-                                            .shadow(color: Color.black.opacity(0.2), radius: 1, x: 0, y: 1)
-                                    )
-                            }
-                        }
-                    }
-                    
-                    Spacer()
-                    
-                    // Stack amount - fix wrapping
-                    HStack(spacing: 0) {
-                        Text("STACK $")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.textSecondary)
-                            .lineLimit(1)
-                            .frame(width: 55, alignment: .leading)
-                        
-                        Spacer(minLength: 5)
-                        
-                        TextField("", value: $viewModel.effectiveStackAmount, formatter: doubleFormatter)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.textPrimary)
-                            .padding(5)
-                            .frame(width: 45)
-                            .background(Color.inputBackground)
-                            .cornerRadius(5)
-                            .onChange(of: viewModel.effectiveStackAmount) { _ in
-                                viewModel.updatePlayerStacksBasedOnEffectiveStack()
-                                viewModel.effectiveStackType = .dollars
-                            }
-                    }
-                    .frame(width: 105)
-                }
-            }
-            .glassySectionStyle()
-            
-            // Active villains section
-            VStack(alignment: .leading, spacing: 8) { // Wrap Active Villains for glassy style
-                HStack {
-                    Text("ACTIVE VILLAINS") // Kept original styling for this title
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.accentGreen)
-                        .tracking(0.8)
-                    Spacer()
-                }
-                
-                if viewModel.players.filter({ $0.isActive && !$0.isHero }).isEmpty {
-                    // Empty state when no active villains
-                    Text("No active villains - add positions below")
-                        .font(.system(size: 14))
-                        .foregroundColor(.textSecondary)
-                        .padding(12)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.tertiaryBackground)
-                        .cornerRadius(8)
-                } else {
-                    // Active villains list
-                    ForEach(viewModel.players.filter({ $0.isActive && !$0.isHero }), id: \.id) { player in
-                        HStack(spacing: 10) {
-                            // Position
-                            Text(player.position)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.textPrimary)
-                                .frame(width: 40, alignment: .leading)
-                            
-                            // Stack
-                            Text("$\(Int(player.stack))")
-                                .font(.system(size: 14))
-                                .foregroundColor(.textSecondary)
-                            
-                            Spacer()
-                            
-                            // Cards
-                            Button(action: { cardSelectionTarget = .villainHand(playerId: player.id) }) {
-                                HStack(spacing: 2) {
-                                    ForEach([player.card1, player.card2], id: \.self) { card in
-                                        let (symbol, color) = cardSymbol(for: card)
-                                        Text(symbol)
-                                            .font(.system(size: 15, weight: .bold))
-                                            .foregroundColor(color)
-                                            .frame(width: 30, height: 36)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 4)
-                                                    .fill(card == nil ? Color.cardBackground.opacity(0.5) : Color.cardBackground)
-                                            )
-                                    }
-                                }
-                            }
-                            .contentShape(Rectangle())
-                            
-                            // Remove button
-                            Button(action: {
-                                if let index = viewModel.players.firstIndex(where: { $0.id == player.id }) {
-                                    viewModel.players[index].isActive = false
-                                }
-                            }) {
-                                Image(systemName: "minus.circle.fill")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.accentRed.opacity(0.7))
-                            }
-                            .buttonStyle(BorderlessButtonStyle())
-                        }
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.tertiaryBackground)
-                        )
-                    }
-                }
-            }
-            .glassySectionStyle()
-            
-            // Available positions section - renamed to "ADD ACTIVE VILLAIN"
-            VStack(alignment: .leading, spacing: 8) { // Wrap Add Villains for glassy style
-                HStack {
-                    Text("ADD ACTIVE VILLAIN") // Kept original styling
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.accentGreen)
-                        .tracking(0.8)
-                    Spacer()
-                }
-                
-                // Position buttons in a grid
-                LazyVGrid(columns: [
-                    GridItem(.flexible()),
-                    GridItem(.flexible()),
-                    GridItem(.flexible())
-                ], spacing: 8) {
-                    ForEach(viewModel.players.filter { !$0.isHero && !$0.isActive }, id: \.id) { player in
-                        Button(action: {
-                            if let index = viewModel.players.firstIndex(where: { $0.id == player.id }) {
-                                viewModel.players[index].isActive = true
-                            }
-                        }) {
-                            Text(player.position)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.textPrimary)
-                                .frame(height: 40)
-                                .frame(maxWidth: .infinity)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.tertiaryBackground.opacity(0.7))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(Color.accentGreen.opacity(0.3), lineWidth: 1)
-                                        )
-                                )
-                        }
-                    }
-                }
-            }
-            .glassySectionStyle()
-        }
-    }
-    
-    // Fix street tabs with more space
-    private var streetTabsView: some View {
-        HStack(spacing: 2) {
-            ForEach(StreetIdentifier.allCases, id: \.self) { street in
-                let isActive = viewModel.currentActionStreet == street
-                let hasContent = !viewModel.actionsForStreet(street).isEmpty || streetHasCards(street)
-                let isEnabled = hasContent || (viewModel.waitingForNextStreetCards && viewModel.nextStreetNeeded == street)
-                
-                Button(action: {
-                    if isEnabled {
-                        viewModel.currentActionStreet = street
-                    }
-                }) {
-                    VStack(spacing: 3) {
-                        Text(street.rawValue.capitalized)
-                            .font(.system(size: 14, weight: isActive ? .bold : .medium))
-                            .foregroundColor(isActive ? colorForStreet(street) : (isEnabled ? .textPrimary : .textSecondary))
-                        
-                        // Indicator for active tab
-                        RoundedRectangle(cornerRadius: 1)
-                            .frame(height: 2)
-                            .foregroundColor(isActive ? colorForStreet(street) : .clear)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.secondaryBackground)
-                }
-                .disabled(!isEnabled)
-            }
-        }
-        // Use secondaryBackground to match the box below
-        .background(Color.secondaryBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.accentGreen.opacity(0.3), lineWidth: 1)
-        )
-    }
-    
-    // Board actions section with more appropriate spacing
-    private var boardAndActionSection: some View {
-        VStack(spacing: 12) {
-            // Sleek street tabs
-            streetTabsView
-            
-            // Current street content
-            VStack(spacing: 8) {
-                switch viewModel.currentActionStreet {
-                case .preflop:
-                    preflopContent
-                case .flop:
-                    flopContent
-                case .turn:
-                    turnContent
-                case .river:
-                    riverContent
-                }
-            }
-        }
-        .glassySectionStyle() // Apply to the whole Board & Action area
-    }
-    
-    // Fix action display with more space
-    @ViewBuilder
-    private func displayActionsList(actions: [ActionInput], street: StreetIdentifier) -> some View {
-        VStack(spacing: 6) {
-            // Pot display with green accent
-            HStack {
-                Text("POT:")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.textSecondary)
-                
-                Text("$\(potForStreet(street), specifier: "%.2f")")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.textPrimary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.accentGreen.opacity(0.15))
-                    )
-                
-                Spacer()
-                
-                // Waiting indicator
-                if viewModel.waitingForNextStreetCards && viewModel.nextStreetNeeded == street.next {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.right.circle")
-                            .font(.system(size: 12))
-                        Text("Need \(street.next.rawValue.capitalized)")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundColor(colorForStreet(street.next))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(colorForStreet(street.next).opacity(0.15))
-                    )
-                }
-            }
-            
-            // Empty state or action list
-            if actions.isEmpty && (viewModel.pendingActionInput == nil || viewModel.currentActionStreet != street) 
-               && !(street != .preflop && viewModel.preflopActions.isEmpty && viewModel.actionsForStreet(street).isEmpty && streetHasCards(street) ) {
-                // Empty state with minimalist design
-                VStack(spacing: 3) {
-                    Image(systemName: "person.crop.circle.badge.clock")
-                        .font(.system(size: 18))
-                        .foregroundColor(Color.accentGreen.opacity(0.5))
-                        .padding(.bottom, 2)
-                    
-                    Text("Waiting for actions")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(.textSecondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.tertiaryBackground.opacity(0.5))
-                )
-            } else {
-                // Action list
-                ForEach(actions.indices, id: \.self) { index in
-                    if index < actions.count {
-                        let action = actions[index]
-                        HStack {
-                            // Position with color indicator
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(action.isSystemAction ? Color.gray.opacity(0.5) : colorForPlayer(name: action.playerName))
-                                    .frame(width: 6, height: 6)
-                                
-                                Text(action.playerName)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(action.isSystemAction ? Color.textSecondary : Color.textPrimary)
-                            }
-                            .frame(width: 40, alignment: .leading)
-                            
-                            // Action type
-                            HStack(spacing: 3) {
-                                actionIcon(for: action.actionType)
-                                    .foregroundColor(actionColor(for: action.actionType))
-                                    .font(.system(size: 11))
-                                
-                                Text(action.actionType.rawValue)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(action.isSystemAction ? Color.textSecondary : actionColor(for: action.actionType))
-                            }
-                            
-                            // Amount
-                            if let amount = action.amount, amount > 0 {
-                                Spacer()
-                                
-                                Text("$\(amount, specifier: "%.0f")")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundColor(action.isSystemAction ? Color.textSecondary : Color.textPrimary)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .fill(Color.tertiaryBackground)
-                                    )
-                            }
-                            
-                            Spacer()
-                            
-                            // Undo button for last action
-                            if index == actions.count - 1 && street == viewModel.currentActionStreet {
-                                Button(action: {
-                                    viewModel.undoLastAction()
-                                }) {
-                                    Image(systemName: "arrow.uturn.backward.circle")
-                                        .foregroundColor(Color.accentRed)
-                                        .font(.system(size: 14))
-                                }
-                                .buttonStyle(BorderlessButtonStyle())
-                            }
-                        }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(index % 2 == 0 ? Color.tertiaryBackground.opacity(0.7) : Color.tertiaryBackground.opacity(0.4))
-                        )
-                    }
-                }
-            }
-        }
-        
-        // Pending action
-        if let pendingAction = viewModel.pendingActionInput, viewModel.currentActionStreet == street {
-            pendingActionView(pendingAction: pendingAction)
-                .padding(.top, 6)
-        }
-    }
-    
-    // Fix pending action view
-    @ViewBuilder
-    private func pendingActionView(pendingAction: ActionInput) -> some View {
-        // Bindings (unchanged)
-        let actionTypeBinding = Binding<PokerActionType>(
-            get: { viewModel.pendingActionInput?.actionType ?? .fold },
-            set: { newActionType in
-                if viewModel.pendingActionInput != nil {
-                    viewModel.pendingActionInput!.actionType = newActionType
-                    if newActionType == .call {
-                        viewModel.pendingActionInput!.amount = viewModel.callAmountForPendingPlayer
-                    } else if newActionType == .fold || newActionType == .check {
-                        viewModel.pendingActionInput!.amount = nil
-                    } else if newActionType == .bet || newActionType == .raise {
-                        if viewModel.pendingActionInput!.amount == nil || viewModel.pendingActionInput!.amount == 0 {
-                            viewModel.pendingActionInput!.amount = viewModel.minBetRaiseAmountForPendingPlayer
-                        }
-                    }
-                }
-            }
-        )
-        
-        let canCommit = pendingAction.actionType != .bet && pendingAction.actionType != .raise || 
-                      (pendingAction.amount ?? 0) >= viewModel.minBetRaiseAmountForPendingPlayer
-        
-        let heroStack = viewModel.players.first(where: { $0.isHero })?.stack ?? 0
-        
-        let sliderBinding = Binding<Double>(
-            get: { viewModel.pendingActionInput?.amount ?? viewModel.minBetRaiseAmountForPendingPlayer },
-            set: { newValue in 
-                if viewModel.pendingActionInput != nil {
-                    let clampedValue = max(viewModel.minBetRaiseAmountForPendingPlayer, min(newValue, heroStack))
-                    viewModel.pendingActionInput!.amount = clampedValue
-                }
-            }
-        )
-        
-        // Pending action UI
-        VStack(spacing: 8) {
-            // Header with player name
-            HStack {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(colorForPlayer(name: pendingAction.playerName))
-                        .frame(width: 7, height: 7)
-                    
-                    Text(pendingAction.playerName)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.textPrimary)
-                }
-                
-                Text("TO ACT")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.accentGreen)
-                    .tracking(0.8)
-                
-                Spacer()
-            }
-            
-            // Action buttons in a row
-            HStack(spacing: 6) {
-                ForEach(viewModel.legalActionsForPendingPlayer, id: \.self) { action in
-                    Button(action: {
-                        actionTypeBinding.wrappedValue = action
-                    }) {
-                        Text(action.rawValue)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(pendingAction.actionType == action ? .white : .textSecondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(pendingAction.actionType == action ? 
-                                          actionColor(for: action) : Color.tertiaryBackground)
-                            )
-                    }
-                }
-            }
-            
-            // Amount controls for bet/raise
-            if pendingAction.actionType == .bet || pendingAction.actionType == .raise {
-                VStack(spacing: 4) {
-                    // Slider with amount display
-                    HStack {
-                        // TextField for bet amount
-                        let actingPlayerPositionForField = pendingAction.playerName
-                        let actingPlayerStackForField = viewModel.players.first(where: { $0.position == actingPlayerPositionForField })?.stack ?? 0
-                        let minBetAmountForField = viewModel.minBetRaiseAmountForPendingPlayer
 
-                        TextField("Amount", value: Binding(
-                            get: { viewModel.pendingActionInput?.amount ?? 0.0 },
-                            set: { newValue in
-                                if viewModel.pendingActionInput != nil {
-                                    let clampedValue = max(minBetAmountForField, min(newValue, actingPlayerStackForField))
-                                    viewModel.pendingActionInput!.amount = clampedValue
-                                }
-                            }
-                        ), formatter: doubleFormatter)
-                            .keyboardType(.decimalPad)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 80)
-                            .focused($isBetAmountFieldFocused)
-                            .onSubmit {
-                                isBetAmountFieldFocused = false // Dismiss keyboard on standard submit (if keyboard type allows)
-                            }
-                            .toolbar { // Toolbar for the keyboard
-                                ToolbarItemGroup(placement: .keyboard) {
-                                    Spacer() // Push button to the right
-                                    Button("Done") {
-                                        isBetAmountFieldFocused = false // Dismiss keyboard
-                                    }
-                                }
-                            }
-                        
-                        Spacer()
-                        
-                        // Quick bet buttons
-                        HStack(spacing: 4) {
-                            quickBetButton(label: "Min", amount: viewModel.minBetRaiseAmountForPendingPlayer)
-                            quickBetButton(label: "½", amount: potForStreet(viewModel.currentActionStreet) * 0.5)
-                            quickBetButton(label: "Pot", amount: potForStreet(viewModel.currentActionStreet))
-                            quickBetButton(label: "2×", amount: potForStreet(viewModel.currentActionStreet) * 2)
-                        }
-                    }
-                    
-                    // Slider
-                    let actingPlayerPosition = pendingAction.playerName
-                    let actingPlayerStack = viewModel.players.first(where: { $0.position == actingPlayerPosition })?.stack ?? 0
-                    let sliderLowerBound = viewModel.minBetRaiseAmountForPendingPlayer
-                    let sliderUpperBound = max(sliderLowerBound, actingPlayerStack)
-
-                    Slider(
-                        value: sliderBinding,
-                        in: sliderLowerBound...sliderUpperBound,
-                        step: 1
-                    )
-                    .accentColor(Color.accentGreen)
-                }
-            } else if pendingAction.actionType == .call {
-                // Call amount display
-                HStack {
-                    Text("Call amount:")
-                        .font(.system(size: 13))
-                        .foregroundColor(.textSecondary)
-                    
-                    Spacer()
-                    
-                    Text("$\(String(format: "%.0f", viewModel.callAmountForPendingPlayer))")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.accentGreen)
-                        .padding(.vertical, 3)
-                        .padding(.horizontal, 8)
-                        .background(Color.tertiaryBackground)
-                        .cornerRadius(4)
-                }
-            }
-            
-            // Commit button
-            Button(action: { viewModel.commitPendingAction() }) {
-                Text("COMMIT")
-                    .font(.system(size: 14, weight: .bold))
-                    .tracking(0.5)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 38)
-                    .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [canCommit ? Color.accentGreen : Color.gray,
-                                                       canCommit ? Color.accentGreen.opacity(0.7) : Color.gray.opacity(0.7)]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .cornerRadius(6)
-            }
-            .disabled(!canCommit)
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.secondaryBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.accentGreen.opacity(0.2), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
-        )
-    }
-    
-    // Quick bet button
-    private func quickBetButton(label: String, amount: Double) -> some View {
-        Button(action: {
-            viewModel.pendingActionInput?.amount = amount
-        }) {
-            Text(label)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.accentGreen.opacity(0.6))
-                )
-        }
-    }
-    
-    // Helper to get appropriate icon for action type
-    @ViewBuilder
-    private func actionIcon(for type: PokerActionType) -> some View {
-        switch type {
-        case .fold:
-            Image(systemName: "x.circle")
-                .font(.system(size: 11))
-        case .check:
-            Image(systemName: "hand.tap")
-                .font(.system(size: 11))
-        case .call:
-            Image(systemName: "equal.circle")
-                .font(.system(size: 11))
-        case .bet:
-            Image(systemName: "dollarsign.circle")
-                .font(.system(size: 11))
-        case .raise:
-            Image(systemName: "arrow.up.circle")
-                .font(.system(size: 11))
-        }
-    }
-    
-    // Helper to get color for action type
-    private func actionColor(for type: PokerActionType) -> Color {
-        switch type {
-        case .fold:
-            return .accentRed
-        case .check:
-            return .textPrimary
-        case .call:
-            return .accentBlue
-        case .bet:
-            return .accentGreen
-        case .raise:
-            return .accentOrange
-        }
-    }
-    
-    // Helper to get pot amount for a street
-    private func potForStreet(_ street: StreetIdentifier) -> Double {
-        switch street {
-        case .preflop:
-            return viewModel.currentPotPreflop
-        case .flop:
-            return viewModel.currentPotFlop
-        case .turn:
-            return viewModel.currentPotTurn
-        case .river:
-            return viewModel.currentPotRiver
-        }
-    }
-    
+    // Card Selector Sheet
     @ViewBuilder
     private func cardSelectorSheet(for target: CardSelectionTarget) -> some View {
         switch target {
@@ -1105,7 +1481,6 @@ struct NewHandEntryView: View {
                 initialUsedCards: viewModel.usedCardsExcludingHeroHand,
                 currentSelections: [viewModel.heroCard1, viewModel.heroCard2],
                 onComplete: { cards in
-                    // Safe array access
                     viewModel.heroCard1 = cards.count > 0 ? cards[0] : nil
                     viewModel.heroCard2 = cards.count > 1 ? cards[1] : nil
                 }
@@ -1117,7 +1492,6 @@ struct NewHandEntryView: View {
                 initialUsedCards: viewModel.usedCards,
                 currentSelections: [viewModel.flopCard1, viewModel.flopCard2, viewModel.flopCard3],
                 onComplete: { cards in
-                    // Safe array access
                     viewModel.flopCard1 = cards.count > 0 ? cards[0] : nil
                     viewModel.flopCard2 = cards.count > 1 ? cards[1] : nil
                     viewModel.flopCard3 = cards.count > 2 ? cards[2] : nil
@@ -1151,7 +1525,6 @@ struct NewHandEntryView: View {
                     initialUsedCards: viewModel.usedCardsExcludingPlayer(playerId: playerId),
                     currentSelections: [viewModel.players[playerIndex].card1, viewModel.players[playerIndex].card2],
                     onComplete: { cards in
-                        // Safe array access
                         let card1 = cards.count > 0 ? cards[0] : nil
                         let card2 = cards.count > 1 ? cards[1] : nil
                         viewModel.updatePlayerCards(playerId: playerId, card1: card1, card2: card2)
@@ -1161,7 +1534,6 @@ struct NewHandEntryView: View {
         }
     }
     
-    // Enhanced card selector with a more visual layout
     @ViewBuilder
     private func enhancedCardSelector(
         quantity: CardSelectorSheetView.SelectionQuantity,
@@ -1170,7 +1542,6 @@ struct NewHandEntryView: View {
         currentSelections: [String?],
         onComplete: @escaping ([String?]) -> Void
     ) -> some View {
-        // Just wrap the existing card selector with a more visually appealing frame
         CardSelectorSheetView(
             quantity: quantity,
             title: title,
@@ -1188,7 +1559,6 @@ struct NewHandEntryView: View {
         Task {
             if let handToSave = viewModel.createParsedHandHistory() {
                 do {
-                    // Use the view model's sessionId or the view's sessionId for saving
                     try await handStore.saveHand(handToSave, sessionId: self.sessionId ?? viewModel.sessionId)
                     await MainActor.run {
                         isSaving = false
@@ -1208,277 +1578,18 @@ struct NewHandEntryView: View {
         }
     }
     
-    // Helper function to get color for player
-    private func colorForPlayer(name: String) -> Color {
-        switch name {
-        case "SB": return .accentBlue
-        case "BB": return .accentGreen
-        case "UTG": return .accentOrange
-        case "MP": return .accentPurple
-        case "CO": return Color.yellow
-        case "BTN": return Color.cyan
-        default: return .accentBlue
-        }
-    }
-
-    // Add back table setup sheet
-    private var tableSetupSheet: some View {
-        NavigationView {
-            Form {
-                Section(header: Text("BLINDS")) {
-                    HStack {
-                        Text("Small Blind")
-                        Spacer()
-                        TextField("1", value: $viewModel.smallBlind, formatter: doubleFormatter)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 100)
-                    }
-                    
-                    HStack {
-                        Text("Big Blind")
-                        Spacer()
-                        TextField("2", value: $viewModel.bigBlind, formatter: doubleFormatter)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 100)
-                    }
-                }
-                
-                Section(header: Text("TABLE SIZE")) {
-                    Picker("Table Size", selection: $viewModel.tableSize) {
-                        Text("2-max").tag(2)
-                        Text("6-max").tag(6)
-                        Text("9-max").tag(9)
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                }
-                
-                Section(header: Text("EFFECTIVE STACK")) {
-                    HStack {
-                        Text("Amount")
-                        Spacer()
-                        TextField("100", value: $viewModel.effectiveStackAmount, formatter: doubleFormatter)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 100)
-                            .onChange(of: viewModel.effectiveStackAmount) { _ in
-                                viewModel.updatePlayerStacksBasedOnEffectiveStack()
-                            }
-                    }
-                }
-            }
-            .navigationTitle("Game Setup")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        showingTableSetup = false
-                    }
-                }
-            }
-            .preferredColorScheme(.dark)
-        }
-    }
-
-    // Update color function to use more green
-    private func colorForStreet(_ street: StreetIdentifier) -> Color {
-        switch street {
-        case .preflop: return .accentBlue
-        case .flop: return .accentGreen
-        case .turn: return .accentOrange
-        case .river: return .accentPurple
-        }
-    }
-
-    private func streetHasCards(_ street: StreetIdentifier) -> Bool {
-        switch street {
-        case .preflop:
-            return true // Preflop always has content
-        case .flop:
-            return viewModel.flopCard1 != nil || viewModel.flopCard2 != nil || viewModel.flopCard3 != nil
-        case .turn:
-            return viewModel.turnCard != nil
-        case .river:
-            return viewModel.riverCard != nil
-        }
-    }
-
-    // Add back the missing street content views
-    private var preflopContent: some View {
-        VStack(spacing: 10) {
-            // Preflop actions
-            displayActionsList(
-                actions: viewModel.preflopActions,
-                street: .preflop
-            )
-        }
-    }
-
-    private var flopContent: some View {
-        VStack(spacing: 10) {
-            // Flop cards - elegant display
-            Button(action: { cardSelectionTarget = .flopTriplet }) {
-                HStack(spacing: 8) {
-                    ForEach([viewModel.flopCard1, viewModel.flopCard2, viewModel.flopCard3], id: \.self) { card in
-                        let (symbol, color) = cardSymbol(for: card)
-                        Text(symbol)
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(color)
-                            .frame(width: 42, height: 60)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.cardBackground)
-                                    .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 2)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(
-                                                viewModel.waitingForNextStreetCards && viewModel.nextStreetNeeded == .flop
-                                                ? Color.accentGreen.opacity(0.8) : Color.clear,
-                                                lineWidth: 2
-                                            )
-                                    )
-                            )
-                    }
-                }
-                .padding(.vertical, 5)
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-            
-            Divider()
-                .background(Color.dividerColor)
-                .padding(.vertical, 5)
-            
-            // Flop actions
-            displayActionsList(
-                actions: viewModel.flopActions,
-                street: .flop
-            )
-        }
-    }
-
-    private var turnContent: some View {
-        VStack(spacing: 10) {
-            // Board cards (flop + turn)
-            HStack(spacing: 8) {
-                // Flop cards (smaller and dimmed)
-                ForEach([viewModel.flopCard1, viewModel.flopCard2, viewModel.flopCard3], id: \.self) { card in
-                    let (symbol, color) = cardSymbol(for: card)
-                    Text(symbol)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(color.opacity(0.7))
-                        .frame(width: 36, height: 50)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.cardBackground.opacity(0.7))
-                        )
-                }
-                
-                Spacer()
-                    .frame(width: 10)
-                
-                // Turn card (highlighted)
-                Button(action: { cardSelectionTarget = .turnCard }) {
-                    let (symbol, color) = cardSymbol(for: viewModel.turnCard)
-                    Text(symbol)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(color)
-                        .frame(width: 42, height: 60)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.cardBackground)
-                                .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 2)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(
-                                            viewModel.waitingForNextStreetCards && viewModel.nextStreetNeeded == .turn
-                                            ? Color.accentGreen.opacity(0.8) : Color.clear,
-                                            lineWidth: 2
-                                        )
-                                )
-                        )
-                }
-            }
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .center)
-            
-            Divider()
-                .background(Color.dividerColor)
-                .padding(.vertical, 5)
-            
-            // Turn actions
-            displayActionsList(
-                actions: viewModel.turnActions,
-                street: .turn
-            )
-        }
-    }
-
-    private var riverContent: some View {
-        VStack(spacing: 10) {
-            // Board cards (flop + turn + river)
-            HStack(spacing: 8) {
-                // Flop cards (smaller and dimmed)
-                ForEach([viewModel.flopCard1, viewModel.flopCard2, viewModel.flopCard3], id: \.self) { card in
-                    let (symbol, color) = cardSymbol(for: card)
-                    Text(symbol)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(color.opacity(0.7))
-                        .frame(width: 30, height: 40)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.cardBackground.opacity(0.7))
-                        )
-                }
-                
-                // Turn card (dimmed)
-                let (turnSymbol, turnColor) = cardSymbol(for: viewModel.turnCard)
-                Text(turnSymbol)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(turnColor.opacity(0.7))
-                    .frame(width: 30, height: 40)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.cardBackground.opacity(0.7))
-                    )
-                
-                Spacer()
-                    .frame(width: 8)
-                
-                // River card (highlighted)
-                Button(action: { cardSelectionTarget = .riverCard }) {
-                    let (symbol, color) = cardSymbol(for: viewModel.riverCard)
-                    Text(symbol)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(color)
-                        .frame(width: 42, height: 60)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.cardBackground)
-                                .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 2)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(
-                                            viewModel.waitingForNextStreetCards && viewModel.nextStreetNeeded == .river
-                                            ? Color.accentGreen.opacity(0.8) : Color.clear,
-                                            lineWidth: 2
-                                        )
-                                )
-                        )
-                }
-            }
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .center)
-            
-            Divider()
-                .background(Color.dividerColor)
-                .padding(.vertical, 5)
-            
-            // River actions
-            displayActionsList(
-                actions: viewModel.riverActions,
-                street: .river
-            )
+    private func actionColor(for type: PokerActionType) -> Color {
+        switch type {
+        case .fold:
+            return .accentRed
+        case .check:
+            return .textPrimary
+        case .call:
+            return .accentBlue
+        case .bet:
+            return .accentGreen
+        case .raise:
+            return .accentOrange
         }
     }
 }

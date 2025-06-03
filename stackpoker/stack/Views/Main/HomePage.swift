@@ -197,6 +197,7 @@ struct HomePage: View {
                                     }
                                     loadActiveHostedStandaloneGame()
                                 })
+                                .environmentObject(sessionStore)
                             }
                             .navigationBarBackButtonHidden(true)
                         }

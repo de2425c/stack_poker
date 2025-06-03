@@ -14,6 +14,11 @@ class HandStore: ObservableObject {
     }
     
     init(userId: String) {
+        guard !userId.isEmpty else {
+            print("HandStore: userId is empty, skipping loadSavedHands during account creation")
+            self.userId = userId // Initialize userId even if empty
+            return
+        }
         self.userId = userId
         loadSavedHands()
     }
@@ -39,6 +44,10 @@ class HandStore: ObservableObject {
     }
     
     func loadSavedHands() {
+        guard !userId.isEmpty else {
+            print("HandStore: Cannot load hands - userId is empty")
+            return
+        }
         db.collection("users")
             .document(userId)
             .collection("hands")

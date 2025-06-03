@@ -38,6 +38,7 @@ struct EnhancedLiveSessionView: View {
     
     // Staking State Variables - COPIED FROM SessionFormView
     @State private var stakerConfigs: [StakerConfig] = [] // Array for multiple stakers
+    @State private var stakerConfigsForPopup: [StakerConfig] = [] // Temporary copy for the popup
     @State private var showStakingSection = false // To toggle visibility of staking fields
     @State private var showingStakingPopup = false // New state for floating popup
     
@@ -219,7 +220,7 @@ struct EnhancedLiveSessionView: View {
             // Add floating staking popup overlay
             FloatingStakingPopup(
                 isPresented: $showingStakingPopup,
-                stakerConfigs: $stakerConfigs,
+                stakerConfigs: $stakerConfigsForPopup, // Pass the copy here
                 userService: userService,
                 primaryTextColor: .white,
                 secondaryTextColor: Color.white.opacity(0.7),
@@ -227,6 +228,21 @@ struct EnhancedLiveSessionView: View {
                 materialOpacity: 0.2
             )
         )
+        .onChange(of: showingStakingPopup) { newValue in
+            if !newValue {
+                // When popup is dismissed, sync the main stakerConfigs from the popup's copy
+                print("[EnhancedLiveSessionView] Popup dismissed. Syncing stakerConfigs.")
+                print("[EnhancedLiveSessionView] Before sync, main stakerConfigs count: \(stakerConfigs.count)")
+                print("[EnhancedLiveSessionView] Popup copy stakerConfigsForPopup count: \(stakerConfigsForPopup.count)")
+                // It's crucial that stakerConfigs is updated to reflect changes made in the popup.
+                // This will include any additions or removals.
+                self.stakerConfigs = self.stakerConfigsForPopup
+                print("[EnhancedLiveSessionView] After sync, main stakerConfigs count: \(stakerConfigs.count)")
+                // After syncing, you might need to save these stakes if the session is active
+                // or if they are meant to be persisted immediately without ending the session.
+                // For now, this just updates the @State, persistence happens on session end.
+            }
+        }
         .sheet(isPresented: $showSessionDetailSheet) {
             if let session = completedSessionToShowInSheet {
                 NavigationView {
@@ -1924,11 +1940,15 @@ struct EnhancedLiveSessionView: View {
 
         // Filter out configs that are truly empty or invalid before deciding to save session only or with stakes.
         let validConfigs = stakerConfigs.filter { config in
-            guard let _ = config.selectedStaker, // Must have a staker
-                  let percentage = Double(config.percentageSold), percentage > 0, // Percentage must be valid and > 0
-                  let _ = Double(config.markup), // Markup must be a valid double (can be 0 or more)
-                  actualBuyInForStaking > 0 else { // Session buy-in must be > 0 for staking
-                return false
+            if config.isManualEntry {
+                guard !config.manualStakerName.isEmpty else { return false }
+            } else {
+                guard let _ = config.selectedStaker else { return false }
+            }
+            guard let percentage = Double(config.percentageSold), percentage > 0, percentage <= 100 else { return false }
+            guard let markup = Double(config.markup), markup >= 1.0 else { return false }
+            guard actualBuyInForStaking > 0 else { 
+                return percentage == 0
             }
             return true
         }
@@ -2001,12 +2021,29 @@ struct EnhancedLiveSessionView: View {
             var savedStakeCount = 0
 
             for config in configs {
-                // Basic validation already done in handleStakingAndSave,
-                // but ensure crucial parts are still present for constructing Stake object.
-                guard let stakerProfile = config.selectedStaker,
-                      let percentageSoldDouble = Double(config.percentageSold),
+                guard let percentageSoldDouble = Double(config.percentageSold),
                       let markupDouble = Double(config.markup) else {
+                    allStakesSuccessful = false
+                    continue
+                }
 
+                let stakerIdToUse: String
+                let manualName: String?
+                let isOffApp: Bool
+
+                if config.isManualEntry {
+                    guard !config.manualStakerName.isEmpty else {
+                        allStakesSuccessful = false
+                        continue
+                    }
+                    stakerIdToUse = Stake.OFF_APP_STAKER_ID
+                    manualName = config.manualStakerName
+                    isOffApp = true
+                } else if let stakerProfile = config.selectedStaker {
+                    stakerIdToUse = stakerProfile.id
+                    manualName = nil
+                    isOffApp = false
+                } else {
                     allStakesSuccessful = false
                     continue
                 }
@@ -2016,14 +2053,15 @@ struct EnhancedLiveSessionView: View {
                     sessionGameName: tournamentName ?? gameName,
                     sessionStakes: stakes,
                     sessionDate: startDateTime,
-                    stakerUserId: stakerProfile.id, // Use ID from config
+                    stakerUserId: stakerIdToUse,
                     stakedPlayerUserId: self.userId,
-                    stakePercentage: percentageSoldDouble / 100.0, // Convert to decimal
+                    stakePercentage: percentageSoldDouble / 100.0,
                     markup: markupDouble,
                     totalPlayerBuyInForSession: actualSessionBuyInForStaking,
                     playerCashoutForSession: sessionCashout,
-                    status: .awaitingSettlement,
-                    isTournamentSession: isTournamentStake
+                    isTournamentSession: isTournamentStake,
+                    manualStakerDisplayName: manualName,
+                    isOffAppStake: isOffApp
                 )
                 do {
                     _ = try await stakeService.addStake(newStake)
@@ -3219,7 +3257,31 @@ struct EnhancedLiveSessionView: View {
                 HStack(spacing: 8) {
                     // Add Staker Button
                     Button(action: {
-                        stakerConfigs.append(StakerConfig())
+                        // Prepare the copy for the popup
+                        // If stakerConfigs is empty and existingStakes has items, populate from existing first.
+                        if stakerConfigs.isEmpty && !existingStakes.isEmpty {
+                            self.stakerConfigs = existingStakes.compactMap { stake in
+                                guard stake.stakedPlayerUserId == self.userId else { return nil }
+                                var config = StakerConfig()
+                                config.markup = String(stake.markup)
+                                config.percentageSold = String(stake.stakePercentage * 100)
+                                config.isManualEntry = stake.isOffAppStake ?? false
+                                config.manualStakerName = stake.manualStakerDisplayName ?? ""
+                                if let stakerProfile = self.userService.loadedUsers[stake.stakerUserId] {
+                                    config.selectedStaker = stakerProfile
+                                } else if !(stake.isOffAppStake ?? false) {
+                                    // Pre-fetch user for on-app stakes if not already loaded
+                                    Task { await self.userService.fetchUser(id: stake.stakerUserId) }
+                                }
+                                return config
+                            }
+                        }
+                        // If still empty, add a default new one
+                        if stakerConfigs.isEmpty {
+                            stakerConfigs.append(StakerConfig())
+                        }
+                        stakerConfigsForPopup = stakerConfigs // Make a fresh copy for the popup
+                        print("[EnhancedLiveSessionView] Add Staker tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
                         showingStakingPopup = true
                     }) {
                         HStack(spacing: 4) {
@@ -3237,10 +3299,31 @@ struct EnhancedLiveSessionView: View {
                     
                     // Edit Button
                     Button(action: {
-                        // If no configs exist but stakes do, populate from stakes
+                        // Prepare the copy for the popup
+                        // If stakerConfigs is empty and existingStakes has items, populate from existing first.
                         if stakerConfigs.isEmpty && !existingStakes.isEmpty {
-                            loadExistingStakes() // This will populate stakerConfigs
+                            self.stakerConfigs = existingStakes.compactMap { stake in
+                                guard stake.stakedPlayerUserId == self.userId else { return nil }
+                                var config = StakerConfig()
+                                config.markup = String(stake.markup)
+                                config.percentageSold = String(stake.stakePercentage * 100)
+                                config.isManualEntry = stake.isOffAppStake ?? false
+                                config.manualStakerName = stake.manualStakerDisplayName ?? ""
+                                if let stakerProfile = self.userService.loadedUsers[stake.stakerUserId] {
+                                    config.selectedStaker = stakerProfile
+                                } else if !(stake.isOffAppStake ?? false) {
+                                    // Pre-fetch user for on-app stakes if not already loaded
+                                    Task { await self.userService.fetchUser(id: stake.stakerUserId) }
+                                }
+                                return config
+                            }
                         }
+                        // If still empty (e.g. no existing stakes), ensure at least one config for popup
+                         if stakerConfigs.isEmpty {
+                            stakerConfigs.append(StakerConfig())
+                        }
+                        stakerConfigsForPopup = stakerConfigs // Make a fresh copy for the popup
+                        print("[EnhancedLiveSessionView] Edit Stakes tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
                         showingStakingPopup = true
                     }) {
                         Image(systemName: "pencil.circle.fill")
@@ -3583,7 +3666,7 @@ struct EnhancedLiveSessionView: View {
             // Add floating staking popup overlay specifically to the edit session sheet
             FloatingStakingPopup(
                 isPresented: $showingStakingPopup,
-                stakerConfigs: $stakerConfigs,
+                stakerConfigs: $stakerConfigsForPopup, // Pass the copy here
                 userService: userService,
                 primaryTextColor: .white,
                 secondaryTextColor: Color.white.opacity(0.7),

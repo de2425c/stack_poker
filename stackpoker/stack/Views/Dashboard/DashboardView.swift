@@ -94,6 +94,147 @@ struct DashboardView: View {
         }
         return nil
     }
+
+    // MARK: - New Computed Properties for Stats Grid (similar to ProfileView)
+    private var totalHoursPlayed: Double {
+        return sessionStore.sessions.reduce(0) { $0 + $1.hoursPlayed }
+    }
+
+    private var averageSessionLength: Double {
+        if totalSessions == 0 { return 0 }
+        return totalHoursPlayed / Double(totalSessions)
+    }
+    
+    // MARK: - Computed Properties for Carousel Stats (similar to ProfileView)
+    private var highestCashoutToBuyInRatio: (ratio: Double, session: Session)? {
+        guard !sessionStore.sessions.isEmpty else { return nil }
+        
+        var maxRatio: Double = 0
+        var sessionWithMaxRatio: Session? = nil
+        
+        for session in sessionStore.sessions {
+            if session.buyIn > 0 { // Avoid division by zero
+                let ratio = session.cashout / session.buyIn
+                if ratio > maxRatio {
+                    maxRatio = ratio
+                    sessionWithMaxRatio = session
+                }
+            }
+        }
+        
+        if let session = sessionWithMaxRatio, maxRatio > 0 { // Ensure there was a valid ratio found
+            return (maxRatio, session)
+        }
+        return nil
+    }
+
+    enum TimeOfDayCategory: String, CaseIterable, Identifiable {
+        case morning = "Morning Pro"
+        case afternoon = "Afternoon Grinder"
+        case evening = "Evening Shark"
+        case night = "Night Owl"
+        case unknown = "Versatile Player"
+
+        var id: String { self.rawValue }
+
+        var icon: String {
+            switch self {
+            case .morning: return "sun.max.fill"
+            case .afternoon: return "cloud.sun.fill"
+            case .evening: return "moon.stars.fill"
+            case .night: return "zzz"
+            case .unknown: return "questionmark.circle.fill"
+            }
+        }
+        
+        var color: Color {
+            switch self {
+            case .morning: return .yellow
+            case .afternoon: return .orange
+            case .evening: return .purple
+            case .night: return .blue
+            case .unknown: return .gray
+            }
+        }
+    }
+
+    private var pokerPersona: (category: TimeOfDayCategory, dominantHours: String) {
+        guard !sessionStore.sessions.isEmpty else {
+            return (.unknown, "N/A")
+        }
+
+        var morningSessions = 0 // 5 AM - 11:59 AM
+        var afternoonSessions = 0 // 12 PM - 4:59 PM
+        var eveningSessions = 0   // 5 PM - 8:59 PM
+        var nightSessions = 0     // 9 PM - 4:59 AM
+
+        let calendar = Calendar.current
+        for session in sessionStore.sessions {
+            let hour = calendar.component(.hour, from: session.startTime)
+            switch hour {
+            case 5..<12: morningSessions += 1
+            case 12..<17: afternoonSessions += 1
+            case 17..<21: eveningSessions += 1
+            case 21..<24, 0..<5: nightSessions += 1
+            default: break
+            }
+        }
+
+        let counts = [
+            TimeOfDayCategory.morning: morningSessions,
+            TimeOfDayCategory.afternoon: afternoonSessions,
+            TimeOfDayCategory.evening: eveningSessions,
+            TimeOfDayCategory.night: nightSessions
+        ]
+        
+        let totalPlaySessions = Double(morningSessions + afternoonSessions + eveningSessions + nightSessions)
+        if totalPlaySessions == 0 { return (.unknown, "N/A")}
+
+        var persona: TimeOfDayCategory = .unknown
+        var maxCount = 0
+        var dominantPeriodName = "N/A"
+
+        for (category, count) in counts {
+            if count > maxCount {
+                maxCount = count
+                persona = category
+                dominantPeriodName = category.rawValue.components(separatedBy: " ").first ?? category.rawValue // e.g., "Morning"
+            }
+        }
+        
+        if maxCount == 0 { return (.unknown, "No dominant time") } // if all counts are 0
+        
+        let percentage = (Double(maxCount) / totalPlaySessions * 100)
+        let dominantHoursString = "\(dominantPeriodName): \(String(format: "%.0f%%", percentage))"
+        
+        return (persona, dominantHoursString)
+    }
+    
+    private var topLocation: (location: String, count: Int)? {
+        guard !sessionStore.sessions.isEmpty else { return nil }
+        
+        let locationsFromSessions = sessionStore.sessions.map { session -> String? in
+            let trimmedLocation = session.location?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let loc = trimmedLocation, !loc.isEmpty {
+                return loc
+            }
+            let trimmedGameName = session.gameName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedGameName.isEmpty {
+                return trimmedGameName 
+            }
+            return nil
+        }
+
+        let validLocations = locationsFromSessions.compactMap { $0 }.filter { !$0.isEmpty }
+        if validLocations.isEmpty { return nil }
+        
+        let locationCounts = validLocations.reduce(into: [:]) { counts, location in counts[location, default: 0] += 1 }
+        
+        if let (topLoc, count) = locationCounts.max(by: { $0.value < $1.value }) {
+            return (topLoc, count)
+        }
+        return nil
+    }
     
     var body: some View {
         NavigationView {
@@ -128,9 +269,27 @@ struct DashboardView: View {
                                 winRate: winRate,
                                 averageProfit: averageProfit,
                                 totalSessions: totalSessions,
-                                bestSession: bestSession
+                                bestSession: bestSession,
+                                totalHoursPlayed: totalHoursPlayed, // Pass new stat
+                                averageSessionLength: averageSessionLength // Pass new stat
                             )
                             .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                            
+                            // Highlight Carousel Section
+                            Text("HIGHLIGHTS")
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                .foregroundColor(.gray)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 10) // Space above carousel
+
+                            HighlightStatsCarousel(
+                                highestCashoutToBuyInRatio: highestCashoutToBuyInRatio,
+                                pokerPersona: pokerPersona,
+                                topLocation: topLocation
+                            )
+                            .frame(height: 220) // Give the carousel a decent height
                             .padding(.bottom, 16)
                             
                         } else if selectedTab == 1 {
@@ -375,36 +534,41 @@ struct EnhancedStatsCardGrid: View {
     let averageProfit: Double
     let totalSessions: Int
     let bestSession: (profit: Double, id: String)?
+    let totalHoursPlayed: Double // New
+    let averageSessionLength: Double // New
     
     var body: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 16) {
+        VStack(spacing: 12) { // Reduced spacing between rows of cards
+            HStack(spacing: 12) { // Reduced spacing between cards in a row
                 // Win Rate
                 EnhancedStatCard(
                     title: "Win Rate",
                     value: winRate,
                     suffix: "%",
                     isPercentage: true,
-                    color: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+                    iconName: "chart.pie.fill", // Added icon
+                    accentColor: Color(hex: "34D399") // Greenish
                 )
                 
                 // Average Profit
                 EnhancedStatCard(
-                    title: "Average Profit",
+                    title: "Avg. Profit",
                     value: averageProfit,
                     prefix: "$",
-                    subtext: "Per session",
-                    color: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+                    subtext: "/ session", // More concise
+                    iconName: "dollarsign.arrow.circlepath", // Added icon
+                    accentColor: Color(hex: "60A5FA") // Bluish
                 )
             }
             
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 // Total Sessions
                 EnhancedStatCard(
                     title: "Total Sessions",
                     value: Double(totalSessions),
                     subtext: "Played",
-                    color: .white
+                    iconName: "list.star", // Added icon
+                    accentColor: Color(hex: "FBBF24") // Amber/Yellow
                 )
                 
                 // Best Session
@@ -413,7 +577,27 @@ struct EnhancedStatsCardGrid: View {
                     value: bestSession?.profit ?? 0,
                     prefix: "$",
                     subtext: "Profit",
-                    color: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+                    iconName: "star.fill", // Added icon
+                    accentColor: Color(hex: "EC4899") // Pinkish
+                )
+            }
+             HStack(spacing: 12) {
+                // Total Hours Played
+                EnhancedStatCard(
+                    title: "Hours Played",
+                    value: totalHoursPlayed,
+                    suffix: " hrs",
+                    iconName: "hourglass",
+                    accentColor: Color(hex: "A78BFA") // Purplish
+                )
+                
+                // Average Session Length
+                EnhancedStatCard(
+                    title: "Avg. Length",
+                    value: averageSessionLength,
+                    suffix: " hrs",
+                    iconName: "timer",
+                    accentColor: Color(hex: "2DD4BF") // Tealish
                 )
             }
         }
@@ -428,130 +612,283 @@ struct EnhancedStatCard: View {
     var suffix: String = ""
     var subtext: String = ""
     var isPercentage: Bool = false
-    let color: Color
-    
+    let iconName: String // New: System icon name
+    let accentColor: Color // New: Color for icon and subtle accents
+
     private var formattedValue: String {
         if isPercentage {
             return String(format: "%.1f", value)
         } else {
-            return "\(Int(value))"
+            // Format as integer if it's a whole number, else one decimal place
+            return value.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
         }
     }
     
     var body: some View {
-        ZStack {
-            // Glass-morphism background with subtle gradient
-            RoundedRectangle(cornerRadius: 20)
-                .fill(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)),
-                            Color(UIColor(red: 25/255, green: 25/255, blue: 30/255, alpha: 1.0))
-                        ]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color.white.opacity(0.1),
-                                    Color.clear,
-                                    Color.clear
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                )
-                .shadow(color: Color.black.opacity(0.2), radius: 8, y: 4)
-            
-            VStack(spacing: 0) {
-                // Title at top with subtle spacing
+        VStack(alignment: .leading, spacing: 8) { // Overall card content
+            HStack { // Header: Icon and Title
+                Image(systemName: iconName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(accentColor)
+                    .frame(width: 20, alignment: .center)
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color.gray.opacity(0.8))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
-                    .padding(.bottom, 8)
-                
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(Color.white.opacity(0.75))
                 Spacer()
+            }
+            
+            Spacer() // Pushes value to center/bottom
+
+            HStack(alignment: .firstTextBaseline) { // Value and Suffix (if any)
+                Text("\(prefix)\(formattedValue)")
+                    .font(.system(size: 26, weight: .bold, design: .rounded)) // Main value text
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 
-                // Central content based on type
-                if isPercentage {
-                    // Elegant circular progress for percentage
-                    ZStack {
-                        // Track
-                        Circle()
-                            .stroke(
-                                Color.gray.opacity(0.1),
-                                lineWidth: 6
-                            )
-                            .frame(width: 80, height: 80)
-                        
-                        // Progress
-                        Circle()
-                            .trim(from: 0, to: min(CGFloat(value / 100), 1.0))
-                            .stroke(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [
-                                        color,
-                                        color.opacity(0.8)
-                                    ]),
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                ),
-                                style: StrokeStyle(lineWidth: 6, lineCap: .round)
-                            )
-                            .frame(width: 80, height: 80)
-                            .rotationEffect(.degrees(-90))
-                            .animation(.easeInOut(duration: 0.5), value: value)
-                        
-                        // Value text with subtle shadow
-                        VStack(spacing: 0) {
-                            Text(formattedValue)
-                                .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(.white)
-                                .shadow(color: Color.black.opacity(0.1), radius: 2, y: 1)
-                            
-                            Text(suffix)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(color)
-                        }
-                    }
-                    .padding(.bottom, 16)
-                } else {
-                    // Clean large text display for non-percentages
-                    VStack(spacing: 2) {
-                        Text("\(prefix)\(formattedValue)")
-                            .font(.system(size: 30, weight: .bold))
-                            .foregroundColor(.white) // Changed from color to white
-                            .minimumScaleFactor(0.6)
-                            .lineLimit(1)
-                            .shadow(color: Color.black.opacity(0.1), radius: 2, y: 1)
-                        
-                        if !subtext.isEmpty {
-                            Text(subtext)
-                                .font(.system(size: 13))
-                                .foregroundColor(Color.gray.opacity(0.7))
-                                .padding(.top, 4)
-                        }
-                    }
-                    .padding(.bottom, 16)
+                if !suffix.isEmpty {
+                    Text(suffix)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(Color.white.opacity(0.7))
+                        .padding(.leading, -2) // Snug suffix
                 }
-                
+            }
+
+            if !subtext.isEmpty {
+                Text(subtext)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(Color.gray.opacity(0.8))
+            }
+            
+            Spacer() // Pushes subtext to bottom if no percentage circle
+
+            if isPercentage { // Circular progress for percentage
+                ZStack {
+                    Circle() // Track
+                        .stroke(accentColor.opacity(0.15), lineWidth: 7)
+                    Circle() // Progress
+                        .trim(from: 0, to: min(CGFloat(value / 100), 1.0))
+                        .stroke(
+                            LinearGradient(gradient: Gradient(colors: [accentColor, accentColor.opacity(0.6)]), startPoint: .topLeading, endPoint: .bottomTrailing),
+                            style: StrokeStyle(lineWidth: 7, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .animation(.easeInOut(duration: 0.6), value: value)
+                    Text("\(formattedValue)%")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                }
+                .frame(width: 60, height: 60) // Adjust size as needed
+                .padding(.top, 4) // Space for the circle
                 Spacer()
             }
         }
-        .frame(height: 160)
+        .padding(14) // Inner padding for card content
+        .frame(maxWidth: .infinity, minHeight: 130) // Ensure cards have a good minimum height
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(0.30) // Slightly less transparent material
+                
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.black.opacity(0.15)) // Darker overlay for more depth
+
+                RoundedRectangle(cornerRadius: 20) // Subtle highlight/border
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                accentColor.opacity(0.5),
+                                accentColor.opacity(0.2),
+                                Color.white.opacity(0.1)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
+                    )
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
     }
 }
 
+// MARK: - Highlight Stats Carousel
+struct HighlightStatsCarousel: View {
+    let highestCashoutToBuyInRatio: (ratio: Double, session: Session)?
+    let pokerPersona: (category: DashboardView.TimeOfDayCategory, dominantHours: String)
+    let topLocation: (location: String, count: Int)?
 
+    @State private var selectedPageIndex = 0
+
+    struct CarouselItem: Identifiable {
+        let id = UUID()
+        let type: HighlightType
+        var title: String
+        var iconName: String
+        var accentColor: Color
+        var detail1: String? = nil
+        var detail2: String? = nil
+        var detail3: String? = nil
+        var value: String
+    }
+
+    enum HighlightType {
+        case multiplier
+        case persona
+        case location
+    }
+
+    private var carouselItems: [CarouselItem] {
+        var items: [CarouselItem] = []
+
+        if let ratioData = highestCashoutToBuyInRatio {
+            items.append(CarouselItem(
+                type: .multiplier,
+                title: "Best Multiplier",
+                iconName: "flame.fill",
+                accentColor: .pink,
+                detail1: "Buy-in: $\\(Int(ratioData.session.buyIn).formattedWithCommas)",
+                detail2: "Cash-out: $\\(Int(ratioData.session.cashout).formattedWithCommas)",
+                value: String(format: "%.1fx ROI", ratioData.ratio)
+            ))
+        }
+
+        items.append(CarouselItem(
+            type: .persona,
+            title: "Your Grind Style",
+            iconName: pokerPersona.category.icon,
+            accentColor: pokerPersona.category.color,
+            detail1: pokerPersona.category.rawValue,
+            detail2: pokerPersona.dominantHours,
+            value: "" // Main value can be part of details here
+        ))
+
+        if let locData = topLocation {
+            items.append(CarouselItem(
+                type: .location,
+                title: "Hot Spot",
+                iconName: "mappin.and.ellipse",
+                accentColor: .indigo,
+                detail1: locData.location,
+                detail2: "Played \\(locData.count)x",
+                value: "" // Main value can be part of details here
+            ))
+        }
+        return items.filter { $0.title != "N/A" } // Filter out empty/default states
+    }
+    
+    private func formatValue(_ value: String, type: HighlightType) -> Text {
+        if type == .multiplier {
+            return Text(value).font(.system(size: 38, weight: .bold, design: .rounded))
+        }
+        return Text(value).font(.system(size: 20, weight: .semibold, design: .rounded)) // Default for others if value is used
+    }
+
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if carouselItems.isEmpty {
+                Text("More stats available as you log sessions.")
+                    .font(.system(size: 14, design: .rounded))
+                    .foregroundColor(.gray)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Material.ultraThinMaterial.opacity(0.2))
+                    )
+                    .padding(.horizontal, 16)
+
+            } else {
+                TabView(selection: $selectedPageIndex) {
+                    ForEach(carouselItems.indices, id: \.self) { index in
+                        let item = carouselItems[index]
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Image(systemName: item.iconName)
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(item.accentColor)
+                                Text(item.title)
+                                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                Spacer()
+                            }
+                            .padding(.bottom, 5)
+
+                            if !item.value.isEmpty {
+                                formatValue(item.value, type: item.type)
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            
+                            if let detail1 = item.detail1, !detail1.isEmpty {
+                                Text(detail1)
+                                    .font(.system(size: item.type == .persona && item.value.isEmpty ? 22 : 15, weight: .medium, design: .rounded))
+                                    .foregroundColor(Color.white.opacity(0.85))
+                            }
+                            if let detail2 = item.detail2, !detail2.isEmpty {
+                                Text(detail2)
+                                    .font(.system(size: 15, weight: .regular, design: .rounded))
+                                    .foregroundColor(Color.gray)
+                            }
+                            if let detail3 = item.detail3, !detail3.isEmpty {
+                                Text(detail3)
+                                    .font(.system(size: 14, weight: .regular, design: .rounded))
+                                    .foregroundColor(Color.gray.opacity(0.9))
+                            }
+                            Spacer()
+                        }
+                        .padding(20)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 24)
+                                    .fill(Material.ultraThinMaterial.opacity(0.35))
+                                RoundedRectangle(cornerRadius: 24)
+                                    .fill(Color.black.opacity(0.25)) // Slightly darker base
+                                RoundedRectangle(cornerRadius: 24)
+                                    .stroke(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [item.accentColor.opacity(0.6), item.accentColor.opacity(0.2), Color.white.opacity(0.05)]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 2
+                                    )
+                                // Inner subtle glow
+                                RoundedRectangle(cornerRadius: 24)
+                                    .fill(item.accentColor)
+                                    .blur(radius: 40)
+                                    .opacity(0.15)
+                                    .blendMode(.overlay)
+
+                            }
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 24))
+                        .shadow(color: Color.black.opacity(0.2), radius: 10, y: 5)
+                        .padding(.horizontal, 16) // Padding for each tab item
+                        .tag(index)
+                    }
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never)) // Hide default dots
+                .frame(height: 180) // Explicit height for TabView content area
+
+                // Custom Page Indicator
+                HStack(spacing: 8) {
+                    ForEach(carouselItems.indices, id: \.self) { index in
+                        Circle()
+                            .fill(selectedPageIndex == index ? Color.white : Color.gray.opacity(0.5))
+                            .frame(width: 8, height: 8)
+                            .animation(.spring(), value: selectedPageIndex)
+                    }
+                }
+                .padding(.top, 10)
+            }
+        }
+    }
+}
 
 // MARK: - BankrollGraph - without the redundant header
 struct BankrollGraph: View {
@@ -1186,28 +1523,44 @@ struct SessionsTab: View {
                 title: Text("Delete Session"),
                 message: Text("Are you sure you want to delete this session? This action cannot be undone."),
                 primaryButton: .destructive(Text("Delete")) {
-                    if let session = selectedSession {
+                    if let sessionToDelete = selectedSession {
                         Task {
-                            do {
-                                try await deleteSession(session.id)
-                            } catch {
-
+                            // Call the existing deleteSession method in SessionStore
+                            sessionStore.deleteSession(sessionToDelete.id) { error in
+                                if let error = error {
+                                    // Handle error (e.g., show another alert or log)
+                                    print("Error deleting session: \(error.localizedDescription)")
+                                } else {
+                                    // Optionally, refresh or handle UI changes post-deletion if needed
+                                    // (SessionStore likely updates its `sessions` array which should reflect in UI)
+                                    print("Session \(sessionToDelete.id) deleted successfully.")
+                                }
+                                self.selectedSession = nil // Clear selection
                             }
                         }
                     }
                 },
-                secondaryButton: .cancel()
+                secondaryButton: .cancel() {
+                    self.selectedSession = nil // Clear selection on cancel
+                }
             )
         }
-        // Full-screen detail sheet (now standard sheet)
-        .sheet(item: $selectedSession, content: { session in
-            SessionDetailView(session: session)
-                .environmentObject(sessionStore) // Ensure SessionStore is in the environment for SessionDetailView
-        })
-        .sheet(isPresented: $showEditSheet) { 
-            if let session = selectedSession {
-                EditSessionSheetView(session: session, sessionStore: sessionStore) // Corrected call
+        .sheet(isPresented: $showEditSheet) {
+            if let sessionToEdit = selectedSession {
+                EditSessionSheetView(
+                    session: sessionToEdit,
+                    sessionStore: sessionStore // Pass the sessionStore instance
+                )
+                // onSave and onCancel are handled internally by EditSessionSheetView
+            } else {
+                // Fallback or error view if selectedSession is nil, though this should not happen if sheet is presented
+                Text("Error: No session selected for editing.")
             }
+        }
+        // Sheet for viewing session details
+        .sheet(item: $selectedSession, onDismiss: { selectedSession = nil }) { session in
+            SessionDetailView(session: session)
+                .environmentObject(sessionStore)
         }
     }
     
@@ -1217,45 +1570,6 @@ struct SessionsTab: View {
             return "+$\(Int(amount))"
         } else {
             return "-$\(abs(Int(amount)))"
-        }
-    }
-    
-    // Function to delete session
-    private func deleteSession(_ sessionId: String) async throws {
-        try await sessionStore.deleteSession(sessionId) { error in
-            if let error = error {
-
-            }
-        }
-    }
-    
-    // Update session with very basic logic
-    private func updateSelectedSession() {
-        guard let session = selectedSession,
-              let buyInValue = Double(editBuyIn),
-              let cashoutValue = Double(editCashout),
-              let hoursPlayedValue = Double(editHours) else {
-            return
-        }
-        
-        // Create updated session data with minimal changes
-        let updatedData: [String: Any] = [
-            "hoursPlayed": hoursPlayedValue,
-            "buyIn": buyInValue,
-            "cashout": cashoutValue,
-            "profit": cashoutValue - buyInValue,
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        
-        // Update in Firestore
-        let db = Firestore.firestore()
-        db.collection("sessions").document(session.id).updateData(updatedData) { error in
-            if error == nil {
-                // If successful, refresh sessions
-                self.sessionStore.fetchSessions()
-            } else {
-
-            }
         }
     }
 }
