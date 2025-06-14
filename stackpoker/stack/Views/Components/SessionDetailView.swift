@@ -37,10 +37,15 @@ struct SessionDetailView: View {
     // HandStore for fetching hands related to this session
     @StateObject private var handStore: HandStore
     
-    // State for fetched hands and notes
+    // StakeService for fetching stakes related to this session
+    @StateObject private var stakeService = StakeService()
+    @EnvironmentObject var userService: UserService // Add UserService for stake user lookups
+    
+    // State for fetched hands, notes, and stakes
     @State private var sessionHands: [SavedHand] = []
+    @State private var sessionStakes: [Stake] = []
     @State private var isLoadingHands: Bool = false
-    // @State private var isLoadingNotes: Bool = false
+    @State private var isLoadingStakes: Bool = false
 
     // State for presenting image picker and composition view
     @State private var showingImagePicker = false
@@ -51,8 +56,8 @@ struct SessionDetailView: View {
     @State private var selectedHandForReplay: ParsedHandHistory? = nil
     @State private var showingHandReplaySheet: Bool = false // Use a sheet for replay for now
     
-    // State for presenting EditSessionSheetView
-    @State private var showingEditSheet = false // New state variable
+    // State for presenting EditSessionView with NavigationView instead of sheet
+    @State private var showingEditView = false // Changed from showingEditSheet
     @EnvironmentObject var sessionStore: SessionStore // Add SessionStore to environment
     
     // Formatting helpers
@@ -66,7 +71,7 @@ struct SessionDetailView: View {
     // Computed properties for card display
     private var cardGameName: String {
         if session.gameType == SessionLogType.tournament.rawValue {
-            return session.series ?? session.gameName // Series or Tournament Name
+            return session.gameName // Always use the tournament name, not the series
         } else {
             return session.gameType.isEmpty ? session.gameName : "\(session.gameType) - \(session.gameName)"
         }
@@ -87,6 +92,8 @@ struct SessionDetailView: View {
             return session.location ?? session.gameName // Fallback for cash games
         }
     }
+    
+    @State private var selectedStakeForEdit: Stake? = nil
     
     init(session: Session) {
         self.session = session
@@ -114,59 +121,23 @@ struct SessionDetailView: View {
                 AppBackgroundView().ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .center, spacing: 30) { // Increased spacing from 25 to 30
-                        Text("Tap card to customize & share")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                            .padding(.top, 10)
-                            .padding(.bottom, 5)
-
-                        FinishedSessionCardView(
-                            gameName: cardGameName,
-                            stakes: cardStakes,
-                            location: cardLocation, 
-                            date: session.startDate,
-                            duration: formatDuration(hours: session.hoursPlayed),
-                            buyIn: session.buyIn,
-                            cashOut: session.cashout
-                        )
-                        .frame(maxHeight: 500) // Constrain the card height
-                        .padding(.horizontal)
-                        .padding(.bottom, 25) // Increased bottom padding from 10 to 25
-                        .onTapGesture {
-                            if #available(iOS 16.0, *) {
-                                showingImagePicker = true
-                            } else {
-
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: 25) {
+                        // Beautiful Session Details Display
+                        sessionDetailsView()
                         
-                        // Visual separator to ensure clear separation
-                        Divider()
-                            .opacity(0) // Invisible but creates space
-                            .padding(.vertical, 10)
+                        // Share and Edit Actions
+                        actionButtonsView()
                         
-                        // Edit Session Button - Placed here and styled
-                        Button(action: {
-                            showingEditSheet = true
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "pencil.line")
-                                Text("Edit Session Details")
-                            }
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.white) // Text color for the button
-                        }
-                        .modifier(GlassyButtonStyling())
-                        .padding(.horizontal) // Padding for the button itself within the VStack
-                        .padding(.top, 25) // Increased space above the button from 15 to 25
+                        // Staking Details Section
+                        stakingSectionView()
                         
                         handsSectionView()
                         notesSectionView()
                         
-                        Spacer(minLength: 30) // Keep some space at the bottom
+                        Spacer(minLength: 30)
                     }
                     .padding(.top, 20)
+                    .padding(.horizontal)
                 }
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -200,11 +171,166 @@ struct SessionDetailView: View {
                     Text("No hand selected for replay.") 
                 }
             }
-            .sheet(isPresented: $showingEditSheet) { 
-                EditSessionSheetView(session: session, sessionStore: sessionStore)
+            .fullScreenCover(isPresented: $showingEditView) {
+                NavigationView {
+                    EditSessionSheetView(
+                        session: session, 
+                        sessionStore: sessionStore, 
+                        sessionStakes: sessionStakes, 
+                        stakeService: stakeService,
+                        onStakeUpdated: {
+                            fetchSessionDetails()
+                        }
+                    )
                     .environmentObject(sessionStore)
+                        .environmentObject(userService)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button(action: { 
+                                    showingEditView = false 
+                                }) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                        }
+                }
             }
         }
+    }
+
+    // MARK: - Beautiful Session Details Display
+    @ViewBuilder
+    private func sessionDetailsView() -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // Header
+            VStack(alignment: .leading, spacing: 8) {
+                Text(cardGameName)
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.white)
+                
+                Text(cardStakes)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.gray)
+                
+                Text(cardLocation)
+                    .font(.system(size: 16))
+                    .foregroundColor(.gray)
+            }
+            
+            // Stats Grid - Beautiful Glassy Style
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 16),
+                GridItem(.flexible(), spacing: 16)
+            ], spacing: 16) {
+                GlassyInfoCard(
+                    title: "Duration",
+                    value: formatDuration(hours: session.hoursPlayed),
+                    icon: "clock",
+                    color: .blue
+                )
+                
+                GlassyInfoCard(
+                    title: "Date",
+                    value: formatShortDate(session.startDate),
+                    icon: "calendar",
+                    color: .green
+                )
+                
+                GlassyInfoCard(
+                    title: "Buy-in",
+                    value: "$\(session.buyIn.isFinite ? Int(session.buyIn) : 0)",
+                    icon: "arrow.down.circle",
+                    color: .orange
+                )
+                
+                GlassyInfoCard(
+                    title: "Cashout",
+                    value: "$\(session.cashout.isFinite ? Int(session.cashout) : 0)",
+                    icon: "arrow.up.circle",
+                    color: .purple
+                )
+            }
+            
+            // Profit/Loss Summary - Glassy Style
+            let profit = session.cashout - session.buyIn
+            CombinedProfitCard(
+                profit: profit,
+                hoursPlayed: session.hoursPlayed
+            )
+        }
+    }
+    
+    private func formatShortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date)
+    }
+    
+    // MARK: - Action Buttons
+    @ViewBuilder
+    private func actionButtonsView() -> some View {
+        HStack(spacing: 12) {
+            Button(action: {
+                if #available(iOS 16.0, *) {
+                    showingImagePicker = true
+                }
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Share")
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+            }
+            .modifier(GlassyButtonStyling())
+            
+            Button(action: {
+                showingEditView = true
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "pencil.line")
+                    Text("Edit Details")
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+            }
+            .modifier(GlassyButtonStyling())
+        }
+    }
+
+    // NEW: Extracted Staking Section
+    @ViewBuilder
+    private func stakingSectionView() -> some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Text("Staking Details")
+                .font(.title2)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+            
+            if isLoadingStakes {
+                HStack {
+                    ProgressView()
+                    Text("Loading stakes...")
+                        .foregroundColor(.gray)
+                }
+            } else if !sessionStakes.isEmpty {
+                VStack(spacing: 12) {
+                    ForEach(sessionStakes) { stake in
+                        GlassyStakeCard(stake: stake, userService: userService)
+                    }
+                }
+            } else {
+                Text("No stakes found for this session")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+        }
+        .padding(.bottom, 25)
     }
 
     // Extracted Hands Section
@@ -219,7 +345,6 @@ struct SessionDetailView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
-                    .padding(.horizontal)
                 
                 ForEach(sessionHands) { savedHand in
                     HandDisplayCardView(
@@ -232,9 +357,9 @@ struct SessionDetailView: View {
                         createdAt: savedHand.timestamp,
                         showReplayInFeed: false
                     )
-                    .padding(.horizontal)
                 }
             }
+            .padding(.bottom, 25)
         } else {
             Text("No hands recorded for this session.")
                 .font(.caption)
@@ -252,11 +377,9 @@ struct SessionDetailView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
-                    .padding(.horizontal)
 
                 ForEach(notes, id: \.self) { noteText in
                     NoteCardView(noteText: noteText)
-                        .padding(.horizontal)
                 }
             }
         } else {
@@ -268,24 +391,265 @@ struct SessionDetailView: View {
     }
 
     private func fetchSessionDetails() {
-        // Fetch Hands using the liveSessionUUID if available, otherwise fall back (though ideally it should always be available for new sessions)
-        guard let idForHandsQuery = session.liveSessionUUID, !idForHandsQuery.isEmpty else {
-
-            // Optionally, you could try session.id as a last resort if some old data might use it,
-            // but the primary mechanism should be liveSessionUUID.
-            // For now, we just won't fetch if the intended ID is missing.
-            self.isLoadingHands = false // Stop loading indicator
-            self.sessionHands = [] // Ensure hands are empty
-            return
-        }
-
+        // -----------------------------
+        // 1. HANDS
+        // -----------------------------
+        if let idForHandsQuery = session.liveSessionUUID, !idForHandsQuery.isEmpty {
         isLoadingHands = true
-
         handStore.fetchHands(forSessionId: idForHandsQuery) { hands in
             self.sessionHands = hands
+                self.isLoadingHands = false
+            }
+        } else {
+            // No liveSessionUUID – skip hand fetch gracefully.
             self.isLoadingHands = false
-
+            self.sessionHands = []
         }
+
+        // -----------------------------
+        // 2. STAKES
+        // -----------------------------
+        isLoadingStakes = true
+
+        // Fetch stakes - try both session.id and liveSessionUUID
+        Task {
+            do {
+                print("🔍 [SessionDetailView] Attempting to fetch stakes for session...")
+                print("🔍 [SessionDetailView] session.id: '\(session.id)'")
+                
+                // The user who created the session log is the one who was staked.
+                let playerUserId = session.userId
+                print("🔍 [SessionDetailView] Fetching for user: '\(playerUserId)'")
+
+                let stakes = try await stakeService.fetchStakesForSession(session.id)
+                
+                // If that fails, we can try the liveSessionUUID as a fallback, still using the same user.
+                if stakes.isEmpty, let liveUUID = session.liveSessionUUID, !liveUUID.isEmpty {
+                     print("🔍 [SessionDetailView] No stakes found with session.id, trying liveSessionUUID...")
+                     let fallbackStakes = try await stakeService.fetchStakesForSession(liveUUID)
+                     await MainActor.run {
+                         self.sessionStakes = fallbackStakes
+                     }
+                } else {
+                    await MainActor.run {
+                        self.sessionStakes = stakes
+                    }
+                }
+                
+                // Fetch user profiles for staker / staked if not already loaded
+                for stake in self.sessionStakes {
+                    if userService.loadedUsers[stake.stakerUserId] == nil {
+                        Task { await userService.fetchUser(id: stake.stakerUserId) }
+                    }
+                    if userService.loadedUsers[stake.stakedPlayerUserId] == nil {
+                        Task { await userService.fetchUser(id: stake.stakedPlayerUserId) }
+                    }
+                }
+                
+                await MainActor.run {
+                    self.isLoadingStakes = false
+                    print("🔍 [SessionDetailView] Final result: \(self.sessionStakes.count) stakes loaded")
+                }
+
+            } catch {
+                await MainActor.run {
+                    self.sessionStakes = []
+                    self.isLoadingStakes = false
+                    print("❌ [SessionDetailView] Error fetching stakes: \(error)")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - GlassyInfoCard Component
+struct GlassyInfoCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+    var isFullWidth: Bool = false
+    
+    private let glassOpacity = 0.01
+    private let materialOpacity = 0.25
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(color)
+                Spacer()
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.gray)
+                Text(value)
+                    .font(.system(size: isFullWidth ? 20 : 16, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: isFullWidth ? 80 : 70)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(materialOpacity)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(glassOpacity))
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+// MARK: - GlassyStakeCard Component  
+struct GlassyStakeCard: View {
+    let stake: Stake
+    @ObservedObject var userService: UserService
+    
+    private let glassOpacity = 0.01
+    private let materialOpacity = 0.25
+    
+    private func formatCurrency(_ amount: Double) -> String {
+        guard amount.isFinite && !amount.isNaN else {
+            return "$0"
+        }
+        
+        if amount >= 0 {
+            return "+$\(Int(amount))"
+        } else {
+            return "-$\(abs(Int(amount)))"
+        }
+    }
+    
+    private var stakerName: String {
+        if stake.isOffAppStake == true {
+            return stake.manualStakerDisplayName ?? "Manual Staker"
+        } else if let stakerProfile = userService.loadedUsers[stake.stakerUserId] {
+            return stakerProfile.displayName ?? stakerProfile.username
+        } else {
+            return "Loading..."
+        }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with staker info
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Staker: \(stakerName)")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Text("\(stake.stakePercentage.isFinite ? Int(stake.stakePercentage * 100) : 0)% at \(stake.markup, specifier: "%.2f")x markup")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Status")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                    
+                    Text(stake.status.displayName)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(stake.status == .settled ? .green : .orange)
+                }
+            }
+            
+            // Financial Grid - Glassy Style
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ], spacing: 12) {
+                StakeInfoItem(
+                    title: "Player Buy-in",
+                    value: "$\(stake.totalPlayerBuyInForSession.isFinite ? Int(stake.totalPlayerBuyInForSession) : 0)",
+                    icon: "arrow.down.circle",
+                    color: .orange
+                )
+                
+                StakeInfoItem(
+                    title: "Player Cashout", 
+                    value: "$\(stake.playerCashoutForSession.isFinite ? Int(stake.playerCashoutForSession) : 0)",
+                    icon: "arrow.up.circle",
+                    color: .purple
+                )
+                
+                StakeInfoItem(
+                    title: "Staker Cost",
+                    value: "$\(stake.stakerCost.isFinite ? Int(stake.stakerCost) : 0)",
+                    icon: "dollarsign.circle",
+                    color: .blue
+                )
+                
+                StakeInfoItem(
+                    title: "Settlement",
+                    value: formatCurrency(stake.amountTransferredAtSettlement),
+                    icon: stake.amountTransferredAtSettlement >= 0 ? "plus.circle.fill" : "minus.circle.fill",
+                    color: stake.amountTransferredAtSettlement >= 0 ? .green : .red
+                )
+            }
+        }
+        .padding(20)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(materialOpacity)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(glassOpacity))
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+// MARK: - StakeInfoItem Component
+struct StakeInfoItem: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(color)
+                Spacer()
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.gray)
+                Text(value)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 50)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+        )
     }
 }
 
@@ -327,6 +691,60 @@ struct ImagePicker: UIViewControllerRepresentable {
                 }
             }
         }
+    }
+}
+
+struct CombinedProfitCard: View {
+    let profit: Double
+    let hoursPlayed: Double
+    
+    private let glassOpacity = 0.01
+    private let materialOpacity = 0.25
+    
+    private var profitString: String {
+        guard profit.isFinite else { return "$0" }
+        return profit >= 0 ? "+$\(Int(profit))" : "-$\(abs(Int(profit)))"
+    }
+    private var hourlyString: String {
+        guard hoursPlayed > 0 && profit.isFinite else { return "$0/hr" }
+        let hourly = profit / hoursPlayed
+        return hourly >= 0 ? "+$\(Int(hourly))/hr" : "-$\(abs(Int(hourly)))/hr"
+    }
+    
+    var body: some View {
+        HStack(spacing: 24) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Net Result")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.gray)
+                Text(profitString)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(profit >= 0 ? .green : .red)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Hourly Rate")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.gray)
+                Text(hourlyString)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(profit >= 0 ? .green : .red)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 20)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(materialOpacity)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(glassOpacity))
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

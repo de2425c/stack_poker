@@ -12,7 +12,6 @@ struct GroupsView: View {
     @EnvironmentObject private var tabBarVisibility: TabBarVisibilityManager
     @State private var showingCreateGroup = false
     @State private var showingInvites = false
-    @State private var selectedGroupForDetail: UserGroup?
     @State private var selectedGroupForChat: UserGroup?
     @State private var groupActionSheet: UserGroup?
     @State private var error: String?
@@ -66,9 +65,6 @@ struct GroupsView: View {
                                             onTap: {
                                                 selectedGroupForChat = group
                                             },
-                                            onDetailsTap: {
-                                                selectedGroupForDetail = group
-                                            },
                                             onOptionsTap: {
                                                 groupActionSheet = group
                                             }
@@ -101,17 +97,6 @@ struct GroupsView: View {
                     get: { selectedGroupForChat != nil },
                     set: { if !$0 { selectedGroupForChat = nil } }
                 )) { EmptyView() }
-                
-                // Group Detail navigation
-                NavigationLink(destination:
-                                selectedGroupForDetail.map { grp in
-                    GroupDetailView(group: grp)
-                        .navigationBarHidden(true)
-                        .onDisappear { Task { await refreshGroups() } }
-                }, isActive: Binding(
-                    get: { selectedGroupForDetail != nil },
-                    set: { if !$0 { selectedGroupForDetail = nil } }
-                )) { EmptyView() }
             }
         )
         .alert(isPresented: $showError) {
@@ -128,8 +113,6 @@ struct GroupsView: View {
         // Confirmation Dialog
         .confirmationDialog("Group Options", isPresented: .init(get: { groupActionSheet != nil }, set: { if !$0 { groupActionSheet = nil } }), titleVisibility: .visible) {
             if let grp = groupActionSheet {
-                Button("View Details") { selectedGroupForDetail = grp }
-                Button("Invite Members") { selectedGroupForDetail = grp }
                 if grp.ownerId != Auth.auth().currentUser?.uid {
                     Button("Leave Group", role: .destructive) { Task { await leaveGroup(group: grp) } }
                 }
@@ -138,6 +121,7 @@ struct GroupsView: View {
         }
         .onAppear {
             setupNotificationObserver()
+            setupMessageUpdateObserver()
             Task { await refreshGroups() }
         }
         .onDisappear {
@@ -150,6 +134,19 @@ struct GroupsView: View {
     private func setupNotificationObserver() {
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("GroupDataChanged"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task {
+                await refreshGroups()
+            }
+        }
+    }
+    
+    // Set up observer for message updates to refresh group order
+    private func setupMessageUpdateObserver() {
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("GroupMessageSent"),
             object: nil,
             queue: .main
         ) { _ in
@@ -234,7 +231,6 @@ struct EmptyGroupsView: View {
 struct GroupCard: View {
     let group: UserGroup
     let onTap: () -> Void
-    let onDetailsTap: () -> Void
     let onOptionsTap: () -> Void
     @State private var cardOffset: CGFloat = 30
     @State private var cardOpacity: Double = 0
@@ -308,9 +304,9 @@ struct GroupCard: View {
                 }
             }
             
-            // Info button (more subtle)
-            Button(action: onDetailsTap) {
-                Image(systemName: "chevron.right")
+            // Options button (three dots)
+            Button(action: onOptionsTap) {
+                Image(systemName: "ellipsis")
                     .font(.system(size: 14))
                     .foregroundColor(.gray)
                     .padding(8)

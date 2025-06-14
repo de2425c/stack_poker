@@ -161,26 +161,10 @@ struct FinishedSessionCardView: View {
                             .frame(width: 140, height: 140)
                             .padding(.top, 30)
                         
-                        // Game name only - centered and larger
-                        AdaptiveText(gameName, maxLines: 2, availableWidth: geometry.size.width - 40, fontName: "PlusJakartaSans-Bold", baseFontSize: 50, maxFontSize: 80, minFontSize: 24, color: .white)
+                        // Game/Tournament name only - centered and larger
+                        AdaptiveText(gameName, maxLines: 3, availableWidth: geometry.size.width - 40, fontName: "PlusJakartaSans-Bold", baseFontSize: 50, maxFontSize: 80, minFontSize: 24, color: .white)
                             .padding(.horizontal, 20)
                             .frame(maxWidth: geometry.size.width - 40) // Constrain width
-
-                        // Stakes Display - Only show for cash games, not tournaments
-                        if !isTournament {
-                            AdaptiveText(
-                                stakesDisplay,
-                                maxLines: 1,
-                                availableWidth: geometry.size.width - 60,
-                                fontName: "PlusJakartaSans-Medium",
-                                baseFontSize: 28,
-                                maxFontSize: 36,
-                                minFontSize: 20,
-                                color: .white.opacity(0.8)
-                            )
-                            .padding(.top, 5)
-                            .frame(maxWidth: geometry.size.width - 60) // Constrain width
-                        }
                     }
                     
                     Spacer()

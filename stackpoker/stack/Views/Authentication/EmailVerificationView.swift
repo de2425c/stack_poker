@@ -111,8 +111,7 @@ struct EmailVerificationView: View {
             timer = nil
         }
         .fullScreenCover(isPresented: $showingProfileSetup, onDismiss: {
-
-            authViewModel.refreshFlow()
+            // Don't refresh flow here - let ProfileSetupView handle it
         }) {
             ProfileSetupView(isNewUser: true)
                 .environmentObject(authViewModel)

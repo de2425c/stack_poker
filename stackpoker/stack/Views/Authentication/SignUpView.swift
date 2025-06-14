@@ -13,6 +13,17 @@ struct SignUpView: View {
     @State private var showingEmailVerification = false
     @StateObject private var authService = AuthService()
     
+    // Real-time validation states
+    @State private var emailIsValid = false
+    @State private var passwordIsValid = false
+    @State private var passwordsMatch = false
+    @State private var hasInteracted = false
+    
+    // Computed property for form validity
+    private var isFormValid: Bool {
+        emailIsValid && passwordIsValid && passwordsMatch
+    }
+    
     var body: some View {
         NavigationView {
             GeometryReader { geometry in
@@ -33,44 +44,92 @@ struct SignUpView: View {
                             
                             // Registration Form
                             VStack(spacing: 16) {
-                                GlassyInputField(icon: "envelope", title: "EMAIL", labelColor: Color.white.opacity(0.6)) {
+                                // Email Field with real-time validation
+                                GlassyInputField(
+                                    icon: "envelope", 
+                                    title: "EMAIL", 
+                                    labelColor: emailValidationColor
+                                ) {
                                     TextField("", text: $email)
                                         .font(.plusJakarta(.body))
                                         .foregroundColor(.white)
                                         .keyboardType(.emailAddress)
                                         .autocapitalization(.none)
+                                        .textContentType(.emailAddress)
+                                        .onChange(of: email) { newValue in
+                                            validateEmail(newValue)
+                                            if !hasInteracted { hasInteracted = true }
+                                        }
                                 }
                                 
-                                GlassyInputField(icon: "lock", title: "PASSWORD", labelColor: Color.white.opacity(0.6)) {
+                                // Password Field with real-time validation
+                                GlassyInputField(
+                                    icon: "lock", 
+                                    title: "PASSWORD", 
+                                    labelColor: passwordValidationColor
+                                ) {
                                     SecureField("", text: $password)
                                         .font(.plusJakarta(.body))
                                         .foregroundColor(.white)
+                                        .textContentType(.newPassword)
+                                        .onChange(of: password) { newValue in
+                                            validatePassword(newValue)
+                                            validatePasswordMatch()
+                                            if !hasInteracted { hasInteracted = true }
+                                        }
                                 }
                                 
-                                GlassyInputField(icon: "lock.shield", title: "CONFIRM PASSWORD", labelColor: Color.white.opacity(0.6)) {
+                                // Confirm Password Field with real-time validation
+                                GlassyInputField(
+                                    icon: "lock.shield", 
+                                    title: "CONFIRM PASSWORD", 
+                                    labelColor: confirmPasswordValidationColor
+                                ) {
                                     SecureField("", text: $confirmPassword)
                                         .font(.plusJakarta(.body))
                                         .foregroundColor(.white)
+                                        .textContentType(.newPassword)
+                                        .onChange(of: confirmPassword) { newValue in
+                                            validatePasswordMatch()
+                                            if !hasInteracted { hasInteracted = true }
+                                        }
                                 }
                                 
-                                Button(action: signUp) {
+                                // Optimized Create Account Button
+                                Button(action: {
+                                    // Add haptic feedback for immediate response
+                                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                                    impactFeedback.impactOccurred()
+                                    signUp()
+                                }) {
                                     ZStack {
-                                        Text("Create Account")
-                                            .font(.custom("PlusJakartaSans-SemiBold", size: 18))
-                                            .foregroundColor(.black)
-                                            .opacity(isLoading ? 0 : 1)
-
-                                        if isLoading {
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .black))
-                                                .scaleEffect(0.8)
+                                        HStack {
+                                            if isLoading {
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                                    .scaleEffect(0.8)
+                                                Text("Creating Account...")
+                                                    .font(.custom("PlusJakartaSans-SemiBold", size: 18))
+                                                    .foregroundColor(.black)
+                                            } else {
+                                                Text("Create Account")
+                                                    .font(.custom("PlusJakartaSans-SemiBold", size: 18))
+                                                    .foregroundColor(.black)
+                                            }
                                         }
                                     }
                                     .frame(maxWidth: .infinity, minHeight: 56)
+                                    .animation(.easeInOut(duration: 0.2), value: isLoading)
                                 }
-                                .background(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                .cornerRadius(12)
-                                .disabled(isLoading)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(buttonBackgroundColor)
+                                        .scaleEffect(isLoading ? 0.98 : 1.0)
+                                        .animation(.easeInOut(duration: 0.1), value: isLoading)
+                                )
+                                .disabled(isLoading || (!isFormValid && hasInteracted))
+                                .opacity(buttonOpacity)
+                                .animation(.easeInOut(duration: 0.2), value: isFormValid)
                                 .contentShape(Rectangle())
                             }
                             .padding(.top, 12)
@@ -101,9 +160,9 @@ struct SignUpView: View {
                         Spacer()
                     }
                 }
-                .ignoresSafeArea(.keyboard) // Ignore the keyboard safe area
+                .ignoresSafeArea(.keyboard)
             }
-            .navigationBarHidden(true) // Hide the navigation bar since we have our own close button
+            .navigationBarHidden(true)
         }
         .alert("Error", isPresented: $showingError) {
             Button("OK") { }
@@ -117,37 +176,87 @@ struct SignUpView: View {
         }
     }
     
+    // MARK: - Validation Methods
+    private func validateEmail(_ email: String) {
+        emailIsValid = email.contains("@") && email.contains(".") && email.count > 5
+    }
+    
+    private func validatePassword(_ password: String) {
+        passwordIsValid = password.count >= 6
+    }
+    
+    private func validatePasswordMatch() {
+        passwordsMatch = password == confirmPassword && !confirmPassword.isEmpty
+    }
+    
+    // MARK: - Computed Properties for UI States
+    private var emailValidationColor: Color {
+        if !hasInteracted { return Color.white.opacity(0.6) }
+        return emailIsValid ? Color.green.opacity(0.8) : Color.red.opacity(0.8)
+    }
+    
+    private var passwordValidationColor: Color {
+        if !hasInteracted { return Color.white.opacity(0.6) }
+        return passwordIsValid ? Color.green.opacity(0.8) : Color.red.opacity(0.8)
+    }
+    
+    private var confirmPasswordValidationColor: Color {
+        if !hasInteracted || confirmPassword.isEmpty { return Color.white.opacity(0.6) }
+        return passwordsMatch ? Color.green.opacity(0.8) : Color.red.opacity(0.8)
+    }
+    
+    private var buttonBackgroundColor: Color {
+        if isLoading {
+            return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8))
+        }
+        return isFormValid || !hasInteracted ? 
+            Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
+            Color.gray.opacity(0.6)
+    }
+    
+    private var buttonOpacity: Double {
+        if isLoading { return 0.8 }
+        return (isFormValid || !hasInteracted) ? 1.0 : 0.6
+    }
+    
+    // MARK: - Sign Up Method
     private func signUp() {
-        guard password == confirmPassword else {
-            errorMessage = "Passwords don't match"
-            showingError = true
-            return
-        }
+        // Prevent double submission
+        guard !isLoading else { return }
         
-        // Validate password length
-        guard password.count >= 6 else {
-            errorMessage = "Password must be at least 6 characters long"
-            showingError = true
-            return
-        }
-        
-        // Validate email format (simple check)
-        guard email.contains("@") && email.contains(".") else {
-            errorMessage = "Please enter a valid email address"
+        // Final validation before submission
+        guard isFormValid else {
+            if !emailIsValid {
+                errorMessage = "Please enter a valid email address"
+            } else if !passwordIsValid {
+                errorMessage = "Password must be at least 6 characters long"
+            } else if !passwordsMatch {
+                errorMessage = "Passwords don't match"
+            }
             showingError = true
             return
         }
         
         isLoading = true
+        
         Task {
             do {
                 try await authService.signUpWithEmail(email: email, password: password)
-                DispatchQueue.main.async {
+                
+                await MainActor.run {
+                    // Add success haptic feedback
+                    let successFeedback = UINotificationFeedbackGenerator()
+                    successFeedback.notificationOccurred(.success)
+                    
                     showingEmailVerification = true
                     isLoading = false
                 }
             } catch let error as AuthError {
-                DispatchQueue.main.async {
+                await MainActor.run {
+                    // Add error haptic feedback
+                    let errorFeedback = UINotificationFeedbackGenerator()
+                    errorFeedback.notificationOccurred(.error)
+                    
                     // Check specifically for email already in use error
                     if case .emailInUse = error {
                         errorMessage = "This email is already registered. Please sign in or use a different email."
@@ -158,7 +267,10 @@ struct SignUpView: View {
                     isLoading = false
                 }
             } catch {
-                DispatchQueue.main.async {
+                await MainActor.run {
+                    let errorFeedback = UINotificationFeedbackGenerator()
+                    errorFeedback.notificationOccurred(.error)
+                    
                     errorMessage = "An unexpected error occurred: \(error.localizedDescription)"
                     showingError = true
                     isLoading = false

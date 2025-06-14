@@ -1,8 +1,18 @@
 import SwiftUI
+import FirebaseAuth
 
 struct StandaloneHomeGameBar: View {
     let game: HomeGame
+    var currentUserId: String = Auth.auth().currentUser?.uid ?? ""
     var onTap: () -> Void
+
+    private var subtitle: String {
+        if game.creatorId == currentUserId {
+            return "You're hosting"
+        } else {
+            return "Tap to join"
+        }
+    }
 
     var body: some View {
         Button(action: onTap) {
@@ -16,7 +26,7 @@ struct StandaloneHomeGameBar: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                    Text("You're hosting")
+                    Text(subtitle)
                         .font(.system(size: 12))
                         .foregroundColor(.gray)
                 }

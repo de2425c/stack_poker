@@ -248,6 +248,12 @@ struct HomePage: View {
                 EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
             }
             .onAppear {
+                pageLevelHomeGameService.startListeningForActiveStandaloneGame(userId: self.userId) { game in
+                    DispatchQueue.main.async {
+                        self.activeHostedStandaloneGame = game
+                    }
+                }
+
                 loadActiveHostedStandaloneGame()
                 
                 // Add observer for standalone game bar refresh
@@ -262,6 +268,7 @@ struct HomePage: View {
             .onDisappear {
                 // Remove observer when view disappears
                 NotificationCenter.default.removeObserver(self)
+                pageLevelHomeGameService.stopListeningForActiveStandaloneGame()
             }
             .environmentObject(tabBarVisibility)
         }
@@ -273,30 +280,18 @@ struct HomePage: View {
 
         Task {
             do {
-                let allHostedGames = try await pageLevelHomeGameService.fetchActiveGames(createdBy: self.userId)
+                let hosted = try await pageLevelHomeGameService.fetchActiveGames(createdBy: self.userId)
+                let playing = try await pageLevelHomeGameService.fetchActiveStandaloneGames(for: self.userId)
 
-                
-                // Get standalone games (no groupId) that are active and sort by creation date (newest first)
-                let standaloneGames = allHostedGames
-                    .filter { $0.groupId == nil && $0.status == .active }
+                let all = (hosted + playing).filter { $0.groupId == nil && $0.status == .active }
                     .sorted { $0.createdAt > $1.createdAt }
                 
-
-                
                 await MainActor.run {
-                    // Get the most recent one
-                    self.activeHostedStandaloneGame = standaloneGames.first
-                    
-                    if let game = self.activeHostedStandaloneGame {
-
-                    } else {
-
-                    }
+                    self.activeHostedStandaloneGame = all.first
                 }
             } catch {
-
                 await MainActor.run {
-                    self.activeHostedStandaloneGame = nil // Ensure it's nil on error
+                    self.activeHostedStandaloneGame = nil
                 }
             }
         }

@@ -6,7 +6,7 @@ import FirebaseAuth
 struct ProfileSetupView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var authViewModel: AuthViewModel
-    @StateObject private var userService = UserService()
+    @EnvironmentObject var userService: UserService
     @State private var username = ""
     @State private var displayName = ""
     @State private var bio = ""
@@ -230,23 +230,32 @@ struct ProfileSetupView: View {
                     .padding(.horizontal, 24)
                 }
                 
-                // Close button
-                VStack {
-                    HStack {
-                        Button(action: { dismiss() }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.white)
-                                .padding(10)
-                                .background(Color.black.opacity(0.3))
-                                .clipShape(Circle())
+                // Close button - only show for actual new users who might want to sign out
+                if isNewUser {
+                    VStack {
+                        HStack {
+                            Button(action: { 
+                                // Sign out since they're not completing profile setup
+                                do {
+                                    try Auth.auth().signOut()
+                                } catch {
+                                    print("Error signing out: \(error)")
+                                }
+                            }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(Color.black.opacity(0.3))
+                                    .clipShape(Circle())
+                            }
+                            .padding(.leading, 16)
+                            .padding(.top, 25)
+                            
+                            Spacer()
                         }
-                        .padding(.leading, 16)
-                        .padding(.top, 25)
-                        
                         Spacer()
                     }
-                    Spacer()
                 }
             }
             .ignoresSafeArea()
@@ -258,6 +267,7 @@ struct ProfileSetupView: View {
             Text(errorMessage)
                 .font(.custom("PlusJakartaSans-Medium", size: 16))
         }
+
     }
     
     // Dynamic button background color for step 1
@@ -347,7 +357,23 @@ struct ProfileSetupView: View {
     }
     
     private func createProfile() {
-        guard !username.isEmpty && !displayName.isEmpty else { return }
+        print("ProfileSetupView: createProfile called")
+        print("ProfileSetupView: Username: '\(username)', DisplayName: '\(displayName)'")
+        
+        guard !username.isEmpty && !displayName.isEmpty else { 
+            print("ProfileSetupView: Username or display name is empty")
+            return 
+        }
+        
+        // Check if user is authenticated
+        guard let currentUser = Auth.auth().currentUser else {
+            print("ProfileSetupView: No authenticated user found")
+            errorMessage = "Authentication error. Please sign in again."
+            showingError = true
+            return
+        }
+        
+        print("ProfileSetupView: User authenticated, UID: \(currentUser.uid)")
         
         isLoading = true
         
@@ -398,41 +424,46 @@ struct ProfileSetupView: View {
                     profileData["avatarURL"] = avatarURL
                 }
                 
+                print("ProfileSetupView: About to create profile with data: \(profileData)")
+                
                 try await userService.createUserProfile(userData: profileData)
                 
-                // CRITICAL FIX: Explicitly reload the Firebase user to ensure we have the latest verification status
-                guard let user = Auth.auth().currentUser else {
-                    throw NSError(domain: "ProfileSetup", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not available"])
-                }
+                print("ProfileSetupView: Profile created successfully!")
                 
-                // Force reload the user
-                try await user.reload()
-                
-                // Get the latest user object and email verification status
-                let currentUser = Auth.auth().currentUser
-                let isEmailVerified = currentUser?.isEmailVerified ?? false
-                
-
-                
-                // Dismiss on main thread
-                await MainActor.run {
-
-                    dismiss()
-                }
-
-                // Wait for dismissal animation to complete
-                try await Task.sleep(nanoseconds: 500_000_000)
-
-                // Regardless of email status, enter main flow
-
-                await authViewModel.enterMainFlow()
             } catch {
+                print("ProfileSetupView: Profile creation failed with error: \(error)")
+                print("ProfileSetupView: Error type: \(type(of: error))")
+                print("ProfileSetupView: Error description: \(error.localizedDescription)")
+                
                 await MainActor.run {
-                    errorMessage = (error as? UserServiceError)?.message ?? "An unexpected error occurred"
+                    // Provide more specific error messages
+                    if let userServiceError = error as? UserServiceError {
+                        errorMessage = userServiceError.message
+                    } else {
+                        let nsError = error as NSError
+                        errorMessage = "Error (\(nsError.code)): \(nsError.localizedDescription)"
+                    }
+                    
                     showingError = true
                     isLoading = false
-
+                    print("ProfileSetupView: Showing error: \(errorMessage)")
                 }
+                return
+            }
+            
+            // Profile created successfully - refresh flow and let MainCoordinator handle everything
+            await MainActor.run {
+                isLoading = false
+                
+                // Add success haptic feedback
+                let successFeedback = UINotificationFeedbackGenerator()
+                successFeedback.notificationOccurred(.success)
+                
+                print("ProfileSetupView: Profile created successfully, forcing main flow")
+                
+                // Force the app flow to main since profile is now created
+                // ProfileSetupView is shown directly in NavigationStack, not as modal, so we need to force the flow change
+                authViewModel.forceAppFlow(.main(userId: currentUser.uid))
             }
         }
     }

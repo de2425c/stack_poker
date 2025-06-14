@@ -7,15 +7,18 @@ import FirebaseAuth
 struct DashboardView: View {
     @StateObject private var handStore: HandStore
     @StateObject private var sessionStore: SessionStore
+    @StateObject private var bankrollStore: BankrollStore
     @StateObject private var postService = PostService()
     @EnvironmentObject private var userService: UserService
     @State private var selectedTimeRange = 1 // Default to 1W (index 1)
     @State private var selectedTab: Int // Changed to be initialized with parameter
+    @State private var showingBankrollSheet = false
     private let timeRanges = ["24H", "1W", "1M", "6M", "1Y", "All"]
     
     init(userId: String, initialSelectedTab: Int = 0) {
         _handStore = StateObject(wrappedValue: HandStore(userId: userId))
         _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId))
+        _bankrollStore = StateObject(wrappedValue: BankrollStore(userId: userId))
         // Initialize selectedTab with the provided parameter
         _selectedTab = State(initialValue: initialSelectedTab)
         
@@ -33,8 +36,9 @@ struct DashboardView: View {
     }
     
     private var totalBankroll: Double {
-        // Calculate total profit from all sessions
-        return sessionStore.sessions.reduce(0) { $0 + $1.profit }
+        // Calculate total bankroll: session profits + manual bankroll adjustments
+        let sessionProfitTotal = sessionStore.sessions.reduce(0) { $0 + $1.profit }
+        return sessionProfitTotal + bankrollStore.bankrollSummary.currentTotal
     }
     
     private var selectedTimeRangeProfit: Double {
@@ -259,7 +263,10 @@ struct DashboardView: View {
                                 timeRanges: timeRanges,
                                 sessions: sessionStore.sessions,
                                 totalProfit: totalBankroll,
-                                timeRangeProfit: selectedTimeRangeProfit
+                                timeRangeProfit: selectedTimeRangeProfit,
+                                onAdjustBankroll: {
+                                    showingBankrollSheet = true
+                                }
                             )
                             .padding(.top, 6) // Reduced top padding
                             .padding(.bottom, 2) // Minimal padding to move cards up
@@ -298,7 +305,7 @@ struct DashboardView: View {
                             
                         } else {
                             // SESSIONS TAB
-                            SessionsTab(sessionStore: sessionStore)
+                            SessionsTab(sessionStore: sessionStore, bankrollStore: bankrollStore)
                         }
                     }
                     .padding(.bottom, 90) // Added significant bottom padding for better scrolling
@@ -313,6 +320,9 @@ struct DashboardView: View {
             .navigationBarHidden(true) // Hide the top navigation bar
         }
         .navigationViewStyle(StackNavigationViewStyle()) // Use StackNavigationViewStyle for proper push navigation
+        .sheet(isPresented: $showingBankrollSheet) {
+            BankrollAdjustmentSheet(bankrollStore: bankrollStore, currentTotalBankroll: totalBankroll)
+        }
     }
 }
 
@@ -393,6 +403,7 @@ struct IntegratedChartSection: View {
     let sessions: [Session]
     let totalProfit: Double
     let timeRangeProfit: Double
+    let onAdjustBankroll: () -> Void
     
     // Filter sessions based on selected time range
     private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
@@ -424,15 +435,27 @@ struct IntegratedChartSection: View {
                 VStack(spacing: 0) {
             // Profit info at top with better integration - transparent
             VStack(alignment: .leading, spacing: 4) {
-                Text("Profit")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(Color.gray.opacity(0.7))
-                    .padding(.horizontal, 2) // Moved further left
+                // Bankroll header with inline edit button
+                HStack(alignment: .center, spacing: 6) {
+                    Text("Bankroll")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(Color.gray.opacity(0.7))
+
+                    // Inline edit button (moved from value row)
+                    Button(action: onAdjustBankroll) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.8))
+                            .frame(width: 24, height: 24)
+                    }
+                }
+                .padding(.horizontal, 2)
                 
-                Text("$\(Int(totalProfit))")
-                    .font(.system(size: 38, weight: .bold))
+                HStack(alignment: .center, spacing: 0) {
+                    Text("$\(Int(totalProfit))")
+                        .font(.system(size: 38, weight: .bold))
                         .foregroundColor(.white)
-                    .padding(.horizontal, 2) // Moved further left
+                }
                 
                 HStack(spacing: 4) {
                     Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
@@ -477,6 +500,29 @@ struct IntegratedChartSection: View {
                         .padding(.top, 2) // Further reduced padding
                 }
             }
+            
+            // Edit Bankroll button underneath chart
+            HStack {
+                Button(action: onAdjustBankroll) {
+                    Text("Edit Bankroll")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16) // Space between chart and button
         }
     }
 }
@@ -1313,6 +1359,8 @@ struct HandSummaryRow: View {
 // MARK: - Sessions Tab
 struct SessionsTab: View {
     @ObservedObject var sessionStore: SessionStore
+    @ObservedObject var bankrollStore: BankrollStore
+    @EnvironmentObject private var userService: UserService
     @State private var showingDeleteAlert = false
     @State private var selectedSession: Session? = nil
     @State private var showEditSheet = false
@@ -1323,52 +1371,102 @@ struct SessionsTab: View {
     @State private var selectedDate: Date? = nil
     @State private var currentMonth = Date()
     
-    // Group sessions by time periods
-    private var groupedSessions: (today: [Session], lastWeek: [Session], older: [Session]) {
+    // Combined sessions and transactions grouped by time periods
+    private var groupedItems: (today: [SessionOrTransaction], lastWeek: [SessionOrTransaction], older: [SessionOrTransaction]) {
         let calendar = Calendar.current
         let now = Date()
         let startOfToday = calendar.startOfDay(for: now)
         let oneWeekAgo = calendar.date(byAdding: .day, value: -7, to: startOfToday)!
         
-        var today: [Session] = []
-        var lastWeek: [Session] = []
-        var older: [Session] = []
+        var today: [SessionOrTransaction] = []
+        var lastWeek: [SessionOrTransaction] = []
+        var older: [SessionOrTransaction] = []
         
-        // Sort sessions by start date (newest first)
-        let sortedSessions = sessionStore.sessions.sorted(by: { $0.startDate > $1.startDate })
+        // Convert sessions to SessionOrTransaction
+        let sessionItems = sessionStore.sessions.map { SessionOrTransaction.session($0) }
         
-        for session in sortedSessions {
-            if calendar.isDate(session.startDate, inSameDayAs: now) {
-                today.append(session)
-            } else if session.startDate >= oneWeekAgo && session.startDate < startOfToday {
-                lastWeek.append(session)
+        // Convert bankroll transactions to SessionOrTransaction
+        let transactionItems = bankrollStore.transactions.map { SessionOrTransaction.transaction($0) }
+        
+        // Combine and sort by date (newest first)
+        let allItems = (sessionItems + transactionItems).sorted { item1, item2 in
+            switch (item1, item2) {
+            case let (.session(s1), .session(s2)):
+                return s1.startDate > s2.startDate
+            case let (.transaction(t1), .transaction(t2)):
+                return t1.timestamp > t2.timestamp
+            case let (.session(s), .transaction(t)):
+                return s.startDate > t.timestamp
+            case let (.transaction(t), .session(s)):
+                return t.timestamp > s.startDate
+            }
+        }
+        
+        for item in allItems {
+            let itemDate: Date
+            switch item {
+            case .session(let session):
+                itemDate = session.startDate
+            case .transaction(let transaction):
+                itemDate = transaction.timestamp
+            }
+            
+            if calendar.isDate(itemDate, inSameDayAs: now) {
+                today.append(item)
+            } else if itemDate >= oneWeekAgo && itemDate < startOfToday {
+                lastWeek.append(item)
             } else {
-                older.append(session)
+                older.append(item)
             }
         }
         
         return (today, lastWeek, older)
     }
     
-    // Get sessions for a specific date
-    private func sessionsForDate(_ date: Date) -> [Session] {
+    // Get items for a specific date
+    private func itemsForDate(_ date: Date) -> [SessionOrTransaction] {
         let calendar = Calendar.current
-        return sessionStore.sessions.filter { session in
+        let sessionItems = sessionStore.sessions.filter { session in
             calendar.isDate(session.startDate, inSameDayAs: date)
-        }.sorted(by: { $0.startDate > $1.startDate })
+        }.map { SessionOrTransaction.session($0) }
+        
+        let transactionItems = bankrollStore.transactions.filter { transaction in
+            calendar.isDate(transaction.timestamp, inSameDayAs: date)
+        }.map { SessionOrTransaction.transaction($0) }
+        
+        return (sessionItems + transactionItems).sorted { item1, item2 in
+            switch (item1, item2) {
+            case let (.session(s1), .session(s2)):
+                return s1.startDate > s2.startDate
+            case let (.transaction(t1), .transaction(t2)):
+                return t1.timestamp > t2.timestamp
+            case let (.session(s), .transaction(t)):
+                return s.startDate > t.timestamp
+            case let (.transaction(t), .session(s)):
+                return t.timestamp > s.startDate
+            }
+        }
     }
     
-    // Calculate monthly profit
+    // Calculate monthly profit including bankroll adjustments
     private func monthlyProfit(_ date: Date) -> Double {
         let calendar = Calendar.current
         let month = calendar.component(.month, from: date)
         let year = calendar.component(.year, from: date)
         
-        return sessionStore.sessions.filter { session in
+        let sessionProfit = sessionStore.sessions.filter { session in
             let sessionMonth = calendar.component(.month, from: session.startDate)
             let sessionYear = calendar.component(.year, from: session.startDate)
             return sessionMonth == month && sessionYear == year
         }.reduce(0) { $0 + $1.profit }
+        
+        let bankrollProfit = bankrollStore.transactions.filter { transaction in
+            let transactionMonth = calendar.component(.month, from: transaction.timestamp)
+            let transactionYear = calendar.component(.year, from: transaction.timestamp)
+            return transactionMonth == month && transactionYear == year
+        }.reduce(0) { $0 + $1.amount }
+        
+        return sessionProfit + bankrollProfit
     }
 
     var body: some View {
@@ -1388,8 +1486,8 @@ struct SessionsTab: View {
                     .padding(.top, 20) // Increased top padding for LuxuryCalendarView component
                     .padding(.horizontal, 8) 
                     
-                    // Selected Date Sessions
-                    if let selectedDate = selectedDate, !sessionsForDate(selectedDate).isEmpty {
+                    // Selected Date Items
+                    if let selectedDate = selectedDate, !itemsForDate(selectedDate).isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             // Date header
                             let formatter = DateFormatter()
@@ -1400,16 +1498,23 @@ struct SessionsTab: View {
                                         .font(.system(size: 20, weight: .bold, design: .rounded))
                                         .foregroundColor(.white)
                                     
-                                    let sessionsCount = sessionsForDate(selectedDate).count
-                                    Text("\(sessionsCount) \(sessionsCount == 1 ? "session" : "sessions")")
+                                    let itemsCount = itemsForDate(selectedDate).count
+                                    Text("\(itemsCount) \(itemsCount == 1 ? "item" : "items")")
                                         .font(.system(size: 14, weight: .medium, design: .rounded))
                                         .foregroundColor(Color.gray.opacity(0.8))
                                 }
                                 
                                 Spacer()
                                 
-                                // Daily profit summary
-                                let dailyProfit = sessionsForDate(selectedDate).reduce(0) { $0 + $1.profit }
+                                // Daily profit summary (sessions + bankroll adjustments)
+                                let dailyProfit = itemsForDate(selectedDate).reduce(0) { total, item in
+                                    switch item {
+                                    case .session(let session):
+                                        return total + session.profit
+                                    case .transaction(let transaction):
+                                        return total + transaction.amount
+                                    }
+                                }
                                 Text(formatCurrency(dailyProfit))
                                     .font(.system(size: 20, weight: .bold, design: .rounded))
                                     .foregroundColor(dailyProfit >= 0 ? 
@@ -1427,23 +1532,24 @@ struct SessionsTab: View {
                             .padding(.horizontal, 16)
                             .padding(.top, 8)
                             
-                            // Sessions for selected date with animation
+                            // Items for selected date with animation
                             VStack(spacing: 12) {
-                                ForEach(Array(sessionsForDate(selectedDate).enumerated()), id: \.element.id) { index, session in
-                                    EnhancedSessionSummaryRow(
-                                        session: session,
-                                        onSelect: {
-                                            selectedSession = session
-                                        },
-                                        onDelete: {
-                                            selectedSession = session
-                                            showingDeleteAlert = true
-                                        }
-                                    )
-                                    .transition(.asymmetric(
-                                        insertion: .scale(scale: 0.95).combined(with: .opacity),
-                                        removal: .scale(scale: 0.95).combined(with: .opacity)
-                                    ))
+                                ForEach(Array(itemsForDate(selectedDate).enumerated()), id: \.element.id) { index, item in
+                                    switch item {
+                                    case .session(let session):
+                                        EnhancedSessionSummaryRow(
+                                            session: session,
+                                            onSelect: {
+                                                selectedSession = session
+                                            },
+                                            onDelete: {
+                                                selectedSession = session
+                                                showingDeleteAlert = true
+                                            }
+                                        )
+                                    case .transaction(let transaction):
+                                        BankrollTransactionRow(transaction: transaction)
+                                    }
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -1468,9 +1574,9 @@ struct SessionsTab: View {
                         ))
                     }
                     
-                    // Today's sessions
-                    if !groupedSessions.today.isEmpty && (selectedDate == nil || !Calendar.current.isDate(selectedDate!, inSameDayAs: Date())) {
-                        EnhancedSessionsSection(title: "Today", sessions: groupedSessions.today, 
+                    // Today's items
+                    if !groupedItems.today.isEmpty && (selectedDate == nil || !Calendar.current.isDate(selectedDate!, inSameDayAs: Date())) {
+                        EnhancedItemsSection(title: "Today", items: groupedItems.today, 
                                                 onSelect: { session in
                                                     selectedSession = session
                                                 }, 
@@ -1481,9 +1587,9 @@ struct SessionsTab: View {
                         .padding(.horizontal, 16)
                     }
                     
-                    // Last week's sessions
-                    if !groupedSessions.lastWeek.isEmpty {
-                        EnhancedSessionsSection(title: "Last Week", sessions: groupedSessions.lastWeek, 
+                    // Last week's items
+                    if !groupedItems.lastWeek.isEmpty {
+                        EnhancedItemsSection(title: "Last Week", items: groupedItems.lastWeek, 
                                                 onSelect: { session in
                                                     selectedSession = session
                                                 }, 
@@ -1494,9 +1600,9 @@ struct SessionsTab: View {
                         .padding(.horizontal, 16)
                     }
                     
-                    // Older sessions
-                    if !groupedSessions.older.isEmpty {
-                        EnhancedSessionsSection(title: "All Time", sessions: groupedSessions.older, 
+                    // Older items
+                    if !groupedItems.older.isEmpty {
+                        EnhancedItemsSection(title: "All Time", items: groupedItems.older, 
                                                 onSelect: { session in
                                                     selectedSession = session
                                                 }, 
@@ -1508,7 +1614,7 @@ struct SessionsTab: View {
                     }
                     
                     // Empty state
-                    if sessionStore.sessions.isEmpty {
+                    if sessionStore.sessions.isEmpty && bankrollStore.transactions.isEmpty {
                         EmptySessionsView()
                             .padding(32)
                     }
@@ -1549,8 +1655,10 @@ struct SessionsTab: View {
             if let sessionToEdit = selectedSession {
                 EditSessionSheetView(
                     session: sessionToEdit,
-                    sessionStore: sessionStore // Pass the sessionStore instance
+                    sessionStore: sessionStore,
+                    stakeService: StakeService()
                 )
+                .environmentObject(userService)
                 // onSave and onCancel are handled internally by EditSessionSheetView
             } else {
                 // Fallback or error view if selectedSession is nil, though this should not happen if sheet is presented
@@ -1561,6 +1669,7 @@ struct SessionsTab: View {
         .sheet(item: $selectedSession, onDismiss: { selectedSession = nil }) { session in
             SessionDetailView(session: session)
                 .environmentObject(sessionStore)
+                .environmentObject(userService)
         }
     }
     
@@ -1571,6 +1680,129 @@ struct SessionsTab: View {
         } else {
             return "-$\(abs(Int(amount)))"
         }
+    }
+}
+
+// MARK: - Session or Transaction enum
+enum SessionOrTransaction: Identifiable {
+    case session(Session)
+    case transaction(BankrollTransaction)
+    
+    var id: String {
+        switch self {
+        case .session(let session):
+            return "session_\(session.id)"
+        case .transaction(let transaction):
+            return "transaction_\(transaction.id)"
+        }
+    }
+}
+
+extension SessionOrTransaction {
+    var date: Date {
+        switch self {
+        case .session(let session):
+            return session.startDate
+        case .transaction(let transaction):
+            return transaction.timestamp
+        }
+    }
+    
+    var amount: Double {
+        switch self {
+        case .session(let session):
+            return session.profit
+        case .transaction(let transaction):
+            return transaction.amount
+        }
+    }
+}
+
+// MARK: - Bankroll Transaction Row
+struct BankrollTransactionRow: View {
+    let transaction: BankrollTransaction
+    
+    private func formatMoney(_ amount: Double) -> String {
+        return "$\(abs(Int(amount)))"
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"  // Shorter date format
+        return formatter.string(from: date)
+    }
+    
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"  // Time format
+        return formatter.string(from: date)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header with bankroll info and amount
+            HStack(alignment: .center) {
+                // Bankroll adjustment info
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Bankroll Adjustment")
+                        .font(.plusJakarta(.body, weight: .bold)) // Using Plus Jakarta Sans
+                        .foregroundColor(.white)
+                    
+                    if let note = transaction.note, !note.isEmpty {
+                        Text(note)
+                            .font(.plusJakarta(.footnote, weight: .medium)) // Using Plus Jakarta Sans
+                            .foregroundColor(Color.gray.opacity(0.8))
+                            .lineLimit(2)
+                    } else {
+                        Text("Manual adjustment")
+                            .font(.plusJakarta(.footnote, weight: .medium)) // Using Plus Jakarta Sans
+                            .foregroundColor(Color.gray.opacity(0.8))
+                    }
+                }
+                
+                Spacer()
+                
+                // Amount and time
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(formatMoney(transaction.amount))
+                        .font(.plusJakarta(.title3, weight: .bold)) // Using Plus Jakarta Sans
+                        .foregroundColor(transaction.amount >= 0 ? 
+                                      Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
+                                      Color.red)
+                        .padding(.bottom, 2)
+                    
+                    // Date and time in one line
+                    HStack(spacing: 6) {
+                        Text(formatDate(transaction.timestamp))
+                            .font(.plusJakarta(.caption, weight: .medium)) // Using Plus Jakarta Sans
+                            .foregroundColor(Color.gray.opacity(0.7))
+                        
+                        Text("•")
+                            .font(.plusJakarta(.caption)) // Using Plus Jakarta Sans
+                            .foregroundColor(Color.gray.opacity(0.5))
+                        
+                        Text(formatTime(transaction.timestamp))
+                            .font(.plusJakarta(.caption, weight: .medium)) // Using Plus Jakarta Sans
+                            .foregroundColor(Color.gray.opacity(0.7))
+                    }
+                }
+                .padding(.trailing, 4)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+        }
+        .background(
+            ZStack { // Applying GlassyInputField style to transaction rows
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(0.2)
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.01))
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
+            }
+        )
+        .contentShape(Rectangle())
     }
 }
 
@@ -1610,13 +1842,12 @@ struct EmptySessionsView: View {
 }
 
 // MARK: - Enhanced section header
-struct EnhancedSessionsSection: View {
+struct EnhancedItemsSection: View {
     let title: String
-    let sessions: [Session]
+    let items: [SessionOrTransaction]
     let onSelect: (Session) -> Void
     let onDelete: (Session) -> Void
     
-    // Remove selectedSessionId state and NavigationLink
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Section header
@@ -1627,20 +1858,25 @@ struct EnhancedSessionsSection: View {
                 
                 Spacer()
                 
-                Text("\(sessions.count) sessions")
+                Text("\(items.count) items")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(Color.gray.opacity(0.7))
             }
             .padding(.horizontal, 8)
             
-            // Sessions in this section
+            // Items in this section
             VStack(spacing: 12) {
-                ForEach(sessions) { session in
-                    EnhancedSessionSummaryRow(
-                        session: session,
-                        onSelect: { onSelect(session) },
-                        onDelete: { onDelete(session) }
-                    )
+                ForEach(items) { item in
+                    switch item {
+                    case .session(let session):
+                        EnhancedSessionSummaryRow(
+                            session: session,
+                            onSelect: { onSelect(session) },
+                            onDelete: { onDelete(session) }
+                        )
+                    case .transaction(let transaction):
+                        BankrollTransactionRow(transaction: transaction)
+                    }
                 }
             }
         }
@@ -2225,16 +2461,7 @@ struct LuxuryFormField: View {
     }
 }
 
-// MARK: - Button Styles
-struct ScalePressButtonStyle: ButtonStyle {
-    let scaleAmount: CGFloat = 0.95
-    
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? scaleAmount : 1)
-            .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
-    }
-}
+
 
 // Adds a gentle hover effect for interactive elements
 struct HoverEffectModifier: ViewModifier {
@@ -2285,6 +2512,7 @@ extension EnhancedSessionSummaryRow {
         }
     }
 }
+
 
 
 

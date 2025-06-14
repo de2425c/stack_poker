@@ -14,13 +14,19 @@ class PostService: ObservableObject {
     private var followingUserIds: Set<String> = []
     private var cachedPosts: [Post] = []
     private var lastCacheUpdate: Date?
+    private var cachedFollowingUsers: Set<String> = []
+    private var lastFollowingCacheUpdate: Date?
     
     private let db = Firestore.firestore()
     private let storage = Storage.storage()
     private let postsPerPage = 20
-    private let cacheValidityDuration: TimeInterval = 300
+    private let cacheValidityDuration: TimeInterval = 300 // 5 minutes for better real-time updates
+    private let followingCacheValidityDuration: TimeInterval = 1800 // 30 minutes for following users
+    private let persistentCacheKey = "cached_posts_data"
+    private let followingCacheKey = "cached_following_users"
     
     init() {
+        loadPersistedCache()
         setupAutoRefresh()
         
         // Add an observer to handle sign out cleanup
@@ -28,6 +34,14 @@ class PostService: ObservableObject {
             self,
             selector: #selector(cleanupOnSignOut),
             name: NSNotification.Name("UserWillSignOut"),
+            object: nil
+        )
+        
+        // Add observer to refresh feed when following relationships change
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleFollowingChanged),
+            name: NSNotification.Name("UserFollowingChanged"),
             object: nil
         )
     }
@@ -40,9 +54,70 @@ class PostService: ObservableObject {
         }
     }
     
+    // Load persisted cache from UserDefaults
+    private func loadPersistedCache() {
+        // Load cached posts
+        if let data = UserDefaults.standard.data(forKey: persistentCacheKey),
+           let cacheData = try? JSONDecoder().decode(CachedPostsData.self, from: data) {
+            
+            // Check if cache is still valid (within 2 hours for persistent cache)
+            let persistentCacheValidityDuration: TimeInterval = 7200 // 2 hours
+            if Date().timeIntervalSince(cacheData.timestamp) < persistentCacheValidityDuration {
+                cachedPosts = cacheData.posts
+                lastCacheUpdate = cacheData.timestamp
+                
+                // Show cached posts immediately for instant loading
+                posts = Array(cachedPosts.prefix(postsPerPage))
+                print("DEBUG: Loaded \(posts.count) posts from persistent cache")
+            }
+        }
+        
+        // Load cached following users
+        if let data = UserDefaults.standard.data(forKey: followingCacheKey),
+           let followingData = try? JSONDecoder().decode(CachedFollowingData.self, from: data) {
+            
+            if Date().timeIntervalSince(followingData.timestamp) < followingCacheValidityDuration {
+                cachedFollowingUsers = Set(followingData.userIds)
+                lastFollowingCacheUpdate = followingData.timestamp
+                print("DEBUG: Loaded \(cachedFollowingUsers.count) following users from cache")
+            }
+        }
+    }
+    
+    // Persist cache to UserDefaults
+    private func persistCache() {
+        // Persist posts cache
+        let cacheData = CachedPostsData(posts: cachedPosts, timestamp: lastCacheUpdate ?? Date())
+        if let encoded = try? JSONEncoder().encode(cacheData) {
+            UserDefaults.standard.set(encoded, forKey: persistentCacheKey)
+        }
+        
+        // Persist following users cache
+        let followingData = CachedFollowingData(userIds: Array(cachedFollowingUsers), timestamp: lastFollowingCacheUpdate ?? Date())
+        if let encoded = try? JSONEncoder().encode(followingData) {
+            UserDefaults.standard.set(encoded, forKey: followingCacheKey)
+        }
+    }
+    
     // Safely cleanup resources when called from within the actor
     @objc private func cleanupOnSignOut() {
         cleanupResources()
+    }
+    
+    // Handle following relationship changes by refreshing feed
+    @objc private func handleFollowingChanged() {
+        Task {
+            do {
+                // Invalidate following cache and feed cache
+                invalidateFollowingCache()
+                invalidateCache()
+                
+                // Force a fresh fetch
+                try await forceRefresh()
+            } catch {
+                print("ERROR: Failed to refresh feed after following change: \(error)")
+            }
+        }
     }
     
     // Safe cleanup method for use within the actor context
@@ -55,6 +130,12 @@ class PostService: ObservableObject {
         followingUserIds = []
         cachedPosts = []
         lastCacheUpdate = nil
+        cachedFollowingUsers = []
+        lastFollowingCacheUpdate = nil
+        
+        // Clear persistent cache on sign out
+        UserDefaults.standard.removeObject(forKey: persistentCacheKey)
+        UserDefaults.standard.removeObject(forKey: followingCacheKey)
     }
     
     // This method is explicitly nonisolated so it can be called from deinit
@@ -71,19 +152,48 @@ class PostService: ObservableObject {
     }
     
     private func setupAutoRefresh() {
-        // Set up auto refresh every 30 seconds
-        autoRefreshCancellable = Timer.publish(every: 30, on: .main, in: .common)
+        // Set up auto refresh every 2 minutes (less aggressive)
+        autoRefreshCancellable = Timer.publish(every: 120, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 Task {
-                    try? await self?.forceRefresh() // Use forceRefresh to bypass cache for auto-refresh
+                    // Only auto-refresh if cache is getting stale (older than 10 minutes)
+                    if let lastUpdate = self?.lastCacheUpdate,
+                       Date().timeIntervalSince(lastUpdate) > 600 {
+                        try? await self?.refreshInBackground()
+                    }
                 }
             }
+    }
+    
+    // Background refresh that doesn't show loading state
+    private func refreshInBackground() async throws {
+        // Don't set isLoading = true for background refresh
+        do {
+            let oldPosts = posts
+            try await fetchPostsInternal(showLoading: false)
+            
+            // Only update UI if we got new posts
+            if posts.count != oldPosts.count || posts.first?.createdAt != oldPosts.first?.createdAt {
+                print("DEBUG: Background refresh found new posts")
+            }
+        } catch {
+            print("DEBUG: Background refresh failed: \(error)")
+            // Don't throw error for background refresh
+        }
     }
     
     private func fetchFollowingUsers() async throws -> Set<String> {
         guard let currentUserId = Auth.auth().currentUser?.uid else {
             return []
+        }
+        
+        // Check if we can use cached following users
+        if let lastUpdate = lastFollowingCacheUpdate,
+           Date().timeIntervalSince(lastUpdate) < followingCacheValidityDuration,
+           !cachedFollowingUsers.isEmpty {
+            print("DEBUG: Using cached following users (\(cachedFollowingUsers.count) users)")
+            return cachedFollowingUsers
         }
         
         var userIds: Set<String> = [currentUserId]
@@ -98,18 +208,38 @@ class PostService: ObservableObject {
             }
         }
         
+        // Cache the following users
+        cachedFollowingUsers = userIds
+        lastFollowingCacheUpdate = Date()
+        persistCache()
+        
         return userIds
     }
     
     func fetchPosts() async throws {
-        isLoading = true
-        defer { isLoading = false }
+        try await fetchPostsInternal(showLoading: true)
+    }
+    
+    private func fetchPostsInternal(showLoading: Bool) async throws {
+        if showLoading {
+            isLoading = true
+        }
+        defer { 
+            if showLoading {
+                isLoading = false 
+            }
+        }
         
         do {
             // Get all user IDs we want to see posts from (current user + following)
             self.followingUserIds = try await fetchFollowingUsers()
             
-            print("DEBUG: Following \(followingUserIds.count) users: \(Array(followingUserIds))")
+            print("DEBUG: Following \(followingUserIds.count) users: \(Array(followingUserIds).prefix(5))...")
+            
+            // Debug: Print if user is following themselves
+            if let currentUserId = Auth.auth().currentUser?.uid {
+                print("DEBUG: Current user ID: \(currentUserId), included in following: \(followingUserIds.contains(currentUserId))")
+            }
             
             guard !self.followingUserIds.isEmpty else {
                 self.posts = []
@@ -145,6 +275,7 @@ class PostService: ObservableObject {
             // Cache the results
             self.cachedPosts = allPosts
             self.lastCacheUpdate = Date()
+            persistCache()
             
             // Set the posts for display
             self.posts = Array(allPosts.prefix(postsPerPage))
@@ -187,27 +318,35 @@ class PostService: ObservableObject {
         }
     }
     
-    // Helper for processing posts and avoiding duplicates
+    // Helper for processing posts and avoiding duplicates - now with batched like checks
     private func processPosts(from snapshot: QuerySnapshot, existingIds: inout Set<String>) async throws -> [Post] {
+        guard let currentUserId = Auth.auth().currentUser?.uid else {
+            // If no current user, process posts without like status
+            return try snapshot.documents.compactMap { document in
+                let postId = document.documentID
+                guard !existingIds.contains(postId) else { return nil }
+                
+                var post = try document.data(as: Post.self)
+                post.id = postId
+                post.isLiked = false
+                existingIds.insert(postId)
+                return post
+            }
+        }
+        
         var posts: [Post] = []
+        var postIds: [String] = []
+        
+        // First pass: create posts without like status
         for document in snapshot.documents {
             let postId = document.documentID
             if !existingIds.contains(postId) {
                 do {
                     var post = try document.data(as: Post.self)
                     post.id = postId
-                    // Check likes status for the current user
-                    if let userId = Auth.auth().currentUser?.uid {
-                        let likeDoc = try? await db.collection("posts")
-                            .document(postId)
-                            .collection("likes")
-                            .document(userId)
-                            .getDocument()
-                        if let likeDoc = likeDoc, likeDoc.exists {
-                            post.isLiked = true
-                        }
-                    }
+                    post.isLiked = false // Default to false
                     posts.append(post)
+                    postIds.append(postId)
                     existingIds.insert(postId)
                 } catch {
                     // Log error but continue processing other posts
@@ -215,6 +354,28 @@ class PostService: ObservableObject {
                 }
             }
         }
+        
+        // Batch check like status for all posts at once
+        await withTaskGroup(of: (String, Bool).self) { group in
+            for postId in postIds {
+                group.addTask {
+                    let likeDoc = try? await self.db.collection("posts")
+                        .document(postId)
+                        .collection("likes")
+                        .document(currentUserId)
+                        .getDocument()
+                    return (postId, likeDoc?.exists == true)
+                }
+            }
+            
+            // Collect results and update posts
+            for await (postId, isLiked) in group {
+                if let index = posts.firstIndex(where: { $0.id == postId }) {
+                    posts[index].isLiked = isLiked
+                }
+            }
+        }
+        
         return posts
     }
     
@@ -332,12 +493,21 @@ class PostService: ObservableObject {
     private func invalidateCache() {
         cachedPosts = []
         lastCacheUpdate = nil
+        UserDefaults.standard.removeObject(forKey: persistentCacheKey)
     }
     
     // Force refresh without using cache
     func forceRefresh() async throws {
         invalidateCache()
+        invalidateFollowingCache() // Also invalidate following cache for fresh relationships
         try await fetchPosts()
+    }
+    
+    // Cache management for following users
+    private func invalidateFollowingCache() {
+        cachedFollowingUsers = []
+        lastFollowingCacheUpdate = nil
+        UserDefaults.standard.removeObject(forKey: followingCacheKey)
     }
     
     func createPost(content: String, userId: String, username: String, displayName: String? = nil, profileImage: String?, imageURLs: [String]? = nil, postType: Post.PostType = .text, handHistory: ParsedHandHistory? = nil, sessionId: String? = nil, location: String? = nil, isNote: Bool = false) async throws {
@@ -368,6 +538,8 @@ class PostService: ObservableObject {
             // Invalidate cache since we have new content
             invalidateCache()
         }
+        
+        print("DEBUG: Created new post, total posts in memory: \(posts.count)")
     }
     
     func createHandPost(content: String, userId: String, username: String, displayName: String?, profileImage: String?, hand: ParsedHandHistory, sessionId: String?, location: String?) async throws {
@@ -648,4 +820,15 @@ class PostService: ObservableObject {
             throw error 
         }
     }
+}
+
+// MARK: - Cache Data Structures
+private struct CachedPostsData: Codable {
+    let posts: [Post]
+    let timestamp: Date
+}
+
+private struct CachedFollowingData: Codable {
+    let userIds: [String]
+    let timestamp: Date
 } 

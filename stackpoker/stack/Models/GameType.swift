@@ -1,6 +1,42 @@
 import Foundation
 import FirebaseFirestore
 
+// Poker game variants
+enum PokerVariant: String, Codable, CaseIterable {
+    case nlh = "NLH"
+    case plo = "PLO"
+    case bigO = "Big O"
+    case shortDeck = "Short Deck"
+    
+    var displayName: String {
+        return self.rawValue
+    }
+}
+
+// Tournament game types
+enum TournamentGameType: String, Codable, CaseIterable {
+    case nlh = "NLH"
+    case plo = "PLO"
+    case other = "Other"
+    
+    var displayName: String {
+        return self.rawValue
+    }
+}
+
+// Tournament formats
+enum TournamentFormat: String, Codable, CaseIterable {
+    case standard = "Standard"
+    case pko = "PKO"
+    case bounty = "Bounty"
+    case mysteryBounty = "Mystery Bounty"
+    case satellite = "Satellite"
+    
+    var displayName: String {
+        return self.rawValue
+    }
+}
+
 // Game type (Cash Game or Tournament)
 enum PokerGameType: String, Codable, CaseIterable {
     case cash = "Cash Game"
@@ -16,6 +52,7 @@ struct CashGame: Identifiable, Codable {
     let bigBlind: Double
     let straddle: Double? // Optional straddle amount
     let location: String? // Optional location
+    let gameType: PokerVariant // Added game type
     let createdAt: Date
     
     var stakes: String {
@@ -33,6 +70,7 @@ struct CashGame: Identifiable, Codable {
             "name": name,
             "smallBlind": smallBlind,
             "bigBlind": bigBlind,
+            "gameType": gameType.rawValue,
             "createdAt": createdAt
         ]
         
@@ -54,6 +92,7 @@ struct CashGame: Identifiable, Codable {
          bigBlind: Double, 
          straddle: Double? = nil,
          location: String? = nil,
+         gameType: PokerVariant = .nlh,
          createdAt: Date = Date()) {
         self.id = id
         self.userId = userId
@@ -62,6 +101,7 @@ struct CashGame: Identifiable, Codable {
         self.bigBlind = bigBlind
         self.straddle = straddle
         self.location = location
+        self.gameType = gameType
         self.createdAt = createdAt
     }
     
@@ -76,6 +116,8 @@ struct CashGame: Identifiable, Codable {
         
         let straddle = dictionary["straddle"] as? Double
         let location = dictionary["location"] as? String
+        let gameTypeString = dictionary["gameType"] as? String ?? "NLH"
+        let gameType = PokerVariant(rawValue: gameTypeString) ?? .nlh
         let createdAt = (dictionary["createdAt"] as? Timestamp)?.dateValue() ?? Date()
         
         self.id = id
@@ -85,6 +127,7 @@ struct CashGame: Identifiable, Codable {
         self.bigBlind = bigBlind
         self.straddle = straddle
         self.location = location
+        self.gameType = gameType
         self.createdAt = createdAt
     }
 } 

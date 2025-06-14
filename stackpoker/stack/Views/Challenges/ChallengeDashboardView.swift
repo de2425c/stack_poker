@@ -14,6 +14,7 @@ struct ChallengeDashboardView: View {
     @State private var selectedChallenge: Challenge?
     @State private var showingChallengeDetail = false
     @State private var showingChallengeCompleted = false
+    @State private var showingSessionSetup = false
     
     var body: some View {
         ZStack {
@@ -56,40 +57,28 @@ struct ChallengeDashboardView: View {
                             }
                             .padding(.vertical, 40)
                             
-                            // Create Challenge Button (Only Bankroll for now)
-                            Button(action: { showingBankrollSetup = true }) {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "dollarsign.circle.fill")
-                                        .font(.system(size: 20, weight: .semibold))
-                                        .foregroundColor(.green)
-                                    
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Bankroll Challenge")
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundColor(.white)
-                                        
-                                        Text("Set a bankroll target to reach")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.gray)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "plus.circle.fill")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.green)
+                            // Create Challenge Buttons
+                            VStack(spacing: 12) {
+                                // Bankroll Challenge Button
+                                Button(action: { showingBankrollSetup = true }) {
+                                    ChallengeTypeCard(
+                                        icon: "dollarsign.circle.fill",
+                                        title: "Bankroll Challenge",
+                                        subtitle: "Set a bankroll target to reach",
+                                        color: .green
+                                    )
                                 }
-                                .padding(16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Color.black.opacity(0.25))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 16)
-                                                .stroke(Color.green.opacity(0.3), lineWidth: 1)
-                                        )
-                                )
+                                
+                                // Session Challenge Button
+                                Button(action: { showingSessionSetup = true }) {
+                                    ChallengeTypeCard(
+                                        icon: "clock.fill",
+                                        title: "Session Challenge",
+                                        subtitle: "Track sessions, hours, and deadlines",
+                                        color: .orange
+                                    )
+                                }
                             }
-                            .buttonStyle(PlainButtonStyle())
                             .padding(.horizontal, 20)
                         }
                     } else {
@@ -102,7 +91,15 @@ struct ChallengeDashboardView: View {
                                 
                                 Spacer()
                                 
-                                Button(action: { showingBankrollSetup = true }) {
+                                Menu {
+                                    Button(action: { showingBankrollSetup = true }) {
+                                        Label("Bankroll Challenge", systemImage: "dollarsign.circle.fill")
+                                    }
+                                    
+                                    Button(action: { showingSessionSetup = true }) {
+                                        Label("Session Challenge", systemImage: "clock.fill")
+                                    }
+                                } label: {
                                     Image(systemName: "plus.circle.fill")
                                         .font(.system(size: 18))
                                         .foregroundColor(.green)
@@ -115,7 +112,11 @@ struct ChallengeDashboardView: View {
                                     .padding(.horizontal, 20)
                                     .onTapGesture {
                                         selectedChallenge = challenge
-                                        showingChallengeDetail = true
+                                        if challenge.isCompleted {
+                                            showingChallengeCompleted = true
+                                        } else {
+                                            showingChallengeDetail = true
+                                        }
                                     }
                             }
                         }
@@ -132,6 +133,11 @@ struct ChallengeDashboardView: View {
                             ForEach(challengeService.completedChallenges.prefix(5)) { challenge in
                                 CompletedChallengeCard(challenge: challenge)
                                     .padding(.horizontal, 20)
+                                    .onTapGesture {
+                                        selectedChallenge = challenge
+                                        // Always show completed view for cards in this section
+                                        showingChallengeCompleted = true 
+                                    }
                             }
                         }
                         .padding(.top, 8)
@@ -144,9 +150,14 @@ struct ChallengeDashboardView: View {
         }
         .navigationBarHidden(false)
         .onAppear {
-            // Update bankroll challenges when view appears
+            // Update both bankroll and session challenges when view appears
             Task {
                 await challengeService.updateBankrollFromSessions(sessionStore.sessions)
+                
+                // Update session challenges for all existing sessions
+                for session in sessionStore.sessions {
+                    await challengeService.updateSessionChallengesFromSession(session)
+                }
             }
         }
         .onReceive(challengeService.$justCompletedChallenge) { completedChallenge in
@@ -162,6 +173,11 @@ struct ChallengeDashboardView: View {
         }
         .sheet(isPresented: $showingBankrollSetup) {
             BankrollChallengeSetupView(userId: userId)
+                .environmentObject(challengeService)
+                .environmentObject(sessionStore)
+        }
+        .sheet(isPresented: $showingSessionSetup) {
+            SessionChallengeSetupView(userId: userId)
                 .environmentObject(challengeService)
                 .environmentObject(sessionStore)
         }
@@ -206,9 +222,15 @@ struct ChallengeProgressCard: View {
                         .lineLimit(1)
                     
                     if let daysRemaining = challenge.daysRemaining {
-                        Text("\(daysRemaining) days remaining")
-                            .font(.system(size: 13))
-                            .foregroundColor(.orange)
+                        if daysRemaining > 0 {
+                            Text("\(daysRemaining) days remaining")
+                                .font(.system(size: 13))
+                                .foregroundColor(.orange)
+                        } else {
+                            Text("Due today")
+                                .font(.system(size: 13))
+                                .foregroundColor(.red)
+                        }
                     } else {
                         Text("No deadline")
                             .font(.system(size: 13))
@@ -225,22 +247,14 @@ struct ChallengeProgressCard: View {
                 }
             }
             
-            // Progress Section
+            // Progress Section - Updated for session challenges
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(formattedValue(challenge.currentValue, type: challenge.type))
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    Text("/ \(formattedValue(challenge.targetValue, type: challenge.type))")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
-                    
-                    Spacer()
-                    
-                    Text("\(Int(challenge.progressPercentage))%")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(colorForType(challenge.type))
+                if challenge.type == .session {
+                    // Session challenge specific display
+                    sessionChallengeProgressView
+                } else {
+                    // Original display for other challenge types
+                    standardChallengeProgressView
                 }
                 
                 // Progress Bar
@@ -259,11 +273,15 @@ struct ChallengeProgressCard: View {
                 .frame(height: 8)
             }
             
-            // Remaining
+            // Remaining info
             if !challenge.isCompleted {
-                Text("\(formattedValue(challenge.remainingValue, type: challenge.type)) remaining")
-                    .font(.system(size: 14))
-                    .foregroundColor(.gray)
+                if challenge.type == .session {
+                    sessionChallengeRemainingView
+                } else {
+                    Text("\(formattedValue(challenge.remainingValue, type: challenge.type)) remaining")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                }
             }
         }
         .padding(20)
@@ -275,6 +293,136 @@ struct ChallengeProgressCard: View {
                         .stroke(colorForType(challenge.type).opacity(0.3), lineWidth: 1)
                 )
         )
+    }
+    
+    // Session challenge specific progress view
+    @ViewBuilder
+    private var sessionChallengeProgressView: some View {
+        if let targetCount = challenge.targetSessionCount {
+            // Session count based challenge
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sessions")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Text("\(challenge.validSessionsCount)/\(targetCount)")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Hours")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Text("\(String(format: "%.1f", challenge.totalHoursPlayed))")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Progress")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Text("\(Int(challenge.progressPercentage))%")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(colorForType(challenge.type))
+                }
+            }
+            
+            // Show minimum hours requirement if set
+            if let minHours = challenge.minHoursPerSession {
+                Text("Minimum \(String(format: "%.1f", minHours))h per session")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                    .padding(.top, 4)
+            }
+            
+        } else if let targetHours = challenge.targetHours {
+            // Hours based challenge
+            HStack {
+                Text("\(String(format: "%.1f", challenge.totalHoursPlayed))h")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                
+                Text("/ \(String(format: "%.1f", targetHours))h")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.gray)
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Sessions")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Text("\(challenge.currentSessionCount)")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                }
+                
+                Spacer()
+                
+                Text("\(Int(challenge.progressPercentage))%")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(colorForType(challenge.type))
+            }
+            
+            // Show average hours per session
+            if challenge.currentSessionCount > 0 {
+                Text("Average \(String(format: "%.1f", challenge.averageHoursPerSession))h per session")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray)
+                    .padding(.top, 4)
+            }
+        }
+    }
+    
+    // Session challenge remaining view
+    @ViewBuilder
+    private var sessionChallengeRemainingView: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let targetCount = challenge.targetSessionCount {
+                let remainingSessions = max(targetCount - challenge.validSessionsCount, 0)
+                if remainingSessions > 0 {
+                    Text("\(remainingSessions) sessions remaining")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            if challenge.remainingHours > 0 {
+                Text("\(String(format: "%.1f", challenge.remainingHours)) hours remaining")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+            }
+        }
+    }
+    
+    // Standard challenge progress view (for bankroll and hands)
+    @ViewBuilder
+    private var standardChallengeProgressView: some View {
+        HStack {
+            Text(formattedValue(challenge.currentValue, type: challenge.type))
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(.white)
+            
+            Text("/ \(formattedValue(challenge.targetValue, type: challenge.type))")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.gray)
+            
+            Spacer()
+            
+            Text("\(Int(challenge.progressPercentage))%")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(colorForType(challenge.type))
+        }
     }
     
     private func colorForType(_ type: ChallengeType) -> Color {
@@ -350,5 +498,47 @@ struct CompletedChallengeCard: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - Challenge Type Card
+struct ChallengeTypeCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let color: Color
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(color)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                
+                Text(subtitle)
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+            }
+            
+            Spacer()
+            
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(color)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.black.opacity(0.25))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(color.opacity(0.3), lineWidth: 1)
+                )
+        )
     }
 } 

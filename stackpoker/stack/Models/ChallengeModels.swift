@@ -70,8 +70,16 @@ struct Challenge: Identifiable, Codable {
     let startingBankroll: Double? // For bankroll challenges
     let targetHandCount: Int? // For hands challenges
     let targetSessions: Int? // For session challenges
-    let targetHours: Double? // For session challenges
+    let targetHours: Double? // For session challenges - total hours
     let durationInDays: Int? // For time-based challenges
+    
+    // NEW: Enhanced Session Challenge Fields
+    let targetSessionCount: Int? // Number of sessions required
+    let minHoursPerSession: Double? // Minimum hours per session
+    let maxSessionsPerDay: Int? // Optional: limit sessions per day
+    var currentSessionCount: Int // Number of sessions completed
+    var totalHoursPlayed: Double // Total hours across all sessions
+    var validSessionsCount: Int // Sessions that meet minimum hour requirement
     
     init(id: String? = nil,
          userId: String,
@@ -91,7 +99,13 @@ struct Challenge: Identifiable, Codable {
          targetHandCount: Int? = nil,
          targetSessions: Int? = nil,
          targetHours: Double? = nil,
-         durationInDays: Int? = nil) {
+         durationInDays: Int? = nil,
+         targetSessionCount: Int? = nil,
+         minHoursPerSession: Double? = nil,
+         maxSessionsPerDay: Int? = nil,
+         currentSessionCount: Int = 0,
+         totalHoursPlayed: Double = 0,
+         validSessionsCount: Int = 0) {
         
         self.id = id
         self.userId = userId
@@ -112,19 +126,103 @@ struct Challenge: Identifiable, Codable {
         self.targetSessions = targetSessions
         self.targetHours = targetHours
         self.durationInDays = durationInDays
+        self.targetSessionCount = targetSessionCount
+        self.minHoursPerSession = minHoursPerSession
+        self.maxSessionsPerDay = maxSessionsPerDay
+        self.currentSessionCount = currentSessionCount
+        self.totalHoursPlayed = totalHoursPlayed
+        self.validSessionsCount = validSessionsCount
+    }
+    
+    // MARK: - Session Challenge Computed Properties
+    
+    /// For session challenges, determines if the challenge is completed
+    var isSessionChallengeCompleted: Bool {
+        guard type == .session else { return false }
+        
+        if let targetCount = targetSessionCount {
+            // Count-based challenge: need specific number of valid sessions
+            return validSessionsCount >= targetCount
+        } else if let targetHours = targetHours {
+            // Hours-based challenge: need total hours
+            return totalHoursPlayed >= targetHours
+        }
+        
+        return false
+    }
+    
+    /// Progress percentage for session challenges
+    var sessionChallengeProgress: Double {
+        guard type == .session else { return 0 }
+        
+        if let targetCount = targetSessionCount {
+            // Progress based on session count
+            return min(Double(validSessionsCount) / Double(targetCount) * 100, 100)
+        } else if let targetHours = targetHours {
+            // Progress based on hours
+            return min(totalHoursPlayed / targetHours * 100, 100)
+        }
+        
+        return 0
+    }
+    
+    /// Remaining sessions needed
+    var remainingSessions: Int {
+        guard type == .session, let targetCount = targetSessionCount else { return 0 }
+        return max(targetCount - validSessionsCount, 0)
+    }
+    
+    /// Remaining hours needed
+    var remainingHours: Double {
+        guard type == .session else { return 0 }
+        
+        if let targetHours = targetHours {
+            return max(targetHours - totalHoursPlayed, 0)
+        }
+        
+        return 0
+    }
+    
+    /// Average hours per session
+    var averageHoursPerSession: Double {
+        guard currentSessionCount > 0 else { return 0 }
+        return totalHoursPlayed / Double(currentSessionCount)
+    }
+    
+    /// Check if a session qualifies for this challenge
+    func sessionQualifies(hoursPlayed: Double) -> Bool {
+        guard type == .session else { return false }
+        
+        if let minHours = minHoursPerSession {
+            return hoursPlayed >= minHours
+        }
+        
+        return true // If no minimum set, all sessions qualify
     }
     
     // Computed properties
     var progressPercentage: Double {
+        if type == .session {
+            return sessionChallengeProgress
+        }
+        
         guard targetValue > 0 else { return 0 }
         return min(max(currentValue / targetValue * 100, 0), 100)
     }
     
     var isCompleted: Bool {
+        if type == .session {
+            return isSessionChallengeCompleted
+        }
+        
         return status == .completed || currentValue >= targetValue
     }
     
     var remainingValue: Double {
+        if type == .session {
+            return remainingHours
+        }
+        
         return max(targetValue - currentValue, 0)
     }
     
@@ -148,7 +246,10 @@ struct Challenge: Identifiable, Codable {
             "status": status.rawValue,
             "isPublic": isPublic,
             "createdAt": Timestamp(date: createdAt),
-            "lastUpdated": Timestamp(date: lastUpdated)
+            "lastUpdated": Timestamp(date: lastUpdated),
+            "currentSessionCount": currentSessionCount,
+            "totalHoursPlayed": totalHoursPlayed,
+            "validSessionsCount": validSessionsCount
         ]
         
         if let endDate = endDate {
@@ -178,6 +279,19 @@ struct Challenge: Identifiable, Codable {
         
         if let durationInDays = durationInDays {
             dict["durationInDays"] = durationInDays
+        }
+        
+        // NEW: Session challenge specific fields
+        if let targetSessionCount = targetSessionCount {
+            dict["targetSessionCount"] = targetSessionCount
+        }
+        
+        if let minHoursPerSession = minHoursPerSession {
+            dict["minHoursPerSession"] = minHoursPerSession
+        }
+        
+        if let maxSessionsPerDay = maxSessionsPerDay {
+            dict["maxSessionsPerDay"] = maxSessionsPerDay
         }
         
         return dict
@@ -224,6 +338,14 @@ struct Challenge: Identifiable, Codable {
         self.targetSessions = data["targetSessions"] as? Int
         self.targetHours = data["targetHours"] as? Double
         self.durationInDays = data["durationInDays"] as? Int
+        
+        // NEW: Session challenge specific fields
+        self.targetSessionCount = data["targetSessionCount"] as? Int
+        self.minHoursPerSession = data["minHoursPerSession"] as? Double
+        self.maxSessionsPerDay = data["maxSessionsPerDay"] as? Int
+        self.currentSessionCount = data["currentSessionCount"] as? Int ?? 0
+        self.totalHoursPlayed = data["totalHoursPlayed"] as? Double ?? 0
+        self.validSessionsCount = data["validSessionsCount"] as? Int ?? 0
     }
 }
 

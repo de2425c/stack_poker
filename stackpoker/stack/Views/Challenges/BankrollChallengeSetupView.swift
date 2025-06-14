@@ -4,6 +4,8 @@ struct BankrollChallengeSetupView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject private var challengeService: ChallengeService
     @EnvironmentObject private var sessionStore: SessionStore
+    @EnvironmentObject private var postService: PostService
+    @EnvironmentObject private var userService: UserService
     
     let userId: String
     
@@ -17,8 +19,8 @@ struct BankrollChallengeSetupView: View {
     @State private var errorMessage: String = ""
     @FocusState private var isTargetBankrollFocused: Bool
     
-    @State private var showSharePrompt: Bool = false
-    @State private var createdChallenge: Challenge?
+    @State private var showShareChallengeSheet = false
+    @State private var challengeToShare: Challenge?
     @State private var showPostEditor: Bool = false
     @State private var prefilledPostContent: String = ""
     
@@ -69,6 +71,9 @@ struct BankrollChallengeSetupView: View {
             ZStack {
                 AppBackgroundView()
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        hideKeyboard()
+                    }
                 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -314,33 +319,55 @@ struct BankrollChallengeSetupView: View {
                     .foregroundColor(.white)
                 }
             }
+            .onTapGesture {
+                 hideKeyboard()
+            }
         }
         .alert("Error", isPresented: $showError) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
         }
-        .alert("Challenge Created!", isPresented: $showSharePrompt) {
+        .onReceive(challengeService.$justCreatedChallenge) { newChallenge in
+            if let newChallenge = newChallenge {
+                self.challengeToShare = newChallenge
+                self.showShareChallengeSheet = true
+            }
+        }
+        .alert("Challenge Created!", isPresented: $showShareChallengeSheet) {
             Button("Share Challenge") {
-                if let challenge = createdChallenge {
+                if let challenge = challengeToShare {
                     shareChallenge(challenge)
                 }
+                challengeService.justCreatedChallenge = nil
             }
             Button("Not Now", role: .cancel) { 
+                challengeService.justCreatedChallenge = nil
                 dismiss()
             }
         } message: {
             Text("Would you like to share that you started this challenge?")
         }
-        .sheet(isPresented: $showPostEditor, onDismiss: { dismiss() }) {
-            PostEditorView(
-                userId: userId,
-                prefilledContent: prefilledPostContent,
-                challengeToShare: createdChallenge
-            )
-            .environmentObject(challengeService)
-            .environmentObject(sessionStore)
+        .sheet(isPresented: $showPostEditor, onDismiss: {
+            challengeService.justCreatedChallenge = nil
+            dismiss()
+        }) {
+            if let challenge = challengeToShare {
+                PostEditorView(
+                    userId: userId,
+                    prefilledContent: prefilledPostContent,
+                    challengeToShare: challenge
+                )
+                .environmentObject(challengeService)
+                .environmentObject(sessionStore)
+                .environmentObject(postService)
+                .environmentObject(userService)
+            }
         }
+    }
+    
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     private func createChallenge() {
@@ -366,9 +393,6 @@ struct BankrollChallengeSetupView: View {
                 
                 await MainActor.run {
                     isCreating = false
-                    
-                    showSharePrompt = true
-                    createdChallenge = challenge
                 }
             } catch {
                 await MainActor.run {
@@ -398,6 +422,7 @@ struct BankrollChallengeSetupView: View {
         challengeStartText += "\n\n#PokerChallenge #\(challenge.type.rawValue.capitalized)Goal"
         
         prefilledPostContent = challengeStartText
+        self.challengeToShare = challenge
         showPostEditor = true
     }
     

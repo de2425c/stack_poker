@@ -11,6 +11,10 @@ struct ChallengeCompletedView: View {
     @State private var showShareSheet = false
     @State private var celebrationCard: UIImage?
     @State private var shareText = ""
+    @State private var userComment = ""
+    @State private var isPosting = false
+    @State private var showPostSuccess = false
+    @FocusState private var isCommentFocused: Bool
     
     private var completionDuration: String {
         guard let completedAt = challenge.completedAt else { return "Unknown" }
@@ -72,6 +76,23 @@ struct ChallengeCompletedView: View {
                             .scaleEffect(showConfetti ? 1.05 : 1.0)
                             .animation(.spring(response: 0.8, dampingFraction: 0.7), value: showConfetti)
                         
+                        // Comment box
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Add a comment for your post (optional)")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            TextEditor(text: $userComment)
+                                .foregroundColor(.white)
+                                .frame(height: 100)
+                                .scrollContentBackground(.hidden)
+                                .background(Color.black.opacity(0.1))
+                                .cornerRadius(10)
+                                .focused($isCommentFocused)
+                        }
+                        .padding(.horizontal, 32)
+                        
                         // Action Buttons
                         VStack(spacing: 16) {
                             // Share to Social Media
@@ -128,11 +149,30 @@ struct ChallengeCompletedView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+                .onTapGesture {
+                    // Dismiss keyboard when tapping anywhere on the ScrollView
+                    isCommentFocused = false
+                }
                 
                 // Confetti overlay
                 if showConfetti {
                     ConfettiView()
                         .allowsHitTesting(false)
+                }
+                
+                // Posting overlay
+                if isPosting {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(1.2)
+                        Text("Posting…")
+                            .foregroundColor(.white)
+                    }
+                    .padding(30)
+                    .background(Color.black.opacity(0.8))
+                    .cornerRadius(16)
                 }
             }
             .navigationTitle("")
@@ -156,11 +196,14 @@ struct ChallengeCompletedView: View {
                 ActivityViewController(activityItems: [image, shareText])
             }
         }
+        .alert("Post shared!", isPresented: $showPostSuccess) {
+            Button("OK", role: .cancel) { dismiss() }
+        }
     }
     
     @ViewBuilder
     private var challengeCompletionCard: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 28) {
             // Header with icon and type
             HStack {
                 Image(systemName: challenge.type.icon)
@@ -188,6 +231,8 @@ struct ChallengeCompletedView: View {
                     Text("COMPLETED")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.green)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -201,14 +246,22 @@ struct ChallengeCompletedView: View {
                 )
             }
             
-            // Achievement Stats
+            // Achievement Stats (final + target)
             VStack(spacing: 16) {
                 HStack {
+                    let finalValue: Double = {
+                        if challenge.type == .bankroll {
+                            // For bankroll we trust currentValue, but fallback to target if it's still at starting value
+                            return max(challenge.currentValue, challenge.targetValue)
+                        } else {
+                            return challenge.currentValue
+                        }
+                    }()
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("TARGET ACHIEVED")
+                        Text("FINAL")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.gray)
-                        Text(formattedValue(challenge.targetValue, type: challenge.type))
+                        Text(formattedValue(finalValue, type: challenge.type))
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(colorForType(challenge.type))
                     }
@@ -216,11 +269,11 @@ struct ChallengeCompletedView: View {
                     Spacer()
                     
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text("COMPLETED IN")
+                        Text("TARGET")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.gray)
-                        Text(completionDuration)
-                            .font(.system(size: 20, weight: .bold))
+                        Text(formattedValue(challenge.targetValue, type: challenge.type))
+                            .font(.system(size: 24, weight: .bold))
                             .foregroundColor(.white)
                     }
                 }
@@ -273,19 +326,36 @@ struct ChallengeCompletedView: View {
                 }
             }
             
-            // Stack Poker branding
-            HStack {
-                Spacer()
-                Text("stackpoker.gg")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.gray.opacity(0.6))
-                Spacer()
+            // Duration & branding
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image("stack_logo")
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(height: 60)
+                    Text("STACK")
+                        .font(.plusJakarta(.largeTitle, weight: .black))
+                        .foregroundColor(colorForType(challenge.type))
+                }
+                // Starting bankroll
+                if let startRoll = challenge.startingBankroll {
+                    Text("Started at " + formattedValue(startRoll, type: .bankroll))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.gray)
+                }
             }
         }
-        .padding(24)
+        .padding(32)
         .background(
             RoundedRectangle(cornerRadius: 20)
-                .fill(Color.black.opacity(0.4))
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color.black.opacity(0.5), colorForType(challenge.type).opacity(0.3)]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
                         .stroke(
@@ -339,11 +409,17 @@ struct ChallengeCompletedView: View {
     private func generateCelebrationCardImage() async {
         // Create a view that represents the card for image generation
         let cardView = challengeCompletionCard
-            .frame(width: 400, height: 300)
+            .frame(width: 400, height: 500)
             .background(Color.black)
         
-        // Convert to UIImage (simplified version - in production you'd use ImageRenderer or similar)
-        celebrationCard = UIImage(systemName: "trophy.fill") // Placeholder for now
+        if #available(iOS 16.0, *) {
+            let renderer = ImageRenderer(content: cardView)
+            if let uiImg = renderer.uiImage {
+                celebrationCard = uiImg
+            }
+        } else {
+            celebrationCard = nil
+        }
     }
     
     private func shareToSocialMedia() {
@@ -352,19 +428,22 @@ struct ChallengeCompletedView: View {
     
     private func postToFeed() {
         // Post completion to the app's feed
-        let completionText = """
-        🎉 Challenge Completed!
-        
-        \(challenge.title)
-        
-        Target: \(formattedValue(challenge.targetValue, type: challenge.type))
-        Final: \(formattedValue(challenge.currentValue, type: challenge.type))
-        Completed in: \(completionDuration)
-        
-        #ChallengeCompleted #\(challenge.type.rawValue.capitalized)Goal
-        """
+        var completionText = """
+🎉 Challenge Completed!
+
+\(challenge.title)
+
+Target: \(formattedValue(challenge.targetValue, type: challenge.type))
+Final: \(formattedValue(challenge.currentValue, type: challenge.type))
+
+#ChallengeCompleted #\(challenge.type.rawValue.capitalized)Goal
+"""
+        if !userComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            completionText += "\n\n" + userComment
+        }
         
         Task {
+            await MainActor.run { isPosting = true }
             do {
                 try await postService.createPost(
                     content: completionText,
@@ -381,9 +460,11 @@ struct ChallengeCompletedView: View {
                 )
                 
                 await MainActor.run {
-                    dismiss()
+                    isPosting = false
+                    showPostSuccess = true
                 }
             } catch {
+                await MainActor.run { isPosting = false }
                 print("Error posting challenge completion: \(error)")
             }
         }
@@ -400,7 +481,7 @@ struct ChallengeCompletedView: View {
     private func formattedValue(_ value: Double, type: ChallengeType) -> String {
         switch type {
         case .bankroll:
-            return "$\(Int(value).formattedWithCommas)"
+            return "$" + Int(value).formattedWithCommas
         case .hands:
             return "\(Int(value))"
         case .session:
@@ -487,20 +568,4 @@ struct ActivityViewController: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
-// Scale button style for better interaction
-struct ScaleButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
-    }
-}
 
-// Extension for number formatting
-extension Int {
-    var formattedWithCommas: String {
-        let numberFormatter = NumberFormatter()
-        numberFormatter.numberStyle = .decimal
-        return numberFormatter.string(from: NSNumber(value: self)) ?? "\(self)"
-    }
-} 

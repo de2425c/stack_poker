@@ -74,19 +74,19 @@ struct PostView: View {
     private func extractChallengeInfo() -> ChallengePostInfo? {
         let content = post.content
         
-        // Check for challenge start posts
-        if content.contains("🎯 Started a new challenge:") && content.contains("#PokerChallenge") {
-            return parseChallengeStartPost(content)
+        // Check for challenge completion posts FIRST (most specific)
+        if content.contains("🎉 Challenge Completed!") || content.contains("🏆 Goal Achieved!") || content.contains("#ChallengeCompleted") {
+            return parseChallengeCompletionPost(content)
         }
         
-        // Check for challenge progress posts
-        if content.contains("Challenge Progress:") || content.contains("🎯 Challenge Update:") {
+        // Check for challenge progress posts SECOND (before start posts to avoid confusion)
+        if content.contains("Challenge Progress:") || content.contains("🎯 Challenge Update:") || content.contains("#ChallengeProgress") {
             return parseChallengeProgressPost(content)
         }
         
-        // Check for challenge completion posts
-        if content.contains("🎉 Challenge Completed!") || content.contains("🏆 Goal Achieved!") {
-            return parseChallengeCompletionPost(content)
+        // Check for challenge start posts LAST
+        if content.contains("🎯 Started a new challenge:") && content.contains("#PokerChallenge") {
+            return parseChallengeStartPost(content)
         }
         
         return nil
@@ -137,7 +137,16 @@ struct PostView: View {
     }
     
     private func parseChallengeProgressPost(_ content: String) -> ChallengePostInfo? {
-        // Similar parsing logic for progress posts
+        // Extract challenge title from "🎯 Challenge Update: [Title]" format
+        var challengeTitle = "Challenge Progress"
+        if let titleRange = content.range(of: "🎯 Challenge Update: ") {
+            let remainingContent = String(content[titleRange.upperBound...])
+            if let titleEnd = remainingContent.range(of: "\n") {
+                challengeTitle = String(remainingContent[..<titleEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        
+        // Extract target and current values
         let targetValue = extractValue(from: content, prefix: "Target: ") ?? extractValue(from: content, prefix: "Goal: ")
         let currentValue = extractValue(from: content, prefix: "Current: ") ?? extractValue(from: content, prefix: "Progress: ")
         
@@ -145,10 +154,22 @@ struct PostView: View {
         
         guard let target = targetValue, let current = currentValue else { return nil }
         
+        // Determine challenge type from hashtags
+        let challengeType: ChallengeType
+        if content.contains("#BankrollGoal") {
+            challengeType = .bankroll
+        } else if content.contains("#HandsGoal") {
+            challengeType = .hands
+        } else if content.contains("#SessionGoal") {
+            challengeType = .session
+        } else {
+            challengeType = .bankroll // Default
+        }
+        
         return ChallengePostInfo(
             type: .challengeProgress,
-            challengeTitle: "Challenge Progress",
-            challengeType: .bankroll,
+            challengeTitle: challengeTitle,
+            challengeType: challengeType,
             currentValue: current,
             targetValue: target,
             progressPercentage: (current / target) * 100,
@@ -158,6 +179,18 @@ struct PostView: View {
     }
     
     private func parseChallengeCompletionPost(_ content: String) -> ChallengePostInfo? {
+        // Extract challenge title - it's on the line after "🎉 Challenge Completed!"
+        var challengeTitle = "Challenge Completed!"
+        let lines = content.components(separatedBy: "\n")
+        
+        for (index, line) in lines.enumerated() {
+            if line.contains("🎉 Challenge Completed!") && index + 2 < lines.count {
+                // Title is 2 lines down (skipping the empty line)
+                challengeTitle = lines[index + 2].trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+        }
+        
         let targetValue = extractValue(from: content, prefix: "Target: ") ?? extractValue(from: content, prefix: "Goal: ")
         let currentValue = extractValue(from: content, prefix: "Final: ") ?? extractValue(from: content, prefix: "Achieved: ")
         
@@ -165,10 +198,22 @@ struct PostView: View {
         
         guard let target = targetValue, let current = currentValue else { return nil }
         
+        // Determine challenge type from hashtags
+        let challengeType: ChallengeType
+        if content.contains("#BankrollGoal") {
+            challengeType = .bankroll
+        } else if content.contains("#HandsGoal") {
+            challengeType = .hands
+        } else if content.contains("#SessionGoal") {
+            challengeType = .session
+        } else {
+            challengeType = .bankroll // Default
+        }
+        
         return ChallengePostInfo(
             type: .challengeCompletion,
-            challengeTitle: "Challenge Completed!",
-            challengeType: .bankroll,
+            challengeTitle: challengeTitle,
+            challengeType: challengeType,
             currentValue: current,
             targetValue: target,
             progressPercentage: 100,
@@ -629,10 +674,15 @@ struct ChallengePostView: View {
             
             // Challenge Progress Component
             ChallengeProgressComponent(
-                challengeTitle: challengeInfo.challengeTitle,
-                challengeType: challengeInfo.challengeType,
-                currentValue: challengeInfo.currentValue,
-                targetValue: challengeInfo.targetValue,
+                challenge: Challenge(
+                    userId: post.userId,
+                    type: challengeInfo.challengeType,
+                    title: challengeInfo.challengeTitle,
+                    description: "", // Empty description for display purposes
+                    targetValue: challengeInfo.targetValue,
+                    currentValue: challengeInfo.currentValue,
+                    endDate: challengeInfo.deadline
+                ),
                 isCompact: challengeInfo.isCompact
             )
             .padding(.horizontal, 16)
@@ -742,14 +792,6 @@ struct ChallengePostView: View {
                 }
                 
                 Spacer()
-                
-                Button(action: {
-                    // Share action
-                }) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray.opacity(0.7))
-                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -777,16 +819,20 @@ struct ChallengePostView: View {
         content = content.replacingOccurrences(of: "🎉 Challenge Completed!", with: "")
         content = content.replacingOccurrences(of: "🏆 Goal Achieved!", with: "")
         
-        // Remove technical details that are shown in the component
+        // Remove the challenge title line that matches the title in the progress component
         let lines = content.components(separatedBy: "\n")
         let filteredLines = lines.filter { line in
-            !line.contains("Target:") &&
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !line.contains("Target:") &&
             !line.contains("Current:") &&
             !line.contains("Goal:") &&
             !line.contains("Progress:") &&
             !line.contains("Final:") &&
             !line.contains("Achieved:") &&
-            !line.hasPrefix("#")
+            !line.hasPrefix("#") &&
+            !line.contains("Deadline:") &&
+            trimmedLine != challengeInfo.challengeTitle && // Remove duplicate title
+            !trimmedLine.isEmpty
         }
         
         return filteredLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)

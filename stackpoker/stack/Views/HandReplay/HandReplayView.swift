@@ -266,6 +266,19 @@ struct HandReplayView: View {
             playerStacks[player.name] = player.stack
         }
         
+        // Initialize pot with antes if present
+        if let ante = hand.raw.gameInfo.ante, ante > 0 {
+            let totalAntes = ante * Double(hand.raw.players.count)
+            potAmount = totalAntes
+            
+            // Deduct antes from each player's stack
+            hand.raw.players.forEach { player in
+                if let currentStack = playerStacks[player.name] {
+                    playerStacks[player.name] = currentStack - ante
+                }
+            }
+        }
+        
         // Print info about cards for debugging
         hand.raw.players.forEach { player in
             if player.cards != nil && !player.cards!.isEmpty {
@@ -328,6 +341,7 @@ struct HandReplayView: View {
 
         
         // Initialize player stacks to their starting values
+        // This will also set up the pot with antes if present
         initializeStacks()
     }
     

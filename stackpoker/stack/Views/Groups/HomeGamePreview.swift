@@ -554,7 +554,10 @@ struct HomeGameDetailView: View {
                 // Add top spacing for navigation bar clearance
                 Color.clear.frame(height: 80)
                 
-                if let liveGame = liveGame, liveGame.status == .completed {
+                // Use the most recent game data (liveGame if available, otherwise fallback to initial game)
+                let currentGame = liveGame ?? game
+                
+                if currentGame.status == .completed {
                     // Show game summary for completed games
                     gameSummaryView
                 } else if isGameCreator {
@@ -664,7 +667,8 @@ struct HomeGameDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Text(liveGame?.status == .completed ? "Game Summary" :
+                let currentGame = liveGame ?? game
+                Text(currentGame.status == .completed ? "Game Summary" :
                         (isGameCreator ? "Game Management" : "Game Details"))
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.white)
@@ -682,7 +686,7 @@ struct HomeGameDetailView: View {
                 }
             }
             
-            if isGameCreator && (liveGame?.status ?? game.status) == .active {
+            if isGameCreator && (liveGame ?? game).status == .active {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: copyGameLink) {
                         Image(systemName: "link")
@@ -734,10 +738,12 @@ struct HomeGameDetailView: View {
             })
         }
         .onAppear {
+            // Refresh game data immediately to get latest status
+            refreshGame()
             setupLiveUpdates()
             
             // Show share prompt when view appears if it's the creator and hasn't been shown
-            if isGameCreator && !hasShownSharePrompt && (liveGame?.status ?? game.status) == .active {
+            if isGameCreator && !hasShownSharePrompt && (liveGame ?? game).status == .active {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     withAnimation {
                         showSharePrompt = true

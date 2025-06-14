@@ -20,6 +20,30 @@ class UserService: ObservableObject {
             name: NSNotification.Name("UserWillSignOut"),
             object: nil
         )
+        
+        // Initialize top users cache if needed
+        Task {
+            await initializeTopUsersCacheIfNeeded()
+        }
+    }
+    
+    /// Initializes the top users cache if it doesn't exist
+    private func initializeTopUsersCacheIfNeeded() async {
+        do {
+            let cacheDoc = try await db.collection(topUsersCollection)
+                .document(topUsersDocumentId)
+                .getDocument()
+            
+            if !cacheDoc.exists {
+                // Cache doesn't exist, create it
+                print("Top users cache doesn't exist, creating initial cache")
+                try await updateTopUsersCache()
+            } else {
+                print("Top users cache exists, skipping initialization")
+            }
+        } catch {
+            print("Failed to check top users cache: \(error)")
+        }
     }
     
     deinit {
@@ -109,18 +133,22 @@ class UserService: ObservableObject {
     }
     
     func createUserProfile(userData: [String: Any]) async throws {
+        print("UserService: Starting createUserProfile with data: \(userData)")
+        
         guard let userId = Auth.auth().currentUser?.uid else {
-
+            print("UserService: No authenticated user found")
             throw UserServiceError.notAuthenticated
         }
         
-
+        print("UserService: Creating profile for user ID: \(userId)")
         
         // Extract username for availability check
         guard let username = userData["username"] as? String, !username.isEmpty else {
-
+            print("UserService: Username is missing or empty")
             throw NSError(domain: "UserServiceError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Username is required"])
         }
+        
+        print("UserService: Checking username availability: \(username)")
         
         // Check if username is already taken
         do {
@@ -129,19 +157,23 @@ class UserService: ObservableObject {
                 .getDocuments()
             
             if !querySnapshot.documents.isEmpty {
-
+                print("UserService: Username '\(username)' is already taken")
                 throw UserServiceError.usernameAlreadyExists
             }
+            
+            print("UserService: Username is available, creating profile document")
             
             // Create a mutable copy of userData and add required fields
             var profileData = userData
             profileData["id"] = userId
             profileData["createdAt"] = Timestamp(date: Date())
             
+            print("UserService: Final profile data: \(profileData)")
+            
             let docRef = db.collection("users").document(userId)
             try await docRef.setData(profileData)
             
-
+            print("UserService: Profile document created successfully")
             
             // Create a profile object from the data
             let displayName = userData["displayName"] as? String
@@ -167,12 +199,14 @@ class UserService: ObservableObject {
             
             await MainActor.run {
                 self.currentUserProfile = newProfile
+                print("UserService: Profile cached successfully")
             }
             
         } catch let firestoreError as NSError {
-
-
-
+            print("UserService: Firestore error occurred: \(firestoreError)")
+            print("UserService: Error domain: \(firestoreError.domain)")
+            print("UserService: Error code: \(firestoreError.code)")
+            print("UserService: Error description: \(firestoreError.localizedDescription)")
             throw UserServiceError.from(firestoreError)
         }
     }
@@ -372,6 +406,11 @@ class UserService: ObservableObject {
             
             print("Successfully followed user")
 
+            // Invalidate feed cache and refresh it since following list changed
+            NotificationCenter.default.post(name: NSNotification.Name("UserFollowingChanged"), object: nil)
+
+            // Top users cache will be updated manually as needed
+
             // Removed optimistic refresh of loadedUsers/currentUserProfile counts to avoid
             // triggering large-scale view updates (can be refreshed explicitly where needed).
 
@@ -404,12 +443,24 @@ class UserService: ObservableObject {
             
             print("Successfully unfollowed user")
 
+            // Invalidate feed cache and refresh it since following list changed
+            NotificationCenter.default.post(name: NSNotification.Name("UserFollowingChanged"), object: nil)
+
+            // Top users cache will be updated manually as needed
+
             // Removed optimistic local count updates – rely on explicit refreshes instead.
 
         } catch {
             print("Error unfollowing user: \(error)")
             throw error
         }
+    }
+
+    func isFollowing(userId: String) async throws -> Bool {
+        guard let currentUserId = Auth.auth().currentUser?.uid else {
+            return false
+        }
+        return await isUserFollowing(targetUserId: userId, currentUserId: currentUserId)
     }
 
     func isUserFollowing(targetUserId: String, currentUserId: String?) async -> Bool {
@@ -545,6 +596,317 @@ class UserService: ObservableObject {
 
             throw error
         }
+    }
+    
+    // MARK: - Top Users Cache Management
+    private let topUsersCollection = "topUsers"
+    private let topUsersDocumentId = "mostFollowed"
+    
+    /// Updates the cached list of top followed users in Firebase
+    /// This should be called periodically (e.g., via a cloud function or scheduled task)
+    func updateTopUsersCache() async throws {
+        print("Updating top users cache...")
+        
+        // Query all userFollows to count followers for each user
+        let followsSnapshot = try await db.collection("userFollows").getDocuments()
+        
+        // Count followers for each user
+        var followerCounts: [String: Int] = [:]
+        
+        for document in followsSnapshot.documents {
+            let data = document.data()
+            if let followeeId = data["followeeId"] as? String {
+                followerCounts[followeeId, default: 0] += 1
+            }
+        }
+        
+        // Sort by follower count and take top 5
+        let topUserIds = followerCounts
+            .sorted { $0.value > $1.value }
+            .prefix(5)
+            .map { $0.key }
+        
+        print("Top user IDs by followers: \(topUserIds)")
+        
+        // Fetch user details for these top users
+        var topUsersData: [[String: Any]] = []
+        
+        for userId in topUserIds {
+            do {
+                let userDoc = try await db.collection("users").document(userId).getDocument()
+                
+                if let userData = userDoc.data() {
+                    let followerCount = followerCounts[userId] ?? 0
+                    let (_, followingCount) = (try? await getFollowerCounts(for: userId)) ?? (0, 0)
+                    
+                    var cachedUserData = userData
+                    cachedUserData["id"] = userId
+                    cachedUserData["cachedFollowersCount"] = followerCount
+                    cachedUserData["cachedFollowingCount"] = followingCount
+                    cachedUserData["lastUpdated"] = Timestamp()
+                    
+                    topUsersData.append(cachedUserData)
+                    print("Added user \(userData["username"] as? String ?? "unknown") with \(followerCount) followers")
+                }
+            } catch {
+                print("Failed to fetch user data for \(userId): \(error)")
+            }
+        }
+        
+        // Store in Firebase
+        let cacheData: [String: Any] = [
+            "users": topUsersData,
+            "lastUpdated": Timestamp(),
+            "version": 1
+        ]
+        
+        try await db.collection(topUsersCollection)
+            .document(topUsersDocumentId)
+            .setData(cacheData)
+        
+        print("Top users cache updated with \(topUsersData.count) users")
+    }
+    
+    /// Fetches top followed users from cache, excluding users already being followed
+    func fetchSuggestedUsers(limit: Int = 5) async throws -> [UserProfile] {
+        // Use Auth user ID if current profile isn't loaded yet
+        guard let currentUserId = currentUserProfile?.id ?? Auth.auth().currentUser?.uid else { 
+            print("No current user ID available for suggested users")
+            return [] 
+        }
+        print("Fetching suggested users for currentUserId: \(currentUserId)")
+        
+        // Get list of users currently being followed
+        let followingSnapshot = try await db.collection("userFollows")
+            .whereField("followerId", isEqualTo: currentUserId)
+            .getDocuments()
+        
+        let followingUserIds = Set(followingSnapshot.documents.map { $0.data()["followeeId"] as? String ?? "" })
+        print("Currently following \(followingUserIds.count) users: \(followingUserIds)")
+        
+        // Try to fetch from cache first
+        do {
+            let cacheDoc = try await db.collection(topUsersCollection)
+                .document(topUsersDocumentId)
+                .getDocument()
+            
+            if let cacheData = cacheDoc.data(),
+               let usersArray = cacheData["users"] as? [[String: Any]],
+               let lastUpdated = cacheData["lastUpdated"] as? Timestamp {
+                
+                // For now, always use cache if it exists (as requested by user)
+                // Later we can add staleness checking when there are more users
+                if true {
+                    // Use cached data
+                    var profiles: [UserProfile] = []
+                    
+                    for userData in usersArray {
+                        guard let userId = userData["id"] as? String else { continue }
+                        
+                        // Don't include the current user
+                        if userId == currentUserId { continue }
+                        
+                        // Don't include users already being followed
+                        if followingUserIds.contains(userId) { continue }
+                        
+                        // Stop if we have enough profiles
+                        if profiles.count >= limit { break }
+                        
+                        let userProfile = UserProfile(
+                            id: userId,
+                            username: userData["username"] as? String ?? "",
+                            displayName: userData["displayName"] as? String,
+                            createdAt: (userData["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                            favoriteGames: userData["favoriteGames"] as? [String],
+                            bio: userData["bio"] as? String,
+                            avatarURL: userData["avatarURL"] as? String,
+                            location: userData["location"] as? String,
+                            favoriteGame: userData["favoriteGame"] as? String,
+                            followersCount: userData["cachedFollowersCount"] as? Int ?? 0,
+                            followingCount: userData["cachedFollowingCount"] as? Int ?? 0
+                        )
+                        profiles.append(userProfile)
+                        self.loadedUsers[userId] = userProfile // Cache it locally
+                    }
+                    
+                    print("Fetched \(profiles.count) suggested users from cache")
+                    return profiles
+                }
+            }
+        } catch {
+            print("Failed to fetch from cache, falling back to direct query: \(error)")
+        }
+        
+        // Cache miss or stale cache - fall back to direct query and update cache
+        print("Cache miss or stale, performing direct query...")
+        
+        let snapshot = try await db.collection("users")
+            .order(by: "followersCount", descending: true)
+            .limit(to: limit + followingUserIds.count + 10)
+            .getDocuments()
+        
+        var profiles: [UserProfile] = []
+        
+        for document in snapshot.documents {
+            let data = document.data()
+            let userId = document.documentID
+            
+            // Don't include the current user
+            if userId == currentUserId { continue }
+            
+            // Don't include users already being followed
+            if followingUserIds.contains(userId) { continue }
+            
+            // Stop if we have enough profiles
+            if profiles.count >= limit { break }
+            
+            let (followersCount, followingCount) = (try? await getFollowerCounts(for: userId)) ?? (0, 0)
+            
+            let userProfile = UserProfile(
+                id: userId,
+                username: data["username"] as? String ?? "",
+                displayName: data["displayName"] as? String,
+                createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                favoriteGames: data["favoriteGames"] as? [String],
+                bio: data["bio"] as? String,
+                avatarURL: data["avatarURL"] as? String,
+                location: data["location"] as? String,
+                favoriteGame: data["favoriteGame"] as? String,
+                followersCount: followersCount,
+                followingCount: followingCount
+            )
+            profiles.append(userProfile)
+            self.loadedUsers[userId] = userProfile // Cache it
+        }
+        
+        // Cache update will be triggered manually as needed
+        
+        return profiles
+    }
+    
+    /// Public method to manually refresh the top users cache
+    /// Call this when significant following changes occur
+    func refreshTopUsersCache() async {
+        do {
+            try await updateTopUsersCache()
+            print("Top users cache manually refreshed")
+        } catch {
+            print("Failed to manually refresh top users cache: \(error)")
+        }
+    }
+    
+    // MARK: - Comprehensive User Search
+    /// Searches users by both username and displayName, supporting substring matching for names with spaces
+    func searchUsers(query: String, limit: Int = 10) async throws -> [UserProfile] {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let queryLower = trimmedQuery.lowercased()
+        let currentUserId = currentUserProfile?.id
+        
+        var allResults: [UserProfile] = []
+        
+        // Search with both original case and lowercase to handle case sensitivity issues
+        let searchVariants = [trimmedQuery, queryLower, trimmedQuery.capitalized]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        
+        // Remove duplicates from search variants
+        let uniqueSearchVariants = Array(Set(searchVariants))
+        
+        // Search by username with different case variants
+        for searchVariant in uniqueSearchVariants {
+            let usernameResults = try await searchByField("username", query: searchVariant, currentUserId: currentUserId)
+            
+            // Add results that aren't already in our list
+            for result in usernameResults {
+                if !allResults.contains(where: { $0.id == result.id }) {
+                    allResults.append(result)
+                }
+            }
+        }
+        
+        // Search by displayName with different case variants
+        for searchVariant in uniqueSearchVariants {
+            let displayNameResults = try await searchByField("displayName", query: searchVariant, currentUserId: currentUserId)
+            
+            // Add results that aren't already in our list
+            for result in displayNameResults {
+                if !allResults.contains(where: { $0.id == result.id }) {
+                    allResults.append(result)
+                }
+            }
+        }
+        
+        // Client-side filtering for better substring matching (important for names with spaces like "Mr Floofy")
+        let filteredResults = allResults.filter { profile in
+            let username = profile.username.lowercased()
+            let displayName = (profile.displayName ?? "").lowercased()
+            let searchLower = queryLower
+            
+            return username.contains(searchLower) || displayName.contains(searchLower)
+        }
+        
+        // Sort results by relevance (exact matches first, then starts with, then contains)
+        let sortedResults = filteredResults.sorted { profile1, profile2 in
+            let name1 = (profile1.displayName ?? profile1.username).lowercased()
+            let name2 = (profile2.displayName ?? profile2.username).lowercased()
+            let username1 = profile1.username.lowercased()
+            let username2 = profile2.username.lowercased()
+            
+            // Exact matches first
+            let exact1 = name1 == queryLower || username1 == queryLower
+            let exact2 = name2 == queryLower || username2 == queryLower
+            if exact1 != exact2 { return exact1 }
+            
+            // Then starts with
+            let starts1 = name1.hasPrefix(queryLower) || username1.hasPrefix(queryLower)
+            let starts2 = name2.hasPrefix(queryLower) || username2.hasPrefix(queryLower)
+            if starts1 != starts2 { return starts1 }
+            
+            // Finally alphabetical
+            return name1 < name2
+        }
+        
+        return Array(sortedResults.prefix(limit))
+    }
+    
+    private func searchByField(_ field: String, query: String, currentUserId: String?) async throws -> [UserProfile] {
+        var results: [UserProfile] = []
+        
+        // Firestore prefix search
+        let snapshot = try await db.collection("users")
+            .whereField(field, isGreaterThanOrEqualTo: query)
+            .whereField(field, isLessThanOrEqualTo: query + "\u{f8ff}")
+            .limit(to: 20) // Get more results for better filtering
+            .getDocuments()
+        
+        for document in snapshot.documents {
+            let data = document.data()
+            let userId = document.documentID
+            
+            // Don't include the current user
+            if userId == currentUserId { continue }
+            
+            let (followersCount, followingCount) = (try? await getFollowerCounts(for: userId)) ?? (0, 0)
+            let userProfile = UserProfile(
+                id: userId,
+                username: data["username"] as? String ?? "",
+                displayName: data["displayName"] as? String,
+                createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                favoriteGames: data["favoriteGames"] as? [String],
+                bio: data["bio"] as? String,
+                avatarURL: data["avatarURL"] as? String,
+                location: data["location"] as? String,
+                favoriteGame: data["favoriteGame"] as? String,
+                followersCount: followersCount,
+                followingCount: followingCount
+            )
+            results.append(userProfile)
+            self.loadedUsers[userId] = userProfile // Cache it
+        }
+        
+        return results
     }
 }
 

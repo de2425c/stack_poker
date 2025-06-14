@@ -6,6 +6,7 @@ struct AddCashGameView: View {
     @ObservedObject var cashGameService: CashGameService
     
     @State private var gameName = ""
+    @State private var selectedGameType: PokerVariant = .nlh
     @State private var smallBlind = ""
     @State private var bigBlind = ""
     @State private var straddle = ""
@@ -38,6 +39,34 @@ struct AddCashGameView: View {
                                     .foregroundColor(.white)
                                     .padding()
                                     .background(glassyBackground())
+                            }
+                            
+                            // Game Type Field
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("GAME TYPE")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.7))
+                                
+                                HStack {
+                                    ForEach(PokerVariant.allCases, id: \.self) { variant in
+                                        Button(action: {
+                                            selectedGameType = variant
+                                        }) {
+                                            Text(variant.displayName)
+                                                .font(.system(size: 14, weight: .medium))
+                                                .foregroundColor(selectedGameType == variant ? .white : .gray)
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 8)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .fill(selectedGameType == variant ? Color.white.opacity(0.2) : Color.clear)
+                                                )
+                                        }
+                                    }
+                                    Spacer()
+                                }
+                                .padding()
+                                .background(glassyBackground())
                             }
                             
                             // Stakes Fields
@@ -199,7 +228,8 @@ struct AddCashGameView: View {
                     name: gameName,
                     smallBlind: sb,
                     bigBlind: bb,
-                    straddle: str
+                    straddle: str,
+                    gameType: selectedGameType
                 )
                 
                 await MainActor.run {

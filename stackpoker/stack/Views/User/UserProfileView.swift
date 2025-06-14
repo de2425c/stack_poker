@@ -11,6 +11,10 @@ struct UserProfileView: View {
     // State for the follow button
     @State private var isFollowing: Bool = false // Placeholder: actual value needs to be fetched
     @State private var isProcessingFollow: Bool = false
+    
+    // State for blocking functionality
+    @State private var showingBlockAlert: Bool = false
+    @State private var isUserBlocked: Bool = false
 
     // Local follower/following counts so we don't need to mutate `userService.loadedUsers` each time
     @State private var localFollowersCount: Int = 0
@@ -82,8 +86,7 @@ struct UserProfileView: View {
                             
                             // Block Button
                             Button(action: { 
-                                // Action for block button (not implemented)
-                                print("Block button tapped for user: \(user.username)")
+                                blockUser()
                             }) {
                                 Image(systemName: "person.crop.circle.badge.xmark")
                                     .font(.system(size: 14, weight: .semibold))
@@ -127,10 +130,7 @@ struct UserProfileView: View {
                             
                             ForEach(activeChallenges) { challenge in
                                 ChallengeProgressComponent(
-                                    challengeTitle: challenge.title,
-                                    challengeType: challenge.type,
-                                    currentValue: challenge.currentValue,
-                                    targetValue: challenge.targetValue,
+                                    challenge: challenge,
                                     isCompact: true
                                 )
                                 .padding(.horizontal)
@@ -185,6 +185,13 @@ struct UserProfileView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .background(AppBackgroundView().ignoresSafeArea()) // Assuming AppBackgroundView exists
+        .alert("User Blocked", isPresented: $showingBlockAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            if let user = userService.loadedUsers[userId] {
+                Text("\(user.displayName ?? user.username) has been blocked. You will no longer see their posts in your feed.")
+            }
+        }
         .onAppear {
             Task {
                 if userService.loadedUsers[userId] == nil {
@@ -248,7 +255,11 @@ struct UserProfileView: View {
     
     private func fetchActiveChallenges() async {
         do {
-            let challengeService = ChallengeService(userId: userId)
+            // Initialize challenge service on main actor
+            let challengeService = await MainActor.run {
+                ChallengeService(userId: userId)
+            }
+            
             // Create a simple query to get public challenges for this user
             let db = Firestore.firestore()
             let snapshot = try await db.collection("challenges")
@@ -265,6 +276,37 @@ struct UserProfileView: View {
             }
         } catch {
             print("❌ Error fetching challenges: \(error)")
+        }
+    }
+
+    private func blockUser() {
+        guard let currentLoggedInUserId = loggedInUserId, userId != currentLoggedInUserId else { return }
+        
+        Task {
+            // If currently following the user, unfollow them first
+            if isFollowing {
+                do {
+                    try await userService.unfollowUser(userIdToUnfollow: userId)
+                    await MainActor.run {
+                        self.isFollowing = false
+                        self.localFollowersCount = max(0, self.localFollowersCount - 1)
+                    }
+                } catch {
+                    print("❌ Error unfollowing user during block: \(error)")
+                }
+            }
+            
+            // Set blocked state and show alert
+            await MainActor.run {
+                self.isUserBlocked = true
+                self.showingBlockAlert = true
+            }
+            
+            // Here you would typically call an actual block API
+            // For now, just print for debugging
+            if let user = userService.loadedUsers[userId] {
+                print("🚫 User blocked: \(user.username)")
+            }
         }
     }
 }

@@ -174,12 +174,16 @@ class AuthViewModel: ObservableObject {
     // MARK: - Single refresh point
     func refreshFlow() {
         guard !isRefreshingFlow else {
-
+            print("AuthViewModel: Already refreshing flow, skipping")
             return
         }
         isRefreshingFlow = true
+        print("AuthViewModel: Starting flow refresh")
         // Ensure the flag is reset when the function exits, however it exits.
-        defer { isRefreshingFlow = false }
+        defer { 
+            isRefreshingFlow = false 
+            print("AuthViewModel: Flow refresh completed")
+        }
 
 
         setAppFlow(.loading)
@@ -195,7 +199,13 @@ class AuthViewModel: ObservableObject {
 
                 try await firebaseUser.reload()
 
-                let verified = firebaseUser.isEmailVerified
+                // Check if user is authenticated via phone number
+                let isPhoneUser = firebaseUser.providerData.contains { provider in
+                    provider.providerID == "phone"
+                }
+                
+                // For phone users, skip email verification
+                let verified = isPhoneUser ? true : firebaseUser.isEmailVerified
 
                 // Does profile exist?
                 var profileExists = false
@@ -210,23 +220,25 @@ class AuthViewModel: ObservableObject {
 
                 }
 
-
+                print("AuthViewModel: User is phone user: \(isPhoneUser), Email verified: \(firebaseUser.isEmailVerified), Considered verified: \(verified), Profile exists: \(profileExists)")
 
                 if !verified {
-
+                    print("AuthViewModel: Setting flow to emailVerification")
                     setAppFlow(.emailVerification)
                 } else if !profileExists {
-
+                    print("AuthViewModel: Setting flow to profileSetup")
                     setAppFlow(.profileSetup)
                 } else {
-
+                    print("AuthViewModel: User verified and profile exists - setting to main flow")
                     // cache profile
                     if self.userService.currentUserProfile == nil {
-
+                        print("AuthViewModel: Fetching user profile...")
                         try await userService.fetchUserProfile()
-
+                        print("AuthViewModel: User profile fetched")
                     }
+                    print("AuthViewModel: Setting app flow to main(userId: \(firebaseUser.uid))")
                     setAppFlow(.main(userId: firebaseUser.uid))
+                    print("AuthViewModel: App flow set to main successfully")
                 }
             } catch {
 
@@ -237,9 +249,17 @@ class AuthViewModel: ObservableObject {
 
     // Helper to update flow with logging
     private func setAppFlow(_ newFlow: AppFlow) {
-        if newFlow == self.appFlow { return }
+        print("AuthViewModel: setAppFlow called with: \(newFlow)")
+        print("AuthViewModel: Current app flow: \(self.appFlow)")
+        
+        if newFlow == self.appFlow { 
+            print("AuthViewModel: New flow same as current, skipping")
+            return 
+        }
 
+        print("AuthViewModel: Updating app flow from \(self.appFlow) to \(newFlow)")
         self.appFlow = newFlow
+        print("AuthViewModel: App flow updated successfully to: \(self.appFlow)")
     }
 
     // MARK: - Public helper to force main flow after onboarding
@@ -249,6 +269,14 @@ class AuthViewModel: ObservableObject {
 
         isRefreshingFlow = false // reset debounce flag
         setAppFlow(.main(userId: uid))
+    }
+    
+    // MARK: - Public method to force app flow directly (for profile setup completion)
+    @MainActor
+    func forceAppFlow(_ newFlow: AppFlow) {
+        print("AuthViewModel: Forcing app flow to: \(newFlow)")
+        isRefreshingFlow = false // reset debounce flag
+        setAppFlow(newFlow)
     }
 }
 
@@ -269,15 +297,25 @@ struct MainCoordinator: View {
             switch authViewModel.appFlow {
             case .loading:
                 LoadingView()
+                    .onAppear { print("MainCoordinator: Showing LoadingView") }
             case .signedOut:
                 WelcomeView()
+                    .onAppear { print("MainCoordinator: Showing WelcomeView") }
             case .emailVerification:
                 EmailVerificationView()
+                    .onAppear { print("MainCoordinator: Showing EmailVerificationView") }
             case .profileSetup:
-                ProfileSetupView(isNewUser: false)
+                ProfileSetupView(isNewUser: true)
+                    .environmentObject(authViewModel)
+                    .environmentObject(userService)
+                    .onAppear { print("MainCoordinator: Showing ProfileSetupView") }
             case .main(let userId):
                 HomePage(userId: userId)
+                    .onAppear { print("MainCoordinator: Showing HomePage for user: \(userId)") }
             }
+        }
+        .onChange(of: authViewModel.appFlow) { newFlow in
+            print("MainCoordinator: App flow changed to: \(newFlow)")
         }
         .sheet(item: $notificationPostIdWrapper) { wrapper in
             PostDetailViewWrapper(postId: wrapper.id)
@@ -300,14 +338,22 @@ struct MainCoordinator: View {
 }
 
 struct LoadingView: View {
+    @State private var playLottieAnimation = true
+    
     var body: some View {
         ZStack {
-            Color(UIColor(red: 22/255, green: 23/255, blue: 26/255, alpha: 1.0))
+            AppBackgroundView()
                 .ignoresSafeArea()
             
-            ProgressView()
-                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                .scaleEffect(1.5)
+            LottieView(name: "lottie_white", loopMode: .loop, play: $playLottieAnimation)
+                .ignoresSafeArea()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    playLottieAnimation = true
+                }
+                .onDisappear {
+                    playLottieAnimation = false
+                }
         }
     }
 }

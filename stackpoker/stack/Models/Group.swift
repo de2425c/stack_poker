@@ -226,9 +226,12 @@ struct GroupMessage: Identifiable, Codable {
               let senderId = dictionary["senderId"] as? String,
               let senderName = dictionary["senderName"] as? String,
               let messageTypeString = dictionary["messageType"] as? String,
-              let messageType = MessageType(rawValue: messageTypeString),
-              let timestamp = (dictionary["timestamp"] as? Timestamp)?.dateValue() else {
-            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing required fields"])
+              let messageType = MessageType(rawValue: messageTypeString) else {
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing required fields - groupId: \(dictionary["groupId"] ?? "nil"), senderId: \(dictionary["senderId"] ?? "nil"), senderName: \(dictionary["senderName"] ?? "nil"), messageType: \(dictionary["messageType"] ?? "nil")"])
+        }
+        
+        guard let timestamp = (dictionary["timestamp"] as? Timestamp)?.dateValue() else {
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing or invalid timestamp field"])
         }
         
         self.groupId = groupId

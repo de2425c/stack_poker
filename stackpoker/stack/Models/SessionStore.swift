@@ -32,6 +32,9 @@ struct Session: Identifiable, Equatable {
     let location: String?
     let tournamentType: String?
     let series: String?
+    let pokerVariant: String? // Poker variant for cash games
+    let tournamentGameType: String? // Tournament game type
+    let tournamentFormat: String? // Tournament format
     
     init(id: String, data: [String: Any]) {
         self.id = id
@@ -82,6 +85,13 @@ struct Session: Identifiable, Equatable {
         self.location = data["location"] as? String
         self.tournamentType = data["tournamentType"] as? String
         self.series = data["series"] as? String
+        
+        // Populate new poker variant field
+        self.pokerVariant = data["pokerVariant"] as? String
+        
+        // Populate new tournament fields
+        self.tournamentGameType = data["tournamentGameType"] as? String
+        self.tournamentFormat = data["tournamentFormat"] as? String
     }
     
     static func == (lhs: Session, rhs: Session) -> Bool {
@@ -102,7 +112,10 @@ struct Session: Identifiable, Equatable {
                lhs.liveSessionUUID == rhs.liveSessionUUID &&
                lhs.location == rhs.location &&
                lhs.tournamentType == rhs.tournamentType &&
-               lhs.series == rhs.series
+               lhs.series == rhs.series &&
+               lhs.pokerVariant == rhs.pokerVariant &&
+               lhs.tournamentGameType == rhs.tournamentGameType &&
+               lhs.tournamentFormat == rhs.tournamentFormat
     }
 }
 
@@ -125,6 +138,9 @@ class SessionStore: ObservableObject {
     private let userId: String
     private var timer: Timer?
     
+    // Challenge service for updating challenges when sessions are completed
+    private var challengeService: ChallengeService?
+    
     // Maximum length (in seconds) that a live session is allowed to run (120 hours).
     private let maximumSessionDuration: TimeInterval = 120 * 60 * 60
     
@@ -146,6 +162,11 @@ class SessionStore: ObservableObject {
         self.enhancedLiveSession = LiveSessionData_Enhanced(basicSession: self.liveSession)
         self.showLiveSessionBar = false
         
+        // Initialize challenge service asynchronously on main actor
+        Task { @MainActor in
+            self.challengeService = ChallengeService(userId: userId)
+        }
+        
         // Load any existing session state
         loadLiveSessionState()
         
@@ -158,6 +179,11 @@ class SessionStore: ObservableObject {
         }
         
         print("🔄 SESSION STORE: Initialization complete - isActive: \(liveSession.isActive), showBar: \(showLiveSessionBar)")
+    }
+    
+    // Method to set challenge service (for dependency injection if needed)
+    func setChallengeService(_ service: ChallengeService) {
+        self.challengeService = service
     }
     
     // MARK: - Enhanced Session Methods
@@ -292,9 +318,101 @@ class SessionStore: ObservableObject {
         return sessions.first(where: { $0.id == id })
     }
     
+    // MARK: - Duplicate Session Management
+    
+    /// Removes duplicate sessions based on identical buyIn, cashout, and startDate
+    /// Returns the number of duplicate sessions that were deleted
+    func removeDuplicateSessions(completion: @escaping (Result<Int, Error>) -> Void) {
+        print("🔍 Starting duplicate session removal process...")
+        
+        // Group sessions by duplicate criteria
+        var sessionGroups: [String: [Session]] = [:]
+        
+        for session in sessions {
+            // Create a key based on buyIn, cashout, and startDate (rounded to nearest minute for date comparison)
+            let calendar = Calendar.current
+            let roundedStartDate = calendar.dateInterval(of: .minute, for: session.startDate)?.start ?? session.startDate
+            let key = "\(session.buyIn)|\(session.cashout)|\(roundedStartDate.timeIntervalSince1970)"
+            
+            if sessionGroups[key] == nil {
+                sessionGroups[key] = []
+            }
+            sessionGroups[key]?.append(session)
+        }
+        
+        // Find groups with duplicates
+        let duplicateGroups = sessionGroups.filter { $0.value.count > 1 }
+        
+        if duplicateGroups.isEmpty {
+            print("✅ No duplicate sessions found")
+            completion(.success(0))
+            return
+        }
+        
+        print("⚠️ Found \(duplicateGroups.count) groups with duplicates")
+        
+        // Collect sessions to delete (keep the one with earliest createdAt, delete the rest)
+        var sessionsToDelete: [Session] = []
+        
+        for (key, duplicateSessions) in duplicateGroups {
+            print("📊 Group key: \(key) has \(duplicateSessions.count) duplicates")
+            
+            // Sort by createdAt to keep the earliest one
+            let sortedSessions = duplicateSessions.sorted { $0.createdAt < $1.createdAt }
+            let sessionToKeep = sortedSessions.first!
+            let sessionsToRemove = Array(sortedSessions.dropFirst())
+            
+            print("✅ Keeping session ID: \(sessionToKeep.id) (created: \(sessionToKeep.createdAt))")
+            for sessionToRemove in sessionsToRemove {
+                print("🗑️ Will delete session ID: \(sessionToRemove.id) (created: \(sessionToRemove.createdAt))")
+                sessionsToDelete.append(sessionToRemove)
+            }
+        }
+        
+        let totalToDelete = sessionsToDelete.count
+        print("🗑️ Total sessions to delete: \(totalToDelete)")
+        
+        if totalToDelete == 0 {
+            completion(.success(0))
+            return
+        }
+        
+        // Delete sessions in batches
+        let dispatchGroup = DispatchGroup()
+        var deletedCount = 0
+        var errors: [Error] = []
+        
+        for session in sessionsToDelete {
+            dispatchGroup.enter()
+            
+            deleteSession(session.id) { error in
+                if let error = error {
+                    print("❌ Failed to delete session \(session.id): \(error.localizedDescription)")
+                    errors.append(error)
+                } else {
+                    print("✅ Successfully deleted duplicate session \(session.id)")
+                    deletedCount += 1
+                }
+                dispatchGroup.leave()
+            }
+        }
+        
+        dispatchGroup.notify(queue: .main) {
+            if !errors.isEmpty {
+                print("⚠️ Completed with \(deletedCount) deletions and \(errors.count) errors")
+                completion(.failure(errors.first!))
+            } else {
+                print("✅ Successfully deleted \(deletedCount) duplicate sessions")
+                // Refresh the sessions list after deletion
+                self.fetchSessions()
+                completion(.success(deletedCount))
+            }
+        }
+    }
+    
     // MARK: - Live Session Management
     
-    func startLiveSession(gameName: String, stakes: String, buyIn: Double, isTournament: Bool = false, tournamentDetails: (name: String, type: String, baseBuyIn: Double)? = nil) {
+    func startLiveSession(gameName: String, stakes: String, buyIn: Double, isTournament: Bool = false, tournamentDetails: (name: String, type: String, baseBuyIn: Double)? = nil, pokerVariant: String? = nil, tournamentGameType: TournamentGameType? = nil, tournamentFormat: TournamentFormat? = nil, casino: String? = nil) {
         stopLiveSessionTimer() // Ensure any existing timer is stopped
         liveSession = LiveSessionData(
             isActive: true,
@@ -308,7 +426,12 @@ class SessionStore: ObservableObject {
             isTournament: isTournament,
             tournamentName: tournamentDetails?.name,
             tournamentType: tournamentDetails?.type,
-            baseTournamentBuyIn: tournamentDetails?.baseBuyIn
+            baseTournamentBuyIn: tournamentDetails?.baseBuyIn,
+            tournamentGameType: tournamentGameType,
+            tournamentFormat: tournamentFormat,
+            casino: casino,
+            pokerVariant: pokerVariant
+            
         )
         
         // Initialize enhanced session data
@@ -375,10 +498,22 @@ class SessionStore: ObservableObject {
             "liveSessionUUID": currentLiveSessionId, // Link to the live session instance
             "location": liveSession.isTournament ? (liveSession.tournamentName) : nil, // Assuming tournament name can be used as a proxy for location if not separately stored for live
             "tournamentType": liveSession.isTournament ? liveSession.tournamentType : nil,
+            "tournamentGameType": liveSession.isTournament ? liveSession.tournamentGameType?.rawValue : nil,
+            "tournamentFormat": liveSession.isTournament ? liveSession.tournamentFormat?.rawValue : nil,
+            "pokerVariant": !liveSession.isTournament ? liveSession.pokerVariant : nil, // Only save poker variant for cash games
         ]
         
         do {
             let docRef = try await db.collection("sessions").addDocument(data: sessionData)
+            
+            // Create a Session object from the saved data for challenge updates
+            let session = Session(id: docRef.documentID, data: sessionData)
+            
+            // Update session challenges if challenge service is available
+            if let challengeService = challengeService {
+                await challengeService.updateSessionChallengesFromSession(session)
+            }
+            
             // After successful save, properly end and clear the live session state
             endAndClearLiveSession()
             return docRef.documentID // Return the new document ID
@@ -616,6 +751,19 @@ class SessionStore: ObservableObject {
                 return
             }
 
+            // NEW CHECK: Look inside the persisted *enhanced* session for a final cashout entry.
+            if let enhancedData = UserDefaults.standard.data(forKey: "EnhancedLiveSession_\(userId)"),
+               let enhancedSession = try? JSONDecoder().decode(LiveSessionData_Enhanced.self, from: enhancedData) {
+                let hasFinalCashout = enhancedSession.chipUpdates.contains { update in
+                    update.note?.contains("Final cashout amount") == true
+                }
+                if hasFinalCashout {
+                    print("🗑️ LOADING: Found 'Final cashout amount' in enhanced session – treating as ended and clearing")
+                    scorachedEarthSessionClear()
+                    return
+                }
+            }
+
             if hasValidBuyIn && isPotentiallyRestorable && !isAbandoned {
                 print("✅ LOADING: Restoring valid session")
                 // This session looks like it should be restored.
@@ -797,7 +945,12 @@ class SessionStore: ObservableObject {
 
                     group.enter()
                     self.addSession(sessionData) { error in
-                        if error == nil { importedCount += 1 }
+                        if error == nil {
+                            importedCount += 1
+                            print("✅ Row \(importedCount): Session added successfully")
+                        } else {
+                            print("❌ Row \(importedCount): Failed to add session - \(error?.localizedDescription ?? "Unknown error")")
+                        }
                         group.leave()
                     }
                 }
@@ -809,6 +962,16 @@ class SessionStore: ObservableObject {
 
                 let storageRef = Storage.storage().reference().child("pokerbaseImports/\(self.userId)/\(UUID().uuidString).csv")
                 storageRef.putData(data, metadata: nil) { _, _ in }
+
+                // Remove duplicates after import
+                self.removeDuplicateSessions { duplicateResult in
+                    switch duplicateResult {
+                    case .success(let duplicatesRemoved):
+                        print("✅ Pokerbase import: Removed \(duplicatesRemoved) duplicate sessions")
+                    case .failure(let error):
+                        print("⚠️ Pokerbase import: Failed to remove duplicates - \(error.localizedDescription)")
+                    }
+                }
 
                 DispatchQueue.main.async {
                     completion(.success(importedCount))
@@ -953,6 +1116,16 @@ class SessionStore: ObservableObject {
                 let storageRef = Storage.storage().reference().child("pokerAnalyticsImports/\(self.userId)/\(UUID().uuidString).csv")
                 storageRef.putData(data, metadata: nil) { _, _ in }
 
+                // Remove duplicates after import
+                self.removeDuplicateSessions { duplicateResult in
+                    switch duplicateResult {
+                    case .success(let duplicatesRemoved):
+                        print("✅ Poker Analytics import: Removed \(duplicatesRemoved) duplicate sessions")
+                    case .failure(let error):
+                        print("⚠️ Poker Analytics import: Failed to remove duplicates - \(error.localizedDescription)")
+                    }
+                }
+
                 DispatchQueue.main.async {
                     completion(.success(imported))
                 }
@@ -1071,7 +1244,7 @@ class SessionStore: ObservableObject {
                     let location = cols[locationIdx]
                     let type = typeIdx != nil ? cols[typeIdx!] : ""
                     
-                    // Build stakes from limit or blinds
+                    // Build stakes string from limit or blinds
                     var stakes = ""
                     if let limitIdx = limitIdx, !cols[limitIdx].isEmpty {
                         stakes = cols[limitIdx]
@@ -1119,7 +1292,12 @@ class SessionStore: ObservableObject {
 
                     group.enter()
                     self.addSession(sessionData) { error in
-                        if error == nil { imported += 1 }
+                        if error == nil {
+                            imported += 1
+                            print("✅ Row \(imported): Session added successfully")
+                        } else {
+                            print("❌ Row \(imported): Failed to add session - \(error?.localizedDescription ?? "Unknown error")")
+                        }
                         group.leave()
                     }
                 }
@@ -1128,6 +1306,217 @@ class SessionStore: ObservableObject {
                 self.fetchSessions()
 
                 let storageRef = Storage.storage().reference().child("pbtImports/\(self.userId)/\(UUID().uuidString).csv")
+                storageRef.putData(data, metadata: nil) { _, _ in }
+
+                // Remove duplicates after import
+                self.removeDuplicateSessions { duplicateResult in
+                    switch duplicateResult {
+                    case .success(let duplicatesRemoved):
+                        print("✅ PBT import: Removed \(duplicatesRemoved) duplicate sessions")
+                    case .failure(let error):
+                        print("⚠️ PBT import: Failed to remove duplicates - \(error.localizedDescription)")
+                    }
+                }
+
+                DispatchQueue.main.async {
+                    completion(.success(imported))
+                }
+
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+    
+    // MARK: - Regroup Import
+    /// Imports sessions from Regroup export format.
+    /// Flexible import that looks for core columns: date, buyin, cashout, location, hours, format
+    func importSessionsFromRegroupCSV(fileURL: URL, completion: @escaping (Result<Int, Error>) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let needsSecurity = fileURL.startAccessingSecurityScopedResource()
+            defer { if needsSecurity { fileURL.stopAccessingSecurityScopedResource() } }
+
+            do {
+                let data = try Data(contentsOf: fileURL)
+                guard let content = String(data: data, encoding: .utf8) else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to decode file as UTF-8"])) )
+                    }
+                    return
+                }
+
+                let lines = content.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                
+                print("📊 Regroup Import: Found \(lines.count) lines in CSV")
+                
+                guard lines.count > 1 else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -2, userInfo: [NSLocalizedDescriptionKey: "CSV appears to have no data rows"])) )
+                    }
+                    return
+                }
+
+                // Simple CSV parsing
+                func parseCSVLine(_ line: String) -> [String] {
+                    return line.split(separator: ",", omittingEmptySubsequences: false).map { 
+                        String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
+
+                let headerRow = parseCSVLine(lines[0])
+                let headers = headerRow.map { $0.lowercased() }
+                
+                print("📊 Regroup Import: Headers found: \(headers)")
+                
+                // Find the columns we care about (flexible matching)
+                func findColumn(_ names: [String]) -> Int? {
+                    for name in names {
+                        if let index = headers.firstIndex(where: { $0.contains(name.lowercased()) }) {
+                            return index
+                        }
+                    }
+                    return nil
+                }
+
+                // Look for these core columns - only date and location are truly required
+                guard let dateIdx = findColumn(["date"]) else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV missing date column. Found: \(headers)"])) )
+                    }
+                    return
+                }
+
+                // Optional but important columns
+                let buyinIdx = findColumn(["buyin", "buy"])
+                let cashoutIdx = findColumn(["cashout", "cash"])
+                let locationIdx = findColumn(["location", "venue"])
+                let hoursIdx = findColumn(["hours", "time"])
+                let formatIdx = findColumn(["format", "type"])
+                let expensesIdx = findColumn(["expenses", "expense"])
+
+                // Multiple date formatters to handle different formats
+                let formatters: [DateFormatter] = {
+                    let iso8601WithFraction = DateFormatter()
+                    iso8601WithFraction.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+                    iso8601WithFraction.locale = Locale(identifier: "en_US_POSIX")
+                    iso8601WithFraction.timeZone = TimeZone(secondsFromGMT: 0)
+                    
+                    let iso8601NoFraction = DateFormatter()
+                    iso8601NoFraction.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+                    iso8601NoFraction.locale = Locale(identifier: "en_US_POSIX")
+                    iso8601NoFraction.timeZone = TimeZone(secondsFromGMT: 0)
+                    
+                    let iso8601WithFractionNoZ = DateFormatter()
+                    iso8601WithFractionNoZ.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+                    iso8601WithFractionNoZ.locale = Locale(identifier: "en_US_POSIX")
+                    iso8601WithFractionNoZ.timeZone = TimeZone(secondsFromGMT: 0)
+                    
+                    let simple = DateFormatter()
+                    simple.dateFormat = "yyyy-MM-dd"
+                    simple.locale = Locale(identifier: "en_US_POSIX")
+                    
+                    return [iso8601WithFraction, iso8601NoFraction, iso8601WithFractionNoZ, simple]
+                }()
+
+                // Helper to parse dollar values (already in dollars, not cents)
+                func parseDollars(_ str: String) -> Double? {
+                    guard !str.isEmpty, let dollars = Double(str.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+                    return dollars
+                }
+
+                // Helper to safely get column value
+                func safeCol(_ index: Int?, from cols: [String]) -> String {
+                    guard let idx = index, idx < cols.count else { return "" }
+                    return cols[idx]
+                }
+
+                var imported = 0
+                let group = DispatchGroup()
+
+                print("📊 Regroup Import: Processing \(lines.count - 1) data rows")
+
+                for (index, line) in lines.dropFirst().enumerated() {
+                    let cols = parseCSVLine(line)
+                    
+                    // Only skip if we don't have the date column
+                    guard cols.count > dateIdx else {
+                        print("⚠️ Row \(index + 1): Skipping - no date column")
+                        continue
+                    }
+                    
+                    // Parse date with multiple formatters
+                    let dateString = cols[dateIdx]
+                    var sessionDate: Date?
+                    
+                    for formatter in formatters {
+                        if let date = formatter.date(from: dateString) {
+                            sessionDate = date
+                            break
+                        }
+                    }
+                    
+                    guard let date = sessionDate else {
+                        print("⚠️ Row \(index + 1): Skipping - bad date format: '\(dateString)'")
+                        continue
+                    }
+
+                    // Get values with safe defaults
+                    let buyIn = buyinIdx != nil ? (parseDollars(safeCol(buyinIdx, from: cols)) ?? 0) : 0
+                    let cashOut = cashoutIdx != nil ? (parseDollars(safeCol(cashoutIdx, from: cols)) ?? 0) : 0
+                    let location = locationIdx != nil ? safeCol(locationIdx, from: cols) : "Unknown"
+                    let hoursPlayed = hoursIdx != nil ? (Double(safeCol(hoursIdx, from: cols)) ?? 0) : 0
+                    let expenses = expensesIdx != nil ? (parseDollars(safeCol(expensesIdx, from: cols)) ?? 0) : 0
+                    
+                    // Determine game type from format/type column
+                    let format = formatIdx != nil ? safeCol(formatIdx, from: cols).uppercased() : ""
+                    let isTournament = format.contains("TOURNAMENT") || format.contains("MTT") || format == "TOURNAMENT"
+                    let gameType = isTournament ? SessionLogType.tournament.rawValue : SessionLogType.cashGame.rawValue
+                    
+                    let profit = cashOut - buyIn - expenses
+                    let endTime = date.addingTimeInterval(hoursPlayed * 3600)
+                    
+                    // Create stakes string
+                    let stakes = isTournament ? (buyIn > 0 ? "$\(Int(buyIn)) Tournament" : "Tournament") : ""
+
+                    let sessionData: [String: Any] = [
+                        "userId": self.userId,
+                        "gameType": gameType,
+                        "gameName": location,
+                        "stakes": stakes,
+                        "startDate": Timestamp(date: date),
+                        "startTime": Timestamp(date: date),
+                        "endTime": Timestamp(date: endTime),
+                        "hoursPlayed": hoursPlayed,
+                        "buyIn": buyIn + expenses,
+                        "cashout": cashOut,
+                        "profit": profit,
+                        "createdAt": FieldValue.serverTimestamp(),
+                        "location": location
+                    ]
+
+                    print("📊 Row \(index + 1): \(isTournament ? "Tournament" : "Cash") at \(location) - $\(buyIn) → $\(cashOut) = $\(profit)")
+
+                    group.enter()
+                    self.addSession(sessionData) { error in
+                        if error == nil {
+                            imported += 1
+                        } else {
+                            print("❌ Row \(index + 1): Failed - \(error?.localizedDescription ?? "Unknown")")
+                        }
+                        group.leave()
+                    }
+                }
+
+                group.wait()
+                
+                print("📊 Regroup Import: Complete! Successfully imported \(imported) sessions.")
+                
+                self.fetchSessions()
+
+                // Archive the file
+                let storageRef = Storage.storage().reference().child("regroupImports/\(self.userId)/\(UUID().uuidString).csv")
                 storageRef.putData(data, metadata: nil) { _, _ in }
 
                 DispatchQueue.main.async {

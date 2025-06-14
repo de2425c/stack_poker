@@ -9,9 +9,11 @@ struct EnhancedLiveSessionView: View {
     @StateObject private var userService = UserService()
     let userId: String
     @ObservedObject var sessionStore: SessionStore
+    var preselectedEvent: Event? = nil // Optional preselected event
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var handStore = HandStore(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var stakeService = StakeService() // Add StakeService
+    @StateObject private var challengeService = ChallengeService(userId: Auth.auth().currentUser?.uid ?? "") // Add ChallengeService
     @State private var handEntryMinimized = false
     
     // Callback for when a session ends, passing the new session ID
@@ -148,7 +150,10 @@ struct EnhancedLiveSessionView: View {
     // Tournament setup fields
     @State private var tournamentName: String = ""
     @State private var showingEventSelector = false
+    @State private var tournamentCasino: String = ""
     @State private var baseBuyInTournament: String = ""
+    @State private var selectedTournamentGameType: TournamentGameType = .nlh
+    @State private var selectedTournamentFormat: TournamentFormat = .standard
     // Runtime helpers for tournament sessions
     @State private var isTournamentSession: Bool = false
     @State private var baseBuyInForTournament: Double = 0
@@ -259,6 +264,7 @@ struct EnhancedLiveSessionView: View {
                         }
                 }
                 .environmentObject(self.sessionStore) // Ensure SessionStore is injected
+                .environmentObject(self.userService) // Add UserService for staking details
             }
         }
         .sheet(isPresented: $showingEditSessionSheet) {
@@ -327,20 +333,6 @@ struct EnhancedLiveSessionView: View {
             Button("Not Now", role: .cancel) { dismiss() }
             Button("Share to Feed") {
                 if let details = sessionDetails, userService.currentUserProfile != nil {
-                    let profitText = details.profit >= 0 ? "+$\(Int(details.profit))" : "-$\(Int(abs(details.profit)))"
-                    let content = """
-                    Session at \(details.gameName) (\(details.stakes))
-                    Duration: \(details.duration)
-                    Buy-in: $\(Int(details.buyIn))
-                    Cashout: $\(Int(details.cashout))
-                    Profit: \(profitText)
-                    """
-                    shareToFeedContent = content
-                    shareToFeedIsHand = false
-                    shareToFeedHandData = nil
-                    shareToFeedUpdateId = nil
-                    shareToFeedIsNote = false
-                    shareToFeedIsChipUpdate = false
                     showingPostEditor = true
                 } else {
                     dismiss()
@@ -642,6 +634,21 @@ struct EnhancedLiveSessionView: View {
     private func handleOnAppear() {
         // Check if there's an active session first
         if sessionStore.liveSession.buyIn > 0 { // buyIn > 0 means a session (cash or tourney) exists
+            
+            // DETECT ERROR STATE: Check for "Final cashout amount" entries which indicate a completed session
+            let hasFinalCashoutEntry = sessionStore.enhancedLiveSession.chipUpdates.contains { update in
+                update.note?.contains("Final cashout amount") == true
+            }
+            
+            if hasFinalCashoutEntry {
+                // This is an error state - a completed session is still active
+                print("[EnhancedLiveSessionView] ERROR: Detected 'Final cashout amount' entry in active session. Clearing session state.")
+                sessionStore.endAndClearLiveSession()
+                sessionMode = .setup
+                loadCashGames()
+                return
+            }
+            
             // Determine session mode more directly
             sessionMode = sessionStore.liveSession.isActive ? .active : .paused
             
@@ -690,6 +697,22 @@ struct EnhancedLiveSessionView: View {
 
 
 
+        
+        // Handle preselected event if provided
+        if let event = preselectedEvent {
+            selectedLogType = .tournament
+            tournamentName = event.event_name
+            
+            if let usdBuyin = event.buyin_usd {
+                baseBuyInTournament = String(format: "%.0f", usdBuyin)
+            } else if let parsedBuyin = parseBuyinToDouble(event.buyin_string) {
+                baseBuyInTournament = String(format: "%.0f", parsedBuyin)
+            } else {
+                baseBuyInTournament = ""
+            }
+            
+            tournamentCasino = event.casino ?? ""
+        }
         
         // Ensure user profile is loaded for posting
         Task {
@@ -760,6 +783,7 @@ struct EnhancedLiveSessionView: View {
                                         GameCard(
                                                 stakes: stakes,
                                                 name: game.name,
+                                                gameType: game.gameType,
                                                 isSelected: selectedGame?.id == game.id,
                                                 titleColor: .white,
                                                 subtitleColor: Color.white.opacity(0.7),
@@ -850,6 +874,95 @@ struct EnhancedLiveSessionView: View {
                                 labelColor: .gray,
                                 materialOpacity: 0.2
                             )
+                            
+                            // Casino field
+                            GlassyInputField(
+                                icon: "building.2",
+                                title: "Casino",
+                                content: AnyGlassyContent(TextFieldContent(text: $tournamentCasino, keyboardType: .default, textColor: .white)),
+                                glassOpacity: 0.01,
+                                labelColor: .gray,
+                                materialOpacity: 0.2
+                            )
+                            
+                            // Tournament Game Type and Format Pickers - Side by Side
+                            HStack(spacing: 12) {
+                                // Tournament Game Type Picker
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Image(systemName: "gamecontroller")
+                                            .foregroundColor(.gray)
+                                        Text("Game Type")
+                                            .font(.plusJakarta(.caption, weight: .medium))
+                                            .foregroundColor(.gray)
+                                    }
+                                    
+                                    HStack {
+                                        ForEach(TournamentGameType.allCases, id: \.self) { gameType in
+                                            Button(action: {
+                                                selectedTournamentGameType = gameType
+                                            }) {
+                                                Text(gameType.displayName)
+                                                    .font(.system(size: 13, weight: .medium))
+                                                    .foregroundColor(selectedTournamentGameType == gameType ? .white : .gray)
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 6)
+                                                    .background(
+                                                        RoundedRectangle(cornerRadius: 6)
+                                                            .fill(selectedTournamentGameType == gameType ? Color.white.opacity(0.2) : Color.clear)
+                                                    )
+                                            }
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .fill(Material.ultraThinMaterial)
+                                            .opacity(0.2)
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .fill(Color.white.opacity(0.01))
+                                    }
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                
+                                // Tournament Format Picker
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Image(systemName: "star.circle")
+                                            .foregroundColor(.gray)
+                                        Text("Format")
+                                            .font(.plusJakarta(.caption, weight: .medium))
+                                            .foregroundColor(.gray)
+                                    }
+                                    
+                                    Picker("Tournament Format", selection: $selectedTournamentFormat) {
+                                        ForEach(TournamentFormat.allCases, id: \.self) { format in
+                                            Text(format.displayName).tag(format)
+                                        }
+                                    }
+                                    .pickerStyle(MenuPickerStyle())
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .fill(Material.ultraThinMaterial)
+                                            .opacity(0.2)
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .fill(Color.white.opacity(0.01))
+                                    }
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                            }
 
                             GlassyInputField(
                                 icon: "dollarsign.circle",
@@ -1016,6 +1129,14 @@ struct EnhancedLiveSessionView: View {
                     } else {
                         self.baseBuyInTournament = ""
                     }
+                    
+                    // Ensure casino update happens on main thread for UI refresh
+                    DispatchQueue.main.async {
+                        print("Debug: Selected event casino: '\(selectedEvent.casino ?? "nil")'")
+                        self.tournamentCasino = selectedEvent.casino ?? ""
+                        print("Debug: Tournament casino set to: '\(self.tournamentCasino)'")
+                    }
+                    
                     self.showingEventSelector = false
                 }, isSheetPresentation: true)
                 .navigationTitle("Select Event")
@@ -1043,6 +1164,7 @@ struct EnhancedLiveSessionView: View {
     private struct GameCard: View {
         let stakes: String
         let name: String
+        let gameType: PokerVariant
         let isSelected: Bool
         var titleColor: Color = Color(white: 0.25)
         var subtitleColor: Color = Color(white: 0.4)
@@ -1051,13 +1173,30 @@ struct EnhancedLiveSessionView: View {
         
         var body: some View {
             VStack(alignment: .leading, spacing: 4) {
-                Text(stakes)
-                    .font(.plusJakarta(.title3, weight: .bold))
-                    .foregroundColor(titleColor)
-                
-                Text(name)
-                    .font(.plusJakarta(.caption, weight: .medium))
-                    .foregroundColor(subtitleColor)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(stakes)
+                            .font(.plusJakarta(.title3, weight: .bold))
+                            .foregroundColor(titleColor)
+                        
+                        Text(name)
+                            .font(.plusJakarta(.caption, weight: .medium))
+                            .foregroundColor(subtitleColor)
+                    }
+                    
+                    Spacer()
+                    
+                    // Game type badge
+                    Text(gameType.displayName)
+                        .font(.plusJakarta(.caption2, weight: .semibold))
+                        .foregroundColor(titleColor.opacity(0.8))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.white.opacity(0.1))
+                        )
+                }
             }
             .frame(width: 130)
             .padding(.vertical, 10)
@@ -1228,7 +1367,8 @@ struct EnhancedLiveSessionView: View {
                 gameName: game.name,
                 stakes: game.stakes,
                 buyIn: buyInAmount,
-                isTournament: false // Explicitly false for cash games
+                isTournament: false, // Explicitly false for cash games
+                pokerVariant: game.gameType.rawValue // Pass the poker variant for cash games
             )
             isTournamentSession = false
         } else {
@@ -1244,7 +1384,10 @@ struct EnhancedLiveSessionView: View {
                 stakes: tournamentStakesString, // Simplified stakes string
                 buyIn: baseAmount, // This is the base buy-in for the tournament
                 isTournament: true,
-                tournamentDetails: (name: tournamentName, type: "NLH", baseBuyIn: baseAmount) // Added placeholder type "NLH"
+                tournamentDetails: (name: tournamentName, type: "NLH", baseBuyIn: baseAmount), // Added placeholder type "NLH"
+                tournamentGameType: selectedTournamentGameType,
+                tournamentFormat: selectedTournamentFormat,
+                casino: tournamentCasino
             )
             isTournamentSession = true
             baseBuyInForTournament = baseAmount
@@ -1295,6 +1438,12 @@ struct EnhancedLiveSessionView: View {
                     .padding(.horizontal)
                 } else {
                     chipStackSection
+                        .padding(.horizontal)
+                }
+                
+                // Session Challenge Progress Section
+                if !challengeService.activeChallenges.filter({ $0.type == .session }).isEmpty {
+                    liveSessionChallengeSection
                         .padding(.horizontal)
                 }
                 
@@ -1889,8 +2038,23 @@ struct EnhancedLiveSessionView: View {
             // MODIFIED: Handle staking like SessionFormView
             let finalBuyIn = self.sessionStore.liveSession.buyIn
             let finalCashout = cashout
+            let profit = finalCashout - finalBuyIn
+            let duration = formatDuration(self.sessionStore.liveSession.elapsedTime)
             
-            var sessionDetails: [String: Any] = [
+            // Set up session details for the share prompt
+            await MainActor.run {
+                self.sessionDetails = (
+                    buyIn: finalBuyIn,
+                    cashout: finalCashout,
+                    profit: profit,
+                    duration: duration,
+                    gameName: self.sessionStore.liveSession.gameName,
+                    stakes: self.sessionStore.liveSession.stakes,
+                    sessionId: self.sessionStore.liveSession.id
+                )
+            }
+            
+            var sessionDataToSave: [String: Any] = [
                 "userId": userId,
                 "gameType": self.sessionStore.liveSession.isTournament ? SessionLogType.tournament.rawValue : SessionLogType.cashGame.rawValue,
                 "gameName": self.sessionStore.liveSession.gameName,
@@ -1901,17 +2065,25 @@ struct EnhancedLiveSessionView: View {
                 "hoursPlayed": self.sessionStore.liveSession.elapsedTime / 3600,
                 "buyIn": finalBuyIn,
                 "cashout": finalCashout,
-                "profit": finalCashout - finalBuyIn,
+                "profit": profit,
                 "createdAt": FieldValue.serverTimestamp(),
                 "notes": self.sessionStore.enhancedLiveSession.notes,
                 "liveSessionUUID": self.sessionStore.liveSession.id,
                 "location": self.sessionStore.liveSession.isTournament ? (self.sessionStore.liveSession.tournamentName) : nil,
                 "tournamentType": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentType : nil,
+                "tournamentGameType": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentGameType?.rawValue : nil,
+                "tournamentFormat": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentFormat?.rawValue : nil,
+                "pokerVariant": !self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.pokerVariant : nil, // Only save poker variant for cash games
             ]
+            
+            // Add casino for tournaments if provided
+            if self.sessionStore.liveSession.isTournament, !self.tournamentCasino.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                sessionDataToSave["casino"] = self.tournamentCasino
+            }
             
             // Handle staking using the same logic as SessionFormView
             await self.handleStakingAndSave(
-                sessionDataToSave: sessionDetails,
+                sessionDataToSave: sessionDataToSave,
                 gameNameForStake: self.sessionStore.liveSession.gameName,
                 stakesForStake: self.sessionStore.liveSession.stakes,
                 startDateTimeForStake: self.sessionStore.liveSession.startTime,
@@ -1921,6 +2093,18 @@ struct EnhancedLiveSessionView: View {
                 tournamentTotalInvestmentForStake: self.sessionStore.liveSession.isTournament ? finalBuyIn : nil,
                 tournamentNameForStake: self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentName : nil
             )
+        }
+    }
+    
+    // Helper function to format duration 
+    private func formatDuration(_ timeInterval: TimeInterval) -> String {
+        let hours = Int(timeInterval) / 3600
+        let minutes = (Int(timeInterval) % 3600) / 60
+        
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
         }
     }
 
@@ -1978,17 +2162,25 @@ struct EnhancedLiveSessionView: View {
     private func saveSessionDataOnly(sessionData: [String: Any]) async {
         do {
             let docRef = try await Firestore.firestore().collection("sessions").addDocument(data: sessionData)
-            // After successful save, clear the live session state
+            
+            // Create a Session object from the saved data for challenge updates
+            let session = Session(id: docRef.documentID, data: sessionData)
+            
+            // Update session challenges
+            await challengeService.updateSessionChallengesFromSession(session)
+            
+            // Update sessionDetails with the saved session ID
             await MainActor.run {
+                if var details = self.sessionDetails {
+                    details.sessionId = docRef.documentID
+                    self.sessionDetails = details
+                }
+                
                 self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
-                let sessionId = docRef.documentID // documentID is not optional
-                if let completedSession = self.sessionStore.getSessionById(sessionId) {
-                    self.completedSessionToShowInSheet = completedSession
-                    self.showSessionDetailSheet = true
-                } else {
-                    self.dismiss()
-                }
+                
+                // Show share prompt instead of going directly to session detail
+                self.showingShareToFeedPrompt = true
             }
         } catch {
 
@@ -2015,6 +2207,12 @@ struct EnhancedLiveSessionView: View {
 
         do {
             try await Firestore.firestore().collection("sessions").document(newDocumentId).setData(mutableSessionData)
+            
+            // Create a Session object from the saved data for challenge updates
+            let session = Session(id: newDocumentId, data: mutableSessionData)
+            
+            // Update session challenges
+            await challengeService.updateSessionChallengesFromSession(session)
             
             // Session/Log added successfully, now add stakes for each config
             var allStakesSuccessful = true
@@ -2074,6 +2272,12 @@ struct EnhancedLiveSessionView: View {
             }
 
             await MainActor.run {
+                // Update sessionDetails with the saved session ID
+                if var details = self.sessionDetails {
+                    details.sessionId = newDocumentId
+                    self.sessionDetails = details
+                }
+                
                 self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
                 if allStakesSuccessful && savedStakeCount == configs.count && savedStakeCount > 0 {
@@ -2084,13 +2288,8 @@ struct EnhancedLiveSessionView: View {
 
                 }
                 
-                // Show session detail regardless of stake success
-                if let completedSession = self.sessionStore.getSessionById(newDocumentId) {
-                    self.completedSessionToShowInSheet = completedSession
-                    self.showSessionDetailSheet = true
-                } else {
-                    self.dismiss()
-                }
+                // Show share prompt instead of going directly to session detail
+                self.showingShareToFeedPrompt = true
             }
         } catch {
 
@@ -2501,124 +2700,125 @@ struct EnhancedLiveSessionView: View {
     
     // Update the post editor sheet to use the correct components
     private var postEditorSheet: some View {
-        // Get session info for badge
-        let gameName = sessionStore.liveSession.gameName
-        let stakes = sessionStore.liveSession.stakes
-        
-        // For session result share after session ends
-        if let details = sessionDetails {
-            // Create session summary content
-            let profitText = details.profit >= 0 ? "+$\(Int(details.profit))" : "-$\(Int(abs(details.profit)))"
-            let content = """
-            Session at \(details.gameName) (\(details.stakes))
-            Duration: \(details.duration)
-            Buy-in: $\(Int(details.buyIn))
-            Cashout: $\(Int(details.cashout))
-            Profit: \(profitText)
-            """
+        Group {
+            // Get session info for badge
+            let gameName = sessionStore.liveSession.gameName
+            let stakes = sessionStore.liveSession.stakes
             
-            return PostEditorView(
-                userId: userId,
-                initialText: content,
-                initialHand: nil,
-                sessionId: details.sessionId,
-                isSessionPost: true,
-                isNote: false, // session result is not a 'note'
-                showFullSessionCard: true,
-                sessionGameName: details.gameName,
-                sessionStakes: details.stakes
-            )
-            .environmentObject(postService)
-            .environmentObject(userService)
-            .environmentObject(handStore)
-            .onDisappear {
-                // When post editor closes, we need to dismiss the entire view
-                dismiss()
+            // For session result share after session ends
+            if let details = sessionDetails {
+                // Create a data dictionary for the Session object
+                let sessionData: [String: Any] = [
+                    "userId": userId,
+                    "gameType": sessionStore.liveSession.isTournament ? SessionLogType.tournament.rawValue : SessionLogType.cashGame.rawValue,
+                    "gameName": details.gameName,
+                    "stakes": details.stakes,
+                    "startDate": Timestamp(date: sessionStore.liveSession.startTime),
+                    "startTime": Timestamp(date: sessionStore.liveSession.startTime),
+                    "endTime": Timestamp(date: Date()),
+                    "hoursPlayed": sessionStore.liveSession.elapsedTime / 3600,
+                    "buyIn": details.buyIn,
+                    "cashout": details.cashout,
+                    "profit": details.profit,
+                    "createdAt": Timestamp(date: Date()),
+                    "notes": sessionStore.enhancedLiveSession.notes,
+                    "liveSessionUUID": sessionStore.liveSession.id,
+                    "location": sessionStore.liveSession.isTournament ? sessionStore.liveSession.tournamentName : nil,
+                    "tournamentType": sessionStore.liveSession.tournamentType,
+                    "tournamentGameType": sessionStore.liveSession.tournamentGameType?.rawValue,
+                    "tournamentFormat": sessionStore.liveSession.tournamentFormat?.rawValue,
+                    "pokerVariant": !sessionStore.liveSession.isTournament ? sessionStore.liveSession.pokerVariant : nil,
+                    "casino": sessionStore.liveSession.isTournament ? tournamentCasino : nil
+                ]
+                
+                // Create a Session object from the data dictionary
+                let completedSession = Session(id: details.sessionId, data: sessionData)
+                
+                PostEditorView(
+                    userId: userId,
+                    completedSession: completedSession
+                )
+                .onDisappear {
+                    // When post editor closes, we need to dismiss the entire view
+                    dismiss()
+                }
             }
-        }
-        // For notes or hands during the session, show BADGE (not full card)
-        else if shareToFeedIsNote || shareToFeedIsHand {
-            return PostEditorView(
-                userId: userId,
-                initialText: shareToFeedContent,
-                initialHand: shareToFeedHandData,
-                sessionId: sessionStore.liveSession.id,
-                isSessionPost: true,
-                isNote: shareToFeedIsNote,
-                showFullSessionCard: false,  // Just show badge for notes/hands
-                sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,  // Pass game name directly
-                sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes  // For tournaments, just show buy-in
-            )
-            .environmentObject(postService)
-            .environmentObject(userService)
-            .environmentObject(handStore)
-            .onDisappear {
-                handlePostEditorDisappear()
+            // For notes or hands during the session, show BADGE (not full card)
+            else if shareToFeedIsNote || shareToFeedIsHand {
+                PostEditorView(
+                    userId: userId,
+                    initialText: shareToFeedContent,
+                    initialHand: shareToFeedHandData,
+                    sessionId: sessionStore.liveSession.id,
+                    isSessionPost: true,
+                    isNote: shareToFeedIsNote,
+                    showFullSessionCard: false,  // Just show badge for notes/hands
+                    sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,  // Pass game name directly
+                    sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes  // For tournaments, just show buy-in
+                )
+                .onDisappear {
+                    handlePostEditorDisappear()
+                }
             }
-        }
-        // For session start posts
-        else if shareToFeedIsSessionStart {
-            return PostEditorView(
-                userId: userId,
-                initialText: shareToFeedContent, // This is the "Started session..." message
-                initialHand: nil,
-                sessionId: sessionStore.liveSession.id,
-                isSessionPost: true,
-                isNote: false,
-                showFullSessionCard: true, // Show full card for session start
-                sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,
-                sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes
-            )
-            .environmentObject(postService)
-            .environmentObject(userService)
-            .environmentObject(handStore)
-            .onDisappear {
-                handlePostEditorDisappear()
+            // For session start posts
+            else if shareToFeedIsSessionStart {
+                PostEditorView(
+                    userId: userId,
+                    initialText: shareToFeedContent, // This is the "Started session..." message
+                    initialHand: nil,
+                    sessionId: sessionStore.liveSession.id,
+                    isSessionPost: true,
+                    isNote: false,
+                    showFullSessionCard: true, // Show full card for session start
+                    sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,
+                    sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes
+                )
+                .onDisappear {
+                    handlePostEditorDisappear()
+                }
             }
-        }
-        // For chip updates, show the FULL session card
-        else if shareToFeedIsChipUpdate {
-            let effectiveGameName = isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName
-            let effectiveStakes = isTournamentSession ? "Rebuy/Add-on ($\(Int(baseBuyInForTournament)))" : stakes
+            // For chip updates, show the FULL session card
+            else if shareToFeedIsChipUpdate {
+                let effectiveGameName = isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName
+                let effectiveStakes = isTournamentSession ? "Rebuy/Add-on ($\(Int(baseBuyInForTournament)))" : stakes
 
-            return PostEditorView(
-                userId: userId,
-                initialText: getSessionDetailsText() + "\n\n" + shareToFeedContent,
-                initialHand: nil,
-                sessionId: sessionStore.liveSession.id,
-                isSessionPost: true,
-                isNote: false,
-                showFullSessionCard: true,  // Show full card for chip updates
-                sessionGameName: effectiveGameName,
-                sessionStakes: effectiveStakes
-            )
-            .environmentObject(postService)
-            .environmentObject(userService)
-            .environmentObject(handStore)
-            .onDisappear {
-                handlePostEditorDisappear()
+                PostEditorView(
+                    userId: userId,
+                    initialText: getSessionDetailsText() + "\n\n" + shareToFeedContent,
+                    initialHand: nil,
+                    sessionId: sessionStore.liveSession.id,
+                    isSessionPost: true,
+                    isNote: false,
+                    showFullSessionCard: true,  // Show full card for chip updates
+                    sessionGameName: effectiveGameName,
+                    sessionStakes: effectiveStakes
+                )
+                .onDisappear {
+                    handlePostEditorDisappear()
+                }
+            }
+            // Default case
+            else {
+                PostEditorView(
+                    userId: userId,
+                    initialText: getSessionDetailsText() + "\n\n" + shareToFeedContent,
+                    initialHand: shareToFeedHandData,
+                    sessionId: sessionStore.liveSession.id,
+                    isSessionPost: true,
+                    isNote: false,
+                    showFullSessionCard: !shareToFeedIsNote && !shareToFeedIsHand,
+                    sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,
+                    sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes
+                )
+                .onDisappear {
+                    handlePostEditorDisappear()
+                }
             }
         }
-        // Default case
-        else {
-            return PostEditorView(
-                userId: userId,
-                initialText: getSessionDetailsText() + "\n\n" + shareToFeedContent,
-                initialHand: shareToFeedHandData,
-                sessionId: sessionStore.liveSession.id,
-                isSessionPost: true,
-                isNote: false,
-                showFullSessionCard: !shareToFeedIsNote && !shareToFeedIsHand,
-                sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,
-                sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes
-            )
-            .environmentObject(postService)
-            .environmentObject(userService)
-            .environmentObject(handStore)
-            .onDisappear {
-                handlePostEditorDisappear()
-            }
-        }
+        .environmentObject(postService)
+        .environmentObject(userService)
+        .environmentObject(handStore)
+        .environmentObject(sessionStore)
     }
     
     // Add a method to handle post editor disappear
@@ -3413,7 +3613,7 @@ struct EnhancedLiveSessionView: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.white.opacity(0.05))
+                    .fill(Color.white)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
@@ -3697,6 +3897,150 @@ struct EnhancedLiveSessionView: View {
         // Close the edit sheet
         showingEditSessionSheet = false
     }
+    
+    // MARK: - Live Session Challenge Section
+    
+    private var liveSessionChallengeSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Session Challenges")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.white)
+            
+            let sessionChallenges = challengeService.activeChallenges.filter { $0.type == .session }
+            
+            ForEach(sessionChallenges) { challenge in
+                LiveSessionChallengeCard(
+                    challenge: challenge,
+                    currentSessionHours: sessionStore.liveSession.elapsedTime / 3600.0,
+                    sessionStartTime: sessionStore.liveSession.startTime
+                )
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+    
+    // MARK: - Live Session Challenge Card
+    
+    private struct LiveSessionChallengeCard: View {
+        let challenge: Challenge
+        let currentSessionHours: Double
+        let sessionStartTime: Date
+        
+        private var sessionQualifies: Bool {
+            if let minHours = challenge.minHoursPerSession {
+                return currentSessionHours >= minHours
+            }
+            return true
+        }
+        
+        private var projectedProgress: String {
+            if let targetCount = challenge.targetSessionCount {
+                let currentValidSessions = challenge.validSessionsCount + (sessionQualifies ? 1 : 0)
+                return "\(currentValidSessions)/\(targetCount)"
+            } else if let targetHours = challenge.targetHours {
+                let projectedTotalHours = challenge.totalHoursPlayed + currentSessionHours
+                return "\(String(format: "%.1f", projectedTotalHours))/\(String(format: "%.1f", targetHours))h"
+            }
+            return ""
+        }
+        
+        private var wouldComplete: Bool {
+            if let targetCount = challenge.targetSessionCount {
+                let currentValidSessions = challenge.validSessionsCount + (sessionQualifies ? 1 : 0)
+                return currentValidSessions >= targetCount
+            } else if let targetHours = challenge.targetHours {
+                let projectedTotalHours = challenge.totalHoursPlayed + currentSessionHours
+                return projectedTotalHours >= targetHours
+            }
+            return false
+        }
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(challenge.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    
+                    Spacer()
+                    
+                    if wouldComplete {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.green)
+                            
+                            Text("Will Complete!")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.green)
+                        }
+                    } else {
+                        Image(systemName: "clock.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.orange)
+                    }
+                }
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Current Session")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.gray)
+                            
+                            Text("\(String(format: "%.1f", currentSessionHours))h")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("After Session")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.gray)
+                            
+                            Text(projectedProgress)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(wouldComplete ? .green : .orange)
+                        }
+                    }
+                    
+                    if let minHours = challenge.minHoursPerSession {
+                        HStack(spacing: 4) {
+                            Image(systemName: sessionQualifies ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 12))
+                                .foregroundColor(sessionQualifies ? .green : .gray)
+                            
+                            Text("Minimum \(String(format: "%.1f", minHours))h required")
+                                .font(.system(size: 12))
+                                .foregroundColor(sessionQualifies ? .green : .gray)
+                        }
+                    }
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(wouldComplete ? Color.green.opacity(0.1) : Color.orange.opacity(0.1))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(wouldComplete ? Color.green.opacity(0.3) : Color.orange.opacity(0.3), lineWidth: 1)
+            )
+        }
+    }
+    
+    // MARK: - Helper Functions
 }
 
 // Define the minimized floating control as a separate view

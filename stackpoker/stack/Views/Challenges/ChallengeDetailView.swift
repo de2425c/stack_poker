@@ -252,7 +252,8 @@ struct ChallengeDetailView: View {
         .sheet(isPresented: $showingUpdatePost) {
             PostEditorView(
                 userId: userId,
-                initialText: "🎯 Challenge Update: \(challenge.title)\n\nProgress: \(formattedValue(challenge.currentValue, type: challenge.type))\nTarget: \(formattedValue(challenge.targetValue, type: challenge.type))\n\n#ChallengeProgress #\(challenge.type.rawValue.capitalized)Goal"
+                initialText: generateChallengeUpdateText(for: challenge),
+                challengeToShare: nil
             )
             .environmentObject(postService)
             .environmentObject(userService)
@@ -308,6 +309,27 @@ struct ChallengeDetailView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
         return formatter.string(from: date)
+    }
+    
+    private func generateChallengeUpdateText(for challenge: Challenge) -> String {
+        var updateText = """
+        🎯 Challenge Update: \(challenge.title)
+        
+        Progress: \(formattedValue(challenge.currentValue, type: challenge.type))
+        Target: \(formattedValue(challenge.targetValue, type: challenge.type))
+        
+        \(Int(challenge.progressPercentage))% Complete
+        """
+        
+        if let deadline = challenge.endDate {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            updateText += "\nDeadline: \(formatter.string(from: deadline))"
+        }
+        
+        updateText += "\n\n#ChallengeProgress #\(challenge.type.rawValue.capitalized)Goal"
+        
+        return updateText
     }
 }
 

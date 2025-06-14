@@ -11,6 +11,12 @@ class HomeGameService: ObservableObject {
     @Published var isLoading = false
     
     private var gameListeners: [String: ListenerRegistration] = [:]
+    private var standaloneListener: ListenerRegistration? = nil
+    
+    struct PlayerInfo {
+        let userId: String
+        let displayName: String
+    }
     
     // MARK: - Real-time Updates
     
@@ -53,19 +59,79 @@ class HomeGameService: ObservableObject {
         gameListeners.removeAll()
     }
     
+    /// Listen in real-time for active standalone games for a user (creator or player)
+    func startListeningForActiveStandaloneGame(userId: String, onChange: @escaping (HomeGame?) -> Void) {
+        stopListeningForActiveStandaloneGame()
+
+        // Helper to process snapshots
+        let process: (QuerySnapshot?) -> Void = { snapshot in
+            guard let snap = snapshot else { return }
+            var latestGame: HomeGame? = nil
+            for doc in snap.documents {
+                if let game = try? self.parseHomeGame(data: doc.data(), id: doc.documentID) {
+                    // Only include games explicitly marked as ACTIVE
+                    if game.status == .active {
+                        if latestGame == nil || game.createdAt > latestGame!.createdAt {
+                            latestGame = game
+                        }
+                    }
+                    // Ignore games marked as completed
+                }
+            }
+            onChange(latestGame)
+        }
+        
+        // Listener for games the user created
+        let l1 = db.collection("homeGames")
+            .whereField("status", in: [HomeGame.GameStatus.active.rawValue, HomeGame.GameStatus.completed.rawValue])
+            .whereField("groupId", isEqualTo: NSNull())
+            .whereField("creatorId", isEqualTo: userId)
+            .addSnapshotListener { snap, _ in process(snap) }
+        
+        // Listener for games the user is a player in
+        let l2 = db.collection("homeGames")
+            .whereField("status", in: [HomeGame.GameStatus.active.rawValue, HomeGame.GameStatus.completed.rawValue])
+            .whereField("groupId", isEqualTo: NSNull())
+            .whereField("playerIds", arrayContains: userId)
+            .addSnapshotListener { snap, _ in process(snap) }
+        
+        // Store a combined listener reference that removes both when called
+        standaloneListener = CombinedListener(listeners: [l1, l2])
+    }
+    
+    private func forceGameStatusToActive(gameId: String) async throws {
+        try await db.collection("homeGames").document(gameId).updateData([
+            "status": HomeGame.GameStatus.active.rawValue
+        ])
+    }
+    
+    func stopListeningForActiveStandaloneGame() {
+        standaloneListener?.remove(); standaloneListener = nil
+    }
+    
+    private class CombinedListener: NSObject, ListenerRegistration {
+        let listeners: [ListenerRegistration]
+        init(listeners: [ListenerRegistration]) { self.listeners = listeners }
+        func remove() { listeners.forEach { $0.remove() } }
+    }
+    
     // MARK: - Game Management
     
     /// Create a new home game
-    func createHomeGame(title: String, groupId: String? = nil) async throws -> HomeGame {
-        guard let currentUser = Auth.auth().currentUser else {
-            throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+    func createHomeGame(title: String, creatorId: String, creatorName: String, initialPlayers: [PlayerInfo], groupId: String? = nil, linkedEventId: String? = nil) async throws -> HomeGame {
+        let players = initialPlayers.map {
+            HomeGame.Player(
+                id: UUID().uuidString,
+                userId: $0.userId,
+                displayName: $0.displayName,
+                currentStack: 0,
+                totalBuyIn: 0,
+                joinedAt: Date(),
+                cashedOutAt: nil,
+                status: .active
+            )
         }
-        
-        // Get user's display name
-        let userDoc = try await db.collection("users").document(currentUser.uid).getDocument()
-        let userData = userDoc.data()
-        let displayName = userData?["displayName"] as? String ?? userData?["username"] as? String ?? "Unknown"
-        
+
         // Create game document
         let gameId = UUID().uuidString
         let createdAt = Date()
@@ -73,10 +139,11 @@ class HomeGameService: ObservableObject {
         var gameData: [String: Any] = [
             "title": title,
             "createdAt": Timestamp(date: createdAt),
-            "creatorId": currentUser.uid,
-            "creatorName": displayName,
+            "creatorId": creatorId,
+            "creatorName": creatorName,
             "status": HomeGame.GameStatus.active.rawValue,
-            "players": [],
+            "players": players.map { $0.toDictionary() },
+            "playerIds": players.map { $0.userId },
             "buyInRequests": [],
             "cashOutRequests": [],
         ]
@@ -89,13 +156,17 @@ class HomeGameService: ObservableObject {
             gameData["groupId"] = NSNull()
         }
         
+        if let linkedEventId = linkedEventId {
+            gameData["linkedEventId"] = linkedEventId
+        }
+        
         // Add initial game created event
         let event: [String: Any] = [
             "id": UUID().uuidString,
             "timestamp": Timestamp(date: createdAt),
             "eventType": HomeGame.GameEvent.EventType.gameCreated.rawValue,
-            "userId": currentUser.uid,
-            "userName": displayName,
+            "userId": creatorId,
+            "userName": creatorName,
             "description": "Game created: \(title)"
         ]
         
@@ -116,11 +187,13 @@ class HomeGameService: ObservableObject {
             id: gameId,
             title: title,
             createdAt: createdAt,
-            creatorId: currentUser.uid,
-            creatorName: displayName,
+            creatorId: creatorId,
+            creatorName: creatorName,
             groupId: groupId,
+            linkedEventId: linkedEventId,
+            playerIds: players.map { $0.userId },
             status: .active,
-            players: [],
+            players: players,
             buyInRequests: [],
             cashOutRequests: [],
             gameHistory: [
@@ -128,8 +201,8 @@ class HomeGameService: ObservableObject {
                     id: event["id"] as! String,
                     timestamp: createdAt,
                     eventType: .gameCreated,
-                    userId: currentUser.uid,
-                    userName: displayName,
+                    userId: creatorId,
+                    userName: creatorName,
                     amount: nil,
                     description: "Game created: \(title)"
                 )
@@ -219,6 +292,11 @@ class HomeGameService: ObservableObject {
                     "status": HomeGame.GameStatus.completed.rawValue
                 ], forDocument: gameRef)
                 
+                if let linkedEventId = gameData["linkedEventId"] as? String {
+                    let eventRef = self.db.collection("userEvents").document(linkedEventId)
+                    transaction.updateData(["status": UserEvent.EventStatus.completed.rawValue], forDocument: eventRef)
+                }
+                
                 return nil
             } catch {
                 errorPointer?.pointee = error as NSError
@@ -290,7 +368,87 @@ class HomeGameService: ObservableObject {
         return games
     }
     
+    /// Fetch active games where user is a player (standalone)
+    func fetchActiveStandaloneGames(for userId: String) async throws -> [HomeGame] {
+        self.isLoading = true
+        defer { self.isLoading = false }
+
+        let snapshot = try await db.collection("homeGames")
+            .whereField("status", isEqualTo: HomeGame.GameStatus.active.rawValue)
+            .whereField("groupId", isEqualTo: NSNull())
+            .whereField("playerIds", arrayContains: userId)
+            .getDocuments()
+
+        var games: [HomeGame] = []
+        for doc in snapshot.documents {
+            if let game = try? parseHomeGame(data: doc.data(), id: doc.documentID) {
+                games.append(game)
+            }
+        }
+        return games
+    }
+    
     // MARK: - Player Management
+    
+    func addPlayerToGame(gameId: String, userId: String, displayName: String) async throws {
+        let gameRef = db.collection("homeGames").document(gameId)
+        
+        // Use a transaction to safely check for existence and add the player
+        try await db.runTransaction { (transaction, errorPointer) -> Any? in
+            let gameDoc: DocumentSnapshot
+            do {
+                gameDoc = try transaction.getDocument(gameRef)
+            } catch let fetchError as NSError {
+                errorPointer?.pointee = fetchError
+                return nil
+            }
+
+            guard let gameData = gameDoc.data(),
+                  let statusRaw = gameData["status"] as? String,
+                  let status = HomeGame.GameStatus(rawValue: statusRaw),
+                  status == .active else {
+                // Game doesn't exist or is not active
+                return nil
+            }
+            
+            // Check if player already exists
+            if let players = gameData["players"] as? [[String: Any]], players.contains(where: { ($0["userId"] as? String) == userId }) {
+                // Player already in the game, do nothing.
+                return nil
+            }
+            
+            // Create a new player
+            let newPlayer = HomeGame.Player(
+                id: UUID().uuidString,
+                userId: userId,
+                displayName: displayName,
+                currentStack: 0,
+                totalBuyIn: 0,
+                joinedAt: Date(),
+                cashedOutAt: nil,
+                status: .active
+            )
+            
+            // Create a "player joined" event
+            let joinEvent: [String: Any] = [
+                "id": UUID().uuidString,
+                "timestamp": Timestamp(date: Date()),
+                "eventType": HomeGame.GameEvent.EventType.playerJoined.rawValue,
+                "userId": userId,
+                "userName": displayName,
+                "description": "\(displayName) joined the game."
+            ]
+            
+            // Update the game document
+            transaction.updateData([
+                "players": FieldValue.arrayUnion([newPlayer.toDictionary()]),
+                "playerIds": FieldValue.arrayUnion([userId]),
+                "gameHistory": FieldValue.arrayUnion([joinEvent])
+            ], forDocument: gameRef)
+            
+            return nil
+        }
+    }
     
     /// Request to join a game with a buy-in
     func requestBuyIn(gameId: String, amount: Double) async throws {
@@ -715,7 +873,15 @@ class HomeGameService: ObservableObject {
                 
                 var gameStatus = gameData["status"] as? String ?? HomeGame.GameStatus.active.rawValue
                 
-                if activePlayers.isEmpty && !players.isEmpty {
+                // FOR BANKED GAMES: NEVER auto-complete when all players cash out
+                // Banked games (those with linkedEventId) should only be manually ended
+                let hasLinkedEvent = gameData["linkedEventId"] != nil && !(gameData["linkedEventId"] is NSNull)
+                
+                if hasLinkedEvent {
+                    // This is a banked game - ALWAYS keep it active, never auto-complete
+                    gameStatus = HomeGame.GameStatus.active.rawValue
+                } else if activePlayers.isEmpty && !players.isEmpty {
+                    // Regular standalone game - auto-complete when all players cash out
                     gameStatus = HomeGame.GameStatus.completed.rawValue
                     
                     // Add game ended event
@@ -849,6 +1015,7 @@ class HomeGameService: ObservableObject {
         }
         
         let groupId = data["groupId"] as? String
+        let linkedEventId = data["linkedEventId"] as? String
         let createdAt = createdAtTimestamp.dateValue()
         
         // Parse players
@@ -973,6 +1140,8 @@ class HomeGameService: ObservableObject {
             creatorId: creatorId,
             creatorName: creatorName,
             groupId: groupId,
+            linkedEventId: linkedEventId,
+            playerIds: data["playerIds"] as? [String],
             status: status,
             players: players,
             buyInRequests: buyInRequests,

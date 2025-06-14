@@ -57,18 +57,29 @@ class StakeService: ObservableObject {
         }
     }
     
+    // MARK: - Read (single session fetch by ID)
     func fetchStakesForSession(_ sessionId: String) async throws -> [Stake] {
+        // Simple query by sessionId (document ID of the session)
         let query = stakesCollectionRef.whereField(Stake.CodingKeys.sessionId.rawValue, isEqualTo: sessionId)
         do {
             let snapshot = try await query.getDocuments()
-            let stakes = snapshot.documents.compactMap { document -> Stake? in
-                try? document.data(as: Stake.self)
-            }
+            let stakes = snapshot.documents.compactMap { try? $0.data(as: Stake.self) }
             return stakes.sorted { $0.proposedAt > $1.proposedAt }
         } catch {
-
             throw error
         }
+    }
+    
+    // WORKAROUND: Fetch by user then filter (calls the direct query first)
+    func fetchStakesForSession(_ sessionId: String, forUser userId: String) async throws -> [Stake] {
+        // Try direct query first
+        let direct = try await fetchStakesForSession(sessionId)
+        if !direct.isEmpty {
+            return direct
+        }
+        // Fallback: fetch all stakes for user and filter
+        let allUserStakes = try await fetchStakes(forUser: userId)
+        return allUserStakes.filter { $0.sessionId == sessionId }
     }
 
     // MARK: - Update
@@ -111,6 +122,16 @@ class StakeService: ObservableObject {
 
     }
 
+    // MARK: - Update Stake Percentage & Markup
+    func updateStake(stakeId: String, newPercentage: Double, newMarkup: Double) async throws {
+        let data: [String: Any] = [
+            Stake.CodingKeys.stakePercentage.rawValue: newPercentage,
+            Stake.CodingKeys.markup.rawValue: newMarkup,
+            Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
+        ]
+        try await stakesCollectionRef.document(stakeId).updateData(data)
+    }
+
     // MARK: - Delete
     // (Optional - consider if stakes should be deletable or only cancellable/archived)
     func deleteStake(_ stakeId: String) async throws {
@@ -118,6 +139,7 @@ class StakeService: ObservableObject {
     }
     
     // Function to delete all stakes associated with a session (e.g., if a session is deleted)
+    /*
     func deleteAllStakesForSession(sessionId: String) async throws {
         let stakesToDelete = try await fetchStakesForSession(sessionId)
         let batch = db.batch()
@@ -127,6 +149,6 @@ class StakeService: ObservableObject {
             }
         }
         try await batch.commit()
-
     }
+    */
 } 

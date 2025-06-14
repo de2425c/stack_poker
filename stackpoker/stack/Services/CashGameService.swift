@@ -35,15 +35,16 @@ class CashGameService: ObservableObject {
             }
     }
     
-    func addCashGame(name: String, smallBlind: Double, bigBlind: Double, straddle: Double? = nil, location: String? = nil) async throws {
-        print("Adding new cash game: \(name) - \(smallBlind)/\(bigBlind)")
+    func addCashGame(name: String, smallBlind: Double, bigBlind: Double, straddle: Double? = nil, location: String? = nil, gameType: PokerVariant = .nlh) async throws {
+        print("Adding new cash game: \(name) - \(smallBlind)/\(bigBlind) - \(gameType.rawValue)")
         let game = CashGame(
             userId: userId,
             name: name,
             smallBlind: smallBlind,
             bigBlind: bigBlind,
             straddle: straddle,
-            location: location
+            location: location,
+            gameType: gameType
         )
         try await db.collection("cashGames").document(game.id).setData(game.dictionary)
         print("Successfully added game to Firebase")

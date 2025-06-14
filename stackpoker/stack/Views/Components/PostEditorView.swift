@@ -59,7 +59,8 @@ struct PostEditorView: View {
          showFullSessionCard: Bool = false,
          sessionGameName: String = "",
          sessionStakes: String = "",
-         sessionLocation: String? = nil) { // Added sessionLocation parameter
+         sessionLocation: String? = nil, // Added sessionLocation parameter
+         completedSession: Session? = nil) { // Added completedSession parameter
         self.userId = userId
         self.initialText = initialText
         self.prefilledContent = prefilledContent
@@ -72,6 +73,14 @@ struct PostEditorView: View {
         self.sessionGameName = sessionGameName
         self.sessionStakes = sessionStakes
         _currentSessionLocation = State(initialValue: sessionLocation) // Initialize currentSessionLocation
+        _selectedCompletedSession = State(initialValue: completedSession) // Initialize selectedCompletedSession
+        // Set a more descriptive default title for completed sessions
+        if let session = completedSession {
+            let profitText = session.profit >= 0 ? "+$\(Int(session.profit))" : "-$\(Int(abs(session.profit)))"
+            _completedSessionTitle = State(initialValue: "\(session.gameName) Session (\(profitText))")
+        } else {
+            _completedSessionTitle = State(initialValue: "")
+        }
     }
 
     // Determines if this is a hand post
@@ -265,12 +274,8 @@ struct PostEditorView: View {
                         } else if let challenge = challengeToShare {
                             // Preview of challenge progress update
                             ChallengeProgressComponent(
-                                challengeTitle: challenge.title,
-                                challengeType: challenge.type,
-                                currentValue: challenge.currentValue,
-                                targetValue: challenge.targetValue,
-                                isCompact: false,
-                                deadline: challenge.endDate
+                                challenge: challenge,
+                                isCompact: false
                             )
                             .padding(.horizontal)
                             // Comment editor below the progress bar
@@ -291,12 +296,16 @@ struct PostEditorView: View {
                             // Show challenge progress component for challenge update posts
                             if let challengeInfo = parseChallengeUpdateFromText(initialText) {
                                 ChallengeProgressComponent(
-                                    challengeTitle: challengeInfo.title,
-                                    challengeType: challengeInfo.type,
-                                    currentValue: challengeInfo.currentValue,
-                                    targetValue: challengeInfo.targetValue,
-                                    isCompact: false,
-                                    deadline: challengeInfo.deadline
+                                    challenge: Challenge(
+                                        userId: userId,
+                                        type: challengeInfo.type,
+                                        title: challengeInfo.title,
+                                        description: "", // Empty description for display purposes
+                                        targetValue: challengeInfo.targetValue,
+                                        currentValue: challengeInfo.currentValue,
+                                        endDate: challengeInfo.deadline
+                                    ),
+                                    isCompact: false
                                 )
                                 .padding(.horizontal)
                                 .padding(.bottom, 12)
@@ -1089,45 +1098,67 @@ struct PostEditorView: View {
         var userCommentPart = ""
 
         // Find the end of the technical details (hashtags are a good delimiter)
-        let hashtagKeyword = "#PokerChallenge"
-        if let hashtagRange = text.range(of: hashtagKeyword) {
-            let endOfTechnicalDetails = text.index(hashtagRange.upperBound, offsetBy: hashtagKeyword.count + " #AnotherHashtag".count) // Approximate end
-            var splitPoint = endOfTechnicalDetails
-            if let newlineAfterHashtags = text.range(of: "\n\n", range: hashtagRange.upperBound..<text.endIndex) {
-                 splitPoint = newlineAfterHashtags.lowerBound
+        let challengeHashtags = ["#PokerChallenge", "#ChallengeProgress", "#ChallengeCompleted"]
+        var hashtagRange: Range<String.Index>?
+        
+        // Find any of the challenge hashtags
+        for hashtag in challengeHashtags {
+            if let range = text.range(of: hashtag) {
+                hashtagRange = range
+                break
             }
-
-            technicalPart = String(text[...splitPoint]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let remainingText = String(text[splitPoint...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !remainingText.isEmpty {
-                 userCommentPart = remainingText
+        }
+        
+        if let hashtagRange = hashtagRange {
+            // Find the end of all hashtags (look for double newline after hashtags)
+            let searchStart = hashtagRange.upperBound
+            if let doubleNewlineAfterHashtags = text.range(of: "\n\n", range: searchStart..<text.endIndex) {
+                technicalPart = String(text[..<doubleNewlineAfterHashtags.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let remainingText = String(text[doubleNewlineAfterHashtags.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !remainingText.isEmpty {
+                    userCommentPart = remainingText
+                }
+            } else {
+                // If no double newline found after hashtags, assume everything up to end of hashtags is technical
+                // Look for any content after the hashtag line
+                if let newlineAfterHashtag = text.range(of: "\n", range: searchStart..<text.endIndex) {
+                    technicalPart = String(text[..<newlineAfterHashtag.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let remainingText = String(text[newlineAfterHashtag.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !remainingText.isEmpty && !remainingText.hasPrefix("#") {
+                        userCommentPart = remainingText
+                    }
+                } else {
+                    // No content after hashtag, everything is technical
+                    technicalPart = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    userCommentPart = ""
+                }
             }
         } else {
-            // If no hashtags, assume the whole thing might be technical or just comment
-            // This basic split assumes technical details are first, then double newline, then comment.
+            // If no hashtags found, try to split by double newline
             if let doubleNewlineRange = text.range(of: "\n\n") {
                 technicalPart = String(text[..<doubleNewlineRange.lowerBound])
                 userCommentPart = String(text[doubleNewlineRange.upperBound...])
             } else {
-                // If no clear separator, and it looks like a challenge post, assume it's all technical for now.
-                // The UI will provide an empty comment box anyway.
-                if text.contains("🎯") { // Basic check
+                // If no clear separator and it looks like a challenge post, assume it's all technical
+                if text.contains("🎯") {
                     technicalPart = text
                     userCommentPart = ""
-                } else { // Likely just a user comment passed as initialText
-                    technicalPart = "" // No technical part
+                } else {
+                    // Likely just a user comment
+                    technicalPart = ""
                     userCommentPart = text
                 }
             }
         }
-        return (technicalPart, userCommentPart)
+        
+        return (technicalPart.trimmingCharacters(in: .whitespacesAndNewlines), userCommentPart.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     // Helper function to format values based on challenge type
     private func formattedValue(_ value: Double, type: ChallengeType) -> String {
         switch type {
         case .bankroll:
-            return "$\(Int(value).formattedWithCommas)"
+            return "$" + Int(value).formattedWithCommas
         case .hands:
             return "\(Int(value))"
         case .session:
@@ -1156,14 +1187,5 @@ private struct SessionStatMetricView: View {
                 .foregroundColor(.gray)
         }
         .frame(maxWidth: isWide ? .infinity : nil, alignment: isWide ? .leading : .center)
-    }
-}
-
-// Extension for number formatting
-extension Int {
-    var formattedWithCommas: String {
-        let numberFormatter = NumberFormatter()
-        numberFormatter.numberStyle = .decimal
-        return numberFormatter.string(from: NSNumber(value: self)) ?? "\(self)"
     }
 }

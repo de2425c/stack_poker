@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import FirebaseAuth
+import FirebaseCore
 
 @MainActor
 class AuthService: ObservableObject {
@@ -9,13 +10,23 @@ class AuthService: ObservableObject {
     
     private var authStateDidChangeListenerHandle: AuthStateDidChangeListenerHandle?
     
+    // Store verification ID for phone authentication
+    @Published var verificationID: String?
+    
     init() {
+        // Ensure Firebase is configured
+        if FirebaseApp.app() == nil {
+            print("AuthService: Warning - Firebase not configured yet")
+        }
+        
         // Listen for authentication state changes
         authStateDidChangeListenerHandle = Auth.auth().addStateDidChangeListener { [weak self] _, firebaseUser in
             Task {
                 await self?._updateAuthState(with: firebaseUser)
             }
         }
+        
+        print("AuthService: Initialized successfully")
     }
     
     private func _updateAuthState(with firebaseUser: FirebaseAuth.User?) {
@@ -61,6 +72,86 @@ class AuthService: ObservableObject {
         }
     }
     
+    // MARK: - Phone Authentication Methods
+    
+    func sendPhoneVerificationCode(phoneNumber: String) async throws {
+        do {
+            print("AuthService: Starting phone verification for: \(phoneNumber)")
+            
+            // Ensure we're on the main actor for Firebase Auth operations
+            await MainActor.run {
+                // Configure Firebase Auth settings
+                #if DEBUG
+                if Auth.auth().settings == nil {
+                    print("AuthService: Firebase Auth settings are nil, creating new settings")
+                }
+                Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+                print("AuthService: Testing mode enabled - use fictional phone numbers like +1 650 555 3434")
+                #endif
+                
+                Auth.auth().languageCode = "en"
+                print("AuthService: Firebase Auth configured")
+            }
+            
+            // Small delay to ensure settings are applied
+            try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+            
+            // Verify that Firebase is properly initialized
+            guard FirebaseApp.app() != nil else {
+                throw AuthError.unknown(message: "Firebase is not properly initialized")
+            }
+            
+            print("AuthService: Attempting phone verification...")
+            let verificationID = try await PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumber, uiDelegate: nil)
+            
+            await MainActor.run {
+                self.verificationID = verificationID
+                print("AuthService: Phone verification code sent successfully")
+            }
+        } catch {
+            print("AuthService: Phone verification failed with error: \(error)")
+            
+            // Provide more specific error information
+            if let nsError = error as NSError? {
+                print("AuthService: Error domain: \(nsError.domain), code: \(nsError.code)")
+                print("AuthService: Error description: \(nsError.localizedDescription)")
+                if let userInfo = nsError.userInfo as? [String: Any] {
+                    print("AuthService: Error userInfo: \(userInfo)")
+                }
+            }
+            
+            throw handleFirebaseError(error)
+        }
+    }
+    
+    func verifyPhoneCode(verificationCode: String) async throws {
+        guard let verificationID = verificationID else {
+            throw AuthError.phoneVerificationFailed
+        }
+        
+        do {
+            let credential = PhoneAuthProvider.provider().credential(
+                withVerificationID: verificationID,
+                verificationCode: verificationCode
+            )
+            
+            let result = try await Auth.auth().signIn(with: credential)
+            await MainActor.run {
+                self.user = result.user
+                self.isAuthenticated = true
+                self.verificationID = nil // Clear after successful verification
+            }
+        } catch {
+            throw handleFirebaseError(error)
+        }
+    }
+    
+    func signUpWithPhoneNumber(phoneNumber: String) async throws {
+        // For phone authentication, we first send the verification code
+        // The actual signup happens in verifyPhoneCode
+        try await sendPhoneVerificationCode(phoneNumber: phoneNumber)
+    }
+    
     func sendEmailVerification() async throws {
         guard let user = Auth.auth().currentUser else {
             throw AuthError.notAuthenticated
@@ -70,6 +161,14 @@ class AuthService: ObservableObject {
             try await user.sendEmailVerification()
         } catch {
             throw AuthError.verificationEmailFailed
+        }
+    }
+    
+    func sendPasswordResetEmail(email: String) async throws {
+        do {
+            try await Auth.auth().sendPasswordReset(withEmail: email)
+        } catch {
+            throw handleFirebaseError(error)
         }
     }
     
@@ -91,6 +190,7 @@ class AuthService: ObservableObject {
             await MainActor.run {
                 self.user = nil
                 self.isAuthenticated = false
+                self.verificationID = nil // Clear verification ID on sign out
             }
         } catch {
             throw AuthError.signOutError
@@ -125,6 +225,24 @@ class AuthService: ObservableObject {
             return .userDisabled
         case AuthErrorCode.requiresRecentLogin.rawValue:
             return .requiresRecentLogin
+        case AuthErrorCode.invalidPhoneNumber.rawValue:
+            return .invalidPhoneNumber
+        case AuthErrorCode.invalidVerificationCode.rawValue:
+            return .invalidVerificationCode
+        case AuthErrorCode.invalidVerificationID.rawValue:
+            return .phoneVerificationFailed
+        case AuthErrorCode.sessionExpired.rawValue:
+            return .phoneVerificationExpired
+        case AuthErrorCode.quotaExceeded.rawValue:
+            return .quotaExceeded
+        case AuthErrorCode.missingPhoneNumber.rawValue:
+            return .missingPhoneNumber
+        case AuthErrorCode.captchaCheckFailed.rawValue:
+            return .captchaCheckFailed
+        case AuthErrorCode.appNotAuthorized.rawValue:
+            return .unknown(message: "App not authorized for phone authentication. Please check APNs configuration.")
+        case AuthErrorCode.missingAppToken.rawValue:
+            return .unknown(message: "Missing APNs token. Please ensure push notifications are enabled.")
         default:
             return .unknown(message: error.localizedDescription)
         }
@@ -147,6 +265,15 @@ enum AuthError: Error {
     case tooManyRequests
     case userDisabled
     case requiresRecentLogin
+    case passwordResetSent
+    // Phone authentication errors
+    case invalidPhoneNumber
+    case invalidVerificationCode
+    case phoneVerificationFailed
+    case phoneVerificationExpired
+    case quotaExceeded
+    case missingPhoneNumber
+    case captchaCheckFailed
     
     var message: String {
         switch self {
@@ -178,6 +305,22 @@ enum AuthError: Error {
             return "Your account has been disabled. Please contact support."
         case .requiresRecentLogin:
             return "For security reasons, please sign in again before completing this action."
+        case .passwordResetSent:
+            return "Password reset email has been sent. Please check your inbox."
+        case .invalidPhoneNumber:
+            return "Invalid phone number format. Please check your phone number."
+        case .invalidVerificationCode:
+            return "Invalid verification code. Please check the code and try again."
+        case .phoneVerificationFailed:
+            return "Phone verification failed. Please try again."
+        case .phoneVerificationExpired:
+            return "Verification code has expired. Please request a new code."
+        case .quotaExceeded:
+            return "SMS quota exceeded. Please try again later."
+        case .missingPhoneNumber:
+            return "Phone number is required for verification."
+        case .captchaCheckFailed:
+            return "CAPTCHA verification failed. Please try again."
         case .unknown(let message):
             return message
         }

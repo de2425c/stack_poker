@@ -34,6 +34,23 @@ service cloud.firestore {
       allow write: if request.auth != null;
     }
     
+    // Stakes collection
+    match /stakes/{stakeId} {
+      // Allow read if the user is either the staker or the staked player
+      allow read: if request.auth != null && 
+                  (request.auth.uid == resource.data.stakerUserId || request.auth.uid == resource.data.stakedPlayerUserId);
+      
+      // Allow create if the user is the one being staked
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.stakedPlayerUserId;
+      
+      // Allow update if the user is part of the stake (either staker or staked)
+      allow update: if request.auth != null &&
+                  (request.auth.uid == resource.data.stakerUserId || request.auth.uid == resource.data.stakedPlayerUserId);
+                  
+      // Allow delete only by the person who was staked
+      allow delete: if request.auth != null && request.auth.uid == resource.data.stakedPlayerUserId;
+    }
+    
     // Add other collections as needed
     match /{document=**} {
       // Default: deny all access to other collections

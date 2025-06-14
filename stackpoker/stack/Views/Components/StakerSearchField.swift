@@ -130,13 +130,13 @@ struct StakerSearchField: View {
     private var searchFieldView: some View {
         GlassyInputField(
             icon: "magnifyingglass",
-            title: "Search for Staker (App User)",
+            title: "Search for Staker by Name or Username",
             glassOpacity: glassOpacity,
             labelColor: secondaryTextColor,
             materialOpacity: materialOpacity
         ) {
             HStack(spacing: 8) {
-                TextField("Enter username...", text: $config.searchQuery)
+                TextField("Enter username or display name...", text: $config.searchQuery)
                     .font(.plusJakarta(.body, weight: .regular))
                     .foregroundColor(primaryTextColor)
                     .focused($isSearchFocused)
@@ -272,10 +272,11 @@ struct StakerSearchField: View {
         
         Task {
             do {
-                let users = try await userService.searchUsersByUsernamePrefix(usernamePrefix: query, limit: 5)
+                // Use the comprehensive search that searches both username and displayName
+                let users = try await userService.searchUsers(query: query, limit: 5)
                 await MainActor.run {
                     // Only update if the search query hasn't changed
-                    if config.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().starts(with: query.lowercased()) {
+                    if config.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().contains(query.lowercased()) {
                         config.searchResults = users
                         showingSearchResults = !users.isEmpty
                     }

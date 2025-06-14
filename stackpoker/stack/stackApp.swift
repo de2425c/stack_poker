@@ -44,6 +44,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
         
+        // Configure Firebase Auth for phone verification immediately after configure
+        configureFirebaseAuth()
+        
         // Register custom fonts
         FontRegistration.register()
         
@@ -84,11 +87,46 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
-
+        
+        // Set APNs token for Firebase Auth (required for phone verification)
+        #if DEBUG
+        Auth.auth().setAPNSToken(deviceToken, type: .sandbox)
+        #else
+        Auth.auth().setAPNSToken(deviceToken, type: .prod)
+        #endif
+        
+        print("AppDelegate: APNs token set for Firebase Auth")
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-
+        print("AppDelegate: Failed to register for push notifications with error: \(error)")
+    }
+    
+    // Handle incoming notification while app is active (required for phone auth)
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        
+        // Pass notification to Firebase Auth for phone verification
+        if Auth.auth().canHandleNotification(userInfo) {
+            completionHandler(.noData)
+            return
+        }
+        
+        // Handle other notifications
+        completionHandler(.newData)
+    }
+    
+    // Handle URL schemes for Firebase Auth (required for phone verification)
+    func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        // Check if Firebase Auth can handle this URL
+        if Auth.auth().canHandle(url) {
+            print("AppDelegate: Firebase Auth handled URL: \(url)")
+            return true
+        }
+        
+        // URL not auth related; handle separately if needed
+        print("AppDelegate: URL not handled by Firebase Auth: \(url)")
+        return false
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter,
@@ -203,6 +241,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         )
     }
 
+    // Configure Firebase Auth settings for phone verification
+    private func configureFirebaseAuth() {
+        #if DEBUG
+        Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+        print("AppDelegate: Testing mode enabled - use fictional phone numbers")
+        #endif
+        
+        // Set language code for better compatibility
+        Auth.auth().languageCode = "en"
+        
+        print("AppDelegate: Firebase Auth configured for phone verification")
+    }
+    
     // Add a helper method to check token validity on app startup
     private func validateStoredFCMToken() {
         // Only run if user is signed in
@@ -235,18 +286,47 @@ struct stackApp: App {
     @StateObject private var authViewModel = AuthViewModel()
     @StateObject var userService = UserService()
     @StateObject var postService = PostService()
+    @State private var showInitialLottie = true
+    @State private var playInitialLottie = true
 
     var body: some Scene {
         WindowGroup {
             ZStack {
-                Color(.systemBackground).ignoresSafeArea()
-                MainCoordinator()
-                  .environmentObject(authViewModel)
-                  .environmentObject(userService)
-                  .environmentObject(postService)
-                  
+                AppBackgroundView().ignoresSafeArea()
+                
+                if showInitialLottie {
+                    // Always show Lottie first to prevent white screen
+                    LottieView(name: "lottie_final", loopMode: .loop, play: $playInitialLottie)
+                        .ignoresSafeArea()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onAppear {
+                            playInitialLottie = true
+                        }
+                } else {
+                    MainCoordinator()
+                      .environmentObject(authViewModel)
+                      .environmentObject(userService)
+                      .environmentObject(postService)
+                }
+            }
+            .onChange(of: authViewModel.appFlow) { newFlow in
+                // Hide the initial Lottie once the app has determined its flow
+                if newFlow != .loading {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showInitialLottie = false
+                    }
+                }
             }
             .onAppear {
+                // Give a minimum time for the Lottie to show, then check auth state
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if authViewModel.appFlow != .loading {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            showInitialLottie = false
+                        }
+                    }
+                }
+                
                 // Initial check if already signed in and profile is missing
                 if authViewModel.authState == .signedIn && userService.currentUserProfile == nil {
                     Task {

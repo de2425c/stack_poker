@@ -184,11 +184,17 @@ struct SearchBarView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.black.opacity(0.3))
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.08))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
+                .background(
+                    // Subtle blur effect behind
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.black.opacity(0.1))
+                        .blur(radius: 10)
                 )
         )
         .padding(.horizontal)
@@ -271,8 +277,15 @@ struct SearchResultsView: View {
                         EnhancedUserRow(user: user, currentUserId: currentUserId, userService: userService)
                             .padding(.horizontal)
                             .padding(.vertical, 8)
-                            .background(Color.black.opacity(0.2))
-                            .cornerRadius(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.white.opacity(0.05))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                                    )
+                            )
+                            .cornerRadius(12)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 4)
                     }
@@ -306,13 +319,14 @@ struct UserSearchView: View {
         ZStack {
             AppBackgroundView()
                 .ignoresSafeArea()
-                .opacity(0.9) // Slightly dim the background
+                // Remove opacity reduction to keep full vibrant background
 
-            // Subtle animated gradient overlay for visual interest
+            // Very subtle animated gradient overlay for visual interest
             LinearGradient(
                 gradient: Gradient(colors: [
-                    Color(UIColor(red: 5/255, green: 5/255, blue: 10/255, alpha: 0.4)),
-                    Color(UIColor(red: 20/255, green: 20/255, blue: 30/255, alpha: 0.3))
+                    Color.clear,
+                    Color(UIColor(red: 5/255, green: 5/255, blue: 10/255, alpha: 0.1)),
+                    Color.clear
                 ]),
                 startPoint: animateBackground ? .topLeading : .bottomLeading,
                 endPoint: animateBackground ? .bottomTrailing : .topTrailing
@@ -320,7 +334,7 @@ struct UserSearchView: View {
             .ignoresSafeArea()
         }
         .onAppear {
-            withAnimation(.easeInOut(duration: 15).repeatForever(autoreverses: true)) {
+            withAnimation(.easeInOut(duration: 20).repeatForever(autoreverses: true)) {
                 animateBackground.toggle()
             }
         }
@@ -330,8 +344,8 @@ struct UserSearchView: View {
     @ViewBuilder
     private var contentView: some View {
         ZStack {
-            // Background for content area
-            Color.black.opacity(0.2)
+            // Very subtle background for content area to let AppBackgroundView show through
+            Color.white.opacity(0.02)
                 .cornerRadius(12)
                 .edgesIgnoringSafeArea(.bottom)
             

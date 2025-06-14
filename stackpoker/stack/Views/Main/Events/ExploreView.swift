@@ -1,6 +1,13 @@
 import SwiftUI
 import FirebaseFirestore
 import Combine
+import FirebaseAuth
+
+// MARK: - Tab Selection Enum
+enum EventsTab: String, CaseIterable {
+    case events = "Events"
+    case myEvents = "My Events"
+}
 
 // --- New SimpleDate Structures ---
 struct SimpleDate: Hashable, Comparable {
@@ -116,6 +123,7 @@ struct Event: Identifiable, Hashable {
     let description: String?
     let time: String?
     let buyin_usd: Double? // New field for USD buy-in
+    let casino: String? // New optional casino field
 
     init?(document: QueryDocumentSnapshot) {
         let data = document.data()
@@ -146,12 +154,28 @@ struct Event: Identifiable, Hashable {
         self.description = data["description"] as? String
         self.buyin_usd = data["buyin_usd"] as? Double // Initialize new field
 
+        // Optional casino field
+        self.casino = data["casino"] as? String
+
         let timeValue = data["time"] as? String
         if let t = timeValue, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             self.time = t
         } else {
             self.time = nil
         }
+    }
+    
+    // Manual initializer for creating events from RSVP data
+    init(id: String, buyin_string: String, simpleDate: SimpleDate, event_name: String, series_name: String? = nil, description: String? = nil, time: String? = nil, buyin_usd: Double? = nil, casino: String? = nil) {
+        self.id = id
+        self.buyin_string = buyin_string
+        self.simpleDate = simpleDate
+        self.event_name = event_name
+        self.series_name = series_name
+        self.description = description
+        self.time = time
+        self.buyin_usd = buyin_usd
+        self.casino = casino
     }
 
     func hash(into hasher: inout Hasher) {
@@ -181,96 +205,6 @@ struct InfoRow: View {
                 .font(valueFont)
                 .foregroundColor(valueColor)
                 .lineLimit(alignment == .leading ? 2 : 1)
-        }
-    }
-}
-
-struct EventCardView: View {
-    let event: Event
-    var onSelect: (() -> Void)? // Add a callback for when the card is tapped
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Text(event.event_name)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                .foregroundColor(.white)
-                .lineLimit(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Rectangle()
-                .frame(height: 1)
-                .foregroundColor(Color.white.opacity(0.1))
-                .padding(.vertical, 2)
-
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 12) {
-                    if let description = event.description, !description.isEmpty {
-                        InfoRow(label: "Description", value: description, valueFont: .system(size: 14, weight: .regular, design: .rounded))
-                    }
-                    
-                    if let seriesName = event.series_name, !seriesName.isEmpty {
-                        InfoRow(label: "Series", value: seriesName, valueFont: .system(size: 14, weight: .medium, design: .rounded))
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Date & Time")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundColor(.gray.opacity(0.8))
-                        HStack(spacing: 5) {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundColor(Color.gray)
-                            Text(event.simpleDate.displayMedium) // Use SimpleDate for display
-                                .font(.system(size: 13, weight: .regular, design: .rounded))
-                                .foregroundColor(.white.opacity(0.9))
-                            
-                            if let time = event.time, !time.isEmpty {
-                                Text("•")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(Color.gray)
-                                Image(systemName: "clock")
-                                    .font(.system(size: 13, weight: .regular))
-                                    .foregroundColor(Color.gray)
-                                Text(time)
-                                    .font(.system(size: 13, weight: .regular, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.9))
-                            }
-                        }
-                    }
-                }
-                .layoutPriority(1)
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text("BUY-IN")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundColor(.gray.opacity(0.7))
-                    Text(event.buyin_string)
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(UIColor(red: 100/255, green: 220/255, blue: 100/255, alpha: 1.0)))
-                        .multilineTextAlignment(.trailing)
-                }
-                .frame(minWidth: 80, alignment: .trailing)
-            }
-        }
-        .padding(18)
-        .background(
-            LinearGradient(gradient: Gradient(colors: [Color.black.opacity(0.4), Color.black.opacity(0.25)]), startPoint: .top, endPoint: .bottom)
-                .overlay(Color(UIColor(red: 35/255, green: 37/255, blue: 40/255, alpha: 0.7)))
-        )
-        .cornerRadius(22)
-        .overlay(
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(LinearGradient(
-                    gradient: Gradient(colors: [Color.white.opacity(0.2), Color.white.opacity(0.05), Color.white.opacity(0.0)]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 5)
-        .onTapGesture { // Make the whole card tappable
-            onSelect?()
         }
     }
 }
@@ -359,110 +293,20 @@ class ExploreViewModel: ObservableObject {
     }
 }
 
-// --- Custom SimpleDateHeaderPicker View ---
-struct SimpleDateHeaderPicker: View {
-    var availableDates: [IdentifiableSimpleDate]
-    @Binding var selectedDate: SimpleDate?
-    let currentSystemDate: SimpleDate
-    // TODO: Pass in font names as parameters if Jakarta is used elsewhere for consistency
-
-    @State private var isExpanded: Bool = false
-
-    private var displayString: String {
-        if let date = selectedDate {
-            return date.displayMedium
-        } else if let firstDate = availableDates.first?.simpleDate {
-            return firstDate.displayMedium
-        } else {
-            return "Select Date"
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Tappable Header Row
-            HStack(spacing: 4) {
-                Text("Events On")
-                    // TODO: Replace with .font(.custom("YourJakartaFontName-Bold", size: 22))
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Text(displayString) 
-                    // TODO: Replace with .font(.custom("YourJakartaFontName-Bold", size: 22))
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
-                    .foregroundColor(.gray)
-                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
-            }
-            .padding(.vertical, 8) // Padding for the tappable area
-            .contentShape(Rectangle()) // Makes the whole HStack tappable
-            .onTapGesture {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    isExpanded.toggle()
-                }
-            }
-
-            // Expanded List of Dates
-            if isExpanded {
-                ScrollView { // Wrap the list in a ScrollView
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(availableDates) { identifiableDate in
-                            let isPastDate = identifiableDate.simpleDate < currentSystemDate
-                            Button(action: {
-                                if !isPastDate { // Only allow selection if not a past date
-                                    self.selectedDate = identifiableDate.simpleDate
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                        self.isExpanded = false
-                                    }
-                                }
-                            }) {
-                                HStack {
-                                    Text(identifiableDate.simpleDate.displayMedium)
-                                        // TODO: Replace with .font(.custom("YourJakartaFontName-Regular", size: 16))
-                                        .font(.system(size: 16, weight: selectedDate == identifiableDate.simpleDate && !isPastDate ? .bold : .regular, design: .rounded))
-                                        .foregroundColor(
-                                            isPastDate ? .gray.opacity(0.5) : (selectedDate == identifiableDate.simpleDate ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white.opacity(0.8))
-                                        )
-                                    Spacer()
-                                    if selectedDate == identifiableDate.simpleDate && !isPastDate { // Checkmark only if selected AND not past
-                                        Image(systemName: "checkmark")
-                                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                    }
-                                }
-                                .padding(.vertical, 10)
-                                .padding(.horizontal, 10) // Padding within list items
-                                .background(Color.black.opacity(isPastDate ? 0.03 : (selectedDate == identifiableDate.simpleDate ? 0.15 : 0.05))) // Adjust background for past dates
-                                .cornerRadius(8)
-                            }
-                            .disabled(isPastDate) // Disable the button for past dates
-                            .padding(.vertical, 2) // Spacing between items
-                        }
-                    }
-                }
-                .padding(8) // Padding around the list itself
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(UIColor(red: 40/255, green: 42/255, blue: 45/255, alpha: 1.0))) // Darker background for dropdown
-                        .shadow(color: .black.opacity(0.3), radius: 5, y: 3)
-                )
-                // Add maxHeight to the ScrollView itself
-                .frame(maxHeight: UIScreen.main.bounds.height * 0.4) // e.g., max 40% of screen height
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
-                .zIndex(1) // Ensure dropdown appears above other content if needed
-            }
-        }
-    }
-}
-// --- End Custom SimpleDateHeaderPicker View ---
-
 struct ExploreView: View {
     @State private var placeholderSearchText = "" 
     @StateObject private var viewModel = ExploreViewModel()
+    @StateObject private var userEventService = UserEventService()
+    @StateObject private var userService = UserService()
     @State private var selectedSimpleDate: SimpleDate? = nil
+    @State private var selectedTab: EventsTab = .events
+    @State private var showingCreateEvent = false
+    @State private var showingEventInvites = false
+    @State private var showingFilters = false
+    @State private var showingEventHistory = false
+    @State private var showingEventDetail = false
+    @State private var selectedEvent: Event?
+    @State private var selectedUserEvent: UserEvent? = nil // For UserEvent detail sheet
     var onEventSelected: ((Event) -> Void)? // Callback for when an event is selected
     var isSheetPresentation: Bool = false // New parameter to control top padding
     @Environment(\.dismiss) var dismiss // To dismiss the view if used as a sheet
@@ -479,7 +323,7 @@ struct ExploreView: View {
     private var selectedDateDisplayString: String { 
         if let date = selectedSimpleDate {
             return date.displayMedium
-        } else if let firstDate = identifiableUniqueSimpleDates.first?.simpleDate {
+        } else if let firstDate = allAvailableDates.first?.simpleDate {
             return firstDate.displayMedium
         } else if !viewModel.allEvents.isEmpty {
             return "A Date" // More active phrasing
@@ -488,21 +332,81 @@ struct ExploreView: View {
     }
     // --- End Dynamic Header Title ---
 
-    private var identifiableUniqueSimpleDates: [IdentifiableSimpleDate] {
+    // MARK: - All available dates (unfiltered) for the filter sheet
+    private var allAvailableDates: [IdentifiableSimpleDate] {
         let uniqueDatesSet = Set(viewModel.allEvents.map { $0.simpleDate })
         return Array(uniqueDatesSet).sorted().map { IdentifiableSimpleDate(simpleDate: $0) }
+    }
+    
+    // MARK: - Available dates for current filters (for main view)
+    private var identifiableUniqueSimpleDates: [IdentifiableSimpleDate] {
+        var eventsToFilter = viewModel.allEvents
+        
+        // Apply only series and buy-in filters (NOT date filter)
+        if !viewModel.selectedSeriesSet.isEmpty {
+            eventsToFilter = eventsToFilter.filter { event in
+                guard let eventSeries = event.series_name else { return false }
+                return viewModel.selectedSeriesSet.contains(eventSeries)
+            }
+        }
+        
+        if viewModel.selectedBuyinRange != .all {
+            eventsToFilter = eventsToFilter.filter { event in
+                let buyinAmount: Double?
+                if let usdBuyin = event.buyin_usd {
+                    buyinAmount = usdBuyin
+                } else {
+                    buyinAmount = parseBuyinFromString(event.buyin_string)
+                }
+                guard let amount = buyinAmount else { return false }
+                return viewModel.selectedBuyinRange.contains(amount)
+            }
+        }
+        
+        let uniqueDatesSet = Set(eventsToFilter.map { $0.simpleDate })
+        return Array(uniqueDatesSet).sorted().map { IdentifiableSimpleDate(simpleDate: $0) }
+    }
+    
+    // MARK: - Helper function for buy-in parsing (extracted for reuse)
+    private func parseBuyinFromString(_ buyinString: String) -> Double? {
+        // Remove currency symbols and normalize whitespace
+        let cleanedString = buyinString
+            .replacingOccurrences(of: "[€£¥,]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        var totalAmount: Double = 0
+        
+        // Split by + and - to handle additions and subtractions
+        let components = cleanedString.components(separatedBy: CharacterSet(charactersIn: "+-"))
+        let operators = cleanedString.filter { "+-".contains($0) }
+        
+        // Process each component
+        for (index, component) in components.enumerated() {
+            let numberString = component
+                .replacingOccurrences(of: "$", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            guard let number = Double(numberString) else { continue }
+            
+            if index == 0 {
+                totalAmount = number
+            } else if index - 1 < operators.count {
+                let operatorChar = String(operators[operators.index(operators.startIndex, offsetBy: index - 1)])
+                if operatorChar == "+" {
+                    totalAmount += number
+                } else if operatorChar == "-" {
+                    totalAmount -= number
+                }
+            }
+        }
+        
+        return totalAmount > 0 ? totalAmount : nil
     }
 
     // Changed to use SimpleDate for filtering
     private var filteredEvents: [Event] {
         var eventsToFilter = viewModel.allEvents
-
-        // --- Helper for parsing buyin_string to Double ---
-        func parseBuyinToDouble(_ buyinString: String) -> Double? {
-            let cleanedString = buyinString.replacingOccurrences(of: "[^0-9.]", with: "", options: .regularExpression)
-            return Double(cleanedString)
-        }
-        // --- End Helper ---
 
         // --- Apply Series Filter (Multi-select) ---
         if !viewModel.selectedSeriesSet.isEmpty {
@@ -515,24 +419,29 @@ struct ExploreView: View {
         // --- Apply Buy-in Filter ---
         if viewModel.selectedBuyinRange != .all {
             eventsToFilter = eventsToFilter.filter { event in
-                if let numericBuyin = parseBuyinToDouble(event.buyin_string) {
-                    return viewModel.selectedBuyinRange.contains(numericBuyin)
+                // Try buyin_usd field first, then parse buyin_string
+                let buyinAmount: Double?
+                if let usdBuyin = event.buyin_usd {
+                    buyinAmount = usdBuyin
+                } else {
+                    buyinAmount = parseBuyinFromString(event.buyin_string)
                 }
-                return false // If buy-in can't be parsed, exclude it unless filter is "All"
+                
+                guard let amount = buyinAmount else { return false }
+                return viewModel.selectedBuyinRange.contains(amount)
             }
         }
         // --- End Filter Logic ---
 
-        let eventsForSelectedDate: [Event]
-        let dateToFilterOn = selectedSimpleDate ?? identifiableUniqueSimpleDates.first?.simpleDate
-
-        if let currentFilterDate = dateToFilterOn {
-            eventsForSelectedDate = eventsToFilter.filter { $0.simpleDate == currentFilterDate }
-        } else {
-            eventsForSelectedDate = [] // Or eventsToFilter if you want to show all when no date is selected and no dates exist
+        // --- Apply Date Filter ---
+        if let currentFilterDate = selectedSimpleDate {
+            eventsToFilter = eventsToFilter.filter { $0.simpleDate == currentFilterDate }
+        } else if let fallbackDate = allAvailableDates.first?.simpleDate {
+            // If no date is selected, use the first available date
+            eventsToFilter = eventsToFilter.filter { $0.simpleDate == fallbackDate }
         }
         
-        return eventsForSelectedDate.sorted { (event1, event2) -> Bool in
+        return eventsToFilter.sorted { (event1, event2) -> Bool in
             // Sort alphabetically by event name
             return event1.event_name.localizedCompare(event2.event_name) == .orderedAscending
         }
@@ -543,131 +452,280 @@ struct ExploreView: View {
         return simpleDate.displayShort // e.g., "May 24"
     }
     
+    // MARK: - Computed Properties for Event Filtering
+    
+    /// Non-completed events for main feed
+    private var activeUserEvents: [UserEvent] {
+        userEventService.userEvents.filter { event in
+            event.currentStatus != .completed
+        }
+    }
+    
+    /// Completed events for history (both UserEvents and public event RSVPs)
+    private var completedUserEvents: [UserEvent] {
+        userEventService.userEvents.filter { event in
+            event.currentStatus == .completed
+        }.sorted { $0.startDate > $1.startDate } // Most recent first
+    }
+
+    /// Total completed events count (UserEvents + Public RSVPs)
+    private var totalCompletedEventsCount: Int {
+        return completedUserEvents.count + completedPublicEventRSVPs.count
+    }
+
     var body: some View {
         ZStack {
             AppBackgroundView() 
             
             VStack(spacing: 0) {
-                // --- Header: Date Picker & Search Icon ---
-                HStack(spacing: 6) {
-                    // --- Replace old Picker with Custom SimpleDateHeaderPicker ---
-                    if !identifiableUniqueSimpleDates.isEmpty {
-                        SimpleDateHeaderPicker(availableDates: identifiableUniqueSimpleDates, selectedDate: $selectedSimpleDate, currentSystemDate: currentSystemSimpleDate)
-                    } else {
-                        // Fallback if no dates: "Events On No Dates"
-                        Text("Events On \(selectedDateDisplayString)") 
-                           // TODO: Replace with .font(.custom("YourJakartaFontName-Bold", size: 22))
-                           .font(.system(size: 22, weight: .bold, design: .rounded))
-                           .foregroundColor(.gray) 
+                // --- Custom Gradient Tab Bar ---
+                customTabBar
+                
+                // --- Tab Content ---
+                if selectedTab == .events {
+                    publicEventsView
+                } else {
+                    myEventsView
+                }
+            }
+        }
+        .onAppear {
+            // Always fetch public events to support RSVP display in My Events
+            viewModel.fetchEvents()
+            
+            if selectedTab == .events {
+                // Public events tab - no additional user event fetching needed
+            } else {
+                Task {
+                    try? await userEventService.fetchUserEvents()
+                    try? await userEventService.fetchPendingEventInvites()
+                    try? await userEventService.fetchPublicEventRSVPs()
+                    await userEventService.startMyEventsListeners()
+                }
+            }
+        }
+        .onChange(of: selectedTab) { newTab in
+            if newTab == .events {
+                // Ensure public events are loaded
+                viewModel.fetchEvents()
+                userEventService.stopMyEventsListeners()
+            } else {
+                // Also ensure public events are loaded for RSVP lookup
+                viewModel.fetchEvents()
+                Task {
+                    try? await userEventService.fetchUserEvents()
+                    try? await userEventService.fetchPendingEventInvites()
+                    try? await userEventService.fetchPublicEventRSVPs()
+                    await userEventService.startMyEventsListeners()
+                }
+            }
+        }
+        .onChange(of: viewModel.allEvents) { _ in 
+            // Only set initial date if none is selected
+            if selectedSimpleDate == nil {
+                // Try to select current system date if it has events, otherwise select the first available date
+                let hasEventsToday = allAvailableDates.contains { $0.simpleDate == currentSystemSimpleDate }
+                if hasEventsToday {
+                selectedSimpleDate = currentSystemSimpleDate
+                } else if let firstDate = allAvailableDates.first?.simpleDate {
+                    selectedSimpleDate = firstDate
+                }
+            }
+        }
+        .sheet(isPresented: $showingCreateEvent) {
+            CreateEventView { newEvent in
+                // Refresh user events when a new one is created
+                Task {
+                    try? await userEventService.fetchUserEvents()
+                }
+            }
+            .environmentObject(userEventService)
+        }
+        .sheet(isPresented: $showingEventInvites) {
+            EventInvitesView()
+                .environmentObject(userEventService)
+        }
+        .sheet(isPresented: $showingEventHistory) {
+            EventHistoryView(
+                completedEvents: completedUserEvents,
+                completedPublicEventRSVPs: completedPublicEventRSVPs
+            )
+            .environmentObject(userEventService)
+            .environmentObject(userService)
+        }
+        .sheet(isPresented: $showingFilters) {
+            EventFiltersView(
+                selectedDate: $selectedSimpleDate,
+                selectedBuyinRange: $viewModel.selectedBuyinRange,
+                selectedSeriesSet: $viewModel.selectedSeriesSet,
+                availableDates: allAvailableDates, // Use unfiltered dates!
+                availableSeries: viewModel.availableSeries,
+                currentSystemDate: currentSystemSimpleDate
+            )
+        }
+        .sheet(isPresented: $showingEventDetail) {
+            if let selectedEvent = selectedEvent {
+                EventDetailView(event: selectedEvent)
+                    .environmentObject(userEventService)
+                    .environmentObject(userService)
+            }
+        }
+        .sheet(item: $selectedUserEvent) { userEvent in
+            UserEventDetailView(event: userEvent)
+                .environmentObject(userEventService)
+                .environmentObject(userService)
+        }
+    }
+    
+    // MARK: - Custom Tab Bar
+    private var customTabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(EventsTab.allCases, id: \.self) { tab in
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        selectedTab = tab
+                    }
+                }) {
+                    Text(tab.rawValue)
+                        .font(.system(size: 14, weight: .semibold, design: .default))
+                        .foregroundColor(selectedTab == tab ? .white : .white.opacity(0.6))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            ZStack {
+                                if selectedTab == tab {
+                                    // Beautiful gradient with glossy effect
+                                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [
+                                                    Color(red: 64/255, green: 156/255, blue: 255/255),
+                                                    Color(red: 100/255, green: 180/255, blue: 255/255),
+                                                    Color(red: 64/255, green: 156/255, blue: 255/255)
+                                                ]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .overlay(
+                                            // Glossy highlight overlay
+                                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                                .fill(
+                                                    LinearGradient(
+                                                        gradient: Gradient(colors: [
+                                                            Color.white.opacity(0.4),
+                                                            Color.white.opacity(0.1),
+                                                            Color.clear
+                                                        ]),
+                                                        startPoint: .topLeading,
+                                                        endPoint: .center
+                                                    )
+                                                )
+                                        )
+                                        .shadow(color: Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.4), radius: 6, x: 0, y: 3)
+                                        .shadow(color: Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.2), radius: 12, x: 0, y: 6)
+                                        .matchedGeometryEffect(id: "tabBackground", in: tabNamespace)
+                                }
+                            }
+                        )
+                }
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .background(
+            ZStack {
+                // Base transparent background
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.02),
+                                Color.white.opacity(0.04),
+                                Color.white.opacity(0.02)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                
+                // Glossy overlay
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.08),
+                                Color.white.opacity(0.03),
+                                Color.clear
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .center
+                        )
+                    )
+                
+                // Subtle border
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.15),
+                                Color.white.opacity(0.08),
+                                Color.white.opacity(0.03)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.5
+                    )
+            }
+        )
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+    }
+    
+    @Namespace private var tabNamespace
+    
+    // MARK: - Public Events View (Original Content)
+    private var publicEventsView: some View {
+            VStack(spacing: 0) {
+                // --- Header: Filter Button & Date Display & Search Icon ---
+                HStack(spacing: 12) {
+                    // Filter Button
+                    Button(action: {
+                        showingFilters = true
+                    }) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 20, weight: .medium, design: .default))
+                            .foregroundColor(.white)
+                    }
+                    
+                    // --- Date Display ---
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Events On")
+                            .font(.system(size: 16, weight: .medium, design: .default))
+                            .foregroundColor(.white.opacity(0.7))
+                        Text(selectedDateDisplayString)
+                           .font(.system(size: 22, weight: .bold, design: .default))
+                            .foregroundColor(.white)
                            .lineLimit(1)
                     }
-                    // --- End Custom Picker Replacement ---
                     
                     Spacer()
                     
+                    // Search Icon
                     Button(action: {
                         // TODO: Implement search action
-
                     }) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 22, weight: .medium))
+                            .font(.system(size: 20, weight: .medium, design: .default))
                             .foregroundColor(.white)
                     }
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 0) // Adjusted top padding to 0 to move header up by 15 points
-                .padding(.bottom, 8) // Standardized bottom padding
+                .padding(.top, 0)
+                .padding(.bottom, 16)
                 // --- End Header ---
-                
-                // --- Custom Date Picker List ---
-                // if isDatePickerExpanded { ... } // ENTIRE BLOCK REMOVED
-                // --- End Custom Date Picker List ---
-                
-                // --- Filter Pickers (Buy-in Range Only) ---
-                if !viewModel.isLoading && !viewModel.allEvents.isEmpty {
-                    HStack(spacing: 10) {
-                        // Buy-in Picker
-                        Picker(selection: $viewModel.selectedBuyinRange) {
-                            ForEach(BuyinRange.allCases) { range in
-                                Text(range.rawValue).tag(range)
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(viewModel.selectedBuyinRange.rawValue)
-                                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 14)
-                            .background(Color.white.opacity(0.1))
-                            .cornerRadius(10)
-                            .frame(minWidth: 120)
-                        }
-                        .pickerStyle(MenuPickerStyle())
-                        .accentColor(.white)
-                        
-                        Spacer() // Push picker to the left
-                    }
-                    .animation(.easeInOut(duration: 0.2), value: viewModel.selectedBuyinRange)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 10)
-                }
-                // --- End Buy-in Filter Picker ---
-
-                // --- NEW: Multi-Select Series Horizontal Scroller ---
-                if !viewModel.isLoading && !viewModel.availableSeries.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            // "All Series" Button
-                            Button(action: {
-                                viewModel.selectedSeriesSet.removeAll()
-                            }) {
-                                Text("All Series")
-                                    .font(.system(size: 14, weight: viewModel.selectedSeriesSet.isEmpty ? .bold : .medium, design: .rounded))
-                                    .foregroundColor(viewModel.selectedSeriesSet.isEmpty ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white)
-                                    .padding(.vertical, 8)
-                                    .padding(.horizontal, 16)
-                                    .background(viewModel.selectedSeriesSet.isEmpty ? Color.white.opacity(0.15) : Color.white.opacity(0.05))
-                                    .cornerRadius(10)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(viewModel.selectedSeriesSet.isEmpty ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)).opacity(0.5) : Color.clear, lineWidth: 1.5)
-                                    )
-                            }
-
-                            ForEach(viewModel.availableSeries, id: \.self) { seriesName in
-                                Button(action: {
-                                    if viewModel.selectedSeriesSet.contains(seriesName) {
-                                        viewModel.selectedSeriesSet.remove(seriesName)
-                                    } else {
-                                        viewModel.selectedSeriesSet.insert(seriesName)
-                                    }
-                                }) {
-                                    Text(seriesName)
-                                        .font(.system(size: 14, weight: viewModel.selectedSeriesSet.contains(seriesName) ? .bold : .medium, design: .rounded))
-                                        .foregroundColor(viewModel.selectedSeriesSet.contains(seriesName) ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .white)
-                                        .padding(.vertical, 8)
-                                        .padding(.horizontal, 16)
-                                        .background(viewModel.selectedSeriesSet.contains(seriesName) ? Color.white.opacity(0.15) : Color.white.opacity(0.05))
-                                        .cornerRadius(10)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 10)
-                                                .stroke(viewModel.selectedSeriesSet.contains(seriesName) ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)).opacity(0.5) : Color.clear, lineWidth: 1.5)
-                                        )
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
-                    .frame(height: 50) // Give the scroller a fixed height
-                    .padding(.bottom, 15)
-                    .animation(.default, value: viewModel.selectedSeriesSet) // Animate changes to selection
-                }
-                // --- End Multi-Select Series Horizontal Scroller ---
 
                 if viewModel.isLoading {
                     Spacer()
@@ -699,23 +757,26 @@ struct ExploreView: View {
                         Spacer(minLength: 50)
                         Image(systemName: identifiableUniqueSimpleDates.isEmpty ? "calendar.badge.plus" : "calendar.badge.exclamationmark")
                                 .font(.system(size: 50))
-                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
                             .padding(.bottom, 10)
                         Text(identifiableUniqueSimpleDates.isEmpty ? "No Events Available" : "No Events for Selected Date")
-                                .font(.system(size: 18, weight: .medium, design: .rounded))
+                                .font(.system(size: 18, weight: .medium, design: .default))
                                 .foregroundColor(.gray)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        VStack(spacing: 18) {
+                        VStack(spacing: 14) { // Reduced spacing between cards
                             ForEach(filteredEvents) { event in 
                                 EventCardView(event: event, onSelect: {
-                                    onEventSelected?(event) // Call the callback
-                                    // Dismissal will be handled by the presenting view if needed,
-                                    // or uncomment below if ExploreView should always dismiss itself on selection
-                                    // if onEventSelected != nil { dismiss() }
+                                    if let onEventSelected = onEventSelected {
+                                        onEventSelected(event) // Call the callback if provided
+                                    } else {
+                                        // Show detail view
+                                        selectedEvent = event
+                                        showingEventDetail = true
+                                    }
                                 })
                             }
                         }
@@ -725,22 +786,370 @@ struct ExploreView: View {
                 }
             }
         }
-        .onAppear {
-            viewModel.fetchEvents()
-            // Auto-select the current system date if nothing is selected.
-            if selectedSimpleDate == nil {
-                selectedSimpleDate = currentSystemSimpleDate
+    
+    // MARK: - My Events View (User Events)
+    private var myEventsView: some View {
+        VStack(spacing: 0) {
+            // --- Header with Create Event Button ---
+            HStack {
+                Text("My Events")
+                    .font(.system(size: 22, weight: .bold, design: .default))
+                    .foregroundColor(.white)
+                
+                Spacer()
+                
+                // History Button
+                Button(action: {
+                    showingEventHistory = true
+                }) {
+                    ZStack {
+                        Image(systemName: "clock")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(.white)
+                        if totalCompletedEventsCount > 0 {
+                            Text("\(totalCompletedEventsCount)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.black)
+                                .frame(width: 16, height: 16)
+                                .background(Color.gray.opacity(0.8))
+                                .clipShape(Circle())
+                                .offset(x: 8, y: -8)
+                        }
+                    }
+                }
+                .padding(.trailing, 12)
+                
+                // Invites Button (always visible)
+                    Button(action: {
+                        showingEventInvites = true
+                    }) {
+                        ZStack {
+                            Image(systemName: "envelope")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundColor(.white)
+                        if !userEventService.pendingInvites.isEmpty {
+                            Text("\(userEventService.pendingInvites.count)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.black)
+                                .frame(width: 16, height: 16)
+                                .background(Color(red: 64/255, green: 156/255, blue: 255/255))
+                                .clipShape(Circle())
+                                .offset(x: 8, y: -8)
+                        }
+                    }
+                }
+                .padding(.trailing, 12)
+                
+                // Create Event Button
+                Button(action: {
+                    showingCreateEvent = true
+                }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color(red: 64/255, green: 156/255, blue: 255/255),
+                                    Color(red: 100/255, green: 180/255, blue: 255/255)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .clipShape(Circle())
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+            
+            // --- Content ---
+            if userEventService.isLoading {
+                Spacer()
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                Text("Loading Your Events...")
+                    .foregroundColor(.gray)
+                    .padding(.top, 8)
+                Spacer()
+            } else if activeUserEvents.isEmpty && userEventService.publicEventRSVPs.isEmpty {
+                VStack {
+                    Spacer(minLength: 50)
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: 50))
+                        .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                        .padding(.bottom, 16)
+                    
+                    Text("No Events Yet")
+                        .font(.system(size: 18, weight: .medium, design: .default))
+                        .foregroundColor(.white)
+                        .padding(.bottom, 8)
+                    
+                    Text("Create your first event or RSVP to public events")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .padding(.bottom, 24)
+                    
+                    Button(action: {
+                        showingCreateEvent = true
+                    }) {
+                        Text("Create Event")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 64/255, green: 156/255, blue: 255/255),
+                                        Color(red: 100/255, green: 180/255, blue: 255/255)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .cornerRadius(25)
+                    }
+                    
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Combined schedule view with both UserEvents and Public Event RSVPs
+                combinedScheduleView
             }
         }
-        .onChange(of: viewModel.allEvents) { _ in 
-            let currentSelectionIsValidInNewList = identifiableUniqueSimpleDates.contains { $0.simpleDate == selectedSimpleDate }
-            let isSelectedDateInPast = selectedSimpleDate != nil && selectedSimpleDate! < currentSystemSimpleDate
-
-            if selectedSimpleDate == nil || !currentSelectionIsValidInNewList || isSelectedDateInPast {
-                selectedSimpleDate = currentSystemSimpleDate
+    }
+    
+    // MARK: - Schedule View
+    private var scheduleView: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(groupedEventsByDate.keys.sorted(), id: \.self) { date in
+                    if let eventsForDate = groupedEventsByDate[date] {
+                        // Date Section Header
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(formatDateHeader(date))
+                                    .font(.system(size: 18, weight: .bold, design: .default))
+                                    .foregroundColor(.white)
+                                
+                                Text(relativeDateString(date))
+                                    .font(.system(size: 13, weight: .medium, design: .default))
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            Spacer()
+                            
+                            // Event count badge
+                            Text("\(eventsForDate.count)")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 24, height: 24)
+                                .background(Color(red: 64/255, green: 156/255, blue: 255/255))
+                                .clipShape(Circle())
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, date == groupedEventsByDate.keys.sorted().first ? 8 : 24)
+                        .padding(.bottom, 12)
+                        
+                        // Events for this date
+                        ForEach(eventsForDate.sorted { $0.startDate < $1.startDate }) { event in
+                            UserEventCardView(event: event, onSelect: {
+                                selectedUserEvent = event
+                            })
+                                .environmentObject(userEventService)
+                                .environmentObject(userService)
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 14)
+                        }
+                    }
+                }
+                
+                // Bottom padding
+                Color.clear.frame(height: 100)
             }
-            // If currentSystemSimpleDate has no events, selectedSimpleDate will be current date,
-            // and filteredEvents will be empty for that date, showing "No events for selected date". This is okay.
+        }
+    }
+    
+    // MARK: - Combined Schedule View (UserEvents + Public Event RSVPs)
+    private var combinedScheduleView: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(combinedGroupedEventsByDate.keys.sorted(), id: \.self) { date in
+                    if let eventsForDate = combinedGroupedEventsByDate[date] {
+                        // Date Section Header
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(formatDateHeader(date))
+                                    .font(.system(size: 18, weight: .bold, design: .default))
+                                    .foregroundColor(.white)
+                                
+                                Text(relativeDateString(date))
+                                    .font(.system(size: 13, weight: .medium, design: .default))
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            Spacer()
+                            
+                            // Event count badge
+                            Text("\(eventsForDate.count)")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 24, height: 24)
+                                .background(Color(red: 64/255, green: 156/255, blue: 255/255))
+                                .clipShape(Circle())
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, date == combinedGroupedEventsByDate.keys.sorted().first ? 8 : 24)
+                        .padding(.bottom, 12)
+                        
+                        // Events for this date
+                        ForEach(eventsForDate.sorted { $0.date < $1.date }) { eventItem in
+                            if eventItem.isUserEvent, let userEvent = eventItem.userEvent {
+                                UserEventCardView(event: userEvent, onSelect: {
+                                    selectedUserEvent = userEvent
+                                })
+                                    .environmentObject(userEventService)
+                                    .environmentObject(userService)
+                                    .padding(.horizontal, 20)
+                                    .padding(.bottom, 14)
+                            } else if let publicEvent = eventItem.publicEvent {
+                                EventCardView(event: publicEvent, onSelect: {
+                                    selectedEvent = publicEvent
+                                    showingEventDetail = true
+                                })
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 14)
+                            }
+                        }
+                    }
+                }
+                
+                // Bottom padding
+                Color.clear.frame(height: 100)
+            }
+        }
+    }
+    
+    // MARK: - Computed Properties for Schedule
+    private var groupedEventsByDate: [Date: [UserEvent]] {
+        let calendar = Calendar.current
+        return Dictionary(grouping: activeUserEvents) { event in
+            calendar.startOfDay(for: event.startDate)
+        }
+    }
+    
+    // MARK: - Combined Event Item for Mixed Schedule
+    private struct CombinedEventItem: Identifiable {
+        let id = UUID()
+        let date: Date
+        let isUserEvent: Bool
+        let userEvent: UserEvent?
+        let publicEvent: Event?
+        
+        init(userEvent: UserEvent) {
+            self.date = userEvent.startDate
+            self.isUserEvent = true
+            self.userEvent = userEvent
+            self.publicEvent = nil
+        }
+        
+        init(publicEvent: Event, rsvpDate: Date) {
+            self.date = rsvpDate
+            self.isUserEvent = false
+            self.userEvent = nil
+            self.publicEvent = publicEvent
+        }
+    }
+    
+    // MARK: - Combined Grouped Events (UserEvents + Public Event RSVPs)
+    private var combinedGroupedEventsByDate: [Date: [CombinedEventItem]] {
+        let calendar = Calendar.current
+        var combinedItems: [CombinedEventItem] = []
+        
+        // Add UserEvents
+        for userEvent in activeUserEvents {
+            combinedItems.append(CombinedEventItem(userEvent: userEvent))
+        }
+        
+        // Add Public Event RSVPs (only active ones)
+        for rsvp in userEventService.publicEventRSVPs {
+            // Calculate if this public event is completed (12 hours after start)
+            let completionTime = calendar.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
+            let now = Date()
+            
+            // Only include if not completed
+            if now < completionTime {
+                // Look up the original event from viewModel.allEvents to get complete data
+                if let originalEvent = viewModel.allEvents.first(where: { $0.id == rsvp.publicEventId }) {
+                    combinedItems.append(CombinedEventItem(publicEvent: originalEvent, rsvpDate: rsvp.eventDate))
+                } else {
+                    // Fallback: Create event from RSVP data if original not found
+                    let fallbackEvent = Event(
+                        id: rsvp.publicEventId,
+                        buyin_string: "TBD",
+                        simpleDate: SimpleDate(
+                            year: calendar.component(.year, from: rsvp.eventDate),
+                            month: calendar.component(.month, from: rsvp.eventDate),
+                            day: calendar.component(.day, from: rsvp.eventDate)
+                        ),
+                        event_name: rsvp.eventName,
+                        series_name: nil,
+                        description: nil,
+                        time: nil,
+                        buyin_usd: nil,
+                        casino: nil
+                    )
+                    
+                    combinedItems.append(CombinedEventItem(publicEvent: fallbackEvent, rsvpDate: rsvp.eventDate))
+                }
+            }
+        }
+        
+        return Dictionary(grouping: combinedItems) { item in
+            calendar.startOfDay(for: item.date)
+        }
+    }
+    
+    // MARK: - Completed Public Event RSVPs
+    private var completedPublicEventRSVPs: [PublicEventRSVP] {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        return userEventService.publicEventRSVPs.filter { rsvp in
+            let completionTime = calendar.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
+            return now >= completionTime
+        }
+    }
+    
+    // MARK: - Helper Functions for Schedule
+    private func formatDateHeader(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMM d"
+        return formatter.string(from: date)
+    }
+    
+    private func relativeDateString(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let eventDate = calendar.startOfDay(for: date)
+        
+        if calendar.isDate(eventDate, inSameDayAs: today) {
+            return "Today"
+        } else if calendar.isDate(eventDate, inSameDayAs: calendar.date(byAdding: .day, value: 1, to: today)!) {
+            return "Tomorrow"
+        } else if calendar.isDate(eventDate, inSameDayAs: calendar.date(byAdding: .day, value: -1, to: today)!) {
+            return "Yesterday"
+        } else {
+            let daysFromToday = calendar.dateComponents([.day], from: today, to: eventDate).day ?? 0
+            if daysFromToday > 0 {
+                return "In \(daysFromToday) day\(daysFromToday == 1 ? "" : "s")"
+            } else {
+                return "\(-daysFromToday) day\(daysFromToday == -1 ? "" : "s") ago"
+            }
         }
     }
 }

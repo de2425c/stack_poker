@@ -35,8 +35,8 @@ class CustomGameService: ObservableObject {
             }
     }
     
-    func addCustomGame(name: String, stakes: String) async throws {
-        let game = CustomGame(userId: userId, name: name, stakes: stakes)
+    func addCustomGame(name: String, stakes: String, gameType: PokerVariant = .nlh) async throws {
+        let game = CustomGame(userId: userId, name: name, stakes: stakes, gameType: gameType)
         try await db.collection("customGames").document(game.id).setData(game.dictionary)
     }
     

@@ -2,6 +2,7 @@ import Foundation
 import FirebaseFirestore
 import FirebaseAuth
 import FirebaseStorage
+import Combine
 
 class GroupService: ObservableObject {
     private let db = Firestore.firestore()
@@ -13,6 +14,10 @@ class GroupService: ObservableObject {
     @Published var availableUsers: [UserListItem] = []
     @Published var groupMembers: [GroupMemberInfo] = []
     @Published var groupMessages: [GroupMessage] = []
+    
+    // Simple pagination tracking
+    private var messageListener: ListenerRegistration?
+    private var lastMessageDocument: DocumentSnapshot?
     
     // Create a new group
     func createGroup(name: String, description: String?, image: UIImage? = nil) async throws -> UserGroup {
@@ -137,8 +142,18 @@ class GroupService: ObservableObject {
             }
         }
         
-        // Sort groups by creation date (newest first)
-        groups.sort { $0.createdAt > $1.createdAt }
+        // Sort groups by last message time (most recent first), fallback to creation date
+        groups.sort { group1, group2 in
+            if let time1 = group1.lastMessageTime, let time2 = group2.lastMessageTime {
+                return time1 > time2
+            } else if group1.lastMessageTime != nil {
+                return true // group1 has messages, group2 doesn't
+            } else if group2.lastMessageTime != nil {
+                return false // group2 has messages, group1 doesn't
+            } else {
+                return group1.createdAt > group2.createdAt // both have no messages, sort by creation
+            }
+        }
         return groups
     }
     
@@ -637,107 +652,120 @@ class GroupService: ObservableObject {
     
     // MARK: - Chat Methods
     
-    // Fetch messages for a group with pagination
-    func fetchGroupMessages(groupId: String, limit: Int = 30, beforeTimestamp: Date? = nil) async throws {
+    // Simple message fetching with pagination
+    func fetchGroupMessages(groupId: String, limit: Int = 30, loadMore: Bool = false) async throws {
         guard Auth.auth().currentUser != nil else {
             throw GroupServiceError.notAuthenticated
         }
 
-        await MainActor.run {
-            self.isLoading = true
-            if beforeTimestamp == nil {
-                self.error = nil // Clear error only on initial load
-            }
+        print("🔍 fetchGroupMessages called - groupId: \(groupId), limit: \(limit), loadMore: \(loadMore)")
+
+        // Clean up any existing listener when switching groups
+        if !loadMore {
+            messageListener?.remove()
+            messageListener = nil
+            lastMessageDocument = nil
         }
 
         do {
-            let fetchedMessages = try await _fetchGroupMessagesData(groupId: groupId, limit: limit, beforeTimestamp: beforeTimestamp)
-            
-            await MainActor.run {
-                if beforeTimestamp == nil {
-                    // First load, replace all messages
-                    self.groupMessages = fetchedMessages
-                } else {
-                    // Pagination load, add to existing messages
-                    self.groupMessages.insert(contentsOf: fetchedMessages, at: 0)
-                }
-                self.isLoading = false
+            // Build query
+            var query = db.collection("groups")
+                .document(groupId)
+                .collection("messages")
+                .order(by: "timestamp", descending: true)
+                .limit(to: limit)
+
+            // If loading more, start after the last document
+            if loadMore, let lastDoc = lastMessageDocument {
+                query = query.start(afterDocument: lastDoc)
             }
 
-            // Set up a listener for new messages
-            if beforeTimestamp == nil {
-                // Only set up listener on initial load
-                setupMessageListener(groupId: groupId)
+            // Execute query
+            print("📋 Executing query...")
+            let snapshot = try await query.getDocuments()
+            print("📦 Got \(snapshot.documents.count) documents from Firestore")
+            
+            var newMessages: [GroupMessage] = []
+            
+            // Parse messages
+            for doc in snapshot.documents {
+                do {
+                    let message = try GroupMessage(dictionary: doc.data(), id: doc.documentID)
+                    newMessages.append(message)
+                    print("✅ Parsed message: \(message.id)")
+                } catch {
+                    print("❌ Failed to parse message \(doc.documentID): \(error)")
+                }
+            }
+            
+            print("📊 Parsed \(newMessages.count) messages successfully")
+            
+            // Store last document for pagination
+            lastMessageDocument = snapshot.documents.last
+            
+            await MainActor.run {
+                if loadMore {
+                    // Append to existing messages (older messages go at the beginning)
+                    self.groupMessages = newMessages + self.groupMessages
+                    print("📈 Load more: total messages now: \(self.groupMessages.count)")
+                } else {
+                    // Replace all messages
+                    self.groupMessages = newMessages
+                    print("🔄 Initial load: \(self.groupMessages.count) messages")
+                    
+                    // Set up real-time listener for new messages only
+                    setupNewMessageListener(groupId: groupId)
+                }
+                
+                // Sort by timestamp (oldest first)
+                self.groupMessages.sort { $0.timestamp < $1.timestamp }
+                print("✅ Final message count after sort: \(self.groupMessages.count)")
             }
             
         } catch {
-            await MainActor.run {
-                self.error = error
-                self.isLoading = false
-            }
+            print("❌ Error fetching messages: \(error)")
             throw error
         }
     }
-
-    private func _fetchGroupMessagesData(groupId: String, limit: Int, beforeTimestamp: Date?) async throws -> [GroupMessage] {
-        // Create a query for the messages collection
-        var query = db.collection("groups")
+    
+    // Listen only for new messages (not the entire collection)
+    private func setupNewMessageListener(groupId: String) {
+        let now = Timestamp(date: Date())
+        
+        messageListener = db.collection("groups")
             .document(groupId)
             .collection("messages")
-            .order(by: "timestamp", descending: true)
-            .limit(to: limit)
-
-        // Add pagination if provided
-        if let beforeTimestamp = beforeTimestamp {
-            query = query.whereField("timestamp", isLessThan: Timestamp(date: beforeTimestamp))
-        }
-
-        // Execute the query
-        let snapshot = try await query.getDocuments()
-
-        var messages: [GroupMessage] = []
-
-        for doc in snapshot.documents {
-            let data = doc.data()
-            do {
-                let message = try GroupMessage(dictionary: data, id: doc.documentID)
-                messages.append(message)
-            } catch {
-                // Log or handle individual parsing error
-            }
-        }
-
-        // Sort by timestamp (newest last for correct insertion/replacement)
-        messages.sort { $0.timestamp < $1.timestamp }
-        return messages
-    }
-
-    // Listen for new messages
-    private func setupMessageListener(groupId: String) {
-        db.collection("groups")
-            .document(groupId)
-            .collection("messages")
+            .whereField("timestamp", isGreaterThan: now)
             .order(by: "timestamp", descending: false)
-            .whereField("timestamp", isGreaterThan: Timestamp(date: Date()))
             .addSnapshotListener { [weak self] snapshot, error in
-                guard let self = self, let snapshot = snapshot else {
-                    return
-                }
+                guard let self = self, let snapshot = snapshot else { return }
                 
                 for change in snapshot.documentChanges {
                     if change.type == .added {
-                        do {
-                            let message = try GroupMessage(dictionary: change.document.data(), id: change.document.documentID)
+                        if let message = try? GroupMessage(dictionary: change.document.data(), id: change.document.documentID) {
                             DispatchQueue.main.async {
-                                self.groupMessages.append(message)
+                                // Check if message already exists
+                                if !self.groupMessages.contains(where: { $0.id == message.id }) {
+                                    self.groupMessages.append(message)
+                                    // Keep sorted
+                                    self.groupMessages.sort { $0.timestamp < $1.timestamp }
+                                    print("📨 New message received via listener: \(message.id)")
+                                }
                             }
-                        } catch {
                         }
                     }
                 }
             }
     }
     
+    // Clean up when leaving a group
+    func cleanupGroupListener() {
+        messageListener?.remove()
+        messageListener = nil
+        lastMessageDocument = nil
+        groupMessages = []
+    }
+
     // Send a text message
     func sendTextMessage(groupId: String, text: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
@@ -781,6 +809,11 @@ class GroupService: ObservableObject {
             "lastMessage": text,
             "lastMessageTime": timestamp
         ])
+        
+        // Notify that a message was sent to update group order
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
+        }
     }
     
     // Send an image message
@@ -900,6 +933,11 @@ class GroupService: ObservableObject {
                 "lastMessageTime": timestamp
             ])
             
+            // Notify that a message was sent to update group order
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
+            }
+            
             return
         } catch {
             throw error
@@ -950,6 +988,11 @@ class GroupService: ObservableObject {
             "lastMessage": "🃏 Poker Hand",
             "lastMessageTime": timestamp
         ])
+        
+        // Notify that a message was sent to update group order
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
+        }
     }
     
     // Add sendHomeGameMessage function
@@ -1053,6 +1096,11 @@ class GroupService: ObservableObject {
             "lastMessageAt": FieldValue.serverTimestamp(),
             "lastMessageType": GroupMessage.MessageType.homeGame.rawValue
         ])
+        
+        // Notify that a message was sent to update group order
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
+        }
     }
 }
 

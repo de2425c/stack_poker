@@ -115,6 +115,12 @@ struct LiveSessionData: Codable {
     var tournamentName: String? = nil // Name of the tournament
     var tournamentType: String? = nil // e.g., NLH, PLO (used as stakes for tournaments)
     var baseTournamentBuyIn: Double? = nil // Initial buy-in for the tournament (excluding rebuys)
+    var tournamentGameType: TournamentGameType? = nil // Tournament game type (NLH, PLO, Other)
+    var tournamentFormat: TournamentFormat? = nil // Tournament format (Standard, PKO, etc.)
+    var casino: String? = nil // Casino where the tournament is held
+    
+    // MARK: - Cash Game Specific Data
+    var pokerVariant: String? = nil // Poker variant for cash games (e.g., "No Limit Hold'em", "Pot Limit Omaha")
 }
 
 // Extended LiveSessionData to include updates and hand histories

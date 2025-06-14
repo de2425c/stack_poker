@@ -12,6 +12,9 @@ class ChallengeService: ObservableObject {
     // Add property to track newly completed challenges for celebration
     @Published var justCompletedChallenge: Challenge? = nil
     
+    // Add property to track newly created challenges for sharing
+    @Published var justCreatedChallenge: Challenge? = nil
+    
     private let db = Firestore.firestore()
     private let userId: String
     
@@ -41,6 +44,12 @@ class ChallengeService: ObservableObject {
             
             // Reload challenges
             loadUserChallenges()
+            
+            // Set the just created challenge for a share prompt
+            // We need to fetch the full challenge object with the new ID
+            if let newChallenge = try? await db.collection("challenges").document(docRef.documentID).getDocument(as: Challenge.self) {
+                justCreatedChallenge = newChallenge
+            }
             
         } catch {
             self.error = "Failed to create challenge: \(error.localizedDescription)"
@@ -197,6 +206,113 @@ class ChallengeService: ObservableObject {
         }
     }
     
+    // MARK: - Session Challenge Helper
+    
+    func updateSessionChallengesFromSession(_ session: Session) async {
+        print("🎯 Updating session challenges from completed session")
+        
+        // Update all active session challenges
+        for challenge in activeChallenges where challenge.type == .session {
+            guard let challengeId = challenge.id else { continue }
+            
+            // Check if this session occurred after the challenge start date
+            guard session.startDate >= challenge.startDate else {
+                print("   Session \(session.id) predates challenge \(challenge.title) - skipping")
+                continue
+            }
+            
+            // Check if session meets minimum hour requirement (if any)
+            let sessionQualifies = challenge.sessionQualifies(hoursPlayed: session.hoursPlayed)
+            
+            var updatedChallenge = challenge
+            
+            // Always increment total session count and hours
+            updatedChallenge.currentSessionCount += 1
+            updatedChallenge.totalHoursPlayed += session.hoursPlayed
+            
+            // Increment valid sessions count if it qualifies
+            if sessionQualifies {
+                updatedChallenge.validSessionsCount += 1
+            }
+            
+            print("   Challenge: \(challenge.title)")
+            print("     Session hours: \(String(format: "%.1f", session.hoursPlayed))")
+            print("     Session qualifies: \(sessionQualifies)")
+            print("     Total sessions: \(updatedChallenge.currentSessionCount)")
+            print("     Valid sessions: \(updatedChallenge.validSessionsCount)")
+            print("     Total hours: \(String(format: "%.1f", updatedChallenge.totalHoursPlayed))")
+            
+            // Check if challenge is now completed
+            let wasCompleted = challenge.isSessionChallengeCompleted
+            let isNowCompleted = updatedChallenge.isSessionChallengeCompleted
+            
+            if !wasCompleted && isNowCompleted {
+                updatedChallenge.status = .completed
+                updatedChallenge.completedAt = Date()
+                
+                // Move from active to completed
+                do {
+                    try await moveToCompletedChallenges(updatedChallenge)
+                    
+                    // Set the just completed challenge for celebration
+                    justCompletedChallenge = updatedChallenge
+                    
+                    // Create completion post
+                    await createChallengeCompletionPost(for: updatedChallenge)
+                    
+                    print("🎉 Session Challenge completed! \(updatedChallenge.title)")
+                } catch {
+                    print("❌ Error completing session challenge: \(error)")
+                }
+            } else {
+                // Update the challenge document with new progress
+                do {
+                    try await db.collection("challenges").document(challengeId).updateData([
+                        "currentSessionCount": updatedChallenge.currentSessionCount,
+                        "totalHoursPlayed": updatedChallenge.totalHoursPlayed,
+                        "validSessionsCount": updatedChallenge.validSessionsCount,
+                        "lastUpdated": Timestamp(date: Date())
+                    ])
+                    
+                    // Update local state
+                    if let index = activeChallenges.firstIndex(where: { $0.id == challengeId }) {
+                        activeChallenges[index] = updatedChallenge
+                    }
+                    
+                    print("📈 Session challenge progress updated")
+                } catch {
+                    print("❌ Error updating session challenge: \(error)")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Live Session Challenge Helper
+    
+    func updateSessionChallengesFromLiveSession(_ liveSession: LiveSessionData) async {
+        print("🔄 Updating session challenges from live session")
+        
+        // Update all active session challenges with current progress
+        for challenge in activeChallenges where challenge.type == .session {
+            guard let challengeId = challenge.id else { continue }
+            
+            // Check if this session started after the challenge start date
+            guard liveSession.startTime >= challenge.startDate else {
+                print("   Live session predates challenge \(challenge.title) - skipping")
+                continue
+            }
+            
+            let currentHours = liveSession.elapsedTime / 3600.0
+            
+            print("   Challenge: \(challenge.title)")
+            print("     Live session hours: \(String(format: "%.1f", currentHours))")
+            print("     Minimum required: \(challenge.minHoursPerSession ?? 0)")
+            
+            // For live sessions, we can show real-time progress but don't update the actual challenge until session ends
+            // This is handled by the UI components that display live progress
+        }
+    }
+    
     // MARK: - Bankroll Challenge Helper
     
     func updateBankrollFromSessions(_ sessions: [Session]) async {
@@ -246,22 +362,58 @@ class ChallengeService: ObservableObject {
         }
     }
     
+    // MARK: - Unified Session Update Method
+    
+    func updateChallengesFromCompletedSession(_ session: Session) async {
+        // Update both bankroll and session challenges
+        await updateBankrollFromSessions([session])
+        await updateSessionChallengesFromSession(session)
+    }
+    
     // MARK: - Challenge Completion Posts
     
     func createChallengeCompletionPost(for challenge: Challenge) async {
         guard challenge.status == .completed,
               let challengeId = challenge.id else { return }
         
-        let completionText = """
-        🎉 Challenge Completed!
+        let completionText: String
         
-        \(challenge.title)
-        
-        Target: \(formattedValue(challenge.targetValue, type: challenge.type))
-        Final: \(formattedValue(challenge.currentValue, type: challenge.type))
-        
-        #ChallengeCompleted #\(challenge.type.rawValue.capitalized)Goal
-        """
+        if challenge.type == .session {
+            // Special formatting for session challenges
+            var sessionDetails = ""
+            
+            if let targetCount = challenge.targetSessionCount {
+                sessionDetails += "\nSessions: \(challenge.validSessionsCount)/\(targetCount)"
+            }
+            
+            if let minHours = challenge.minHoursPerSession {
+                sessionDetails += "\nMinimum per session: \(String(format: "%.1f", minHours)) hours"
+            }
+            
+            sessionDetails += "\nTotal hours played: \(String(format: "%.1f", challenge.totalHoursPlayed))"
+            sessionDetails += "\nAverage per session: \(String(format: "%.1f", challenge.averageHoursPerSession)) hours"
+            
+            completionText = """
+            🎉 Session Challenge Completed!
+            
+            \(challenge.title)
+            \(sessionDetails)
+            
+            #ChallengeCompleted #SessionGoal
+            """
+        } else {
+            // Original formatting for other challenge types
+            completionText = """
+            🎉 Challenge Completed!
+            
+            \(challenge.title)
+            
+            Target: \(formattedValue(challenge.targetValue, type: challenge.type))
+            Final: \(formattedValue(challenge.currentValue, type: challenge.type))
+            
+            #ChallengeCompleted #\(challenge.type.rawValue.capitalized)Goal
+            """
+        }
         
         // Get user profile for post creation
         do {
@@ -281,11 +433,22 @@ class ChallengeService: ObservableObject {
     private func formattedValue(_ value: Double, type: ChallengeType) -> String {
         switch type {
         case .bankroll:
-            return "$\(Int(value).formattedWithCommas)"
+            return "$" + Int(value).formattedWithCommas
         case .hands:
             return "\(Int(value))"
         case .session:
-            return "\(Int(value))"
+            return "\(Int(value))" // Will be used for hours or session count
+        }
+    }
+    
+    // Helper method to format session challenge values specifically
+    private func formattedSessionValue(_ challenge: Challenge) -> String {
+        if let targetCount = challenge.targetSessionCount {
+            return "\(challenge.validSessionsCount)/\(targetCount) sessions"
+        } else if let targetHours = challenge.targetHours {
+            return "\(String(format: "%.1f", challenge.totalHoursPlayed))/\(String(format: "%.1f", targetHours)) hours"
+        } else {
+            return "\(String(format: "%.1f", challenge.totalHoursPlayed)) hours"
         }
     }
     
@@ -398,14 +561,5 @@ class ChallengeService: ObservableObject {
             ])
         
         // Update local state - challenges will be updated via listeners
-    }
-}
-
-// Extension for number formatting
-extension Int {
-    var formattedWithCommas: String {
-        let numberFormatter = NumberFormatter()
-        numberFormatter.numberStyle = .decimal
-        return numberFormatter.string(from: NSNumber(value: self)) ?? "\(self)"
     }
 } 

@@ -21,11 +21,18 @@ struct FeedView: View {
     
     // Global image viewer state
     @State private var viewerImageURL: String? = nil
-    @State private var playLottieAnimation = false // Added for Lottie control
     
     // Holds the profile to navigate to after search dismisses
     @State private var userIdToOpen: String? = nil
     @State private var navigateToProfile = false
+    
+    // New state for action buttons
+    @State private var showNewHandEntryViewSheet = false
+    @State private var showingLiveSession = false
+    
+    // State for suggested users
+    @State private var suggestedUsers: [UserProfile] = []
+    @State private var loadingSuggestedUsers = false
     
     let userId: String
     
@@ -117,9 +124,18 @@ struct FeedView: View {
             )
             .hidden()
         )
+        // New sheet presentations for action buttons
+        .sheet(isPresented: $showNewHandEntryViewSheet) {
+            NewHandEntryView()
+        }
+        .fullScreenCover(isPresented: $showingLiveSession) {
+            EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
+        }
         .onAppear {
-            // Load posts when the view appears
-            if postService.posts.isEmpty {
+            // Load posts when the view appears - but only if we don't have recent data
+            if postService.posts.isEmpty || shouldRefreshFeed() {
+                // Pre-mark as loading to avoid flashing empty state
+                postService.isLoading = true
                 Task {
                     try? await postService.fetchPosts()
                 }
@@ -130,28 +146,66 @@ struct FeedView: View {
                     try? await userService.fetchUserProfile()
                 }
             }
+            
+            // Load suggested users for both empty state and feed injection
+            loadSuggestedUsers()
+            print("DEBUG: Loading suggested users on appear")
+            
+            // Add observer for following changes to refresh suggested users
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("UserFollowingChanged"),
+                object: nil,
+                queue: .main
+            ) { _ in
+                loadSuggestedUsers() // Refresh suggested users when following changes
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // Refresh feed and suggested users when app becomes active
+            Task {
+                try? await postService.forceRefresh()
+                loadSuggestedUsers() // Refresh suggested users too
+            }
         }
         .ignoresSafeArea(.keyboard) // Prevent keyboard from resizing view
+        .onDisappear {
+            // Clean up notification observers
+            NotificationCenter.default.removeObserver(self, name: NSNotification.Name("UserFollowingChanged"), object: nil)
+        }
     }
     
     // MARK: - Content View
     private var contentView: some View {
         Group {
             if postService.isLoading && postService.posts.isEmpty {
-                // Restructured Loading state with Lottie animation
+                // Loading state with header visible
                 ZStack {
-                    LottieView(name: "lottie_white", loopMode: .loop, play: $playLottieAnimation) // Switch back to lottie_white
-                        .ignoresSafeArea() // Make Lottie animation itself full screen
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    
-                    Text("Loading Feed...")
-                        .font(.system(size: 18, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.8))
-                        .padding(.top, 100) // Adjust padding to position text over animation
+                    AppBackgroundView()
+                        .ignoresSafeArea()
+
+                    VStack(spacing: 0) {
+                        // Add the same top spacing as the loaded feed
+                        Spacer().frame(height: 45)
+                        
+                        // Header should be in the same position as when loaded
+                        feedHeader()
+
+                        Spacer()
+
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(1.5)
+
+                            Text("Loading Feed")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+
+                        Spacer()
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure ZStack fills the space
-                .onAppear { self.playLottieAnimation = true }
-                .onDisappear { self.playLottieAnimation = false }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if postService.posts.isEmpty {
                 // Empty feed state
                 ScrollView { 
@@ -159,10 +213,45 @@ struct FeedView: View {
                         Spacer().frame(height: 45)
                         // Top spacer removed
                         feedHeader() // Add header here
-                        EmptyFeedView(onFindPlayersTapped: {
-                            showingUserSearchView = true // Updated action
-                        })
-                        .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure EmptyFeedView can expand
+                        
+                        // Enhanced empty feed content - Strava-style post cards
+                        LazyVStack(spacing: 0) {
+                            Spacer().frame(height: 20)
+                            
+                            // Record Activity Post Card
+                            RecordActivityPostCard(
+                                onAddHandTapped: { showNewHandEntryViewSheet = true },
+                                onLiveSessionTapped: { showingLiveSession = true }
+                            )
+                            
+                            // Divider between cards
+                            Divider()
+                                .frame(height: 0.5)
+                                .background(Color.white.opacity(0.1))
+                            
+                            // Suggested Users Post Card
+                            SuggestedUsersPostCard(
+                                users: Array(suggestedUsers.prefix(3)), // Show fewer users in feed
+                                isLoading: loadingSuggestedUsers,
+                                userId: userId,
+                                onUserTapped: { selectedUserId in
+                                    userIdToOpen = selectedUserId
+                                    navigateToProfile = true
+                                },
+                                onUserFollowed: {
+                                    // Refresh suggested users after following
+                                    loadSuggestedUsers()
+                                    
+                                    // Force refresh the feed to show new content
+                                    Task {
+                                        try? await postService.forceRefresh()
+                                    }
+                                }
+                            )
+                            .environmentObject(userService)
+                            
+                            Spacer().frame(height: 40)
+                        }
                     }
                 }
             } else {
@@ -276,7 +365,75 @@ struct FeedView: View {
                     // Add top padding for the first post *below the header*
                     // Spacer().frame(height: 10) // This might not be needed if header has padding
                     
-                    ForEach(postService.posts) { post in
+                    ForEach(0..<postService.posts.count, id: \.self) { index in
+                        let post = postService.posts[index]
+                        
+                        // Insert suggestion card BEFORE certain posts
+                        if shouldShowSuggestedContent(at: index) {
+                            let _ = print("DEBUG: Should show content at index \(index), suggestedUsers.count: \(suggestedUsers.count)")
+                            VStack(spacing: 0) {
+                                // Add a subtle background to make it stand out
+                                VStack(spacing: 0) {
+                                    // Alternate between card types based on position
+                                    let cardPosition = (index / 5)
+                                    let _ = print("DEBUG: Card position: \(cardPosition), isEven: \(cardPosition % 2 == 0)")
+                                    
+                                    if cardPosition % 2 == 0 {
+                                        // Even positions (0, 2, 4...) show Record Activity
+                                        RecordActivityPostCard(
+                                            onAddHandTapped: { showNewHandEntryViewSheet = true },
+                                            onLiveSessionTapped: { showingLiveSession = true }
+                                        )
+                                    } else {
+                                        // Odd positions (1, 3, 5...) show Suggested Users
+                                        if !suggestedUsers.isEmpty {
+                                            SuggestedUsersPostCard(
+                                                users: Array(suggestedUsers.prefix(3)), // Show fewer users in feed
+                                                isLoading: loadingSuggestedUsers,
+                                                userId: userId,
+                                                onUserTapped: { selectedUserId in
+                                                    userIdToOpen = selectedUserId
+                                                    navigateToProfile = true
+                                                },
+                                                onUserFollowed: {
+                                                    // Refresh suggested users after following
+                                                    loadSuggestedUsers()
+                                                    
+                                                    // Force refresh the feed to show new content
+                                                    Task {
+                                                        try? await postService.forceRefresh()
+                                                    }
+                                                }
+                                            )
+                                            .environmentObject(userService)
+                                        } else {
+                                            // Fallback to Record Activity if no suggested users
+                                            RecordActivityPostCard(
+                                                onAddHandTapped: { showNewHandEntryViewSheet = true },
+                                                onLiveSessionTapped: { showingLiveSession = true }
+                                            )
+                                        }
+                                    }
+                                }
+                                .background(
+                                    // Subtle highlight background
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color.white.opacity(0.02),
+                                            Color.white.opacity(0.01)
+                                        ]),
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                
+                                Divider()
+                                    .frame(height: 0.5)
+                                    .background(Color.white.opacity(0.1))
+                            }
+                        }
+                        
+                        // Show the actual post
                         VStack(spacing: 0) {
                             PostView(
                                 post: post,
@@ -334,6 +491,20 @@ struct FeedView: View {
         isRefreshing = false
     }
     
+    // Check if feed should be refreshed based on last activity
+    private func shouldRefreshFeed() -> Bool {
+        // Always refresh if no posts
+        guard !postService.posts.isEmpty else { return true }
+        
+        // If we have posts but they're more than 5 minutes old, refresh for better real-time updates
+        if let firstPost = postService.posts.first,
+           Date().timeIntervalSince(firstPost.createdAt) > 300 {
+            return true
+        }
+        
+        return false
+    }
+    
     // Handle like action
     private func likePost(_ post: Post) {
         Task {
@@ -364,6 +535,33 @@ struct FeedView: View {
 
             }
         }
+    }
+    
+    // Load suggested users function
+    private func loadSuggestedUsers() {
+        loadingSuggestedUsers = true
+        Task {
+            do {
+                let users = try await userService.fetchSuggestedUsers(limit: 5)
+                await MainActor.run {
+                    suggestedUsers = users
+                    loadingSuggestedUsers = false
+                }
+            } catch {
+                await MainActor.run {
+                    loadingSuggestedUsers = false
+                }
+            }
+        }
+    }
+    
+    // Helper function to determine when to show suggested content
+    private func shouldShowSuggestedContent(at index: Int) -> Bool {
+        // Show after every 5 posts starting from index 4 (5th post)
+        // This creates pattern: posts 0-4, then suggestion, posts 5-9, then suggestion, etc.
+        let shouldShow = (index > 0) && ((index % 5) == 0)
+        print("DEBUG: Index \(index), shouldShow: \(shouldShow)")
+        return shouldShow
     }
 }
 
@@ -402,7 +600,6 @@ struct BasicPostCardView: View {
     var onReplay: (() -> Void)?
     @State private var isLiked: Bool
     @State private var animateLike = false
-    @State private var showDeleteConfirm = false
     @EnvironmentObject private var userService: UserService // Added to pass along to destination view
 
     init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, onDelete: @escaping () -> Void, isCurrentUser: Bool, onImageTapped: ((String) -> Void)? = nil, openPostDetail: (() -> Void)? = nil, onReplay: (() -> Void)? = nil) {
@@ -585,28 +782,6 @@ struct BasicPostCardView: View {
                     }
                     
                     Spacer()
-                    
-                    // Delete option (only for user's own posts, moved to top right)
-                    if isCurrentUser {
-                        Button(action: { showDeleteConfirm = true }) {
-                            Image(systemName: "trash")
-                                .font(.system(size: 15))
-                                .foregroundColor(.gray.opacity(0.7))
-                                .padding(6) // Add some padding for easier tapping
-                        }
-                        .confirmationDialog(
-                            "Delete this post?",
-                            isPresented: $showDeleteConfirm,
-                            titleVisibility: .visible
-                        ) {
-                            Button("Delete", role: .destructive) {
-                                onDelete()
-                            }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text("This action cannot be undone.")
-                        }
-                    }
                 }
                 .padding(.horizontal, 16)
                 // Adjust top padding based on tag presence
@@ -685,7 +860,7 @@ struct BasicPostCardView: View {
                         .lineSpacing(5)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16)
-                        .padding(.top, 14)
+                        .padding(.top, 6) // Reduced from 14 to bring comment closer to top
                         .padding(.bottom, 8)
                 }
                 
@@ -782,15 +957,6 @@ struct BasicPostCardView: View {
                     }
                     
                     Spacer()
-                    
-                    // Share button
-                    Button(action: {
-                        // Non-functional share button
-                    }) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 16))
-                            .foregroundColor(.gray.opacity(0.7))
-                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -1104,7 +1270,7 @@ struct PostCardView: View {
                     .lineSpacing(5)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
-                    .padding(.top, 14)
+                    .padding(.top, 6) // Reduced from 14 to bring comment closer to top
                     .padding(.bottom, 8)
             }
             
@@ -1193,15 +1359,6 @@ struct PostCardView: View {
                 // Delete option REMOVED from here
                 
                 Spacer()
-                
-                // Share button
-                Button(action: {
-                    // Non-functional share button
-                }) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 16))
-                        .foregroundColor(.gray.opacity(0.7))
-                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -2294,7 +2451,7 @@ private struct PostBodyContentView: View {
     // For now, assuming they are top-level private functions in the file or accessible.
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) { // Reduced from 18 to 12
             // Parse completed session info first
             let (parsedCompletedSession, commentTextForCompletedSession) = parseCompletedSessionInfo(from: post.content)
 
@@ -2303,7 +2460,7 @@ private struct PostBodyContentView: View {
             let challengeUpdateInfo = parseChallengeUpdateFromPost(post.content)
 
             if let challengeInfo = challengeStartedInfo ?? challengeUpdateInfo { // Prioritize started, then update
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) { // Reduced from 12 to 8
                     // Show any text content before the challenge info
                     if let additionalText = extractAdditionalTextFromChallengePost(post.content), !additionalText.isEmpty {
                         Text(additionalText)
@@ -2316,12 +2473,16 @@ private struct PostBodyContentView: View {
                     
                     // Challenge progress component
                     ChallengeProgressComponent(
-                        challengeTitle: challengeInfo.title,
-                        challengeType: challengeInfo.type,
-                        currentValue: challengeInfo.currentValue,
-                        targetValue: challengeInfo.targetValue,
-                        isCompact: false, // Always show full detail in PostDetailView context
-                        deadline: challengeInfo.deadline
+                        challenge: Challenge(
+                            userId: post.userId,
+                            type: challengeInfo.type,
+                            title: challengeInfo.title,
+                            description: "", // Empty description for display purposes
+                            targetValue: challengeInfo.targetValue,
+                            currentValue: challengeInfo.currentValue,
+                            endDate: challengeInfo.deadline
+                        ),
+                        isCompact: false // Always show full detail in PostDetailView context
                     )
                     .padding(.horizontal, 16)
                 }
@@ -2921,4 +3082,346 @@ private func extractAdditionalTextFromChallengePost(_ content: String) -> String
     let result = additionalLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     return result.isEmpty ? nil : result
 }
+
+// MARK: - Record Activity Post Card (Strava-style)
+struct RecordActivityPostCard: View {
+    let onAddHandTapped: () -> Void
+    let onLiveSessionTapped: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Content
+            Text("Record an Activity")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white.opacity(0.95))
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 4)
+            
+            Text("You can also record activity with the + button")
+                .font(.system(size: 14))
+                .foregroundColor(.gray.opacity(0.8))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+            
+            // Action buttons in horizontal layout
+            HStack(spacing: 12) {
+                // Add Hand Button
+                Button(action: onAddHandTapped) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 14))
+                            .foregroundColor(.black)
+                        
+                        Text("Add Hand")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+                    )
+                    .cornerRadius(20)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                // Live Session Button
+                Button(action: onLiveSessionTapped) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white)
+                        
+                        Text("Live Session")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        Color.clear
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
+        }
+        .background(Color.clear)
+    }
+}
+
+// MARK: - Suggested Users Post Card (Strava-style)
+struct SuggestedUsersPostCard: View {
+    let users: [UserProfile]
+    let isLoading: Bool
+    let userId: String
+    let onUserTapped: (String) -> Void
+    let onUserFollowed: () -> Void
+    @EnvironmentObject var userService: UserService
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header (simplified, no faux profile picture)
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Suggested Players")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    if !isLoading && !users.isEmpty {
+                        Text("\(users.count) players")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray.opacity(0.6))
+                    }
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
+            
+            // Content
+            Text("Follow players to see their poker content!")
+                .font(.system(size: 14))
+                .foregroundColor(.gray.opacity(0.8))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+            
+            if isLoading {
+                // Compact loading state
+                VStack(spacing: 8) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        CompactUserSkeletonView()
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+            } else if users.isEmpty {
+                // Empty state
+                Text("No suggestions available")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray.opacity(0.6))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 14)
+            } else {
+                // User list in compact format
+                VStack(spacing: 8) {
+                    ForEach(users, id: \.id) { user in
+                        CompactUserRowView(
+                            user: user,
+                            currentUserId: userId,
+                            onTapped: { onUserTapped(user.id) },
+                            onFollowTapped: {
+                                // Call the parent callback when user is followed
+                                onUserFollowed()
+                            }
+                        )
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+            }
+        }
+        .background(Color.clear)
+    }
+}
+
+// MARK: - Compact User Row for Post-style Feed
+struct CompactUserRowView: View {
+    let user: UserProfile
+    let currentUserId: String
+    let onTapped: () -> Void
+    let onFollowTapped: () -> Void
+    @State private var isFollowing = false
+    @State private var isProcessing = false
+    @State private var showFollowed = false
+    @EnvironmentObject var userService: UserService
+    
+    var body: some View {
+        Button(action: onTapped) {
+            HStack(spacing: 12) {
+                // Profile Picture (smaller)
+                Group {
+                    if let avatarURL = user.avatarURL, let url = URL(string: avatarURL) {
+                        KFImage(url)
+                            .placeholder {
+                                PlaceholderAvatarView(size: 36)
+                            }
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 36, height: 36)
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                    } else {
+                        PlaceholderAvatarView(size: 36)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                    }
+                }
+                
+                // User Info (more compact)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let displayName = user.displayName, !displayName.isEmpty {
+                        Text(displayName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                    }
+                    
+                    HStack(spacing: 4) {
+                        Text("@\(user.username)")
+                            .font(.system(size: 13))
+                            .foregroundColor(.gray.opacity(0.8))
+                            .lineLimit(1)
+                        
+                        if user.followersCount > 0 {
+                            Text("• \(user.followersCount) followers")
+                                .font(.system(size: 13))
+                                .foregroundColor(.gray.opacity(0.6))
+                        }
+                    }
+                }
+                
+                Spacer()
+                
+                // Follow Button (smaller)
+                Button(action: {
+                    guard !isProcessing else { return }
+                    handleFollowTap()
+                }) {
+                    Group {
+                        if showFollowed {
+                            Text("✓ Followed")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                        } else {
+                            Text(isProcessing ? "..." : "Follow")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.black)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(showFollowed ? Color.clear : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(showFollowed ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : Color.clear, lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isProcessing || showFollowed)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            checkIfFollowing()
+        }
+    }
+    
+    private func checkIfFollowing() {
+        Task {
+            do {
+                let following = try await userService.isFollowing(userId: user.id)
+                await MainActor.run {
+                    self.isFollowing = following
+                    self.showFollowed = following
+                }
+            } catch {
+                // Error checking, assume not following
+                await MainActor.run {
+                    self.isFollowing = false
+                    self.showFollowed = false
+                }
+            }
+        }
+    }
+    
+    private func handleFollowTap() {
+        isProcessing = true
+        
+        Task {
+            do {
+                try await userService.followUser(userIdToFollow: user.id)
+                await MainActor.run {
+                    self.showFollowed = true
+                    self.isFollowing = true
+                    self.isProcessing = false
+                }
+                
+                // Refresh current user profile to update following count
+                try? await userService.fetchUserProfile()
+                
+                // Call the original callback
+                await MainActor.run {
+                    onFollowTapped()
+                }
+            } catch {
+                await MainActor.run {
+                    self.isProcessing = false
+                }
+                print("Error following user: \(error)")
+            }
+        }
+    }
+}
+
+// MARK: - Compact Skeleton Loading View
+struct CompactUserSkeletonView: View {
+    @State private var isAnimating = false
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Profile picture skeleton (smaller)
+            Circle()
+                .fill(Color.gray.opacity(isAnimating ? 0.1 : 0.3))
+                .frame(width: 36, height: 36)
+                .animation(Animation.easeInOut(duration: 1.5).repeatForever(), value: isAnimating)
+            
+            // User info skeleton
+            VStack(alignment: .leading, spacing: 4) {
+                Rectangle()
+                    .fill(Color.gray.opacity(isAnimating ? 0.1 : 0.3))
+                    .frame(width: 100, height: 14)
+                    .cornerRadius(3)
+                
+                Rectangle()
+                    .fill(Color.gray.opacity(isAnimating ? 0.1 : 0.3))
+                    .frame(width: 120, height: 12)
+                    .cornerRadius(3)
+            }
+            
+            Spacer()
+            
+            // Follow button skeleton (smaller)
+            Rectangle()
+                .fill(Color.gray.opacity(isAnimating ? 0.1 : 0.3))
+                .frame(width: 60, height: 24)
+                .cornerRadius(12)
+        }
+        .padding(.vertical, 4)
+        .onAppear {
+            isAnimating = true
+        }
+    }
+}
+
+
 

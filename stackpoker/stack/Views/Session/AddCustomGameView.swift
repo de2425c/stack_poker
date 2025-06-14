@@ -4,6 +4,7 @@ struct AddCustomGameView: View {
     @Environment(\.dismiss) var dismiss
     @ObservedObject var gameService: CustomGameService
     @State private var gameName = ""
+    @State private var selectedGameType: PokerVariant = .nlh
     @State private var stakes = ""
     @State private var isLoading = false
     @State private var showingError = false
@@ -27,6 +28,42 @@ struct AddCustomGameView: View {
                             systemImage: "building.2",
                             text: $gameName,
                             keyboardType: .default
+                        )
+                        
+                        // Game Type Picker
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "gamecontroller")
+                                    .foregroundColor(.gray)
+                                Text("Game Type")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            HStack {
+                                ForEach(PokerVariant.allCases, id: \.self) { variant in
+                                    Button(action: {
+                                        selectedGameType = variant
+                                    }) {
+                                        Text(variant.displayName)
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(selectedGameType == variant ? .white : .gray)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .fill(selectedGameType == variant ? Color.white.opacity(0.2) : Color.clear)
+                                            )
+                                    }
+                                }
+                                Spacer()
+                            }
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(Color.white.opacity(0.5))
                         )
                         
                         CustomInputField(
@@ -93,7 +130,7 @@ struct AddCustomGameView: View {
         
         Task {
             do {
-                try await gameService.addCustomGame(name: gameName, stakes: stakes)
+                try await gameService.addCustomGame(name: gameName, stakes: stakes, gameType: selectedGameType)
                 // Force a refresh of the games list
                 await MainActor.run {
                     gameService.fetchCustomGames()

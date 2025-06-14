@@ -39,12 +39,14 @@ struct ProfileView: View {
     @EnvironmentObject private var userService: UserService
     @StateObject private var sessionStore: SessionStore
     @StateObject private var handStore: HandStore
+    @StateObject private var bankrollStore: BankrollStore
     @StateObject private var challengeService: ChallengeService
     @StateObject private var challengeProgressTracker: ChallengeProgressTracker
     @EnvironmentObject private var postService: PostService
     @State private var showEdit = false
     @State private var showSettings = false
     @State private var selectedPostForNavigation: Post? = nil
+    @State private var showingBankrollSheet = false
     // @State private var showingPostDetailSheet: Bool = false // Kept if ActivityContentView still uses it, but focus is on NavigationLink
     
     // State for full-screen card views
@@ -58,6 +60,7 @@ struct ProfileView: View {
     // Analytics specific state (remains for analyticsDetailContent)
     @State private var selectedTimeRange = 1 // Default to 1W (index 1) for Analytics
     @State private var selectedCarouselIndex = 0 // For carousel page selection
+    @State private var selectedGraphTab = 0 // 0 = Bankroll, 1 = Profit, 2 = Monthly
     private let timeRanges = ["24H", "1W", "1M", "6M", "1Y", "All"] // Used by analyticsDetailContent
     
     // Chart interaction states
@@ -65,14 +68,25 @@ struct ProfileView: View {
     @State private var touchLocation: CGPoint = .zero
     @State private var showTooltip: Bool = false
     
+    // MARK: - Analytics filtering
+    @State private var showFilterSheet = false
+    @State private var analyticsFilter = AnalyticsFilter()
+    
+    // Convenience: sessions that satisfy current filter (ignores time-range)
+    private var filteredSessions: [Session] {
+        sessionStore.sessions.filter { sessionMatchesFilter($0) }
+    }
+    
     init(userId: String) {
         self.userId = userId
         let sessionStore = SessionStore(userId: userId)
         let handStore = HandStore(userId: userId)
+        let bankrollStore = BankrollStore(userId: userId)
         let challengeService = ChallengeService(userId: userId)
         
         _sessionStore = StateObject(wrappedValue: sessionStore)
         _handStore = StateObject(wrappedValue: handStore)
+        _bankrollStore = StateObject(wrappedValue: bankrollStore)
         _challengeService = StateObject(wrappedValue: challengeService)
         _challengeProgressTracker = StateObject(wrappedValue: ChallengeProgressTracker(challengeService: challengeService, sessionStore: sessionStore))
     }
@@ -366,7 +380,14 @@ struct ProfileView: View {
                                     .foregroundColor(.white)
                             }
                         }
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button(action: { showFilterSheet = true }) {
+                                Image(systemName: analyticsFilter.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                                    .foregroundColor(.white)
+                            }
+                        }
                     }
+                    .overlay(EmptyView())
             }
             .toolbarBackground(Color.clear, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -374,6 +395,15 @@ struct ProfileView: View {
             .accentColor(.white)
             .environmentObject(sessionStore)
             .environmentObject(userService)
+            // Filter configuration sheet
+            .sheet(isPresented: $showFilterSheet) {
+                let uniqueGames = Array(Set(sessionStore.sessions.map { $0.gameName.trimmingCharacters(in: .whitespaces) })).filter { !$0.isEmpty }.sorted()
+                AnalyticsFilterSheet(filter: $analyticsFilter, availableGames: uniqueGames)
+            }
+            // Bankroll adjustment sheet
+            .sheet(isPresented: $showingBankrollSheet) {
+                BankrollAdjustmentSheet(bankrollStore: bankrollStore, currentTotalBankroll: totalBankroll)
+            }
         }
         .fullScreenCover(isPresented: $showHandsDetailView) {
             NavigationView {
@@ -404,7 +434,7 @@ struct ProfileView: View {
             NavigationView {
                 ZStack {
                     AppBackgroundView().ignoresSafeArea()
-                    SessionsTab(sessionStore: sessionStore)
+                    SessionsTab(sessionStore: sessionStore, bankrollStore: bankrollStore)
                         .padding(.top, -33)
                 }
                 .navigationTitle("Sessions")
@@ -623,7 +653,8 @@ struct ProfileView: View {
     
     // MARK: - Analytics Helper Properties (Unchanged, used by analyticsDetailContent)
     private var totalBankroll: Double {
-        return sessionStore.sessions.reduce(0) { $0 + $1.profit }
+        let sessionProfit = filteredSessions.reduce(0) { $0 + $1.profit }
+        return sessionProfit + bankrollStore.bankrollSummary.currentTotal
     }
     
     private var selectedTimeRangeProfit: Double {
@@ -632,49 +663,51 @@ struct ProfileView: View {
     }
     
     private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
+        // First, apply user-defined analytics filters
+        let preFiltered = filteredSessions
         let now = Date()
         let calendar = Calendar.current
         
         switch timeRangeIndex {
         case 0: // 24H
             let oneDayAgo = calendar.date(byAdding: .day, value: -1, to: now) ?? now
-            return sessionStore.sessions.filter { $0.startDate >= oneDayAgo }
+            return preFiltered.filter { $0.startDate >= oneDayAgo }
         case 1: // 1W
             let oneWeekAgo = calendar.date(byAdding: .weekOfYear, value: -1, to: now) ?? now
-            return sessionStore.sessions.filter { $0.startDate >= oneWeekAgo }
+            return preFiltered.filter { $0.startDate >= oneWeekAgo }
         case 2: // 1M
             let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: now) ?? now
-            return sessionStore.sessions.filter { $0.startDate >= oneMonthAgo }
+            return preFiltered.filter { $0.startDate >= oneMonthAgo }
         case 3: // 6M
             let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: now) ?? now
-            return sessionStore.sessions.filter { $0.startDate >= sixMonthsAgo }
+            return preFiltered.filter { $0.startDate >= sixMonthsAgo }
         case 4: // 1Y
             let oneYearAgo = calendar.date(byAdding: .year, value: -1, to: now) ?? now
-            return sessionStore.sessions.filter { $0.startDate >= oneYearAgo }
+            return preFiltered.filter { $0.startDate >= oneYearAgo }
         default: // All
-            return sessionStore.sessions
+            return preFiltered
         }
     }
     
     private var winRate: Double {
-        let totalSessions = sessionStore.sessions.count
+        let totalSessions = filteredSessions.count
         if totalSessions == 0 { return 0 }
-        let winningSessions = sessionStore.sessions.filter { $0.profit > 0 }.count
+        let winningSessions = filteredSessions.filter { $0.profit > 0 }.count
         return Double(winningSessions) / Double(totalSessions) * 100
     }
     
     private var averageProfit: Double {
-        let totalSessions = sessionStore.sessions.count
+        let totalSessions = filteredSessions.count
         if totalSessions == 0 { return 0 }
         return totalBankroll / Double(totalSessions)
     }
     
     private var totalSessions: Int {
-        return sessionStore.sessions.count
+        filteredSessions.count
     }
     
     private var bestSession: (profit: Double, id: String)? {
-        if let best = sessionStore.sessions.max(by: { $0.profit < $1.profit }) {
+        if let best = filteredSessions.max(by: { $0.profit < $1.profit }) {
             return (best.profit, best.id)
         }
         return nil
@@ -682,7 +715,7 @@ struct ProfileView: View {
     
     // MARK: - New Analytics Helper Properties
     private var totalHoursPlayed: Double {
-        return sessionStore.sessions.reduce(0) { $0 + $1.hoursPlayed }
+        filteredSessions.reduce(0) { $0 + $1.hoursPlayed }
     }
 
     private var averageSessionLength: Double {
@@ -691,12 +724,12 @@ struct ProfileView: View {
     }
 
     private var highestCashoutToBuyInRatio: (ratio: Double, session: Session)? {
-        guard !sessionStore.sessions.isEmpty else { return nil }
+        guard !filteredSessions.isEmpty else { return nil }
         
         var maxRatio: Double = 0
         var sessionWithMaxRatio: Session? = nil
         
-        for session in sessionStore.sessions {
+        for session in filteredSessions {
             if session.buyIn > 0 { // Avoid division by zero
                 let ratio = session.cashout / session.buyIn
                 if ratio > maxRatio {
@@ -731,7 +764,7 @@ struct ProfileView: View {
     }
 
     private var pokerPersona: (category: TimeOfDayCategory, dominantHours: String) {
-        guard !sessionStore.sessions.isEmpty else {
+        guard !filteredSessions.isEmpty else {
             return (.unknown, "N/A")
         }
 
@@ -741,7 +774,7 @@ struct ProfileView: View {
         var nightSessions = 0     // 9 PM - 4:59 AM
 
         let calendar = Calendar.current
-        for session in sessionStore.sessions {
+        for session in filteredSessions {
             let hour = calendar.component(.hour, from: session.startTime)
             switch hour {
             case 5..<12: morningSessions += 1
@@ -778,30 +811,14 @@ struct ProfileView: View {
     }
     
     private var topLocation: (location: String, count: Int)? {
-        guard !sessionStore.sessions.isEmpty else { return nil }
-        
-        // Consider gameName as a fallback if location is nil or empty
-        let locationsFromSessions = sessionStore.sessions.map { session -> String? in
-            let trimmedLocation = session.location?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let loc = trimmedLocation, !loc.isEmpty {
-                return loc
-            }
-            let trimmedGameName = session.gameName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedGameName.isEmpty {
-                return trimmedGameName // Use gameName as fallback
-            }
-            return nil
-        }
+        guard !filteredSessions.isEmpty else { return nil }
 
-        let validLocations = locationsFromSessions.compactMap { $0 }.filter { !$0.isEmpty }
-        if validLocations.isEmpty { return nil }
-        
-        let locationCounts = validLocations.reduce(into: [:]) { counts, location in counts[location, default: 0] += 1 }
-        
-        if let (topLoc, count) = locationCounts.max(by: { $0.value < $1.value }) {
-            return (topLoc, count)
+        let locationStrings = filteredSessions.map { displayLocation(for: $0) }
+        let locationCounts = locationStrings.reduce(into: [String: Int]()) { counts, loc in
+            counts[loc, default: 0] += 1
         }
-        return nil
+        guard let (loc, cnt) = locationCounts.max(by: { $0.value < $1.value }) else { return nil }
+        return (loc, cnt)
     }
     
     private var carouselHighlights: [CarouselHighlight] {
@@ -852,18 +869,53 @@ struct ProfileView: View {
             VStack(spacing: 15) { // Reduced main spacing
                 // Bankroll section with past month profit/loss indicator
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Bankroll")
+                    // Dynamic header title based on selected graph tab
+                    Text(selectedGraphTab == 0 ? "Bankroll" : (selectedGraphTab == 1 ? "Profit" : "Monthly Profit"))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.gray)
                     
-                    // Show selected data point profit or total bankroll
-                    Text(selectedDataPoint != nil ? 
-                         "$\(Int(selectedDataPoint!.profit).formattedWithCommas)" : 
-                         "$\(Int(totalBankroll).formattedWithCommas)")
-                        .font(.system(size: selectedDataPoint != nil ? 40 : 36, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedDataPoint?.profit)
+                    // Show selected data point profit or aggregated value with edit button for bankroll
+                    HStack(alignment: .bottom, spacing: 12) {
+                        Text(selectedDataPoint != nil ?
+                             "$\(Int(selectedDataPoint!.profit).formattedWithCommas)" :
+                             (selectedGraphTab == 0 ? "$\(Int(totalBankroll).formattedWithCommas)" : 
+                              (selectedGraphTab == 1 ? "$\(Int(filteredSessions.reduce(0){$0+$1.profit}).formattedWithCommas)" : 
+                               "$\(Int(monthlyProfitCurrent()).formattedWithCommas)")))
+                            .font(.system(size: selectedDataPoint != nil ? 40 : 36, weight: .bold))
+                            .foregroundColor(.white)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedDataPoint?.profit)
+                        
+                        // Edit button only for bankroll view
+                        if selectedGraphTab == 0 {
+                            Button(action: { showingBankrollSheet = true }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text("Edit")
+                                        .font(.system(size: 13, weight: .medium))
+                                }
+                                .foregroundColor(.white.opacity(0.85))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Material.ultraThinMaterial)
+                                            .opacity(0.2)
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.white.opacity(0.02))
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                                    }
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                        
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
         
                     HStack(spacing: 4) {
                         if let selectedData = selectedDataPoint {
@@ -910,249 +962,59 @@ struct ProfileView: View {
                 
                 // Chart display with time selectors at bottom
                 VStack(spacing: 8) { // Reduced spacing
-                    if sessionStore.sessions.isEmpty {
+                    if filteredSessions.isEmpty {
                         Text("No sessions recorded")
                             .foregroundColor(.gray)
                             .frame(height: 220)
                             .frame(maxWidth: .infinity) // Ensure it centers if no data
                     } else {
-                        // Display chart using BankrollGraph
-                        GeometryReader { geometry in
-                            ZStack {
-                                // Y-axis grid lines (subtle)
-                                VStack(spacing: 0) {
-                                    ForEach(0..<5) { _ in
-                                        Spacer()
-                                        Divider()
-                                            .background(Color.gray.opacity(0.1))
-                                    }
-                                }
-                                
-                                // Beautiful background gradient overlay
-                                LinearGradient(
-                                    gradient: Gradient(stops: [
-                                        .init(color: Color.clear, location: 0),
-                                        .init(color: Color.white.opacity(0.02), location: 0.3),
-                                        .init(color: Color.white.opacity(0.03), location: 0.7),
-                                        .init(color: Color.clear, location: 1)
-                                    ]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                                .blendMode(.overlay)
-                                
-                                // Simple line chart - use green or red based on profit/loss for the selected time range
-                                let selectedSessions = filteredSessionsForTimeRange(selectedTimeRange)
-                                let currentRangeProfit = selectedSessions.reduce(0) { $0 + $1.profit } // Renamed from selectedTimeRangeProfit to avoid conflict
-                                let isProfit = currentRangeProfit >= 0
-                                let chartColor = isProfit ? 
-                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
-                                
-                                // Simplified line chart
-                                Path { path in
-                                    let sessions = filteredSessionsForTimeRange(selectedTimeRange)
+                        // Swipeable Graph Carousel
+                        SwipeableGraphCarousel(
+                            sessions: filteredSessions,
+                            bankrollTransactions: bankrollStore.transactions,
+                            selectedTimeRange: $selectedTimeRange,
+                            timeRanges: timeRanges,
+                            selectedGraphIndex: $selectedGraphTab,
+                            onChartTouch: { location, geometry in
+                                // Handle touch for tooltip
+                                if selectedGraphTab < 2 {
+                                    let touchX = location.x
+                                    let normalizedX = touchX / geometry.size.width
                                     
-                                    guard !sessions.isEmpty else { return }
-                                    
-                                    var cumulativeProfit: [Double] = []
-                                    var cumulative = 0.0
-                                    
-                                    for session in sessions.sorted(by: { $0.startDate < $1.startDate }) {
-                                        cumulative += session.profit
-                                        cumulativeProfit.append(cumulative)
-                                    }
-                                    
-                                    guard !cumulativeProfit.isEmpty else { return }
-                                    
-                                    // Find the min/max for scaling
-                                    let minProfit = cumulativeProfit.min() ?? 0
-                                    let maxProfit = max(cumulativeProfit.max() ?? 1, 1) // Ensure maxProfit is at least 1 to avoid division by zero if range is 0
-                                    let range = max(maxProfit - minProfit, 1) // Ensure range is at least 1
-                                    
-                                    // Draw the path
-                                    let stepX = cumulativeProfit.count > 1 ? geometry.size.width / CGFloat(cumulativeProfit.count - 1) : geometry.size.width
-                                    
-                                    // Function to get Y position
-                                    func getY(_ value: Double) -> CGFloat {
-                                        let normalized = range == 0 ? 0.5 : (value - minProfit) / range // Handle range == 0 case
-                                        return geometry.size.height * (1 - CGFloat(normalized))
-                                    }
-                                    
-                                    // Start path
-                                    path.move(to: CGPoint(x: 0, y: getY(cumulativeProfit[0])))
-                                    
-                                    // Draw lines to each point
-                                    for i in 1..<cumulativeProfit.count {
-                                        let x = CGFloat(i) * stepX
-                                        let y = getY(cumulativeProfit[i])
+                                    if !filteredSessions.isEmpty {
+                                        let index = Int(normalizedX * CGFloat(filteredSessions.count - 1))
+                                        let clampedIndex = max(0, min(index, filteredSessions.count - 1))
+                                        let session = filteredSessions.sorted { $0.startDate < $1.startDate }[clampedIndex]
                                         
-                                        // Smooth curve
-                                        if i > 0 {
-                                            let prevX = CGFloat(i-1) * stepX
-                                            let prevY = getY(cumulativeProfit[i-1])
-                                            
-                                            let controlPoint1 = CGPoint(x: prevX + stepX/3, y: prevY)
-                                            let controlPoint2 = CGPoint(x: x - stepX/3, y: y)
-                                            
-                                            path.addCurve(to: CGPoint(x: x, y: y), 
-                                                       control1: controlPoint1, 
-                                                       control2: controlPoint2)
+                                        var cumulativeProfit = 0.0
+                                        for i in 0...clampedIndex {
+                                            cumulativeProfit += filteredSessions.sorted { $0.startDate < $1.startDate }[i].profit
                                         }
-                                    }
-                                }
-                                .stroke(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            chartColor.opacity(0.9),
-                                            chartColor,
-                                            chartColor.opacity(0.95)
-                                        ]),
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    ),
-                                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
-                                )
-                                .shadow(color: chartColor.opacity(0.4), radius: 4, y: 2)
-                                
-                                // Add chart area fill with gradient
-                                Path { path in
-                                    let sessions = filteredSessionsForTimeRange(selectedTimeRange)
-                                    
-                                    guard !sessions.isEmpty else { return }
-                                    
-                                    var cumulativeProfit: [Double] = []
-                                    var cumulative = 0.0
-                                    
-                                    for session in sessions.sorted(by: { $0.startDate < $1.startDate }) {
-                                        cumulative += session.profit
-                                        cumulativeProfit.append(cumulative)
-                                    }
-                                    
-                                    guard !cumulativeProfit.isEmpty else { return }
-                                    
-                                    // Find the min/max for scaling
-                                    let minProfit = cumulativeProfit.min() ?? 0
-                                    let maxProfit = max(cumulativeProfit.max() ?? 1, 1)
-                                    let range = max(maxProfit - minProfit, 1)
-                                    
-                                    // Draw the path
-                                    let stepX = cumulativeProfit.count > 1 ? geometry.size.width / CGFloat(cumulativeProfit.count - 1) : geometry.size.width
-
-                                    // Function to get Y position
-                                    func getY(_ value: Double) -> CGFloat {
-                                        let normalized = range == 0 ? 0.5 : (value - minProfit) / range
-                                        return geometry.size.height * (1 - CGFloat(normalized))
-                                    }
-                                    
-                                    // Start path - bottom left
-                                    path.move(to: CGPoint(x: 0, y: geometry.size.height))
-                                    
-                                    // Bottom left to first data point
-                                    path.addLine(to: CGPoint(x: 0, y: getY(cumulativeProfit[0])))
-                                    
-                                    // Draw curves through all points
-                                    for i in 1..<cumulativeProfit.count {
-                                        let x = CGFloat(i) * stepX
-                                        let y = getY(cumulativeProfit[i])
                                         
-                                        // Smooth curve
-                                        if i > 0 {
-                                            let prevX = CGFloat(i-1) * stepX
-                                            let prevY = getY(cumulativeProfit[i-1])
-                                            
-                                            let controlPoint1 = CGPoint(x: prevX + stepX/3, y: prevY)
-                                            let controlPoint2 = CGPoint(x: x - stepX/3, y: y)
-                                            
-                                            path.addCurve(to: CGPoint(x: x, y: y), 
-                                                       control1: controlPoint1, 
-                                                       control2: controlPoint2)
-                                        }
+                                        selectedDataPoint = (date: session.startDate, profit: cumulativeProfit)
+                                        touchLocation = location
+                                        showTooltip = true
                                     }
-                                    
-                                    // Last point to bottom right
-                                    path.addLine(to: CGPoint(x: cumulativeProfit.count > 1 ? geometry.size.width : 0, y: geometry.size.height)) // Handle single point
-                                    
-                                    // Close the path
-                                    path.closeSubpath()
                                 }
-                                .fill(
-                                    LinearGradient(
-                                        gradient: Gradient(stops: [
-                                            .init(color: chartColor.opacity(0.35), location: 0),
-                                            .init(color: chartColor.opacity(0.15), location: 0.4),
-                                            .init(color: chartColor.opacity(0.08), location: 0.7),
-                                            .init(color: Color.clear, location: 1)
-                                        ]),
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                
-                                // Interactive overlay for touch detection
-                                Rectangle()
-                                    .fill(Color.clear)
-                                    .contentShape(Rectangle())
-                                    .gesture(
-                                        DragGesture(minimumDistance: 0)
-                                            .onChanged { value in
-                                                handleChartTouch(at: value.location, in: geometry)
-                                            }
-                                            .onEnded { _ in
-                                                withAnimation(.easeOut(duration: 0.3)) {
-                                                    showTooltip = false
-                                                    selectedDataPoint = nil
-                                                }
-                                            }
-                                    )
-                                
-                                // Unified touch indicator with line and dot
-                                if showTooltip {
-                                    // Vertical indicator line with gradient
-                                    Rectangle()
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(stops: [
-                                                    .init(color: Color.clear, location: 0),
-                                                    .init(color: Color.white.opacity(0.6), location: 0.1),
-                                                    .init(color: Color.white.opacity(0.8), location: 0.5),
-                                                    .init(color: Color.white.opacity(0.6), location: 0.9),
-                                                    .init(color: Color.clear, location: 1)
-                                                ]),
-                                                startPoint: .top,
-                                                endPoint: .bottom
-                                            )
-                                        )
-                                        .frame(width: 1)
-                                        .position(x: touchLocation.x, y: geometry.size.height / 2)
-                                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                                }
-                            }
-                        }
-                        .frame(height: 200) // Adjusted height for chart
-                        
-                        // Time period selector
-                        HStack {
-                            // Using self.timeRanges to refer to the ProfileView's property
-                            ForEach(Array(self.timeRanges.enumerated()), id: \.element) { index, rangeString in
-                                Button(action: {
-                                    self.selectedTimeRange = index // Update ProfileView's @State
-                                }) {
-                                    Text(rangeString) // Display 24H, 1W, etc.
-                                        .font(.system(size: 13, weight: self.selectedTimeRange == index ? .medium : .regular))
-                                        .foregroundColor(self.selectedTimeRange == index ? .white : .gray)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 8) // Make buttons easier to tap
-                                        .background(self.selectedTimeRange == index ? Color.gray.opacity(0.3) : Color.clear)
-                                        .cornerRadius(8)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        }
-                        .padding(.horizontal, 20)
+                            },
+                            onTouchEnd: {
+                                showTooltip = false
+                                selectedDataPoint = nil
+                            },
+                            showTooltip: showTooltip,
+                            touchLocation: touchLocation,
+                            selectedDataPoint: selectedDataPoint
+                        )
+                        .frame(height: 280)
                     }
                 }
-                .padding(.top, 5) // Reduced top padding
+                // Graph now full width
+                
+                // Spacer for consistent layout
+                Spacer()
+                    .frame(height: 16)
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
                 
                 // Premium Highlights Carousel Section
                 Text("HIGHLIGHTS")
@@ -1656,8 +1518,8 @@ struct ProfileView: View {
         
         guard !filteredSessions.isEmpty else { return }
         
-        // Get ALL sessions sorted by date to calculate true cumulative bankroll
-        let allSessionsSorted = sessionStore.sessions.sorted(by: { $0.startDate < $1.startDate })
+        // Get ALL sessions that respect the active filter, sorted by date
+        let allSessionsSorted = filteredSessions.sorted(by: { $0.startDate < $1.startDate })
         
         // Calculate cumulative data for filtered sessions but with true bankroll totals
         var cumulativeData: [(date: Date, profit: Double)] = []
@@ -1843,6 +1705,135 @@ struct ProfileView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: dynamicRadius))
         }
+    }
+
+    // MARK: - Session Filter Logic
+    private func sessionMatchesFilter(_ session: Session) -> Bool {
+        // Game type
+        if analyticsFilter.gameType == .cash && !session.gameType.lowercased().contains("cash") {
+            return false
+        }
+        if analyticsFilter.gameType == .tournament && !session.gameType.lowercased().contains("tournament") {
+            return false
+        }
+
+        // Stake level
+        let level = stakeLevel(for: session)
+        if analyticsFilter.stakeLevel != .all && analyticsFilter.stakeLevel != level {
+            return false
+        }
+
+        // Location
+        if let desired = analyticsFilter.location {
+            if session.gameName.trimmingCharacters(in: .whitespaces) != desired { return false }
+        }
+
+        // Session length
+        switch analyticsFilter.sessionLength {
+        case .under2:
+            if session.hoursPlayed >= 2 { return false }
+        case .twoToFour:
+            if session.hoursPlayed < 2 || session.hoursPlayed > 4 { return false }
+        case .over4:
+            if session.hoursPlayed <= 4 { return false }
+        default:
+            break
+        }
+
+        // Profitability
+        switch analyticsFilter.profitability {
+        case .winning:
+            if session.profit <= 0 { return false }
+        case .losing:
+            if session.profit >= 0 { return false }
+        default: break
+        }
+
+        // Time of day
+        let hour = Calendar.current.component(.hour, from: session.startTime)
+        switch analyticsFilter.timeOfDay {
+        case .morning:
+            if !(5..<12).contains(hour) { return false }
+        case .afternoon:
+            if !(12..<17).contains(hour) { return false }
+        case .lateNight:
+            if !((22...23).contains(hour) || (0..<6).contains(hour)) { return false }
+        default: break
+        }
+
+        // Day of week (1 = Sunday)
+        if analyticsFilter.dayOfWeek != .all {
+            let weekdaySymbols: [DayOfWeekFilter] = [.sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday]
+            let weekdayIndex = Calendar.current.component(.weekday, from: session.startDate) - 1 // 0–6
+            let sessionDay = weekdaySymbols[weekdayIndex]
+            if sessionDay != analyticsFilter.dayOfWeek { return false }
+        }
+
+        return true
+    }
+
+    private func stakeLevel(for session: Session) -> StakeLevelFilter {
+        // Attempt to parse big blind value from the stakes string (e.g., "$1/$2")
+        let digits = session.stakes.replacingOccurrences(of: " $", with: "")
+        let comps = digits.replacingOccurrences(of: "$", with: "").split(separator: "/")
+        guard comps.count == 2, let bb = Double(comps[1]) else {
+            return .all
+        }
+        switch bb {
+        case ..<1: return .micro
+        case ..<3: return .low
+        case ..<10: return .mid
+        default: return .high
+        }
+    }
+
+    // Helper: unified display string for location / game & stakes
+    private func displayLocation(for session: Session) -> String {
+        if session.gameType.lowercased().contains("cash") {
+            // e.g. "PokerStars $1/$2"
+            return "\(session.gameName) \(session.stakes)".trimmingCharacters(in: .whitespaces)
+        }
+        // tournaments – use location if available otherwise series/gameName
+        return (session.location ?? session.gameName).trimmingCharacters(in: .whitespaces)
+    }
+
+    private func monthlyProfitCurrent() -> Double {
+        let calendar = Calendar.current
+        let now = Date()
+        let month = calendar.component(.month, from: now)
+        let year = calendar.component(.year, from: now)
+        
+        let sessionProfit = filteredSessions.filter { session in
+            calendar.component(.month, from: session.startDate) == month && calendar.component(.year, from: session.startDate) == year
+        }.reduce(0) { $0 + $1.profit }
+        
+        let bankrollProfit = bankrollStore.transactions.filter { txn in
+            calendar.component(.month, from: txn.timestamp) == month && calendar.component(.year, from: txn.timestamp) == year
+        }.reduce(0) { $0 + $1.amount }
+        
+        return sessionProfit + bankrollProfit
+    }
+
+    // Capsule ticker view
+    @ViewBuilder
+    private func CapsuleTicker(amount: Double, label: String) -> some View {
+        let isPositive = amount >= 0
+        let color = isPositive ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : Color.red
+        HStack(spacing: 4) {
+            Image(systemName: isPositive ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                .font(.system(size: 9))
+            Text("$\(abs(Int(amount)).formattedWithCommas)")
+                .font(.system(size: 12, weight: .medium))
+            Text(label.uppercased())
+                .font(.system(size: 11))
+        }
+        .foregroundColor(color)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(color.opacity(0.15))
+        )
     }
 }
 
@@ -2080,20 +2071,12 @@ struct SettingsView: View {
     @State private var deleteError: String? = nil
     @State private var isDeleting = false
     @State private var pushNotificationsEnabled: Bool = true // Added for push notification toggle
-    @State private var showCSVImporter: Bool = false // For Pokerbase import
-    @State private var importStatusMessage: String? = nil // Shows success/failure
-    @State private var showEmergencyResetConfirmation = false // Add confirmation state
-    @State private var showPAImporter: Bool = false // Poker Analytics
-    @State private var paStatusMessage: String? = nil
-    @State private var showPBTImporter: Bool = false // Poker Bankroll Tracker
-    @State private var pbtStatusMessage: String? = nil
-    
-    // Add enum and state for consolidated file import
-    enum ImportType {
-        case pokerbase, pokerAnalytics, pbt
-    }
+    // Consolidated import states
+    @State private var showImportOptionsSheet = false
     @State private var currentImportType: ImportType = .pokerbase
     @State private var showFileImporter: Bool = false
+    @State private var importStatusMessage: String? = nil
+    @State private var isImporting = false
     
     var body: some View {
         ZStack {
@@ -2133,97 +2116,18 @@ struct SettingsView: View {
                 )
                 .padding(.horizontal, 20)
                 
-                // Emergency Session Reset Button
-                Button(action: { showEmergencyResetConfirmation = true }) {
-                    HStack {
-                        Image(systemName: "exclamationmark.triangle")
-                            .foregroundColor(.orange)
-                        Text("Reset Session Data")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.orange)
-                        Spacer()
-                        Text("Emergency")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.gray)
-                    }
-                    .padding(.vertical, 14)
-                    .padding(.horizontal, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                    )
-                }
-                .padding(.horizontal, 20)
-                
-                // Import from Pokerbase Button
+                // Consolidated Import CSV Button
                 Button(action: { 
-                    print("Pokerbase import button tapped")
-                    currentImportType = .pokerbase
-                    showFileImporter = true
-                    print("showFileImporter set to: \(showFileImporter) for type: \(currentImportType)")
+                    showImportOptionsSheet = true
                 }) {
                     HStack {
                         Image(systemName: "tray.and.arrow.down")
                             .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                        Text("Import from Pokerbase")
+                        Text("Import CSV")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                         Spacer()
-                        Text("CSV")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.gray)
-                    }
-                    .padding(.vertical, 14)
-                    .padding(.horizontal, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                    )
-                }
-                .padding(.horizontal, 20)
-                
-                // Import from Poker Analytics 6 Button
-                Button(action: { 
-                    print("Poker Analytics import button tapped")
-                    currentImportType = .pokerAnalytics
-                    showFileImporter = true
-                    print("showFileImporter set to: \(showFileImporter) for type: \(currentImportType)")
-                }) {
-                    HStack {
-                        Image(systemName: "tray.and.arrow.down")
-                            .foregroundColor(.cyan)
-                        Text("Import from Poker Analytics")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.cyan)
-                        Spacer()
-                        Text("TSV/CSV")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.gray)
-                    }
-                    .padding(.vertical, 14)
-                    .padding(.horizontal, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                    )
-                }
-                .padding(.horizontal, 20)
-                
-                // Import from Poker Bankroll Tracker Button
-                Button(action: { 
-                    print("PBT import button tapped")
-                    currentImportType = .pbt
-                    showFileImporter = true
-                    print("showFileImporter set to: \(showFileImporter) for type: \(currentImportType)")
-                }) {
-                    HStack {
-                        Image(systemName: "tray.and.arrow.down")
-                            .foregroundColor(.purple)
-                        Text("Import from Poker Bankroll Tracker")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.purple)
-                        Spacer()
-                        Text("CSV")
+                        Text("Multiple Formats")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.gray)
                     }
@@ -2295,6 +2199,32 @@ struct SettingsView: View {
                 .padding(.top, 30) // Space above company info
                 .padding(.bottom, 120) // Maintained bottom padding for tab bar space
             }
+            
+            // Simple loading overlay
+            if isImporting {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+                            .scaleEffect(1.2)
+                        
+                        Text("Importing \(currentImportType.title) data...")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    .padding(24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 0.95)))
+                            .shadow(color: Color.black.opacity(0.3), radius: 10, y: 5)
+                    )
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: isImporting)
+            }
         }
         .alert("Delete Your Account?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -2317,73 +2247,78 @@ struct SettingsView: View {
         } message: {
             Text(deleteError ?? "An unknown error occurred")
         }
-        .alert("Reset Session Data?", isPresented: $showEmergencyResetConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) {
-                sessionStore.emergencySessionReset()
-            }
-        } message: {
-            Text("This will clear all session data if you're experiencing issues with stuck sessions. Use this only if sessions appear active when they shouldn't be.")
-        }
         .alert("Import Result", isPresented: Binding(get: { importStatusMessage != nil }, set: { if !$0 { importStatusMessage = nil } })) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(importStatusMessage ?? "")
         }
-        .alert("Poker Analytics Import", isPresented: Binding(get: { paStatusMessage != nil }, set: { if !$0 { paStatusMessage = nil } })) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(paStatusMessage ?? "")
-        }
-        .alert("PBT Import Result", isPresented: Binding(get: { pbtStatusMessage != nil }, set: { if !$0 { pbtStatusMessage = nil } })) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(pbtStatusMessage ?? "")
+        .sheet(isPresented: $showImportOptionsSheet) {
+            ImportOptionsSheet(
+                onImportSelected: { importType in
+                    currentImportType = importType
+                    showFileImporter = true
+                }
+            )
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.commaSeparatedText, .tabSeparatedText, .text, .data]) { result in
             print("Consolidated file importer triggered for type: \(currentImportType)")
             switch result {
             case .success(let url):
                 print("File selected: \(url)")
+                isImporting = true
                 switch currentImportType {
                 case .pokerbase:
                     sessionStore.importSessionsFromPokerbaseCSV(fileURL: url) { importResult in
-                        switch importResult {
-                        case .success(let count):
-                            importStatusMessage = "Successfully imported \(count) session" + (count == 1 ? "" : "s") + " from Pokerbase."
-                        case .failure(let error):
-                            importStatusMessage = "Pokerbase import failed: \(error.localizedDescription)"
+                        DispatchQueue.main.async {
+                            isImporting = false
+                            switch importResult {
+                            case .success(let count):
+                                importStatusMessage = "Successfully imported \(count) session" + (count == 1 ? "" : "s") + " from Pokerbase."
+                            case .failure(let error):
+                                importStatusMessage = "Pokerbase import failed: \(error.localizedDescription)"
+                            }
                         }
                     }
                 case .pokerAnalytics:
                     sessionStore.importSessionsFromPokerAnalyticsCSV(fileURL: url) { res in
-                        switch res {
-                        case .success(let count):
-                            paStatusMessage = "Imported \(count) session" + (count == 1 ? "" : "s") + " from Poker Analytics."
-                        case .failure(let err):
-                            paStatusMessage = "Poker Analytics import failed: \(err.localizedDescription)"
+                        DispatchQueue.main.async {
+                            isImporting = false
+                            switch res {
+                            case .success(let count):
+                                importStatusMessage = "Successfully imported \(count) session" + (count == 1 ? "" : "s") + " from Poker Analytics."
+                            case .failure(let err):
+                                importStatusMessage = "Poker Analytics import failed: \(err.localizedDescription)"
+                            }
                         }
                     }
                 case .pbt:
                     sessionStore.importSessionsFromPBTCSV(fileURL: url) { res in
-                        switch res {
-                        case .success(let count):
-                            pbtStatusMessage = "Imported \(count) session" + (count == 1 ? "" : "s") + " from PBT."
-                        case .failure(let err):
-                            pbtStatusMessage = "PBT import failed: \(err.localizedDescription)"
+                        DispatchQueue.main.async {
+                            isImporting = false
+                            switch res {
+                            case .success(let count):
+                                importStatusMessage = "Successfully imported \(count) session" + (count == 1 ? "" : "s") + " from Poker Bankroll Tracker."
+                            case .failure(let err):
+                                importStatusMessage = "Poker Bankroll Tracker import failed: \(err.localizedDescription)"
+                            }
+                        }
+                    }
+                case .regroup:
+                    sessionStore.importSessionsFromRegroupCSV(fileURL: url) { res in
+                        DispatchQueue.main.async {
+                            isImporting = false
+                            switch res {
+                            case .success(let count):
+                                importStatusMessage = "Successfully imported \(count) session" + (count == 1 ? "" : "s") + " from Regroup."
+                            case .failure(let err):
+                                importStatusMessage = "Regroup import failed: \(err.localizedDescription)"
+                            }
                         }
                     }
                 }
             case .failure(let error):
                 print("File picker error: \(error)")
-                switch currentImportType {
-                case .pokerbase:
-                    importStatusMessage = "Failed to pick Pokerbase file: \(error.localizedDescription)"
-                case .pokerAnalytics:
-                    paStatusMessage = "Failed to pick Poker Analytics file: \(error.localizedDescription)"
-                case .pbt:
-                    pbtStatusMessage = "Failed to pick PBT file: \(error.localizedDescription)"
-                }
+                importStatusMessage = "Failed to pick \(currentImportType.title) file: \(error.localizedDescription)"
             }
         }
     }
@@ -2551,6 +2486,121 @@ struct SettingsRow: View {
     }
 }
 
+// MARK: - Import Type Definition (moved outside of SettingsView for accessibility)
+enum ImportType: Hashable {
+    case pokerbase, pokerAnalytics, pbt, regroup
+    
+    var title: String {
+        switch self {
+        case .pokerbase: return "Pokerbase"
+        case .pokerAnalytics: return "Poker Analytics"
+        case .pbt: return "Poker Bankroll Tracker"
+        case .regroup: return "Regroup"
+        }
+    }
+    
+    var fileType: String {
+        switch self {
+        case .pokerbase: return "CSV"
+        case .pokerAnalytics: return "TSV/CSV"
+        case .pbt: return "CSV"
+        case .regroup: return "CSV"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .pokerbase: return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+        case .pokerAnalytics: return .cyan
+        case .pbt: return .purple
+        case .regroup: return .orange
+        }
+    }
+}
+
+// MARK: - Import Options Sheet
+struct ImportOptionsSheet: View {
+    let onImportSelected: (ImportType) -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 20) {
+                    Text("Select Import Format")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.top, 20)
+                    
+                    Text("Choose the app you want to import your poker session data from:")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 16) {
+                        ForEach([ImportType.pokerbase, .pokerAnalytics, .pbt, .regroup], id: \.self) { importType in
+                            Button(action: {
+                                onImportSelected(importType)
+                                dismiss()
+                            }) {
+                                HStack(spacing: 16) {
+                                    Image(systemName: "tray.and.arrow.down")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundColor(importType.color)
+                                        .frame(width: 30)
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(importType.title)
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(.white)
+                                        Text("Import \(importType.fileType) files")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.gray)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(importType.color.opacity(0.3), lineWidth: 1)
+                                        )
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    Spacer()
+                }
+            }
+            .navigationTitle("Import CSV")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+    }
+}
+
 // Add at the bottom of the file, outside any struct
 extension Int {
     var formattedWithCommas: String {
@@ -2560,12 +2610,769 @@ extension Int {
     }
 }
 
+// MARK: - Button Styles
+struct ScalePressButtonStyle: ButtonStyle {
+    let scaleAmount: CGFloat = 0.95
+    
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scaleAmount : 1)
+            .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
+    }
+}
+
 // Helper struct for clarity, though often not strictly necessary for just transparency.
 // struct ClearBackground: View { // This helper is no longer used with the new structure
 //     var body: some View {
 //         Color.clear
 //     }
 // }
+
+// MARK: - Swipeable Graph Carousel
+struct SwipeableGraphCarousel: View {
+    let sessions: [Session]
+    let bankrollTransactions: [BankrollTransaction]
+    @Binding var selectedTimeRange: Int
+    let timeRanges: [String]
+    @Binding var selectedGraphIndex: Int
+    let onChartTouch: (CGPoint, GeometryProxy) -> Void
+    let onTouchEnd: () -> Void
+    let showTooltip: Bool
+    let touchLocation: CGPoint
+    let selectedDataPoint: (date: Date, profit: Double)?
+    
+    @State private var dragOffset: CGFloat = 0
+    
+    private let graphTypes = ["Bankroll", "Profit", "Monthly"]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Swipeable graph container
+            TabView(selection: $selectedGraphIndex) {
+                // Bankroll Graph (sessions + bankroll adjustments)
+                BankrollGraphView(
+                    sessions: sessions,
+                    bankrollTransactions: bankrollTransactions,
+                    selectedTimeRange: selectedTimeRange,
+                    timeRanges: timeRanges,
+                    onChartTouch: onChartTouch,
+                    onTouchEnd: onTouchEnd,
+                    showTooltip: showTooltip,
+                    touchLocation: touchLocation,
+                    selectedDataPoint: selectedDataPoint
+                )
+                .tag(0)
+                
+                // Profit Graph (sessions only)
+                ProfitGraphView(
+                    sessions: sessions,
+                    selectedTimeRange: selectedTimeRange,
+                    timeRanges: timeRanges,
+                    onChartTouch: onChartTouch,
+                    onTouchEnd: onTouchEnd,
+                    showTooltip: showTooltip,
+                    touchLocation: touchLocation,
+                    selectedDataPoint: selectedDataPoint
+                )
+                .tag(1)
+                
+                // Monthly Profit Bar Chart
+                MonthlyProfitBarChart(
+                    sessions: sessions,
+                    bankrollTransactions: bankrollTransactions,
+                    onBarTouch: { monthData in
+                        // Handle bar touch to show monthly profit
+                        // Could potentially update selectedDataPoint here if needed
+                    }
+                )
+                .tag(2)
+            }
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            .frame(height: 280)
+            
+            // Time period selector (only for bankroll and profit graphs)
+            if selectedGraphIndex < 2 {
+                HStack {
+                    ForEach(Array(timeRanges.enumerated()), id: \.element) { index, rangeString in
+                        Button(action: {
+                            selectedTimeRange = index
+                        }) {
+                            Text(rangeString)
+                                .font(.system(size: 13, weight: selectedTimeRange == index ? .medium : .regular))
+                                .foregroundColor(selectedTimeRange == index ? .white : .gray)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(selectedTimeRange == index ? Color.gray.opacity(0.3) : Color.clear)
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding(.top, 16)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            
+            // Graph type indicators (moved to bottom, after time selectors)
+            HStack(spacing: 16) {
+                ForEach(Array(graphTypes.enumerated()), id: \.offset) { index, type in
+                    Button(action: {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                            selectedGraphIndex = index
+                        }
+                    }) {
+                        Text(type)
+                            .font(.system(size: 13, weight: selectedGraphIndex == index ? .semibold : .regular))
+                            .foregroundColor(selectedGraphIndex == index ? .white : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(selectedGraphIndex == index ? Color.gray.opacity(0.3) : Color.clear)
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.top, selectedGraphIndex < 2 ? 12 : 16)
+        }
+        .animation(.easeInOut(duration: 0.3), value: selectedGraphIndex)
+    }
+}
+
+// MARK: - Bankroll Graph View
+struct BankrollGraphView: View {
+    let sessions: [Session]
+    let bankrollTransactions: [BankrollTransaction]
+    let selectedTimeRange: Int
+    let timeRanges: [String]
+    let onChartTouch: (CGPoint, GeometryProxy) -> Void
+    let onTouchEnd: () -> Void
+    let showTooltip: Bool
+    let touchLocation: CGPoint
+    let selectedDataPoint: (date: Date, profit: Double)?
+    
+    private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
+        let now = Date()
+        let calendar = Calendar.current
+        
+        switch timeRangeIndex {
+        case 0: // 24H
+            let oneDayAgo = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneDayAgo }
+        case 1: // 1W
+            let oneWeekAgo = calendar.date(byAdding: .weekOfYear, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneWeekAgo }
+        case 2: // 1M
+            let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneMonthAgo }
+        case 3: // 6M
+            let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: now) ?? now
+            return sessions.filter { $0.startDate >= sixMonthsAgo }
+        case 4: // 1Y
+            let oneYearAgo = calendar.date(byAdding: .year, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneYearAgo }
+        default: // All
+            return sessions
+        }
+    }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Y-axis grid lines
+                VStack(spacing: 0) {
+                    ForEach(0..<5) { _ in
+                        Spacer()
+                        Divider()
+                            .background(Color.gray.opacity(0.1))
+                    }
+                }
+                
+                // Background gradient
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: Color.clear, location: 0),
+                        .init(color: Color.white.opacity(0.02), location: 0.3),
+                        .init(color: Color.white.opacity(0.03), location: 0.7),
+                        .init(color: Color.clear, location: 1)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .blendMode(.overlay)
+                
+                // Combined bankroll chart (sessions + transactions)
+                let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                let filteredTransactions = bankrollTransactions // Include all bankroll transactions
+                
+                // Combine and sort data points
+                let combinedData = (filteredSessions.map { (date: $0.startDate, amount: $0.profit, type: "session") } +
+                                  filteredTransactions.map { (date: $0.timestamp, amount: $0.amount, type: "transaction") })
+                    .sorted { $0.date < $1.date }
+                
+                if !combinedData.isEmpty {
+                    let cumulativeData = combinedData.reduce(into: [(Date, Double)]()) { result, item in
+                        let previousTotal = result.last?.1 ?? 0
+                        result.append((item.date, previousTotal + item.amount))
+                    }
+                    
+                    let totalProfit = cumulativeData.last?.1 ?? 0
+                    let chartColor = totalProfit >= 0 ? 
+                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
+                    
+                    // Draw chart path
+                    ChartPath(
+                        dataPoints: cumulativeData,
+                        geometry: geometry,
+                        color: chartColor,
+                        showFill: true
+                    )
+                }
+                
+                // Interactive overlay
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                onChartTouch(value.location, geometry)
+                            }
+                            .onEnded { _ in
+                                onTouchEnd()
+                            }
+                    )
+                
+                // Touch indicator
+                if showTooltip {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(stops: [
+                                    .init(color: Color.clear, location: 0),
+                                    .init(color: Color.white.opacity(0.6), location: 0.1),
+                                    .init(color: Color.white.opacity(0.8), location: 0.5),
+                                    .init(color: Color.white.opacity(0.6), location: 0.9),
+                                    .init(color: Color.clear, location: 1)
+                                ]),
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 1)
+                        .position(x: touchLocation.x, y: geometry.size.height / 2)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Profit Graph View
+struct ProfitGraphView: View {
+    let sessions: [Session]
+    let selectedTimeRange: Int
+    let timeRanges: [String]
+    let onChartTouch: (CGPoint, GeometryProxy) -> Void
+    let onTouchEnd: () -> Void
+    let showTooltip: Bool
+    let touchLocation: CGPoint
+    let selectedDataPoint: (date: Date, profit: Double)?
+    
+    private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
+        let now = Date()
+        let calendar = Calendar.current
+        
+        switch timeRangeIndex {
+        case 0: // 24H
+            let oneDayAgo = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneDayAgo }
+        case 1: // 1W
+            let oneWeekAgo = calendar.date(byAdding: .weekOfYear, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneWeekAgo }
+        case 2: // 1M
+            let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneMonthAgo }
+        case 3: // 6M
+            let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: now) ?? now
+            return sessions.filter { $0.startDate >= sixMonthsAgo }
+        case 4: // 1Y
+            let oneYearAgo = calendar.date(byAdding: .year, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneYearAgo }
+        default: // All
+            return sessions
+        }
+    }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Y-axis grid lines
+                VStack(spacing: 0) {
+                    ForEach(0..<5) { _ in
+                        Spacer()
+                        Divider()
+                            .background(Color.gray.opacity(0.1))
+                    }
+                }
+                
+                // Background gradient
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: Color.clear, location: 0),
+                        .init(color: Color.white.opacity(0.02), location: 0.3),
+                        .init(color: Color.white.opacity(0.03), location: 0.7),
+                        .init(color: Color.clear, location: 1)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .blendMode(.overlay)
+                
+                // Profit-only chart (sessions only)
+                let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                
+                if !filteredSessions.isEmpty {
+                    let sortedSessions = filteredSessions.sorted { $0.startDate < $1.startDate }
+                    let cumulativeData = sortedSessions.reduce(into: [(Date, Double)]()) { result, session in
+                        let previousTotal = result.last?.1 ?? 0
+                        result.append((session.startDate, previousTotal + session.profit))
+                    }
+                    
+                    let totalProfit = cumulativeData.last?.1 ?? 0
+                    let chartColor = totalProfit >= 0 ? 
+                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
+                    
+                    // Draw chart path
+                    ChartPath(
+                        dataPoints: cumulativeData,
+                        geometry: geometry,
+                        color: chartColor,
+                        showFill: true
+                    )
+                }
+                
+                // Interactive overlay
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                onChartTouch(value.location, geometry)
+                            }
+                            .onEnded { _ in
+                                onTouchEnd()
+                            }
+                    )
+                
+                // Touch indicator
+                if showTooltip {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(stops: [
+                                    .init(color: Color.clear, location: 0),
+                                    .init(color: Color.white.opacity(0.6), location: 0.1),
+                                    .init(color: Color.white.opacity(0.8), location: 0.5),
+                                    .init(color: Color.white.opacity(0.6), location: 0.9),
+                                    .init(color: Color.clear, location: 1)
+                                ]),
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 1)
+                        .position(x: touchLocation.x, y: geometry.size.height / 2)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Monthly Profit Bar Chart
+struct MonthlyProfitBarChart: View {
+    let sessions: [Session]
+    let bankrollTransactions: [BankrollTransaction]
+    let onBarTouch: (String) -> Void
+    
+    @State private var selectedBarIndex: Int? = nil
+    
+    private func barHeight(for profit: Double, isPositive: Bool, positiveMax: Double, negativeMin: Double, maxAbsValue: Double, zeroLineY: CGFloat, geometryHeight: CGFloat) -> CGFloat {
+        guard maxAbsValue > 0 else { return 0 }
+        
+        if isPositive {
+            return (profit / positiveMax) * (zeroLineY - 30)
+        } else {
+            return (abs(profit) / abs(negativeMin)) * (geometryHeight - 30 - zeroLineY)
+        }
+    }
+    
+    private func barColor(isPositive: Bool) -> Color {
+        return isPositive ? 
+            Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+            Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
+    }
+    
+    private var monthlyData: [(String, Double)] {
+        let calendar = Calendar.current
+        let now = Date()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM yy"
+        
+        // Get last 12 months
+        var months: [Date] = []
+        for i in 0..<12 {
+            if let date = calendar.date(byAdding: .month, value: -i, to: now) {
+                months.append(date)
+            }
+        }
+        months.reverse()
+        
+        return months.map { month in
+            let monthProfit = sessions.filter { session in
+                calendar.isDate(session.startDate, equalTo: month, toGranularity: .month)
+            }.reduce(0) { $0 + $1.profit }
+            
+            let bankrollProfit = bankrollTransactions.filter { transaction in
+                calendar.isDate(transaction.timestamp, equalTo: month, toGranularity: .month)
+            }.reduce(0) { $0 + $1.amount }
+            
+            return (formatter.string(from: month), monthProfit + bankrollProfit)
+        }
+    }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            let data = monthlyData
+            let maxValue = data.map { abs($0.1) }.max() ?? 1
+            let centerY = geometry.size.height / 2
+            let availableHeight = centerY - 25 // Leave space for labels
+            let barWidth: CGFloat = 24 // Fixed width for consistency
+            let totalBarsWidth = CGFloat(data.count) * barWidth
+            let totalSpacing = geometry.size.width - totalBarsWidth - 32 // 16 padding on each side
+            let spacing = totalSpacing / CGFloat(max(1, data.count - 1))
+            
+            ZStack {
+                // Grid lines for reference
+                VStack(spacing: 0) {
+                    ForEach(0..<3) { i in
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.1))
+                            .frame(height: 0.5)
+                        if i < 2 { Spacer() }
+                    }
+                }
+                .padding(.vertical, 15)
+                
+                // Central zero line (emphasized)
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.clear,
+                                Color.gray.opacity(0.6),
+                                Color.gray.opacity(0.8),
+                                Color.gray.opacity(0.6),
+                                Color.clear
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 2)
+                    .position(x: geometry.size.width / 2, y: centerY)
+                    .shadow(color: Color.gray.opacity(0.3), radius: 1, y: 0)
+                
+                // Bars with perfect alignment
+                HStack(spacing: 0) {
+                    ForEach(Array(data.enumerated()), id: \.offset) { index, item in
+                        let (month, profit) = item
+                        let isPositive = profit >= 0
+                        let barHeight = maxValue > 0 ? min(abs(profit) / maxValue * availableHeight, availableHeight) : 0
+                        let barColor = barColor(isPositive: isPositive)
+                        
+                        VStack(spacing: 0) {
+                            // Top section (positive values)
+                            ZStack(alignment: .bottom) {
+                                // Spacer to maintain layout
+                                Color.clear
+                                    .frame(height: availableHeight)
+                                
+                                // Positive bar
+                                if isPositive && barHeight > 0 {
+                                    Rectangle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(stops: [
+                                                    .init(color: barColor.opacity(0.3), location: 0),
+                                                    .init(color: barColor.opacity(0.7), location: 0.3),
+                                                    .init(color: barColor, location: 0.7),
+                                                    .init(color: barColor.opacity(0.9), location: 1)
+                                                ]),
+                                                startPoint: .bottom,
+                                                endPoint: .top
+                                            )
+                                        )
+                                        .frame(width: barWidth, height: barHeight)
+                                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 6, topTrailingRadius: 6))
+                                        .shadow(color: barColor.opacity(0.4), radius: 3, x: 0, y: -2)
+                                        .overlay(
+                                            // Highlight effect
+                                            Rectangle()
+                                                .fill(
+                                                    LinearGradient(
+                                                        gradient: Gradient(colors: [
+                                                            Color.white.opacity(0.3),
+                                                            Color.clear
+                                                        ]),
+                                                        startPoint: .top,
+                                                        endPoint: .bottom
+                                                    )
+                                                )
+                                                .frame(width: barWidth * 0.7, height: barHeight * 0.4)
+                                                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 4, topTrailingRadius: 4))
+                                                .offset(y: -barHeight * 0.3)
+                                        )
+                                        .scaleEffect(selectedBarIndex == index ? 1.05 : 1.0)
+                                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedBarIndex)
+                                }
+                            }
+                            
+                            // Center divider (zero line space)
+                            Rectangle()
+                                .fill(Color.clear)
+                                .frame(height: 4)
+                            
+                            // Bottom section (negative values)
+                            ZStack(alignment: .top) {
+                                // Spacer to maintain layout
+                                Color.clear
+                                    .frame(height: availableHeight)
+                                
+                                // Negative bar
+                                if !isPositive && barHeight > 0 {
+                                    Rectangle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(stops: [
+                                                    .init(color: barColor.opacity(0.9), location: 0),
+                                                    .init(color: barColor, location: 0.3),
+                                                    .init(color: barColor.opacity(0.7), location: 0.7),
+                                                    .init(color: barColor.opacity(0.3), location: 1)
+                                                ]),
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            )
+                                        )
+                                        .frame(width: barWidth, height: barHeight)
+                                        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 6, bottomTrailingRadius: 6))
+                                        .shadow(color: barColor.opacity(0.4), radius: 3, x: 0, y: 2)
+                                        .overlay(
+                                            // Highlight effect
+                                            Rectangle()
+                                                .fill(
+                                                    LinearGradient(
+                                                        gradient: Gradient(colors: [
+                                                            Color.clear,
+                                                            Color.white.opacity(0.2)
+                                                        ]),
+                                                        startPoint: .top,
+                                                        endPoint: .bottom
+                                                    )
+                                                )
+                                                .frame(width: barWidth * 0.7, height: barHeight * 0.4)
+                                                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 4, bottomTrailingRadius: 4))
+                                                .offset(y: barHeight * 0.3)
+                                        )
+                                        .scaleEffect(selectedBarIndex == index ? 1.05 : 1.0)
+                                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedBarIndex)
+                                }
+                            }
+                        }
+                        .frame(width: barWidth)
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                selectedBarIndex = selectedBarIndex == index ? nil : index
+                            }
+                            onBarTouch(month)
+                        }
+                        
+                        // Add spacing except after last item
+                        if index < data.count - 1 {
+                            Spacer()
+                                .frame(width: spacing)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                
+                // Month labels with better positioning
+                VStack {
+                    Spacer()
+                    HStack(spacing: 0) {
+                        ForEach(Array(data.enumerated()), id: \.offset) { index, item in
+                            Text(item.0.split(separator: " ").first ?? "")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundColor(.gray.opacity(0.8))
+                                .frame(width: barWidth)
+                                .multilineTextAlignment(.center)
+                            
+                            // Add spacing except after last item
+                            if index < data.count - 1 {
+                                Spacer()
+                                    .frame(width: spacing)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                }
+                
+                // Value labels on hover/selection
+                if let selectedIndex = selectedBarIndex {
+                    let selectedData = data[selectedIndex]
+                    VStack(spacing: 4) {
+                        Text(selectedData.0)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                        Text("$\(Int(selectedData.1).formattedWithCommas)")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(selectedData.1 >= 0 ? 
+                                          Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                          Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Material.ultraThinMaterial)
+                                .opacity(0.9)
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        }
+                    )
+                    .position(x: geometry.size.width / 2, y: 30)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+        }
+    }
+}
+
+
+
+// MARK: - Chart Path Helper
+struct ChartPath: View {
+    let dataPoints: [(Date, Double)]
+    let geometry: GeometryProxy
+    let color: Color
+    let showFill: Bool
+    
+    var body: some View {
+        ZStack {
+            if showFill {
+                // Fill area
+                Path { path in
+                    guard !dataPoints.isEmpty else { return }
+                    
+                    let minProfit = dataPoints.map { $0.1 }.min() ?? 0
+                    let maxProfit = max(dataPoints.map { $0.1 }.max() ?? 1, 1)
+                    let range = max(maxProfit - minProfit, 1)
+                    
+                    let stepX = dataPoints.count > 1 ? geometry.size.width / CGFloat(dataPoints.count - 1) : geometry.size.width
+                    
+                    func getY(_ value: Double) -> CGFloat {
+                        let normalized = range == 0 ? 0.5 : (value - minProfit) / range
+                        return geometry.size.height * (1 - CGFloat(normalized))
+                    }
+                    
+                    // Start from bottom
+                    path.move(to: CGPoint(x: 0, y: geometry.size.height))
+                    path.addLine(to: CGPoint(x: 0, y: getY(dataPoints[0].1)))
+                    
+                    // Draw through all points
+                    for i in 1..<dataPoints.count {
+                        let x = CGFloat(i) * stepX
+                        let y = getY(dataPoints[i].1)
+                        
+                        let prevX = CGFloat(i-1) * stepX
+                        let prevY = getY(dataPoints[i-1].1)
+                        
+                        let controlPoint1 = CGPoint(x: prevX + stepX/3, y: prevY)
+                        let controlPoint2 = CGPoint(x: x - stepX/3, y: y)
+                        
+                        path.addCurve(to: CGPoint(x: x, y: y), control1: controlPoint1, control2: controlPoint2)
+                    }
+                    
+                    // Close to bottom
+                    path.addLine(to: CGPoint(x: geometry.size.width, y: geometry.size.height))
+                    path.closeSubpath()
+                }
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: color.opacity(0.35), location: 0),
+                            .init(color: color.opacity(0.15), location: 0.4),
+                            .init(color: color.opacity(0.08), location: 0.7),
+                            .init(color: Color.clear, location: 1)
+                        ]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+            }
+            
+            // Line path
+            Path { path in
+                guard !dataPoints.isEmpty else { return }
+                
+                let minProfit = dataPoints.map { $0.1 }.min() ?? 0
+                let maxProfit = max(dataPoints.map { $0.1 }.max() ?? 1, 1)
+                let range = max(maxProfit - minProfit, 1)
+                
+                let stepX = dataPoints.count > 1 ? geometry.size.width / CGFloat(dataPoints.count - 1) : geometry.size.width
+                
+                func getY(_ value: Double) -> CGFloat {
+                    let normalized = range == 0 ? 0.5 : (value - minProfit) / range
+                    return geometry.size.height * (1 - CGFloat(normalized))
+                }
+                
+                path.move(to: CGPoint(x: 0, y: getY(dataPoints[0].1)))
+                
+                for i in 1..<dataPoints.count {
+                    let x = CGFloat(i) * stepX
+                    let y = getY(dataPoints[i].1)
+                    
+                    let prevX = CGFloat(i-1) * stepX
+                    let prevY = getY(dataPoints[i-1].1)
+                    
+                    let controlPoint1 = CGPoint(x: prevX + stepX/3, y: prevY)
+                    let controlPoint2 = CGPoint(x: x - stepX/3, y: y)
+                    
+                    path.addCurve(to: CGPoint(x: x, y: y), control1: controlPoint1, control2: controlPoint2)
+                }
+            }
+            .stroke(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        color.opacity(0.9),
+                        color,
+                        color.opacity(0.95)
+                    ]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ),
+                style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+            )
+            .shadow(color: color.opacity(0.4), radius: 4, y: 2)
+        }
+    }
+}
+
+
 
 
 

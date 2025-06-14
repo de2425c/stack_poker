@@ -13,6 +13,7 @@ struct GameOption: Identifiable, Hashable {
     let id = UUID()
     let name: String
     let stakes: String
+    let gameType: PokerVariant
     
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
@@ -245,6 +246,9 @@ struct GameInfoSection: View {
 // MARK: - Tournament Info Section
 struct TournamentInfoSection: View {
     @Binding var tournamentName: String
+    @Binding var tournamentCasino: String
+    @Binding var selectedTournamentGameType: TournamentGameType
+    @Binding var selectedTournamentFormat: TournamentFormat
     var onSelectFromEvents: () -> Void // Closure to signal event selection request
 
     // Colors & Font (assuming these are accessible or passed in if needed)
@@ -289,6 +293,96 @@ struct TournamentInfoSection: View {
                     materialOpacity: materialOpacity
                 ) {
                     TextFieldContent(text: $tournamentName, placeholder: "Enter tournament name...", textColor: primaryTextColor)
+                }
+                
+                // Casino input field under tournament name
+                GlassyInputField(
+                    icon: "building.2",
+                    title: "Casino",
+                    glassOpacity: glassOpacity,
+                    labelColor: secondaryTextColor,
+                    materialOpacity: materialOpacity
+                ) {
+                    TextFieldContent(text: $tournamentCasino, placeholder: "Enter casino name...", textColor: primaryTextColor)
+                }
+                
+                // Tournament Game Type and Format Pickers - Side by Side
+                HStack(spacing: 12) {
+                    // Tournament Game Type Picker
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "gamecontroller")
+                                .foregroundColor(secondaryTextColor)
+                            Text("Game Type")
+                                .font(.plusJakarta(.caption, weight: .medium))
+                                .foregroundColor(secondaryTextColor)
+                        }
+                        
+                        HStack {
+                            ForEach(TournamentGameType.allCases, id: \.self) { gameType in
+                                Button(action: {
+                                    selectedTournamentGameType = gameType
+                                }) {
+                                    Text(gameType.displayName)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(selectedTournamentGameType == gameType ? primaryTextColor : secondaryTextColor)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 6)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .fill(selectedTournamentGameType == gameType ? Color.white.opacity(0.2) : Color.clear)
+                                        )
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Material.ultraThinMaterial)
+                                .opacity(materialOpacity)
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.white.opacity(glassOpacity))
+                        }
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    
+                    // Tournament Format Picker
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "star.circle")
+                                .foregroundColor(secondaryTextColor)
+                            Text("Format")
+                                .font(.plusJakarta(.caption, weight: .medium))
+                                .foregroundColor(secondaryTextColor)
+                        }
+                        
+                        Picker("Tournament Format", selection: $selectedTournamentFormat) {
+                            ForEach(TournamentFormat.allCases, id: \.self) { format in
+                                Text(format.displayName).tag(format)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        .foregroundColor(primaryTextColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Material.ultraThinMaterial)
+                                .opacity(materialOpacity)
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.white.opacity(glassOpacity))
+                        }
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
             }
         }
@@ -479,10 +573,13 @@ struct SessionFormView: View {
 
     // Tournament Specific Data
     @State private var tournamentName: String = ""
+    @State private var tournamentCasino: String = ""
     @State private var showingEventSelector = false // State to control ExploreView presentation
     @State private var selectedEventSeries: String? = nil // To store series from selected event
     @State private var rebuyCount: Int = 1 // New state for rebuy count
     @State private var baseBuyIn: String = "" // Store the base buy-in amount
+    @State private var selectedTournamentGameType: TournamentGameType = .nlh
+    @State private var selectedTournamentFormat: TournamentFormat = .standard
 
     // Staking State Variables - REPLACED
     // @State private var stakerSearchQuery = ""
@@ -599,6 +696,7 @@ struct SessionFormView: View {
                                                     GameCard(
                                                         stakes: stakes,
                                                         name: game.name,
+                                                        gameType: game.gameType,
                                                         isSelected: selectedGame?.name == game.name && selectedGame?.stakes == stakes,
                                                         titleColor: primaryTextColor,
                                                         subtitleColor: secondaryTextColor,
@@ -608,7 +706,8 @@ struct SessionFormView: View {
                                                     .onTapGesture {
                                                         selectedGame = GameOption(
                                                             name: game.name,
-                                                            stakes: stakes
+                                                            stakes: stakes,
+                                                            gameType: game.gameType
                                                         )
                                                     }
                                                     .contextMenu { // Added context menu for deletion
@@ -641,6 +740,9 @@ struct SessionFormView: View {
                                 if selectedLogType == .tournament {
                                     TournamentInfoSection(
                                         tournamentName: $tournamentName,
+                                        tournamentCasino: $tournamentCasino,
+                                        selectedTournamentGameType: $selectedTournamentGameType,
+                                        selectedTournamentFormat: $selectedTournamentFormat,
                                         onSelectFromEvents: { // Pass the closure action
                                             self.showingEventSelector = true
                                         }
@@ -801,9 +903,12 @@ struct SessionFormView: View {
                         self.baseBuyIn = "" // Clear or set to default if parsing fails
                     }
                     
-                    // Location and Type are no longer set from the event
-                    // self.tournamentLocation = "" // REMOVED state variable
-                    // self.selectedTournamentType = "NLH" // REMOVED state variable
+                    // Ensure casino update happens on main thread for UI refresh
+                    DispatchQueue.main.async {
+                        print("Debug: Selected event casino: '\(selectedEvent.casino ?? "nil")'")
+                        self.tournamentCasino = selectedEvent.casino ?? ""
+                        print("Debug: Tournament casino set to: '\(self.tournamentCasino)'")
+                    }
 
                     self.selectedEventSeries = selectedEvent.series_name // Series can still be used for other purposes if needed
 
@@ -966,6 +1071,7 @@ struct SessionFormView: View {
             sessionDetails["gameType"] = selectedLogType.rawValue // "CASH GAME"
             sessionDetails["gameName"] = game.name
             sessionDetails["stakes"] = game.stakes
+            sessionDetails["pokerVariant"] = game.gameType.rawValue // Add poker variant
             sessionDetails["profit"] = finalCashout - finalBuyIn
 
             gameNameForStake = game.name
@@ -993,11 +1099,19 @@ struct SessionFormView: View {
             // sessionDetails["tournamentType"] = ... // REMOVED
             // sessionDetails["location"] = ... // REMOVED
             
+            // Add tournament game type and format
+            sessionDetails["tournamentGameType"] = selectedTournamentGameType.rawValue
+            sessionDetails["tournamentFormat"] = selectedTournamentFormat.rawValue
+            
             let totalInvestment = finalBuyIn 
             sessionDetails["profit"] = finalCashout - totalInvestment
             
             if let eventSeries = selectedEventSeries, !eventSeries.isEmpty {
                 sessionDetails["series"] = eventSeries // Store series if available
+            }
+
+            if !tournamentCasino.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                sessionDetails["casino"] = tournamentCasino
             }
 
             gameNameForStake = trimmedTournamentName
@@ -1221,6 +1335,7 @@ struct SessionFormView: View {
 struct GameCard: View {
     let stakes: String
     let name: String
+    let gameType: PokerVariant
     let isSelected: Bool
     var titleColor: Color = Color(white: 0.25)
     var subtitleColor: Color = Color(white: 0.4)
@@ -1229,13 +1344,30 @@ struct GameCard: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(stakes)
-                .font(.plusJakarta(.title3, weight: .bold))
-                .foregroundColor(titleColor)
-            
-            Text(name)
-                .font(.plusJakarta(.caption, weight: .medium))
-                .foregroundColor(subtitleColor)
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stakes)
+                        .font(.plusJakarta(.title3, weight: .bold))
+                        .foregroundColor(titleColor)
+                    
+                    Text(name)
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(subtitleColor)
+                }
+                
+                Spacer()
+                
+                // Game type badge
+                Text(gameType.displayName)
+                    .font(.plusJakarta(.caption2, weight: .semibold))
+                    .foregroundColor(titleColor.opacity(0.8))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.white.opacity(0.1))
+                    )
+            }
         }
         .frame(width: 130)
         .padding(.vertical, 10)

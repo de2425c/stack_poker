@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseAuth
+import FirebaseFirestore
 
 // Model for a home game
 struct HomeGame: Identifiable, Codable {
@@ -9,6 +10,8 @@ struct HomeGame: Identifiable, Codable {
     var creatorId: String
     var creatorName: String
     var groupId: String?
+    var linkedEventId: String?
+    var playerIds: [String]?
     var status: GameStatus
     var players: [Player]
     var buyInRequests: [BuyInRequest]
@@ -31,6 +34,22 @@ struct HomeGame: Identifiable, Codable {
         
         enum PlayerStatus: String, Codable {
             case active, cashedOut
+        }
+
+        func toDictionary() -> [String: Any] {
+            var dict: [String: Any] = [
+                "id": id,
+                "userId": userId,
+                "displayName": displayName,
+                "currentStack": currentStack,
+                "totalBuyIn": totalBuyIn,
+                "joinedAt": Timestamp(date: joinedAt),
+                "status": status.rawValue
+            ]
+            if let cashedOutAt = cashedOutAt {
+                dict["cashedOutAt"] = Timestamp(date: cashedOutAt)
+            }
+            return dict
         }
     }
     
@@ -362,6 +381,12 @@ struct HomeGameView: View {
         
         Task {
             do {
+                guard let currentUser = Auth.auth().currentUser else {
+                    // Handle not authenticated
+                    isCreating = false
+                    return
+                }
+
                 // If part of a group, double-check for existing active games in that group
                 if let currentGroupId = groupId {
                     let activeGames = try await homeGameService.fetchActiveGamesForGroup(groupId: currentGroupId)
@@ -376,9 +401,21 @@ struct HomeGameView: View {
                         return
                     }
                 } // For standalone games, this check is skipped.
+
+                // Fetch creator's name
+                let userDoc = try await Firestore.firestore().collection("users").document(currentUser.uid).getDocument()
+                let creatorName = userDoc.data()?["displayName"] as? String ?? userDoc.data()?["username"] as? String ?? "Unknown"
                 
+                let creatorInfo = HomeGameService.PlayerInfo(userId: currentUser.uid, displayName: creatorName)
+
                 // Create the game in Firestore (groupId can be nil here)
-                let newGame = try await homeGameService.createHomeGame(title: gameTitle, groupId: groupId)
+                let newGame = try await homeGameService.createHomeGame(
+                    title: gameTitle,
+                    creatorId: currentUser.uid,
+                    creatorName: creatorName,
+                    initialPlayers: [creatorInfo],
+                    groupId: groupId
+                )
                 
                 // Call the completion handler with the new game if provided
                 await MainActor.run {
