@@ -220,46 +220,31 @@ struct SessionDetailView: View {
                     .foregroundColor(.gray)
             }
             
-            // Stats Grid - Beautiful Glassy Style
-            LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: 16),
-                GridItem(.flexible(), spacing: 16)
-            ], spacing: 16) {
-                GlassyInfoCard(
-                    title: "Duration",
-                    value: formatDuration(hours: session.hoursPlayed),
-                    icon: "clock",
-                    color: .blue
-                )
+            // Clean Analytics Layout
+            VStack(spacing: 24) {
+                // Session Metrics - Clean Row Layout
+                VStack(spacing: 16) {
+                    HStack {
+                        MetricItem(label: "Duration", value: formatDuration(hours: session.hoursPlayed))
+                        Spacer()
+                        MetricItem(label: "Date", value: formatShortDate(session.startDate))
+                    }
+                    
+                    Rectangle()
+                        .fill(Color.white.opacity(0.1))
+                        .frame(height: 1)
+                    
+                    HStack {
+                        MetricItem(label: "Buy-in", value: "$\(session.buyIn.isFinite ? Int(session.buyIn) : 0)")
+                        Spacer()
+                        MetricItem(label: "Cashout", value: "$\(session.cashout.isFinite ? Int(session.cashout) : 0)")
+                    }
+                }
                 
-                GlassyInfoCard(
-                    title: "Date",
-                    value: formatShortDate(session.startDate),
-                    icon: "calendar",
-                    color: .green
-                )
-                
-                GlassyInfoCard(
-                    title: "Buy-in",
-                    value: "$\(session.buyIn.isFinite ? Int(session.buyIn) : 0)",
-                    icon: "arrow.down.circle",
-                    color: .orange
-                )
-                
-                GlassyInfoCard(
-                    title: "Cashout",
-                    value: "$\(session.cashout.isFinite ? Int(session.cashout) : 0)",
-                    icon: "arrow.up.circle",
-                    color: .purple
-                )
+                // Profit Summary - Clean Layout
+                let profit = session.cashout - session.buyIn
+                CleanProfitSummary(profit: profit, hoursPlayed: session.hoursPlayed)
             }
-            
-            // Profit/Loss Summary - Glassy Style
-            let profit = session.cashout - session.buyIn
-            CombinedProfitCard(
-                profit: profit,
-                hoursPlayed: session.hoursPlayed
-            )
         }
     }
     
@@ -462,51 +447,72 @@ struct SessionDetailView: View {
     }
 }
 
-// MARK: - GlassyInfoCard Component
-struct GlassyInfoCard: View {
-    let title: String
+// MARK: - MetricItem Component
+struct MetricItem: View {
+    let label: String
     let value: String
-    let icon: String
-    let color: Color
-    var isFullWidth: Bool = false
-    
-    private let glassOpacity = 0.01
-    private let materialOpacity = 0.25
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(color)
-                Spacer()
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.gray)
-                Text(value)
-                    .font(.system(size: isFullWidth ? 20 : 16, weight: .bold))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.white.opacity(0.7))
+            Text(value)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.white)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: isFullWidth ? 80 : 70)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Material.ultraThinMaterial)
-                    .opacity(materialOpacity)
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white.opacity(glassOpacity))
+    }
+}
+
+// MARK: - CleanProfitSummary Component
+struct CleanProfitSummary: View {
+    let profit: Double
+    let hoursPlayed: Double
+    
+    private var profitString: String {
+        guard profit.isFinite else { return "$0" }
+        return "$\(Int(abs(profit)))"
+    }
+    
+    private var hourlyString: String {
+        guard hoursPlayed > 0 && profit.isFinite else { return "$0/hr" }
+        let hourly = profit / hoursPlayed
+        return "$\(Int(abs(hourly)))/hr"
+    }
+    
+    private var profitColor: Color {
+        profit >= 0 ? .green : .red
+    }
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+                .frame(height: 1)
+            
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Net Result")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                    Text(profitString)
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(profitColor)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Hourly Rate")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                    Text(hourlyString)
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(profitColor)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
     }
 }
 
@@ -691,60 +697,6 @@ struct ImagePicker: UIViewControllerRepresentable {
                 }
             }
         }
-    }
-}
-
-struct CombinedProfitCard: View {
-    let profit: Double
-    let hoursPlayed: Double
-    
-    private let glassOpacity = 0.01
-    private let materialOpacity = 0.25
-    
-    private var profitString: String {
-        guard profit.isFinite else { return "$0" }
-        return profit >= 0 ? "+$\(Int(profit))" : "-$\(abs(Int(profit)))"
-    }
-    private var hourlyString: String {
-        guard hoursPlayed > 0 && profit.isFinite else { return "$0/hr" }
-        let hourly = profit / hoursPlayed
-        return hourly >= 0 ? "+$\(Int(hourly))/hr" : "-$\(abs(Int(hourly)))/hr"
-    }
-    
-    var body: some View {
-        HStack(spacing: 24) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Net Result")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.gray)
-                Text(profitString)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(profit >= 0 ? .green : .red)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Hourly Rate")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.gray)
-                Text(hourlyString)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(profit >= 0 ? .green : .red)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 20)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Material.ultraThinMaterial)
-                    .opacity(materialOpacity)
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white.opacity(glassOpacity))
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

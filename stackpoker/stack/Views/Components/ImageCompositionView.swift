@@ -93,9 +93,7 @@ struct ImageCompositionView: View {
                 date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,
-                cashOut: session.cashout,
-                cardBackgroundColor: selectedCardColor,
-                cardOpacity: cardOpacity
+                cashOut: session.cashout
             )
             .scaleEffect(cardScale + currentMagnification) // Include live magnification state
             .offset(x: interactiveCardOffset.width + currentDragOffset.width, // Include live drag state
@@ -121,9 +119,7 @@ struct ImageCompositionView: View {
                 date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,
-                cashOut: session.cashout,
-                cardBackgroundColor: selectedCardColor,
-                cardOpacity: cardOpacity
+                cashOut: session.cashout
             )
             .scaleEffect(cardScale + currentMagnification) // Interactive scaling
             .offset(x: interactiveCardOffset.width + currentDragOffset.width,

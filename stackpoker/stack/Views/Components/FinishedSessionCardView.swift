@@ -78,155 +78,175 @@ struct AdaptiveText: View {
 }
 
 struct FinishedSessionCardView: View {
-    // Example session data - replace with your actual Session model/data
+    // Session data
     let gameName: String
     let stakes: String
     let location: String
     let date: Date
-    let duration: String // e.g., "3h 15m"
+    let duration: String
     let buyIn: Double
     let cashOut: Double
-    let currencySymbol: String = "$" // Or determine dynamically
-    
-    // Customization Parameters
-    var cardBackgroundColor: Color = Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 1.0)) // Default dark
-    var cardOpacity: Double = 1.0
+    let currencySymbol: String = "$"
     
     // Computed property for profit/loss
     var profit: Double {
         cashOut - buyIn
     }
     
-    // Computed property to determine if this is a tournament
-    var isTournament: Bool {
-        stakes.lowercased().contains("tournament") || 
-        stakes.lowercased().contains("buy-in") ||
-        stakes.contains("$") && !stakes.contains("/")
+    private var profitColor: Color {
+        profit >= 0 ? .green : .red
     }
     
-    // Computed property for stakes display
-    var stakesDisplay: String {
-        if isTournament {
-            return "$\(String(format: "%.0f", buyIn)) Buy-In"
+    private var profitString: String {
+        return "$\(Int(abs(profit)))"
+    }
+    
+    // Determine if tournament or cash game
+    private var gameType: String {
+        if stakes.lowercased().contains("tournament") || 
+           stakes.lowercased().contains("buy-in") ||
+           (stakes.contains("$") && !stakes.contains("/")) {
+            return "TOURNAMENT"
         } else {
-            return stakes
+            return "CASH GAME"
         }
     }
     
-    // Environment for detecting dark mode
-    @Environment(\.colorScheme) var colorScheme
+    private let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // Rich glossy black background
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.black.opacity(0.95),
-                                Color(UIColor(red: 20/255, green: 20/255, blue: 25/255, alpha: 1.0)),
-                                Color.black.opacity(0.98)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                AppBackgroundView()
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 24)
-                            .stroke(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [
-                                        Color.white.opacity(0.2),
-                                        Color.white.opacity(0.05),
-                                        Color.clear
-                                    ]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
                     )
-                    .shadow(color: Color.black.opacity(0.4), radius: 15, x: 0, y: 8)
                 
-                VStack(alignment: .center, spacing: 0) {
-                    // Top section with centered logo
-                    VStack(alignment: .center, spacing: 20) {
-                        // Stack logo - bigger and centered
-                        Image("stack_logo")
+                VStack(spacing: 0) {
+                    // Top section with logo and game info
+                    VStack(spacing: 16) {
+                        Image("promo_logo")
                             .resizable()
-                            .renderingMode(.template)
-                            .foregroundColor(.white)
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 140, height: 140)
-                            .padding(.top, 30)
+                            .frame(width: 44, height: 44)
+                            .foregroundColor(.white.opacity(0.95))
                         
-                        // Game/Tournament name only - centered and larger
-                        AdaptiveText(gameName, maxLines: 3, availableWidth: geometry.size.width - 40, fontName: "PlusJakartaSans-Bold", baseFontSize: 50, maxFontSize: 80, minFontSize: 24, color: .white)
-                            .padding(.horizontal, 20)
-                            .frame(maxWidth: geometry.size.width - 40) // Constrain width
-                    }
-                    
-                    Spacer()
-                    
-                    // Financial information
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("BUY-IN")
-                                    .font(.custom("PlusJakartaSans-Medium", size: 18))
-                                    .foregroundColor(.white.opacity(0.8))
-                                Text("\(currencySymbol)\(String(format: "%.2f", buyIn))")
-                                    .font(.custom("PlusJakartaSans-Bold", size: 24))
-                                    .foregroundColor(.white)
-                            }
+                        VStack(spacing: 6) {
+                            AdaptiveGameTitle(
+                                gameName, 
+                                availableWidth: geometry.size.width - 48
+                            )
                             
-                            Spacer()
-                            
-                            VStack(alignment: .trailing, spacing: 6) {
-                                Text("CASH OUT")
-                                    .font(.custom("PlusJakartaSans-Medium", size: 18))
-                                    .foregroundColor(.white.opacity(0.8))
-                                Text("\(currencySymbol)\(String(format: "%.2f", cashOut))")
-                                    .font(.custom("PlusJakartaSans-Bold", size: 24))
-                                    .foregroundColor(.white)
-                            }
-                        }
-                        
-                        // Divider line
-                        Rectangle()
-                            .fill(Color.white.opacity(0.3))
-                            .frame(height: 1)
-                            .padding(.vertical, 12)
-                        
-                        // Duration and Profit
-                        HStack(alignment: .bottom) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("DURATION")
-                                    .font(.custom("PlusJakartaSans-Medium", size: 18))
-                                    .foregroundColor(.white.opacity(0.8))
-                                Text(duration.uppercased())
-                                    .font(.custom("PlusJakartaSans-Bold", size: 22))
-                                    .foregroundColor(.white)
-                            }
-                            
-                            Spacer()
-                            
-                            // Large profit/loss display
-                            Text("\(profit >= 0 ? "+" : "")\(String(format: "%.2f", profit))")
-                                .font(.custom("PlusJakartaSans-Bold", size: min(geometry.size.width * 0.18, 72)))
-                                .foregroundColor(profit >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : Color.red)
+                            Text(stakes)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white.opacity(0.75))
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.6)
                         }
                     }
-                    .padding(.horizontal, 30)
-                    .padding(.bottom, 30)
+                    .padding(.top, 28)
+                    .padding(.horizontal, 24)
+                    
+                    Spacer(minLength: 20)
+                    
+                    // Metrics section with perfect spacing
+                    HStack(spacing: 0) {
+                        VStack(spacing: 16) {
+                            LuxuryMetric(label: "BUY-IN", value: "$\(Int(buyIn))")
+                            LuxuryMetric(label: "TIME", value: duration.uppercased())
+                        }
+                        .frame(maxWidth: .infinity)
+                        
+                        VStack(spacing: 16) {
+                            LuxuryMetric(label: "CASHOUT", value: "$\(Int(cashOut))")
+                            LuxuryMetric(label: "DATE", value: dateFormatter.string(from: date).uppercased())
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .padding(.horizontal, 32)
+                    
+                    Spacer(minLength: 24)
+                    
+                    // Net result section
+                    VStack(spacing: 8) {
+                        Text("NET RESULT")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.65))
+                            .tracking(1.2)
+                        
+                        Text(profitString)
+                            .font(.system(size: 32, weight: .bold))
+                            .foregroundColor(profitColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .padding(.bottom, 28)
                 }
             }
         }
-        .aspectRatio(0.8, contentMode: .fit) // Taller card proportions
-        .frame(minHeight: 400) // Minimum height to ensure it's large enough
+        .aspectRatio(1.35, contentMode: .fit)
+        .frame(maxWidth: 340, maxHeight: 252)
+    }
+}
+
+// MARK: - AdaptiveGameTitle Component
+struct AdaptiveGameTitle: View {
+    let text: String
+    let availableWidth: CGFloat
+    
+    init(_ text: String, availableWidth: CGFloat) {
+        self.text = text
+        self.availableWidth = availableWidth
+    }
+    
+    private var fontSize: CGFloat {
+        let characterCount = text.count
+        
+        if characterCount <= 6 {
+            return min(24, availableWidth * 0.09)
+        } else if characterCount <= 10 {
+            return min(22, availableWidth * 0.08)
+        } else if characterCount <= 15 {
+            return min(20, availableWidth * 0.07)
+        } else {
+            return min(18, availableWidth * 0.065)
+        }
+    }
+    
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: fontSize, weight: .bold))
+            .foregroundColor(.white)
+            .multilineTextAlignment(.center)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .tracking(0.5)
+    }
+}
+
+// MARK: - LuxuryMetric Component
+struct LuxuryMetric: View {
+    let label: String
+    let value: String
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white.opacity(0.6))
+                .tracking(0.8)
+            Text(value)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -234,38 +254,38 @@ struct FinishedSessionCardView: View {
 struct FinishedSessionCardView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            // Winning session preview
+            // Cash game preview
             FinishedSessionCardView(
                 gameName: "WYNN 1/2",
-                stakes: "$200.00",
-                location: "Home Game",
+                stakes: "$1/$2 NL Hold'em",
+                location: "Wynn Las Vegas",
                 date: Date(),
                 duration: "5H",
                 buyIn: 200.00,
                 cashOut: 560.00
             )
-            .frame(width: 350, height: 450)
+            .frame(width: 280, height: 400)
             .previewLayout(.sizeThatFits)
             .padding()
             .background(Color.gray.opacity(0.1))
-            .previewDisplayName("Winning Session")
+            .previewDisplayName("Cash Game")
             
-            // Losing session preview
+            // Tournament preview
             FinishedSessionCardView(
-                gameName: "PLO High Stakes Tournament",
-                stakes: "$2/$5",
+                gameName: "Daily Deepstack",
+                stakes: "$150 Buy-in Tournament",
                 location: "Bellagio",
                 date: Date(),
-                duration: "2h 45m",
-                buyIn: 500.00,
-                cashOut: 379.25
+                duration: "4H 30M",
+                buyIn: 150.00,
+                cashOut: 425.00
             )
-            .frame(width: 350, height: 450)
+            .frame(width: 280, height: 400)
             .preferredColorScheme(.dark)
             .previewLayout(.sizeThatFits)
             .padding()
             .background(Color.gray.opacity(0.1))
-            .previewDisplayName("Losing Session - Dark Mode")
+            .previewDisplayName("Tournament")
         }
     }
 } 
