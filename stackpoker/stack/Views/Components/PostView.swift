@@ -226,13 +226,12 @@ struct PostView: View {
         guard let range = content.range(of: prefix) else { return nil }
         
         let remainingContent = String(content[range.upperBound...])
-        let valueString = remainingContent.components(separatedBy: CharacterSet.whitespacesAndNewlines).first ?? ""
+        let rawToken = remainingContent.components(separatedBy: CharacterSet.whitespacesAndNewlines).first ?? ""
         
-        // Remove currency symbols and commas
-        let cleanedValue = valueString.replacingOccurrences(of: "$", with: "")
-            .replacingOccurrences(of: ",", with: "")
+        // Strip any characters that are NOT part of a standard number representation (digits or decimal separator)
+        let numericToken = rawToken.filter { ("0123456789.").contains($0) }
         
-        return Double(cleanedValue)
+        return Double(numericToken)
     }
     
     private func extractDeadline(from content: String) -> Date? {
@@ -819,7 +818,7 @@ struct ChallengePostView: View {
         content = content.replacingOccurrences(of: "🎉 Challenge Completed!", with: "")
         content = content.replacingOccurrences(of: "🏆 Goal Achieved!", with: "")
         
-        // Remove the challenge title line that matches the title in the progress component
+        // Split into lines and filter out technical lines
         let lines = content.components(separatedBy: "\n")
         let filteredLines = lines.filter { line in
             let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -829,9 +828,12 @@ struct ChallengePostView: View {
             !line.contains("Progress:") &&
             !line.contains("Final:") &&
             !line.contains("Achieved:") &&
+            !line.contains("Total Hours:") &&
+            !line.contains("Sessions:") &&
+            !line.contains("% Complete") &&
             !line.hasPrefix("#") &&
             !line.contains("Deadline:") &&
-            trimmedLine != challengeInfo.challengeTitle && // Remove duplicate title
+            trimmedLine != challengeInfo.challengeTitle &&
             !trimmedLine.isEmpty
         }
         

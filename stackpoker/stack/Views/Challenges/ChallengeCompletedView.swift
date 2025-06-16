@@ -32,7 +32,46 @@ struct ChallengeCompletedView: View {
     }
     
     private var progressPercentage: Double {
+        if challenge.isCompleted {
+            return 100
+        }
         return min(max(challenge.currentValue / challenge.targetValue * 100, 0), 100)
+    }
+    
+    // MARK: - Challenge Type Determination for Session Challenges
+    private var isSessionCountChallenge: Bool {
+        return challenge.type == .session && challenge.targetSessionCount != nil
+    }
+    private var isHoursBasedSessionChallenge: Bool {
+        return challenge.type == .session && challenge.targetSessionCount == nil && challenge.targetHours != nil
+    }
+    
+    private var displayFinalValue: Double {
+        if challenge.isCompleted {
+            return displayTargetValue
+        }
+        if challenge.type == .session {
+            if isSessionCountChallenge {
+                return Double(min(challenge.validSessionsCount, challenge.targetSessionCount ?? 0))
+            } else if isHoursBasedSessionChallenge {
+                return min(challenge.totalHoursPlayed, challenge.targetHours ?? challenge.targetValue)
+            }
+        }
+        if challenge.type == .bankroll {
+            return max(challenge.currentValue, challenge.targetValue)
+        }
+        return challenge.currentValue
+    }
+    
+    private var displayTargetValue: Double {
+        if challenge.type == .session {
+            if isSessionCountChallenge {
+                return Double(challenge.targetSessionCount ?? 0)
+            } else if isHoursBasedSessionChallenge {
+                return challenge.targetHours ?? challenge.targetValue
+            }
+        }
+        return challenge.targetValue
     }
     
     var body: some View {
@@ -249,19 +288,11 @@ struct ChallengeCompletedView: View {
             // Achievement Stats (final + target)
             VStack(spacing: 16) {
                 HStack {
-                    let finalValue: Double = {
-                        if challenge.type == .bankroll {
-                            // For bankroll we trust currentValue, but fallback to target if it's still at starting value
-                            return max(challenge.currentValue, challenge.targetValue)
-                        } else {
-                            return challenge.currentValue
-                        }
-                    }()
                     VStack(alignment: .leading, spacing: 4) {
                         Text("FINAL")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.gray)
-                        Text(formattedValue(finalValue, type: challenge.type))
+                        Text(formattedValue(challenge.isCompleted ? displayTargetValue : displayFinalValue, type: challenge.type))
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(colorForType(challenge.type))
                     }
@@ -272,7 +303,7 @@ struct ChallengeCompletedView: View {
                         Text("TARGET")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.gray)
-                        Text(formattedValue(challenge.targetValue, type: challenge.type))
+                        Text(formattedValue(displayTargetValue, type: challenge.type))
                             .font(.system(size: 24, weight: .bold))
                             .foregroundColor(.white)
                     }
@@ -393,7 +424,7 @@ struct ChallengeCompletedView: View {
         🎉 Just completed my poker challenge!
         
         \(challenge.title)
-        Target: \(formattedValue(challenge.targetValue, type: challenge.type))
+        Target: \(formattedValue(displayTargetValue, type: challenge.type))
         Completed in: \(completionDuration)
         
         #PokerChallenge #\(challenge.type.rawValue.capitalized)Goal #StackPoker
@@ -433,8 +464,8 @@ struct ChallengeCompletedView: View {
 
 \(challenge.title)
 
-Target: \(formattedValue(challenge.targetValue, type: challenge.type))
-Final: \(formattedValue(challenge.currentValue, type: challenge.type))
+Target: \(formattedValue(displayTargetValue, type: challenge.type))
+Final: \(formattedValue(challenge.isCompleted ? displayTargetValue : displayFinalValue, type: challenge.type))
 
 #ChallengeCompleted #\(challenge.type.rawValue.capitalized)Goal
 """
@@ -485,7 +516,16 @@ Final: \(formattedValue(challenge.currentValue, type: challenge.type))
         case .hands:
             return "\(Int(value))"
         case .session:
-            return "\(Int(value))"
+            // Determine if this is hours-based or session-count based
+            if isHoursBasedSessionChallenge {
+                // Hours-based session challenge
+                return String(format: "%.1f hours", value)
+            } else if isSessionCountChallenge {
+                // Session-count based challenge
+                return "\(Int(value)) sessions"
+            } else {
+                return "Unknown"
+            }
         }
     }
     

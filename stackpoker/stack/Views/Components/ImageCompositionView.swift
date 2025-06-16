@@ -89,7 +89,6 @@ struct ImageCompositionView: View {
             FinishedSessionCardView(
                 gameName: session.gameName,
                 stakes: session.stakes,
-                location: session.gameName, // location is already removed from its visual display
                 date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,
@@ -115,7 +114,6 @@ struct ImageCompositionView: View {
             FinishedSessionCardView(
                 gameName: session.gameName,
                 stakes: session.stakes,
-                location: session.gameName, // location is already removed from its visual display
                 date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,

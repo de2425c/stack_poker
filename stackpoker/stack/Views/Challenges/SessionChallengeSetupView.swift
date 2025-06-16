@@ -447,6 +447,8 @@ struct SessionChallengeSetupView: View {
                 
                 await MainActor.run {
                     isCreating = false
+                    // Dismiss this view immediately after creating challenge
+                    dismiss()
                 }
                 
             } catch {

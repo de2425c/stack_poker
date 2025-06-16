@@ -22,6 +22,7 @@ struct PostEditorView: View {
     // Pre-filled content for challenge sharing
     var prefilledContent: String?
     var challengeToShare: Challenge?
+    var isChallengeUpdate: Bool // True if sharing an UPDATE, false if sharing a NEW challenge
     // Use @State for the hand so it can be modified by hand selection
     @State private var hand: ParsedHandHistory?
     var sessionId: String?
@@ -47,11 +48,15 @@ struct PostEditorView: View {
     @State private var showingSessionSelection = false
     @State private var completedSessionTitle: String = ""
 
+    // Add new state for challenge display model
+    @State private var challengeDisplayModel: ChallengeDisplayModel?
+
     // Initializer to set up the initial hand state
     init(userId: String,
          initialText: String = "",
          prefilledContent: String? = nil,
          challengeToShare: Challenge? = nil,
+         isChallengeUpdate: Bool = false,
          initialHand: ParsedHandHistory? = nil, // Renamed for clarity in init
          sessionId: String? = nil,
          isSessionPost: Bool = false,
@@ -60,11 +65,12 @@ struct PostEditorView: View {
          sessionGameName: String = "",
          sessionStakes: String = "",
          sessionLocation: String? = nil, // Added sessionLocation parameter
-         completedSession: Session? = nil) { // Added completedSession parameter
+         completedSession: Session? = nil) {
         self.userId = userId
         self.initialText = initialText
         self.prefilledContent = prefilledContent
         self.challengeToShare = challengeToShare
+        self.isChallengeUpdate = isChallengeUpdate
         _hand = State(initialValue: initialHand) // Initialize @State hand
         self.sessionId = sessionId
         self.isSessionPost = isSessionPost
@@ -271,10 +277,10 @@ struct PostEditorView: View {
                             }
                             .padding(.horizontal)
                             .padding(.bottom, 15)
-                        } else if let challenge = challengeToShare {
-                            // Preview of challenge progress update
+                        } else if let displayModel = challengeDisplayModel {
+                            // Use the unified challenge display model
                             ChallengeProgressComponent(
-                                challenge: challenge,
+                                challenge: displayModel.challenge,
                                 isCompact: false
                             )
                             .padding(.horizontal)
@@ -292,38 +298,6 @@ struct PostEditorView: View {
                                     .cornerRadius(10)
                             }
                             .padding(.horizontal)
-                        } else if isChallengeUpdatePost {
-                            // Show challenge progress component for challenge update posts
-                            if let challengeInfo = parseChallengeUpdateFromText(initialText) {
-                                ChallengeProgressComponent(
-                                    challenge: Challenge(
-                                        userId: userId,
-                                        type: challengeInfo.type,
-                                        title: challengeInfo.title,
-                                        description: "", // Empty description for display purposes
-                                        targetValue: challengeInfo.targetValue,
-                                        currentValue: challengeInfo.currentValue,
-                                        endDate: challengeInfo.deadline
-                                    ),
-                                    isCompact: false
-                                )
-                                .padding(.horizontal)
-                                .padding(.bottom, 12)
-                                // Comment editor
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Add a comment (optional)")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.gray)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    TextEditor(text: $postText)
-                                        .foregroundColor(.white)
-                                        .frame(height: 100)
-                                        .scrollContentBackground(.hidden)
-                                        .background(Color.black.opacity(0.15))
-                                        .cornerRadius(10)
-                                }
-                                .padding(.horizontal)
-                            }
                         } else {
                             // Text Editor for regular posts / notes / hands / session starts (not a completed session share)
                             ZStack(alignment: .topLeading) {
@@ -402,37 +376,24 @@ struct PostEditorView: View {
                 }
             }
             .onAppear {
-                // Set postText based on prefilled content or initial text
-                if let prefilled = prefilledContent, !prefilled.isEmpty {
-                    // If prefilledContent is for a challenge, separate technical part and user comment part
-                    if challengeToShare != nil || isChallengeUpdatePost {
-                        self.constructedChallengePostContent = prefilled // Store the full technical string
-                        // Attempt to extract only user comments if any were part of prefilled for updates.
-                        // For new challenges, postText should be empty for user to type.
-                        if isChallengeUpdatePost {
-                            let (technicalPart, userCommentPart) = separateChallengeText(prefilled)
-                            self.constructedChallengePostContent = technicalPart
-                            self.postText = userCommentPart // User comment section
-                        } else {
-                            self.postText = "" // Fresh comment for new challenge share
-                        }
-                    } else {
-                        self.postText = prefilled // Regular post
-                    }
+                // If a challenge is being shared (new or update)
+                if let challenge = challengeToShare {
+                    // Create the display model
+                    self.challengeDisplayModel = ChallengeDisplayModel(challenge: challenge)
+                    // Generate the post content using the display model
+                    self.constructedChallengePostContent = challengeDisplayModel?.generatePostContent(isStarting: !isChallengeUpdate) ?? ""
+                    // User comment always starts blank for a challenge share/update
+                    self.postText = ""
+                }
+                // Fallback for other post types that might use initialText/prefilledContent
+                else if let prefilled = prefilledContent, !prefilled.isEmpty {
+                    self.postText = prefilled
                 } else if !initialText.isEmpty {
-                    if isChallengeUpdatePost {
-                        let (technicalPart, userCommentPart) = separateChallengeText(initialText)
-                        self.constructedChallengePostContent = technicalPart
-                        self.postText = userCommentPart
-                    } else if !isNote && !showFullSessionCard && !isSessionStartPost {
+                    // This handles session start posts, notes, etc.
+                    // It should NOT handle challenge updates anymore.
+                    if !isNote && !showFullSessionCard && !isSessionStartPost {
                         self.postText = initialText
                     }
-                }
-                
-                // If it's a new challenge share and constructedChallengePostContent is not yet set by prefilledContent
-                if let newChallenge = challengeToShare, constructedChallengePostContent.isEmpty {
-                    self.constructedChallengePostContent = generateChallengeShareText(for: newChallenge, isStarting: true)
-                    self.postText = "" // Ensure comments are empty for a new challenge share
                 }
 
                 isTextEditorFocused = true
@@ -568,7 +529,7 @@ struct PostEditorView: View {
         return nil
     }
 
-    // Update the post creation logic to work with different content types
+    // Update the post creation logic to use the display model
     private func createPost() {
         // For completed session, ensure title is present
         if selectedCompletedSession != nil && completedSessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -577,11 +538,10 @@ struct PostEditorView: View {
         }
         
         // User's comment is in `postText`
-        // Technical challenge content is in `constructedChallengePostContent`
         let userComment = postText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Guard for general posts (not completed session or challenge)
-        if selectedCompletedSession == nil && challengeToShare == nil && !isChallengeUpdatePost {
+        if selectedCompletedSession == nil && challengeDisplayModel == nil {
             guard !userComment.isEmpty || isNote || showFullSessionCard || isSessionStartPost else { return }
         }
 
@@ -598,15 +558,9 @@ struct PostEditorView: View {
             let titleToUse = completedSessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Session Report" : completedSessionTitle
             let sessionDetails = "COMPLETED_SESSION_INFO: Title: \(titleToUse), Game: \(session.gameName), Stakes: \(session.stakes), Duration: \(String(format: "%.1f", session.hoursPlayed))hrs, Buy-in: $\(Int(session.buyIn)), Cashout: $\(Int(session.cashout)), Profit: $\(String(format: "%.2f", session.profit))\n"
             finalContent = sessionDetails + userComment
-        } else if !constructedChallengePostContent.isEmpty {
-            // This is a challenge post (new or update)
-            // Combine the technical part with the user's comment if any
-            if !userComment.isEmpty {
-                finalContent = constructedChallengePostContent + "\n\n" + userComment
-            } else {
-                finalContent = constructedChallengePostContent
-            }
-            // Determine postType for challenge (could be stored or inferred if needed)
+        } else if let displayModel = challengeDisplayModel {
+            // Use the display model to generate consistent content
+            finalContent = displayModel.generatePostContent(isStarting: !isChallengeUpdate, userComment: userComment.isEmpty ? nil : userComment)
         } else {
             // Regular posts, notes, hands, session starts
             if isSessionPost && !sessionGameName.isEmpty && !sessionStakes.isEmpty && (isNote || isHandPost) {
@@ -1022,77 +976,6 @@ struct PostEditorView: View {
         .padding(.top, 4) 
     }
 
-    // Helper to detect if this is a challenge update post
-    private var isChallengeUpdatePost: Bool {
-        return initialText.contains("🎯 Challenge Update:") && (initialText.contains("Progress:") || initialText.contains("Target:"))
-    }
-    
-    // Helper to parse challenge info from text
-    private func parseChallengeUpdateFromText(_ text: String) -> (title: String, type: ChallengeType, currentValue: Double, targetValue: Double, deadline: Date?)? {
-        guard text.contains("🎯 Challenge Update:") || text.contains("🎯 Started a new challenge:") else { return nil }
-        
-        let lines = text.components(separatedBy: "\n")
-        guard let firstLine = lines.first else { return nil }
-        
-        var title = ""
-        if firstLine.contains("🎯 Challenge Update:") {
-            title = firstLine.replacingOccurrences(of: "🎯 Challenge Update: ", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-        } else if firstLine.contains("🎯 Started a new challenge:") {
-            title = firstLine.replacingOccurrences(of: "🎯 Started a new challenge: ", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        // Extract progress and target values
-        var currentValue: Double = 0
-        var targetValue: Double = 0
-        var challengeType: ChallengeType = .bankroll
-        var deadline: Date? = nil
-        
-        for line in lines {
-            if line.hasPrefix("Progress: ") {
-                let valueStr = line.replacingOccurrences(of: "Progress: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
-                currentValue = Double(valueStr) ?? 0
-            }
-            if line.hasPrefix("Target: ") {
-                let valueStr = line.replacingOccurrences(of: "Target: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
-                targetValue = Double(valueStr) ?? 0
-            }
-            if line.hasPrefix("Deadline: ") {
-                let dateString = line.replacingOccurrences(of: "Deadline: ", with: "")
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                deadline = formatter.date(from: dateString)
-            }
-            if line.contains("#BankrollGoal") {
-                challengeType = .bankroll
-            } else if line.contains("#HandsGoal") {
-                challengeType = .hands
-            } else if line.contains("#SessionGoal") {
-                challengeType = .session
-            }
-        }
-        
-        return (title: title, type: challengeType, currentValue: currentValue, targetValue: targetValue, deadline: deadline)
-    }
-
-    private func generateChallengeShareText(for challenge: Challenge, isStarting: Bool) -> String {
-        let actionText = isStarting ? "🎯 Started a new challenge:" : "🎯 Challenge Update:"
-        var shareText = """
-        \(actionText) \(challenge.title)
-        
-        Target: \(formattedValue(challenge.targetValue, type: challenge.type))
-        Current: \(formattedValue(challenge.currentValue, type: challenge.type))
-        """
-        
-        if let deadline = challenge.endDate {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            shareText += "\nDeadline: \(formatter.string(from: deadline))"
-        }
-        
-        shareText += "\n\n#PokerChallenge #\(challenge.type.rawValue.capitalized)Goal"
-        return shareText
-    }
-
     private func separateChallengeText(_ text: String) -> (technical: String, comment: String) {
         var technicalPart = text
         var userCommentPart = ""
@@ -1152,6 +1035,43 @@ struct PostEditorView: View {
         }
         
         return (technicalPart.trimmingCharacters(in: .whitespacesAndNewlines), userCommentPart.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func generateChallengeShareText(for challenge: Challenge, isStarting: Bool) -> String {
+        let actionText = isStarting ? "🎯 Started a new challenge:" : "🎯 Challenge Update:"
+
+        // Use the most relevant 'current' value
+        var currentDisplayValue: Double = challenge.currentValue
+        if challenge.type == .session {
+            if challenge.targetHours != nil {
+                currentDisplayValue = challenge.totalHoursPlayed
+            } else if challenge.targetSessionCount != nil {
+                currentDisplayValue = Double(challenge.validSessionsCount)
+            }
+        }
+
+        var shareText = """
+        \(actionText) \(challenge.title)
+        
+        Progress: \(formattedValue(currentDisplayValue, type: challenge.type))
+        Target: \(formattedValue(challenge.targetValue, type: challenge.type))
+        """
+        
+        // Only show percentage for updates
+        if !isStarting {
+            shareText += "\n\(Int(challenge.progressPercentage))% Complete"
+        }
+        
+        if let deadline = challenge.endDate {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            shareText += "\nDeadline: \(formatter.string(from: deadline))"
+        }
+        
+        let hashtag = isStarting ? "#PokerChallenge" : "#ChallengeProgress"
+        shareText += "\n\n\(hashtag) #\(challenge.type.rawValue.capitalized)Goal"
+        
+        return shareText
     }
 
     // Helper function to format values based on challenge type

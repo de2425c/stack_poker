@@ -17,12 +17,17 @@ class ChallengeService: ObservableObject {
     
     private let db = Firestore.firestore()
     private let userId: String
+    private var bankrollStore: BankrollStore? // Use BankrollStore instead of userService
     
-    init(userId: String) {
+    init(userId: String, bankrollStore: BankrollStore? = nil) {
         self.userId = userId
-        if !userId.isEmpty {
-            loadUserChallenges()
-        }
+        self.bankrollStore = bankrollStore
+        loadUserChallenges()
+    }
+    
+    // Method to set bankrollStore after initialization if needed
+    func setBankrollStore(_ bankrollStore: BankrollStore) {
+        self.bankrollStore = bankrollStore
     }
     
     // MARK: - Public Methods
@@ -46,10 +51,11 @@ class ChallengeService: ObservableObject {
             loadUserChallenges()
             
             // Set the just created challenge for a share prompt
-            // We need to fetch the full challenge object with the new ID
-            if let newChallenge = try? await db.collection("challenges").document(docRef.documentID).getDocument(as: Challenge.self) {
-                justCreatedChallenge = newChallenge
-            }
+            // Create a copy of the challenge with the new document ID
+            var challengeWithId = challenge
+            challengeWithId.id = docRef.documentID
+            justCreatedChallenge = challengeWithId
+            print("✅ Set justCreatedChallenge: \(challengeWithId.title) with ID: \(docRef.documentID)")
             
         } catch {
             self.error = "Failed to create challenge: \(error.localizedDescription)"
@@ -112,6 +118,13 @@ class ChallengeService: ObservableObject {
                 if shouldComplete {
                     challenge.status = .completed
                     challenge.completedAt = Date()
+                    
+                    // For bankroll challenges, update currentValue with dynamic calculation
+                    if challenge.type == .bankroll {
+                        let dynamicBankroll = await calculateCurrentBankroll()
+                        challenge.currentValue = dynamicBankroll
+                        print("💰 Updated challenge currentValue with dynamic bankroll: $\(dynamicBankroll)")
+                    }
                     
                     // Move from active to completed
                     try await moveToCompletedChallenges(challenge)
@@ -210,6 +223,9 @@ class ChallengeService: ObservableObject {
     
     func updateSessionChallengesFromSession(_ session: Session) async {
         print("🎯 Updating session challenges from completed session")
+        print("   Session ID: \(session.id)")
+        print("   Session Date: \(session.startDate)")
+        print("   Session Hours: \(session.hoursPlayed)")
         
         // Update all active session challenges
         for challenge in activeChallenges where challenge.type == .session {
@@ -217,14 +233,23 @@ class ChallengeService: ObservableObject {
             
             // Check if this session occurred after the challenge start date
             guard session.startDate >= challenge.startDate else {
-                print("   Session \(session.id) predates challenge \(challenge.title) - skipping")
+                print("   ❌ Session \(session.id) predates challenge \(challenge.title) - skipping")
                 continue
             }
             
             // Check if session meets minimum hour requirement (if any)
             let sessionQualifies = challenge.sessionQualifies(hoursPlayed: session.hoursPlayed)
             
+            // Skip if this session was already counted
+            if challenge.countedSessionIds.contains(session.id) {
+                print("   ⚠️ Session already counted for challenge \(challenge.title) - skipping duplicate")
+                continue
+            }
+            
             var updatedChallenge = challenge
+            
+            // Append session id to prevent double counting
+            updatedChallenge.countedSessionIds.append(session.id)
             
             // Always increment total session count and hours
             updatedChallenge.currentSessionCount += 1
@@ -235,16 +260,34 @@ class ChallengeService: ObservableObject {
                 updatedChallenge.validSessionsCount += 1
             }
             
-            print("   Challenge: \(challenge.title)")
+            print("   📊 Challenge: \(challenge.title)")
             print("     Session hours: \(String(format: "%.1f", session.hoursPlayed))")
+            print("     Min hours required: \(challenge.minHoursPerSession ?? 0)")
             print("     Session qualifies: \(sessionQualifies)")
             print("     Total sessions: \(updatedChallenge.currentSessionCount)")
             print("     Valid sessions: \(updatedChallenge.validSessionsCount)")
             print("     Total hours: \(String(format: "%.1f", updatedChallenge.totalHoursPlayed))")
             
+            // CRITICAL: Update currentValue based on challenge configuration
+            if let targetHours = updatedChallenge.targetHours {
+                // Hours-based challenge: currentValue tracks total hours
+                updatedChallenge.currentValue = updatedChallenge.totalHoursPlayed
+                print("     Hours-based challenge - currentValue: \(updatedChallenge.currentValue)")
+            } else if let targetCount = updatedChallenge.targetSessionCount {
+                // Count-based challenge: currentValue tracks valid session count
+                updatedChallenge.currentValue = Double(updatedChallenge.validSessionsCount)
+                print("     Count-based challenge - currentValue: \(updatedChallenge.currentValue)")
+            }
+            
+            // Update lastUpdated
+            updatedChallenge.lastUpdated = Date()
+            
             // Check if challenge is now completed
             let wasCompleted = challenge.isSessionChallengeCompleted
             let isNowCompleted = updatedChallenge.isSessionChallengeCompleted
+            
+            print("     Was completed: \(wasCompleted)")
+            print("     Is now completed: \(isNowCompleted)")
             
             if !wasCompleted && isNowCompleted {
                 updatedChallenge.status = .completed
@@ -271,7 +314,10 @@ class ChallengeService: ObservableObject {
                         "currentSessionCount": updatedChallenge.currentSessionCount,
                         "totalHoursPlayed": updatedChallenge.totalHoursPlayed,
                         "validSessionsCount": updatedChallenge.validSessionsCount,
-                        "lastUpdated": Timestamp(date: Date())
+                        "currentValue": updatedChallenge.currentValue,
+                        "countedSessionIds": updatedChallenge.countedSessionIds,
+                        "lastUpdated": Timestamp(date: updatedChallenge.lastUpdated),
+                        "status": updatedChallenge.status.rawValue
                     ])
                     
                     // Update local state
@@ -279,7 +325,7 @@ class ChallengeService: ObservableObject {
                         activeChallenges[index] = updatedChallenge
                     }
                     
-                    print("📈 Session challenge progress updated")
+                    print("✅ Session challenge progress updated successfully")
                 } catch {
                     print("❌ Error updating session challenge: \(error)")
                 }
@@ -322,21 +368,19 @@ class ChallengeService: ObservableObject {
         for challenge in activeChallenges where challenge.type == .bankroll {
             guard let challengeId = challenge.id else { continue }
             
-            // Calculate profit/loss ONLY from sessions that occurred AFTER the challenge start date
-            let profitSinceStart = sessions
-                .filter { $0.startDate >= challenge.startDate }
-                .reduce(0) { $0 + $1.profit }
+            // Calculate profit/loss from ALL sessions (to match how challenge setup calculates current bankroll)
+            let totalSessionProfit = sessions.reduce(0) { $0 + $1.profit }
             
-            let startingBankroll = challenge.startingBankroll ?? 0
-            let currentBankroll = startingBankroll + profitSinceStart
+            let userBankroll = bankrollStore?.bankrollSummary.currentTotal ?? 0
+            let currentBankroll = userBankroll + totalSessionProfit
             
             // Don't update challenges that were just created (within 30 seconds)
             let timeSinceCreation = Date().timeIntervalSince(challenge.createdAt)
             let isRecentlyCreated = timeSinceCreation < 30
             
             print("   Challenge: \(challenge.title)")
-            print("     Profit since start: $\(profitSinceStart)")
-            print("     Starting bankroll: $\(startingBankroll)")
+            print("     Total session profit: $\(totalSessionProfit)")
+            print("     User bankroll: $\(userBankroll)")
             print("     Current bankroll : $\(currentBankroll)")
             print("     Target bankroll  : $\(challenge.targetValue)")
             print("     Time since creation: \(String(format: "%.1f", timeSinceCreation))s  (recent: \(isRecentlyCreated))")
@@ -373,47 +417,11 @@ class ChallengeService: ObservableObject {
     // MARK: - Challenge Completion Posts
     
     func createChallengeCompletionPost(for challenge: Challenge) async {
-        guard challenge.status == .completed,
-              let challengeId = challenge.id else { return }
+        guard challenge.status == .completed else { return }
         
-        let completionText: String
-        
-        if challenge.type == .session {
-            // Special formatting for session challenges
-            var sessionDetails = ""
-            
-            if let targetCount = challenge.targetSessionCount {
-                sessionDetails += "\nSessions: \(challenge.validSessionsCount)/\(targetCount)"
-            }
-            
-            if let minHours = challenge.minHoursPerSession {
-                sessionDetails += "\nMinimum per session: \(String(format: "%.1f", minHours)) hours"
-            }
-            
-            sessionDetails += "\nTotal hours played: \(String(format: "%.1f", challenge.totalHoursPlayed))"
-            sessionDetails += "\nAverage per session: \(String(format: "%.1f", challenge.averageHoursPerSession)) hours"
-            
-            completionText = """
-            🎉 Session Challenge Completed!
-            
-            \(challenge.title)
-            \(sessionDetails)
-            
-            #ChallengeCompleted #SessionGoal
-            """
-        } else {
-            // Original formatting for other challenge types
-            completionText = """
-            🎉 Challenge Completed!
-            
-            \(challenge.title)
-            
-            Target: \(formattedValue(challenge.targetValue, type: challenge.type))
-            Final: \(formattedValue(challenge.currentValue, type: challenge.type))
-            
-            #ChallengeCompleted #\(challenge.type.rawValue.capitalized)Goal
-            """
-        }
+        // Create display model and use its completion post generation
+        let displayModel = ChallengeDisplayModel(challenge: challenge)
+        let completionText = displayModel.generateCompletionPostContent()
         
         // Get user profile for post creation
         do {
@@ -459,16 +467,43 @@ class ChallengeService: ObservableObject {
               let challengeId = challenge.id,
               progressMade > 0 else { return }
         
-        let progressText = """
-        🎯 Challenge Update: \(challenge.title)
+        // Calculate current value dynamically for bankroll challenges
+        let updatedChallenge: Challenge
+        if challenge.type == .bankroll {
+            // For bankroll challenges, calculate current bankroll dynamically
+            let currentProgressValue = await calculateCurrentBankroll()
+            print("💰 Dynamically calculated current bankroll for progress post: $\(currentProgressValue)")
+            
+            // Create updated challenge with dynamic value
+            updatedChallenge = Challenge(
+                id: challenge.id,
+                userId: challenge.userId,
+                type: challenge.type,
+                title: challenge.title,
+                description: challenge.description,
+                targetValue: challenge.targetValue,
+                currentValue: currentProgressValue,
+                endDate: challenge.endDate,
+                status: challenge.status,
+                createdAt: challenge.createdAt,
+                completedAt: challenge.completedAt,
+                lastUpdated: challenge.lastUpdated,
+                startingBankroll: challenge.startingBankroll,
+                targetHours: challenge.targetHours,
+                targetSessionCount: challenge.targetSessionCount,
+                minHoursPerSession: challenge.minHoursPerSession,
+                currentSessionCount: challenge.currentSessionCount,
+                totalHoursPlayed: challenge.totalHoursPlayed,
+                validSessionsCount: challenge.validSessionsCount,
+            )
+        } else {
+            // For other challenge types, use stored currentValue
+            updatedChallenge = challenge
+        }
         
-        Progress: \(formattedValue(challenge.currentValue, type: challenge.type))
-        Target: \(formattedValue(challenge.targetValue, type: challenge.type))
-        
-        \(Int(challenge.progressPercentage))% Complete
-        
-        #ChallengeProgress #\(challenge.type.rawValue.capitalized)Goal
-        """
+        // Create display model and use its progress post generation
+        let displayModel = ChallengeDisplayModel(challenge: updatedChallenge)
+        let progressText = displayModel.generatePostContent(isStarting: false)
         
         // TODO: Create actual post using PostService
         print("📈 Challenge Progress Post: \(progressText)")
@@ -535,12 +570,15 @@ class ChallengeService: ObservableObject {
     private func moveToCompletedChallenges(_ challenge: Challenge) async throws {
         guard let challengeId = challenge.id else { return }
         
-        // Update challenge document
+        // Update challenge document - include currentValue to persist the final calculated value
         try await db.collection("challenges").document(challengeId).updateData([
             "status": ChallengeStatus.completed.rawValue,
             "completedAt": Timestamp(date: Date()),
-            "lastUpdated": Timestamp(date: Date())
+            "lastUpdated": Timestamp(date: Date()),
+            "currentValue": challenge.currentValue // CRITICAL: Persist the updated currentValue
         ])
+        
+        print("💾 Persisted challenge completion with currentValue: $\(challenge.currentValue)")
         
         // Remove from user's active challenges
         try await db.collection("users")
@@ -561,5 +599,33 @@ class ChallengeService: ObservableObject {
             ])
         
         // Update local state - challenges will be updated via listeners
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func calculateCurrentBankroll() async -> Double {
+        // Calculate the current bankroll using the same logic as updateBankrollFromSessions
+        do {
+            let snapshot = try await db.collection("sessions")
+                .whereField("userId", isEqualTo: userId)
+                .getDocuments()
+            
+            let sessions = snapshot.documents.compactMap { document in
+                Session(id: document.documentID, data: document.data())
+            }
+            let totalSessionProfit = sessions.reduce(0) { $0 + $1.profit }
+            let userBankroll = bankrollStore?.bankrollSummary.currentTotal ?? 0
+            let currentBankroll = userBankroll + totalSessionProfit
+            
+            print("💰 Current bankroll calculation:")
+            print("   User bankroll: $\(userBankroll)")
+            print("   Total session profit: $\(totalSessionProfit)")
+            print("   Current bankroll: $\(currentBankroll)")
+            
+            return currentBankroll
+        } catch {
+            print("❌ Error calculating current bankroll: \(error)")
+            return 0 // Fallback to 0 if calculation fails
+        }
     }
 } 

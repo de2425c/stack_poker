@@ -11,10 +11,14 @@ struct ChallengeDashboardView: View {
     let userId: String
     
     @State private var showingBankrollSetup = false
-    @State private var selectedChallenge: Challenge?
+    @State private var selectedChallengeID: String?
     @State private var showingChallengeDetail = false
     @State private var showingChallengeCompleted = false
     @State private var showingSessionSetup = false
+    @State private var showShareChallengePrompt = false
+    @State private var challengeToShare: Challenge? = nil
+    @State private var prefilledPostContent: String = ""
+    @State private var showPostEditorFromDashboard = false
     
     var body: some View {
         ZStack {
@@ -111,10 +115,11 @@ struct ChallengeDashboardView: View {
                                 ChallengeProgressCard(challenge: challenge)
                                     .padding(.horizontal, 20)
                                     .onTapGesture {
-                                        selectedChallenge = challenge
                                         if challenge.isCompleted {
+                                            self.selectedChallengeID = challenge.id
                                             showingChallengeCompleted = true
                                         } else {
+                                            self.selectedChallengeID = challenge.id
                                             showingChallengeDetail = true
                                         }
                                     }
@@ -134,7 +139,7 @@ struct ChallengeDashboardView: View {
                                 CompletedChallengeCard(challenge: challenge)
                                     .padding(.horizontal, 20)
                                     .onTapGesture {
-                                        selectedChallenge = challenge
+                                        self.selectedChallengeID = challenge.id
                                         // Always show completed view for cards in this section
                                         showingChallengeCompleted = true 
                                     }
@@ -164,26 +169,75 @@ struct ChallengeDashboardView: View {
             if let challenge = completedChallenge {
                 // Show celebration after a brief delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    selectedChallenge = challenge
+                    self.selectedChallengeID = challenge.id
                     showingChallengeCompleted = true
                     // Clear the completed challenge to prevent showing again
                     challengeService.justCompletedChallenge = nil
                 }
             }
         }
-        .sheet(isPresented: $showingBankrollSetup) {
-            BankrollChallengeSetupView(userId: userId)
-                .environmentObject(challengeService)
-                .environmentObject(sessionStore)
+        .alert("Challenge Created!", isPresented: $showShareChallengePrompt) {
+            Button("Share Challenge") {
+                print("🚀 User chose to share challenge")
+                if let ch = challengeToShare {
+                    // Build prefilled content via ChallengeDisplayModel
+                    let model = ChallengeDisplayModel(challenge: ch)
+                    prefilledPostContent = model.generatePostContent(isStarting: true)
+                    showPostEditorFromDashboard = true
+                    print("📝 Opening post editor with prefilled content")
+                }
+                challengeService.justCreatedChallenge = nil
+                print("🧹 Cleared justCreatedChallenge")
+            }
+            Button("Not Now", role: .cancel) {
+                print("❌ User chose not to share challenge")
+                challengeService.justCreatedChallenge = nil
+                print("🧹 Cleared justCreatedChallenge")
+            }
+        } message: {
+            Text("Would you like to share that you started this challenge?")
         }
-        .sheet(isPresented: $showingSessionSetup) {
+        .onChange(of: showShareChallengePrompt) { isShowing in
+            print("🔔 Share prompt visibility changed: \(isShowing)")
+        }
+        .sheet(isPresented: $showingBankrollSetup, onDismiss: {
+            // Check if a challenge was just created when the sheet dismisses
+            print("🔍 Bankroll setup sheet dismissed. justCreatedChallenge: \(challengeService.justCreatedChallenge?.title ?? "nil")")
+            if challengeService.justCreatedChallenge != nil {
+                // Small delay to ensure the sheet is fully dismissed before showing alert
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    if let ch = challengeService.justCreatedChallenge {
+                        print("🎯 Setting up share prompt for challenge: \(ch.title)")
+                        self.challengeToShare = ch
+                        self.showShareChallengePrompt = true
+                    }
+                }
+            }
+        }) {
+            BankrollChallengeSetupView(challengeService: challengeService, sessionStore: sessionStore, userId: userId)
+        }
+        .sheet(isPresented: $showingSessionSetup, onDismiss: {
+            // Check if a challenge was just created when the sheet dismisses
+            print("🔍 Session setup sheet dismissed. justCreatedChallenge: \(challengeService.justCreatedChallenge?.title ?? "nil")")
+            if challengeService.justCreatedChallenge != nil {
+                // Small delay to ensure the sheet is fully dismissed before showing alert
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    if let ch = challengeService.justCreatedChallenge {
+                        print("🎯 Setting up share prompt for challenge: \(ch.title)")
+                        self.challengeToShare = ch
+                        self.showShareChallengePrompt = true
+                    }
+                }
+            }
+        }) {
             SessionChallengeSetupView(userId: userId)
                 .environmentObject(challengeService)
                 .environmentObject(sessionStore)
         }
         .sheet(isPresented: $showingChallengeDetail) {
-            if let challenge = selectedChallenge {
-                ChallengeDetailView(challenge: challenge, userId: userId)
+            if let challengeID = selectedChallengeID,
+               let index = challengeService.activeChallenges.firstIndex(where: { $0.id == challengeID }) {
+                ChallengeDetailView(challenge: $challengeService.activeChallenges[index], userId: userId)
                     .environmentObject(challengeService)
                     .environmentObject(sessionStore)
                     .environmentObject(userService)
@@ -192,11 +246,24 @@ struct ChallengeDashboardView: View {
             }
         }
         .fullScreenCover(isPresented: $showingChallengeCompleted) {
-            if let challenge = selectedChallenge {
-                ChallengeCompletedView(challenge: challenge)
+            if let challengeID = selectedChallengeID {
+                let challenge = (challengeService.activeChallenges + challengeService.completedChallenges).first { $0.id == challengeID }
+                
+                if let challenge = challenge {
+                    ChallengeCompletedView(challenge: challenge)
+                        .environmentObject(challengeService)
+                        .environmentObject(userService)
+                        .environmentObject(postService)
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showPostEditorFromDashboard) {
+            if let ch = challengeToShare {
+                PostEditorView(userId: userId, prefilledContent: prefilledPostContent, challengeToShare: ch)
                     .environmentObject(challengeService)
-                    .environmentObject(userService)
+                    .environmentObject(sessionStore)
                     .environmentObject(postService)
+                    .environmentObject(userService)
             }
         }
     }

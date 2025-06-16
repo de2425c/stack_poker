@@ -79,10 +79,10 @@ struct ProfileView: View {
     
     init(userId: String) {
         self.userId = userId
-        let sessionStore = SessionStore(userId: userId)
-        let handStore = HandStore(userId: userId)
         let bankrollStore = BankrollStore(userId: userId)
-        let challengeService = ChallengeService(userId: userId)
+        let sessionStore = SessionStore(userId: userId, bankrollStore: bankrollStore)
+        let handStore = HandStore(userId: userId)
+        let challengeService = ChallengeService(userId: userId, bankrollStore: bankrollStore)
         
         _sessionStore = StateObject(wrappedValue: sessionStore)
         _handStore = StateObject(wrappedValue: handStore)

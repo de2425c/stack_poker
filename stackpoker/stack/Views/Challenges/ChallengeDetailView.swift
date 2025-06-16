@@ -8,7 +8,7 @@ struct ChallengeDetailView: View {
     @EnvironmentObject private var postService: PostService
     @EnvironmentObject private var handStore: HandStore
     
-    @State var challenge: Challenge
+    @Binding var challenge: Challenge
     let userId: String
     
     @State private var showingUpdatePost = false
@@ -77,7 +77,7 @@ struct ChallengeDetailView: View {
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.gray)
                         
-                        Text(formattedValue(challenge.currentValue, type: challenge.type))
+                        Text(formattedValue(displayCurrentValue, type: challenge.type))
                             .font(.system(size: 36, weight: .bold))
                             .foregroundColor(.white)
                     }
@@ -97,21 +97,21 @@ struct ChallengeDetailView: View {
                 
                 // Progress Percentage
                 HStack {
-                    Text("\(Int(challenge.progressPercentage))% Complete")
+                    Text("\(Int(displayProgress))% Complete")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(colorForType(challenge.type))
                     
                     Spacer()
                     
                     if !challenge.isCompleted {
-                        Text("\(formattedValue(challenge.remainingValue, type: challenge.type)) remaining")
+                        Text("\(formattedValue(displayRemainingValue, type: challenge.type)) remaining")
                             .font(.system(size: 14))
                             .foregroundColor(.gray)
                     }
                 }
                 
                 // Progress Bar
-                ProgressView(value: challenge.progressPercentage / 100)
+                ProgressView(value: displayProgress / 100)
                     .progressViewStyle(LinearProgressViewStyle(tint: colorForType(challenge.type)))
                     .scaleEffect(x: 1, y: 2, anchor: .center)
             }
@@ -252,8 +252,8 @@ struct ChallengeDetailView: View {
         .sheet(isPresented: $showingUpdatePost) {
             PostEditorView(
                 userId: userId,
-                initialText: generateChallengeUpdateText(for: challenge),
-                challengeToShare: nil
+                challengeToShare: challenge,
+                isChallengeUpdate: true
             )
             .environmentObject(postService)
             .environmentObject(userService)
@@ -312,10 +312,20 @@ struct ChallengeDetailView: View {
     }
     
     private func generateChallengeUpdateText(for challenge: Challenge) -> String {
+        // Dynamically determine current progress value, especially for session challenges
+        var current: Double = challenge.currentValue
+        if challenge.type == .session {
+            if let _ = challenge.targetHours {
+                current = challenge.totalHoursPlayed
+            } else if let _ = challenge.targetSessionCount {
+                current = Double(challenge.validSessionsCount)
+            }
+        }
+        
         var updateText = """
         🎯 Challenge Update: \(challenge.title)
         
-        Progress: \(formattedValue(challenge.currentValue, type: challenge.type))
+        Progress: \(formattedValue(current, type: challenge.type))
         Target: \(formattedValue(challenge.targetValue, type: challenge.type))
         
         \(Int(challenge.progressPercentage))% Complete
@@ -330,6 +340,29 @@ struct ChallengeDetailView: View {
         updateText += "\n\n#ChallengeProgress #\(challenge.type.rawValue.capitalized)Goal"
         
         return updateText
+    }
+    
+    private var displayCurrentValue: Double {
+        if challenge.isCompleted {
+            return challenge.targetValue
+        }
+        if challenge.type == .session {
+            if challenge.targetSessionCount != nil {
+                return Double(challenge.validSessionsCount)
+            } else if challenge.targetHours != nil {
+                return challenge.totalHoursPlayed
+            }
+        }
+        return challenge.currentValue
+    }
+    
+    private var displayProgress: Double {
+        challenge.isCompleted ? 100 : challenge.progressPercentage
+    }
+    
+    private var displayRemainingValue: Double {
+        if challenge.isCompleted { return 0 }
+        return challenge.remainingValue
     }
 }
 

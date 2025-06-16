@@ -80,6 +80,7 @@ struct Challenge: Identifiable, Codable {
     var currentSessionCount: Int // Number of sessions completed
     var totalHoursPlayed: Double // Total hours across all sessions
     var validSessionsCount: Int // Sessions that meet minimum hour requirement
+    var countedSessionIds: [String] = [] // Sessions already counted towards this challenge
     
     init(id: String? = nil,
          userId: String,
@@ -294,6 +295,10 @@ struct Challenge: Identifiable, Codable {
             dict["maxSessionsPerDay"] = maxSessionsPerDay
         }
         
+        if !countedSessionIds.isEmpty {
+            dict["countedSessionIds"] = countedSessionIds
+        }
+        
         return dict
     }
     
@@ -346,6 +351,7 @@ struct Challenge: Identifiable, Codable {
         self.currentSessionCount = data["currentSessionCount"] as? Int ?? 0
         self.totalHoursPlayed = data["totalHoursPlayed"] as? Double ?? 0
         self.validSessionsCount = data["validSessionsCount"] as? Int ?? 0
+        self.countedSessionIds = data["countedSessionIds"] as? [String] ?? []
     }
 }
 

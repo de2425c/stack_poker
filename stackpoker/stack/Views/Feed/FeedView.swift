@@ -39,7 +39,10 @@ struct FeedView: View {
     init(userId: String = Auth.auth().currentUser?.uid ?? "") {
         self.userId = userId
         _handStore = StateObject(wrappedValue: HandStore(userId: userId)) // Initialize HandStore
-        _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId)) // Initialize SessionStore
+        
+        // Create bankrollStore first, then pass it to sessionStore
+        let bankrollStore = BankrollStore(userId: userId)
+        _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId, bankrollStore: bankrollStore)) // Initialize SessionStore with bankrollStore
         
         // Configure the Kingfisher cache
         let cache = ImageCache.default
@@ -435,7 +438,7 @@ struct FeedView: View {
                         
                         // Show the actual post
                         VStack(spacing: 0) {
-                            PostView(
+                            PostCardView(
                                 post: post,
                                 onLike: {
                                     Task {
@@ -450,10 +453,11 @@ struct FeedView: View {
                                     selectedPost = post
                                     showingComments = true
                                 },
-                                userId: userId,
-                                onImageTapped: { url in
-                                    viewerImageURL = url
-                                }
+                                onDelete: {
+                                    deletePost(post)
+                                },
+                                isCurrentUser: post.userId == userId,
+                                userId: userId
                             )
                             Divider() 
                                 .frame(height: 0.5) 
@@ -574,17 +578,21 @@ private struct PostContextTagView: View {
         HStack(spacing: 6) {
             Image(systemName: iconName)
                 .font(.system(size: 13))
-                .foregroundColor(Color.gray.opacity(0.8))
+                .foregroundColor(isChallenge ? .yellow : Color.gray.opacity(0.8))
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.9))
+                .foregroundColor(isChallenge ? .yellow : Color.gray.opacity(0.9))
                 .lineLimit(1)
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(Color.gray.opacity(0.8))
+                .foregroundColor(isChallenge ? .yellow.opacity(0.8) : Color.gray.opacity(0.8))
             Spacer()
         }
         .padding(.bottom, 8) // Add some space below this tag
+    }
+    
+    private var isChallenge: Bool {
+        return title.contains("Challenge") || iconName == "flag.fill"
     }
 }
 
@@ -618,6 +626,11 @@ struct BasicPostCardView: View {
     private var contextTagInfo: (title: String, iconName: String)? {
         let iconName = "rectangle.stack.fill"
         var tempTitle: String? // Use a temporary variable to build the core title
+
+        // Check for challenge posts first
+        if let challengeStatus = challengeStatusText(post.content) {
+            return (challengeStatus, "flag.fill")
+        }
 
         // Initial debug prints
 
@@ -854,14 +867,39 @@ struct BasicPostCardView: View {
                             .padding(.bottom, 8)
                     }
                 } else if !post.content.isEmpty { // Regular text posts
-                    Text(post.content)
-                        .font(.system(size: 16))
-                        .foregroundColor(.white.opacity(0.95))
-                        .lineSpacing(5)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 6) // Reduced from 14 to bring comment closer to top
-                        .padding(.bottom, 8)
+                    // Use the unified challenge parser
+                    if let challengeDisplayModel = ChallengePostParser.parse(post.content) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            // Extract and show user comment if any
+                            if let userComment = ChallengePostParser.extractUserComment(post.content), !userComment.isEmpty {
+                                Text(userComment)
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white.opacity(0.95))
+                                    .lineSpacing(5)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 6)
+                                    .padding(.bottom, 8)
+                            }
+
+                            // Display the challenge progress component using the display model
+                            ChallengeProgressComponent(
+                                challenge: challengeDisplayModel.challenge,
+                                isCompact: true // Use compact for the feed
+                            )
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                        }
+                    } else {
+                        Text(post.content)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.95))
+                            .lineSpacing(5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 6) // Reduced from 14 to bring comment closer to top
+                            .padding(.bottom, 8)
+                    }
                 }
                 
                 // Images
@@ -1006,6 +1044,11 @@ struct PostCardView: View {
     private var contextTagInfo: (title: String, iconName: String)? {
         let iconName = "rectangle.stack.fill"
         var tempTitle: String? // Use a temporary variable to build the core title
+
+        // Check for challenge posts first
+        if let challengeStatus = challengeStatusText(post.content) {
+            return (challengeStatus, "flag.fill")
+        }
 
         // Initial debug prints
 
@@ -1233,7 +1276,7 @@ struct PostCardView: View {
                         .lineSpacing(5)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16)
-                        .padding(.top, post.handHistory != nil ? 8 : 14)
+                        .padding(.top, post.handHistory != nil ? 4 : 14)
                         .padding(.bottom, 8)
                 }
             } else if post.sessionId != nil { // Live session posts (chip updates or start)
@@ -1264,14 +1307,39 @@ struct PostCardView: View {
                         .padding(.bottom, 8)
                 }
             } else if !post.content.isEmpty { // Regular text posts
-                Text(post.content)
-                    .font(.system(size: 16))
-                    .foregroundColor(.white.opacity(0.95))
-                    .lineSpacing(5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6) // Reduced from 14 to bring comment closer to top
-                    .padding(.bottom, 8)
+                // Use the unified challenge parser
+                if let challengeDisplayModel = ChallengePostParser.parse(post.content) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Extract and show user comment if any
+                        if let userComment = ChallengePostParser.extractUserComment(post.content), !userComment.isEmpty {
+                            Text(userComment)
+                                .font(.system(size: 16))
+                                .foregroundColor(.white.opacity(0.95))
+                                .lineSpacing(5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 6)
+                                .padding(.bottom, 8)
+                        }
+
+                        // Display the challenge progress component using the display model
+                        ChallengeProgressComponent(
+                            challenge: challengeDisplayModel.challenge,
+                            isCompact: true // Use compact for the feed
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                    }
+                } else {
+                    Text(post.content)
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.95))
+                        .lineSpacing(5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 6) // Reduced from 14 to bring comment closer to top
+                        .padding(.bottom, 8)
+                }
             }
             
             // Images - Twitter-like layout
@@ -1369,6 +1437,18 @@ struct PostCardView: View {
                 HandReplayView(hand: hand, userId: userId)
             }
         }
+    }
+
+    // Determine challenge status for this post
+    private func challengeStatusText(_ content: String) -> String? {
+        if content.contains("🎯 Started a new challenge") {
+            return "Challenge Started"
+        } else if content.contains("🎯 Challenge Update") {
+            return "Challenge Update"
+        } else if content.contains("🎉 Session Challenge Completed") || content.contains("🎉 Challenge Completed") {
+            return "Challenge Completed"
+        }
+        return nil
     }
 }
 
@@ -2455,15 +2535,12 @@ private struct PostBodyContentView: View {
             // Parse completed session info first
             let (parsedCompletedSession, commentTextForCompletedSession) = parseCompletedSessionInfo(from: post.content)
 
-            // Check for challenge posts first
-            let challengeStartedInfo = parseChallengeStartFromPost(post.content)
-            let challengeUpdateInfo = parseChallengeUpdateFromPost(post.content)
-
-            if let challengeInfo = challengeStartedInfo ?? challengeUpdateInfo { // Prioritize started, then update
-                VStack(alignment: .leading, spacing: 8) { // Reduced from 12 to 8
-                    // Show any text content before the challenge info
-                    if let additionalText = extractAdditionalTextFromChallengePost(post.content), !additionalText.isEmpty {
-                        Text(additionalText)
+            // Check for challenge posts first using unified parser
+            if let challengeDisplayModel = ChallengePostParser.parse(post.content) {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Extract and show user comment if any
+                    if let userComment = ChallengePostParser.extractUserComment(post.content), !userComment.isEmpty {
+                        Text(userComment)
                             .font(.system(size: 17))
                             .foregroundColor(.white.opacity(0.95))
                             .lineSpacing(6)
@@ -2471,17 +2548,9 @@ private struct PostBodyContentView: View {
                             .padding(.horizontal, 16)
                     }
                     
-                    // Challenge progress component
+                    // Display the challenge progress component using the display model
                     ChallengeProgressComponent(
-                        challenge: Challenge(
-                            userId: post.userId,
-                            type: challengeInfo.type,
-                            title: challengeInfo.title,
-                            description: "", // Empty description for display purposes
-                            targetValue: challengeInfo.targetValue,
-                            currentValue: challengeInfo.currentValue,
-                            endDate: challengeInfo.deadline
-                        ),
+                        challenge: challengeDisplayModel.challenge,
                         isCompact: false // Always show full detail in PostDetailView context
                     )
                     .padding(.horizontal, 16)
@@ -2542,7 +2611,7 @@ private struct PostBodyContentView: View {
                         LiveStackUpdateCardView(parsedContent: parsed)
                             .padding(.horizontal, 16)
                     }
-                } else { // Fallback for session posts that don't parse
+                } else { // Fallback for session posts that don't parse with parseSessionContent
                     Text(post.content)
                         .font(.system(size: 17))
                         .foregroundColor(.white.opacity(0.95))
@@ -2973,115 +3042,7 @@ extension String: Identifiable {
     public var id: String { self }
 }
 
-// Helper functions for challenge detection in PostBodyContentView
-private func parseChallengeUpdateFromPost(_ content: String) -> (title: String, type: ChallengeType, currentValue: Double, targetValue: Double, deadline: Date?)? {
-    guard content.contains("🎯 Challenge Update:") else { return nil }
-    
-    // Extract title
-    let lines = content.components(separatedBy: "\n")
-    guard let firstLine = lines.first else { return nil }
-    
-    let title = firstLine.replacingOccurrences(of: "🎯 Challenge Update: ", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-    
-    // Extract progress and target values
-    var currentValue: Double = 0
-    var targetValue: Double = 0
-    var challengeType: ChallengeType = .bankroll
-    var deadline: Date? = nil
-    
-    for line in lines {
-        if line.hasPrefix("Progress: ") {
-            let valueStr = line.replacingOccurrences(of: "Progress: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
-            currentValue = Double(valueStr) ?? 0
-        }
-        if line.hasPrefix("Target: ") {
-            let valueStr = line.replacingOccurrences(of: "Target: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
-            targetValue = Double(valueStr) ?? 0
-        }
-        if line.hasPrefix("Deadline: ") {
-            let dateString = line.replacingOccurrences(of: "Deadline: ", with: "")
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            deadline = formatter.date(from: dateString)
-        }
-        if line.contains("#BankrollGoal") {
-            challengeType = .bankroll
-        } else if line.contains("#HandsGoal") {
-            challengeType = .hands
-        } else if line.contains("#SessionGoal") {
-            challengeType = .session
-        }
-    }
-    
-    return (title: title, type: challengeType, currentValue: currentValue, targetValue: targetValue, deadline: deadline)
-}
 
-private func parseChallengeStartFromPost(_ content: String) -> (title: String, type: ChallengeType, currentValue: Double, targetValue: Double, deadline: Date?)? {
-    guard content.contains("🎯 Started a new challenge:") else { return nil }
-
-    let lines = content.components(separatedBy: "\n")
-    guard let firstLine = lines.first else { return nil }
-
-    let title = firstLine.replacingOccurrences(of: "🎯 Started a new challenge: ", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-
-    var currentValue: Double = 0
-    var targetValue: Double = 0
-    var challengeType: ChallengeType = .bankroll // Default
-    var deadline: Date? = nil
-
-    for line in lines {
-        if line.hasPrefix("Current: ") {
-            let valueStr = line.replacingOccurrences(of: "Current: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
-            currentValue = Double(valueStr) ?? 0
-        }
-        if line.hasPrefix("Target: ") {
-            let valueStr = line.replacingOccurrences(of: "Target: ", with: "").replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
-            targetValue = Double(valueStr) ?? 0
-        }
-        if line.hasPrefix("Deadline: ") {
-            let dateString = line.replacingOccurrences(of: "Deadline: ", with: "")
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            deadline = formatter.date(from: dateString)
-        }
-        if line.contains("#BankrollGoal") {
-            challengeType = .bankroll
-        } else if line.contains("#HandsGoal") {
-            challengeType = .hands
-        } else if line.contains("#SessionGoal") {
-            challengeType = .session
-        }
-    }
-    // For "started" posts, if current value is 0 and target is also 0 (error in parsing or bad data), it's not valid.
-    // A valid started challenge should have a target.
-    if targetValue == 0 { return nil }
-
-    return (title: title, type: challengeType, currentValue: currentValue, targetValue: targetValue, deadline: deadline)
-}
-
-private func extractAdditionalTextFromChallengePost(_ content: String) -> String? {
-    let lines = content.components(separatedBy: "\n")
-    var additionalLines: [String] = []
-    var inMetadata = false
-    
-    for line in lines {
-        let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Skip the title line and metadata lines
-        if trimmedLine.hasPrefix("🎯 Challenge Update:") ||
-           trimmedLine.hasPrefix("Progress:") ||
-           trimmedLine.hasPrefix("Target:") ||
-           trimmedLine.hasPrefix("#") ||
-           trimmedLine.isEmpty {
-            continue
-        }
-        
-        additionalLines.append(line)
-    }
-    
-    let result = additionalLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    return result.isEmpty ? nil : result
-}
 
 // MARK: - Record Activity Post Card (Strava-style)
 struct RecordActivityPostCard: View {
@@ -3422,6 +3383,20 @@ struct CompactUserSkeletonView: View {
         }
     }
 }
+
+// Determine challenge post status (start / update / completed)
+private func challengeStatusText(_ content: String) -> String? {
+    if content.contains("🎯 Started a new challenge") {
+        return "Challenge Started"
+    } else if content.contains("🎯 Challenge Update") {
+        return "Challenge Update"
+    } else if content.contains("🎉 Session Challenge Completed") || content.contains("🎉 Challenge Completed") {
+        return "Challenge Completed"
+    }
+    return nil
+}
+
+
 
 
 

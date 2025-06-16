@@ -1,36 +1,37 @@
 import SwiftUI
 
 struct BankrollChallengeSetupView: View {
-    @Environment(\.dismiss) var dismiss
-    @EnvironmentObject private var challengeService: ChallengeService
-    @EnvironmentObject private var sessionStore: SessionStore
-    @EnvironmentObject private var postService: PostService
-    @EnvironmentObject private var userService: UserService
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var challengeService: ChallengeService
+    @ObservedObject var sessionStore: SessionStore
+    @EnvironmentObject var userService: UserService
+    @StateObject private var bankrollStore: BankrollStore
     
     let userId: String
     
-    @State private var targetBankroll: String = ""
-    @State private var challengeTitle: String = ""
-    @State private var isPublic: Bool = true
-    @State private var hasDeadline: Bool = false
-    @State private var deadline: Date = Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date()
-    @State private var isCreating: Bool = false
-    @State private var showError: Bool = false
-    @State private var errorMessage: String = ""
-    @FocusState private var isTargetBankrollFocused: Bool
-    
-    @State private var showShareChallengeSheet = false
-    @State private var challengeToShare: Challenge?
-    @State private var showPostEditor: Bool = false
-    @State private var prefilledPostContent: String = ""
-    
-    @State private var deadlineAmount: String = "30"
+    @State private var targetBankroll = ""
+    @State private var challengeTitle = ""
+    @State private var hasDeadline = false
+    @State private var deadlineAmount = "30"
     @State private var deadlineUnit: DeadlineUnit = .days
+    @State private var isPublic = true
+    @State private var isCreating = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+    
+    @FocusState private var isTargetBankrollFocused: Bool
     @FocusState private var isDeadlineAmountFocused: Bool
+    
+    init(challengeService: ChallengeService, sessionStore: SessionStore, userId: String) {
+        self.challengeService = challengeService
+        self.sessionStore = sessionStore
+        self.userId = userId
+        self._bankrollStore = StateObject(wrappedValue: BankrollStore(userId: userId))
+    }
     
     enum DeadlineUnit: String, CaseIterable {
         case days = "days"
-        case weeks = "weeks" 
+        case weeks = "weeks"
         case months = "months"
         
         var displayName: String {
@@ -39,7 +40,8 @@ struct BankrollChallengeSetupView: View {
     }
     
     private var currentBankroll: Double {
-        return sessionStore.sessions.reduce(0) { $0 + $1.profit }
+        let sessionProfit = sessionStore.sessions.reduce(0) { $0 + $1.profit }
+        return sessionProfit + bankrollStore.bankrollSummary.currentTotal
     }
     
     private var targetBankrollValue: Double {
@@ -328,42 +330,6 @@ struct BankrollChallengeSetupView: View {
         } message: {
             Text(errorMessage)
         }
-        .onReceive(challengeService.$justCreatedChallenge) { newChallenge in
-            if let newChallenge = newChallenge {
-                self.challengeToShare = newChallenge
-                self.showShareChallengeSheet = true
-            }
-        }
-        .alert("Challenge Created!", isPresented: $showShareChallengeSheet) {
-            Button("Share Challenge") {
-                if let challenge = challengeToShare {
-                    shareChallenge(challenge)
-                }
-                challengeService.justCreatedChallenge = nil
-            }
-            Button("Not Now", role: .cancel) { 
-                challengeService.justCreatedChallenge = nil
-                dismiss()
-            }
-        } message: {
-            Text("Would you like to share that you started this challenge?")
-        }
-        .sheet(isPresented: $showPostEditor, onDismiss: {
-            challengeService.justCreatedChallenge = nil
-            dismiss()
-        }) {
-            if let challenge = challengeToShare {
-                PostEditorView(
-                    userId: userId,
-                    prefilledContent: prefilledPostContent,
-                    challengeToShare: challenge
-                )
-                .environmentObject(challengeService)
-                .environmentObject(sessionStore)
-                .environmentObject(postService)
-                .environmentObject(userService)
-            }
-        }
     }
     
     private func hideKeyboard() {
@@ -393,6 +359,8 @@ struct BankrollChallengeSetupView: View {
                 
                 await MainActor.run {
                     isCreating = false
+                    // Dismiss this view immediately after creating challenge
+                    dismiss()
                 }
             } catch {
                 await MainActor.run {
@@ -401,39 +369,6 @@ struct BankrollChallengeSetupView: View {
                     showError = true
                 }
             }
-        }
-    }
-    
-    private func shareChallenge(_ challenge: Challenge) {
-        var challengeStartText = """
-        🎯 Started a new challenge: \(challenge.title)
-        
-        Target: \(formattedValue(challenge.targetValue, type: challenge.type))
-        Current: \(formattedValue(challenge.currentValue, type: challenge.type))
-        """
-        
-        // Add deadline if present
-        if let deadline = challenge.endDate {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            challengeStartText += "\nDeadline: \(formatter.string(from: deadline))"
-        }
-        
-        challengeStartText += "\n\n#PokerChallenge #\(challenge.type.rawValue.capitalized)Goal"
-        
-        prefilledPostContent = challengeStartText
-        self.challengeToShare = challenge
-        showPostEditor = true
-    }
-    
-    private func formattedValue(_ value: Double, type: ChallengeType) -> String {
-        switch type {
-        case .bankroll:
-            return "$\(Int(value).formattedWithCommas)"
-        case .hands:
-            return "\(Int(value))"
-        case .session:
-            return "\(Int(value))"
         }
     }
     

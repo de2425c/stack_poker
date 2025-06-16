@@ -16,9 +16,10 @@ struct DashboardView: View {
     private let timeRanges = ["24H", "1W", "1M", "6M", "1Y", "All"]
     
     init(userId: String, initialSelectedTab: Int = 0) {
+        let bankrollStore = BankrollStore(userId: userId)
         _handStore = StateObject(wrappedValue: HandStore(userId: userId))
-        _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId))
-        _bankrollStore = StateObject(wrappedValue: BankrollStore(userId: userId))
+        _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId, bankrollStore: bankrollStore))
+        _bankrollStore = StateObject(wrappedValue: bankrollStore)
         // Initialize selectedTab with the provided parameter
         _selectedTab = State(initialValue: initialSelectedTab)
         

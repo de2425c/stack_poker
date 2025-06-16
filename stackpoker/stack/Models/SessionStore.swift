@@ -144,7 +144,7 @@ class SessionStore: ObservableObject {
     // Maximum length (in seconds) that a live session is allowed to run (120 hours).
     private let maximumSessionDuration: TimeInterval = 120 * 60 * 60
     
-    init(userId: String) {
+    init(userId: String, bankrollStore: BankrollStore? = nil) {
         self.userId = userId
         print("🔄 SESSION STORE: Initializing for user \(userId)")
 
@@ -157,6 +157,8 @@ class SessionStore: ObservableObject {
             return
         }
         
+       
+        
         // Initialize with clean defaults
         self.liveSession = LiveSessionData()
         self.enhancedLiveSession = LiveSessionData_Enhanced(basicSession: self.liveSession)
@@ -164,7 +166,7 @@ class SessionStore: ObservableObject {
         
         // Initialize challenge service asynchronously on main actor
         Task { @MainActor in
-            self.challengeService = ChallengeService(userId: userId)
+            self.challengeService = ChallengeService(userId: userId, bankrollStore: bankrollStore)
         }
         
         // Load any existing session state
@@ -184,6 +186,13 @@ class SessionStore: ObservableObject {
     // Method to set challenge service (for dependency injection if needed)
     func setChallengeService(_ service: ChallengeService) {
         self.challengeService = service
+    }
+    
+    // Method to update challenge service with bankrollStore
+    func updateChallengeServiceWithBankrollStore(_ bankrollStore: BankrollStore) {
+        Task { @MainActor in
+            self.challengeService?.setBankrollStore(bankrollStore)
+        }
     }
     
     // MARK: - Enhanced Session Methods
@@ -291,7 +300,24 @@ class SessionStore: ObservableObject {
     }
     
     func addSession(_ sessionData: [String: Any], completion: @escaping (Error?) -> Void) {
-        db.collection("sessions").addDocument(data: sessionData, completion: completion)
+        let docRef = db.collection("sessions").document() // create reference first to use inside closure safely
+        docRef.setData(sessionData) { error in
+            if let err = error {
+                completion(err)
+                return
+            }
+            // Build a Session object with the saved data and new document ID
+            var mergedData = sessionData
+            mergedData["id"] = docRef.documentID // convenience
+            let session = Session(id: docRef.documentID, data: mergedData)
+            // Update challenges asynchronously
+            Task {
+                await self.challengeService?.updateChallengesFromCompletedSession(session)
+            }
+            DispatchQueue.main.async {
+                completion(nil)
+            }
+        }
     }
     
     func deleteSession(_ sessionId: String, completion: @escaping (Error?) -> Void) {
