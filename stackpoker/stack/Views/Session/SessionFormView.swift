@@ -594,6 +594,7 @@ struct SessionFormView: View {
 
     @State private var showStakingSection = false // To toggle visibility of staking fields
     @State private var showingStakingPopup = false // New state for floating popup
+    @State private var showGameSelectionAlert = false // Alert for missing game selection
 
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var stakeService = StakeService() // Add StakeService
@@ -652,9 +653,7 @@ struct SessionFormView: View {
                         // Content
                         ScrollView(showsIndicators: false) {
                             VStack(spacing: 20) {
-                                Spacer()
-                                    .frame(height: 64)
-                                    
+                                // Removed large spacer to reduce top padding entirely
                                 // Session Type Picker
                                 Picker("Session Type", selection: $selectedLogType) {
                                     ForEach(SessionLogType.allCases) { type in
@@ -683,11 +682,28 @@ struct SessionFormView: View {
                                 // Game Selection Section (Conditional)
                                 if selectedLogType == .cashGame {
                                     VStack(alignment: .leading, spacing: 10) {
-                                        Text("Select Game")
-                                            .font(.plusJakarta(.headline, weight: .medium))
-                                            .foregroundColor(primaryTextColor)
-                                            .padding(.leading, 6)
-                                            .padding(.bottom, 2)
+                                        HStack {
+                                            Text("Select Game")
+                                                .font(.plusJakarta(.headline, weight: .medium))
+                                                .foregroundColor(primaryTextColor)
+                                                .padding(.leading, 6)
+                                            
+                                            Spacer()
+                                            
+                                            // Clean + button for adding games
+                                            Button(action: { showingAddGame = true }) {
+                                                Image(systemName: "plus")
+                                                    .font(.system(size: 16, weight: .medium))
+                                                    .foregroundColor(primaryTextColor)
+                                                    .frame(width: 28, height: 28)
+                                                    .background(
+                                                        Circle()
+                                                            .fill(Color.gray.opacity(0.3))
+                                                    )
+                                            }
+                                            .padding(.trailing, 6)
+                                        }
+                                        .padding(.bottom, 2)
                                         
                                         ScrollView(.horizontal, showsIndicators: false) {
                                             HStack(spacing: 12) {
@@ -718,15 +734,6 @@ struct SessionFormView: View {
                                                             Label("Delete Game", systemImage: "trash")
                                                         }
                                                     }
-                                                }
-                                                // Add Game Button
-                                                AddGameButton(
-                                                    textColor: primaryTextColor,
-                                                    glassOpacity: glassOpacity,
-                                                    materialOpacity: materialOpacity
-                                                )
-                                                .onTapGesture {
-                                                    showingAddGame = true
                                                 }
                                             }
                                             .padding(.horizontal, 4)
@@ -809,8 +816,6 @@ struct SessionFormView: View {
 
                                 // Staking Section Trigger - Extracted to a computed property
                                 stakingSectionTriggerButton
-
-                                Spacer()
                             }
                         }
                         
@@ -833,10 +838,10 @@ struct SessionFormView: View {
                                 .cornerRadius(27)
                             }
                             .padding(.horizontal, 20)
-                            .padding(.bottom, 34)
+                            .padding(.bottom, 12)
                         }
                         .background(Color.clear)
-                        .padding(.bottom, 50)
+                        .padding(.bottom, 16)
                     }
                     .frame(width: geometry.size.width)
                 }
@@ -870,6 +875,11 @@ struct SessionFormView: View {
         }
         .sheet(isPresented: $showingAddGame) {
             AddCashGameView(cashGameService: cashGameService)
+        }
+        .alert("Select a Game", isPresented: $showGameSelectionAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Please select a game before logging your session.")
         }
         .alert("Delete Cash Game?", isPresented: $showingDeleteGameAlert, presenting: gameToDelete) { gameToDelete in // Added delete confirmation alert
             Button("Delete \(gameToDelete.name)", role: .destructive) {
@@ -1065,7 +1075,8 @@ struct SessionFormView: View {
             guard let game = selectedGame else {
 
                 isLoading = false
-                // TODO: Show alert to user
+                // Prompt user to select a game before proceeding
+                showGameSelectionAlert = true
                 return
             }
             sessionDetails["gameType"] = selectedLogType.rawValue // "CASH GAME"

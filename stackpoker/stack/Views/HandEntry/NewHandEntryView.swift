@@ -103,7 +103,6 @@ struct NewHandEntryView: View {
     @State private var cardSelectionTarget: CardSelectionTarget? = nil
     @State private var showingTableSetup = false
     @FocusState private var isBetAmountFieldFocused: Bool
-    @State private var playLottieAnimation = false
     
     // State for managing the current step in the hand entry process
     @State private var currentStep: HandEntryStep = .gameSetup
@@ -218,29 +217,6 @@ struct NewHandEntryView: View {
                     llmInputScreenView
                 case .summary:
                     summaryScreenView
-                }
-            }
-            
-            // NEW: Full-screen Lottie loading view
-            if viewModel.isParsingLLM {
-                ZStack {
-                    // Color.black.edgesIgnoringSafeArea(.all) // Full screen black background
-                    AppBackgroundView().edgesIgnoringSafeArea(.all) // USE AppBackgroundView
-                    VStack {
-                        LottieView(name: "lottie_white", loopMode: .loop, play: $playLottieAnimation)
-                            // .frame(width: 250, height: 250) // REMOVED to allow full screen
-                        Text("Parsing hand...")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.top, 20)
-                    }
-                }
-                .zIndex(1) // Ensure it's on top
-                .onAppear {
-                    self.playLottieAnimation = true
-                }
-                .onDisappear {
-                    self.playLottieAnimation = false
                 }
             }
         }

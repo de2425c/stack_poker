@@ -2408,7 +2408,11 @@ class NewHandEntryViewModel: ObservableObject {
                 }
                 
                 // Enhanced all-in and call calculation for preflop
-                let isAllIn = llmAction.action.lowercased().contains("all") || llmAction.action.lowercased().contains("shove")
+                let isAllIn = llmAction.action.lowercased() == "all-in" || 
+                             llmAction.action.lowercased() == "allin" || 
+                             llmAction.action.lowercased() == "all in" ||
+                             llmAction.action.lowercased().contains("shove") || 
+                             (llmAction.amount?.lowercased().contains("all") ?? false)
                 
                 if let player = players.first(where: { $0.position == viewModelPosition }) {
                     // Calculate effective stack (after antes)
@@ -2418,9 +2422,9 @@ class NewHandEntryViewModel: ObservableObject {
                     }
                     
                     if isAllIn {
-                        // For all-in actions, use the player's effective stack
-                        finalAmount = effectiveStack
-                        print("Preflop all-in detected for \(viewModelPosition): using effective stack \(effectiveStack)")
+                        // For all-in actions, calculate the player's remaining stack after previous actions
+                        finalAmount = calculateRemainingStack(for: viewModelPosition, upToStreet: .preflop)
+                        print("Preflop all-in detected for \(viewModelPosition): remaining stack \(finalAmount ?? 0)")
                     } else if actionType == .call && (finalAmount == nil || finalAmount == 0) {
                         // For calls with no amount, calculate the call amount
                         var playerContribution: Double = 0
@@ -2467,7 +2471,11 @@ class NewHandEntryViewModel: ObservableObject {
             }
             
             // Check for missing call actions after all-ins
-            self.addMissingCallActionsAfterAllIn(&playerActionQueues, rawActions: rawLLMPreflopActions)
+            // print("DEBUG: About to check for missing call actions. Raw LLM preflop actions count: \(rawLLMPreflopActions.count)")
+            // for action in rawLLMPreflopActions {
+            //     print("DEBUG: Raw LLM action - position: \(action.position), action: \(action.action), amount: \(action.amount ?? "nil")")
+            // }
+            // self.addMissingCallActionsAfterAllIn(&playerActionQueues, rawActions: rawLLMPreflopActions)
         }
         
         // 5B. Initialize all players with their appropriate actions
@@ -2491,9 +2499,9 @@ class NewHandEntryViewModel: ObservableObject {
             
             // Add straddle if applicable
         if hasStraddle, let straddleAmount = straddle, straddleAmount > 0 {
-                // Find UTG or first non-blind position for straddle
-                let nonBlindPositions = preflopOrder.filter { $0 != "SB" && $0 != "BB" }
-                if let straddlePos = nonBlindPositions.first, position == straddlePos {
+                // UTG should always be the straddler, not the first non-blind from preflopOrder
+                // (because preflopOrder removes UTG when straddle is enabled)
+                if position == "UTG" && self.availablePositions.contains("UTG") {
                     let straddleAction = ActionInput(playerName: position, actionType: .bet, amount: straddleAmount, isSystemAction: true)
                     playerActionQueues[position]?.insert(straddleAction, at: 0) // Insert at beginning
                 }
@@ -2529,14 +2537,14 @@ class NewHandEntryViewModel: ObservableObject {
         
         // Handle straddle if present (after BB)
         if hasStraddle, let straddleAmount = straddle, straddleAmount > 0 {
-            let nonBlindPositions = preflopOrder.filter { $0 != "SB" && $0 != "BB" }
-            if let straddlePos = nonBlindPositions.first {
-                if let actions = playerActionQueues[straddlePos], !actions.isEmpty {
+            // UTG should always be the straddler, not the first non-blind from preflopOrder
+            if self.availablePositions.contains("UTG") {
+                if let actions = playerActionQueues["UTG"], !actions.isEmpty {
                     let straddleAction = actions.first!
                     if straddleAction.isSystemAction && straddleAction.actionType == .bet && straddleAction.amount == straddleAmount {
                         finalPreflopActions.append(straddleAction)
-                        playerActionQueues[straddlePos]?.removeFirst()
-                        print("Posted straddle: \(straddlePos) \(straddleAction.actionType.rawValue) \(straddleAction.amount ?? 0)")
+                        playerActionQueues["UTG"]?.removeFirst()
+                        print("Posted straddle: UTG \(straddleAction.actionType.rawValue) \(straddleAction.amount ?? 0)")
                     }
                 }
             }
@@ -2829,11 +2837,25 @@ class NewHandEntryViewModel: ObservableObject {
     }
 
     private func addMissingCallActionsAfterAllIn(_ playerActionQueues: inout [String: [ActionInput]], rawActions: [LLMActionDetail]) {
+        // Debug: Print what we're checking for all-ins
+        if let lastAction = rawActions.last {
+            print("DEBUG: Checking last action for all-in: position=\(lastAction.position), action=\(lastAction.action), contains 'all'=\(lastAction.action.lowercased().contains("all"))")
+        } else {
+            print("DEBUG: No actions to check for all-in")
+        }
+        
         // Check if the last action is an all-in
         guard let lastAction = rawActions.last,
-              lastAction.action.lowercased().contains("all") else {
+              (lastAction.action.lowercased() == "all-in" || 
+               lastAction.action.lowercased() == "allin" || 
+               lastAction.action.lowercased() == "all in" ||
+               lastAction.action.lowercased().contains("shove") || 
+               (lastAction.amount?.lowercased().contains("all") ?? false)) else {
+            print("DEBUG: No all-in detected, returning early")
             return
         }
+        
+        print("DEBUG: All-in detected, proceeding with missing call logic")
         
         let lastActionPosition = mapLLMPositionToViewModelPosition(lastAction.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
         
@@ -2920,12 +2942,25 @@ class NewHandEntryViewModel: ObservableObject {
             // Parse amount from LLM string, handling nil and invalid strings
             var finalAmount: Double? = nil
             if let amountString = llmAction.amount, !amountString.isEmpty {
-                finalAmount = Double(amountString)
+                // Handle special case where amount is literally "All-in"
+                if amountString.lowercased().contains("all") {
+                    finalAmount = nil // Will be calculated below as all-in
+                } else {
+                    finalAmount = Double(amountString)
+                }
             }
             
             // Enhanced all-in and call amount calculation
-            let isAllIn = llmAction.action.lowercased().contains("all") || llmAction.action.lowercased().contains("shove")
+            let isAllIn = llmAction.action.lowercased() == "all-in" || 
+                         llmAction.action.lowercased() == "allin" || 
+                         llmAction.action.lowercased() == "all in" ||
+                         llmAction.action.lowercased().contains("shove") || 
+                         (llmAction.amount?.lowercased().contains("all") ?? false)
             let playerPosition = mapLLMPositionToViewModelPosition(llmAction.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
+            
+            if isAllIn {
+                print("DEBUG convertLLMActions: All-in detected for action: \(llmAction.action) from position: \(llmAction.position)")
+            }
             
             if let player = players.first(where: { $0.position == playerPosition }) {
                 // Calculate effective stack (after antes)
@@ -2935,37 +2970,32 @@ class NewHandEntryViewModel: ObservableObject {
                 }
                 
                 if isAllIn {
-                    // For all-in actions, use the player's effective stack
-                    finalAmount = effectiveStack
-                    print("All-in detected for \(playerPosition): using effective stack \(effectiveStack)")
-                } else if actionType == .call && (finalAmount == nil || finalAmount == 0) {
-                    // For calls with no amount, calculate the call amount based on current bet
-                    if street == .preflop {
-                        // On preflop, consider blinds and previous raises
-                        var streetPot: Double = 0
-                        if let anteAmount = self.ante, anteAmount > 0 {
-                            streetPot += anteAmount * Double(players.filter { $0.isActive }.count)
-                        }
-                        streetPot += smallBlind + bigBlind
-                        if hasStraddle, let straddleAmount = straddle {
-                            streetPot += straddleAmount
-                        }
-                        
-                        // Check previous actions to determine current bet level
-                        for prevAction in convertedActions {
-                            if prevAction.actionType == .bet || prevAction.actionType == .raise {
-                                currentStreetBet = max(currentStreetBet, prevAction.amount ?? 0)
-                            }
-                        }
-                        
-                        finalAmount = max(0, currentStreetBet - getPlayerContributionThisStreet(playerPosition, in: convertedActions))
-                    } else {
-                        // Post-flop: call the current bet
-                        finalAmount = max(0, currentStreetBet - getPlayerContributionThisStreet(playerPosition, in: convertedActions))
-                    }
+                    // For all-in actions, calculate the player's remaining stack after previous actions
+                    finalAmount = calculateRemainingStack(for: playerPosition, upToStreet: street)
+                    print("All-in detected for \(playerPosition): remaining stack \(finalAmount ?? 0)")
+                } else if actionType == .call && convertedActions.count > 0 {
+                    // Check if this is calling an all-in, regardless of LLM amount
+                    let lastAction = convertedActions.last!
+                    let lastLLMAction = llmActions[convertedActions.count - 1]
+                    let wasLastActionAllIn = lastLLMAction.action.lowercased() == "all-in" || 
+                                           lastLLMAction.action.lowercased() == "allin" || 
+                                           lastLLMAction.action.lowercased() == "all in" ||
+                                           lastLLMAction.action.lowercased().contains("shove") || 
+                                           (lastLLMAction.amount?.lowercased().contains("all") ?? false)
                     
-                    print("Call amount calculated for \(playerPosition): \(finalAmount ?? 0) (current bet: \(currentStreetBet))")
+                    if wasLastActionAllIn && lastAction.amount != nil {
+                        // Override LLM amount with actual all-in amount
+                        finalAmount = lastAction.amount
+                        print("DEBUG: Calling all-in, using all-in amount: \(finalAmount ?? 0) instead of LLM amount: \(llmAction.amount ?? "nil")")
+                    } else if finalAmount == nil || finalAmount == 0 {
+                        // Normal call calculation only if no valid amount provided
+                        print("DEBUG: Normal call calculation for \(playerPosition)")
+                        let callAmountNeeded = calculateNormalCallAmount(for: playerPosition, on: street, with: convertedActions)
+                        finalAmount = callAmountNeeded
+                        print("Call amount calculated for \(playerPosition): \(finalAmount ?? 0)")
+                    }
                 }
+                // If LLM provided a valid amount for call/bet/raise, use it as-is (don't recalculate)
             }
             
             // Update current street bet for raises and bets
@@ -2997,43 +3027,8 @@ class NewHandEntryViewModel: ObservableObject {
             print("LLM Action Converted: \(llmAction.position) -> \(playerNameForActionInput), \(llmAction.action) -> \(actionType.rawValue), amount: \(llmAction.amount ?? "nil") -> \(finalAmount ?? -999)")
         }
         
-        // Check for missing call actions after all-ins on postflop streets
-        if let lastAction = llmActions.last,
-           lastAction.action.lowercased().contains("all") {
-            
-            let lastActionPosition = mapLLMPositionToViewModelPosition(lastAction.position, tableSize: self.tableSize, availableViewModelPositions: self.availablePositions)
-            
-            // Get all active players
-            let activePlayers = self.players.filter { $0.isActive }
-            let activePositions = Set(activePlayers.map { $0.position })
-            
-            // Get positions that have already acted on this street
-            let positionsWithActions = Set(convertedActions.map { $0.playerName })
-            
-            // Find active players who haven't acted yet
-            let missingActors = activePositions.subtracting(positionsWithActions)
-            
-            print("Postflop all-in detected from \(lastActionPosition) on \(street). Missing actors: \(missingActors)")
-            
-            // Add missing call actions
-            for missingPosition in missingActors {
-                // Get the all-in amount from the last action
-                if let allInAction = convertedActions.last,
-                   allInAction.playerName == lastActionPosition,
-                   let allInAmount = allInAction.amount {
-                    
-                    print("Adding missing call action for \(missingPosition) to call all-in amount: \(allInAmount)")
-                    
-                    let callAction = ActionInput(
-                        playerName: missingPosition,
-                        actionType: .call,
-                        amount: allInAmount,
-                        isSystemAction: false
-                    )
-                    convertedActions.append(callAction)
-                }
-            }
-        }
+        // Removed: Do not add "missing" call actions - just follow LLM exactly
+        // The LLM knows who should act and who has folded
         
         return convertedActions
     }
@@ -3077,6 +3072,101 @@ class NewHandEntryViewModel: ObservableObject {
         turnActions.removeAll()
         riverActions.removeAll()
         pendingActionInput = nil // Reset pending action as well
+    }
+
+    // Helper function to calculate a player's remaining stack after all previous actions
+    private func calculateRemainingStack(for playerPosition: String, upToStreet currentStreet: StreetIdentifier) -> Double {
+        let startingStack = players.first(where: { $0.position == playerPosition })?.stack ?? 400.0
+        var totalContributed: Double = 0
+        
+        // Add ante if applicable
+        if let anteAmount = self.ante, anteAmount > 0 {
+            totalContributed += anteAmount
+        }
+        
+        // Track contributions across all streets up to current street
+        let streetsToCheck: [StreetIdentifier]
+        switch currentStreet {
+        case .preflop:
+            streetsToCheck = []
+        case .flop:
+            streetsToCheck = [.preflop]
+        case .turn:
+            streetsToCheck = [.preflop, .flop]
+        case .river:
+            streetsToCheck = [.preflop, .flop, .turn]
+        }
+        
+        for street in streetsToCheck {
+            let actions = actionsForStreet(street)
+            
+            // Find the largest single contribution this player made on this street
+            var largestContributionThisStreet: Double = 0
+            
+            for action in actions {
+                if action.playerName == playerPosition {
+                    switch action.actionType {
+                    case .bet, .raise:
+                        // For bets/raises, this is their total contribution for the street
+                        largestContributionThisStreet = action.amount ?? 0
+                    case .call:
+                        // For calls, we need to see what they're calling to
+                        // Find the highest bet/raise before this call
+                        var targetAmount: Double = 0
+                        for prevAction in actions {
+                            if prevAction.id == action.id { break } // Stop at this call
+                            if prevAction.actionType == .bet || prevAction.actionType == .raise {
+                                targetAmount = max(targetAmount, prevAction.amount ?? 0)
+                            }
+                        }
+                        largestContributionThisStreet = targetAmount
+                    default:
+                        break
+                    }
+                }
+            }
+            
+            totalContributed += largestContributionThisStreet
+            print("DEBUG: \(playerPosition) contributed \(largestContributionThisStreet) on \(street)")
+        }
+        
+        let remainingStack = startingStack - totalContributed
+        print("DEBUG: \(playerPosition) remaining stack: \(startingStack) - \(totalContributed) = \(remainingStack)")
+        return max(0, remainingStack)
+    }
+    
+    // Helper function to calculate normal call amounts (not all-ins)
+    private func calculateNormalCallAmount(for playerPosition: String, on street: StreetIdentifier, with convertedActions: [ActionInput]) -> Double {
+        var currentStreetBet: Double = 0
+        
+        if street == .preflop {
+            // On preflop, consider blinds and previous raises
+            var streetPot: Double = 0
+            if let anteAmount = self.ante, anteAmount > 0 {
+                streetPot += anteAmount * Double(players.filter { $0.isActive }.count)
+            }
+            streetPot += smallBlind + bigBlind
+            if hasStraddle, let straddleAmount = straddle {
+                streetPot += straddleAmount
+            }
+            
+            // Check previous actions to determine current bet level
+            for prevAction in convertedActions {
+                if prevAction.actionType == .bet || prevAction.actionType == .raise {
+                    currentStreetBet = max(currentStreetBet, prevAction.amount ?? 0)
+                }
+            }
+            
+            return max(0, currentStreetBet - getPlayerContributionThisStreet(playerPosition, in: convertedActions))
+        } else {
+            // Post-flop: call the current bet
+            for prevAction in convertedActions {
+                if prevAction.actionType == .bet || prevAction.actionType == .raise {
+                    currentStreetBet = max(currentStreetBet, prevAction.amount ?? 0)
+                }
+            }
+            return max(0, currentStreetBet - getPlayerContributionThisStreet(playerPosition, in: convertedActions))
+        }
     }
 }
 

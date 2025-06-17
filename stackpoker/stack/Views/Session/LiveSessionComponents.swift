@@ -302,70 +302,37 @@ struct SessionUpdateCard: View {
     let isPosted: Bool
     let onPost: (() -> Void)?
     
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack {
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                
-                Spacer()
-                
-                Text(formattedTime)
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.5))
-            }
-            
-            // Content
-            Text(description)
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.8))
-                .lineLimit(nil)
-                .multilineTextAlignment(.leading)
-            
-            // Action button - only show if onPost is provided and not posted
-            if let postAction = onPost, !isPosted {
-                Button(action: postAction) {
-                    HStack {
-                        Spacer()
-                        
-                        Text("Share to Feed")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white)
-                        
-                        Image(systemName: "arrow.up.forward")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white)
-                        
-                        Spacer()
-                    }
-                    .padding(.vertical, 8)
-                    .background(
-                        Color.gray.opacity(0.3)
-                    )
-                    .cornerRadius(12)
-                }
-            }
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(red: 30/255, green: 33/255, blue: 36/255))
-        )
-        .overlay(
-            isPosted ?
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.white.opacity(0.3), lineWidth: 1) :
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
+    private func formattedTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
     
-    private var formattedTime: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        return formatter.string(from: timestamp)
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.plusJakarta(.body, weight: .semibold))
+                    .foregroundColor(.white)
+                
+                Text(description)
+                    .font(.plusJakarta(.caption, weight: .regular))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            Text(formattedTime(timestamp))
+                .font(.plusJakarta(.caption, weight: .medium))
+                .foregroundColor(.gray)
+        }
+        .padding(16)
+        .glassyBackground(cornerRadius: 12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
     }
 }
 

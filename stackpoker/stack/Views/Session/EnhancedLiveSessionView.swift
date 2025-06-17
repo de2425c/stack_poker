@@ -127,8 +127,15 @@ struct EnhancedLiveSessionView: View {
     @State private var noteToEditId: String? = nil // Assuming notes will have IDs for reliable editing
     @State private var showingEditNoteSheet = false
     
+    // Simple display array for notes - completely separate from complex session store
+    @State private var displayNotes: [String] = []
+    
     // State for Post Tab sharing options
     @State private var showingPostShareOptions = false
+    
+    // State for replay functionality
+    @State private var selectedHandForReplay: ParsedHandHistory? = nil
+    @State private var showingHandReplaySheet = false
     
     // MARK: - Enum Definitions
     enum LiveSessionTab {
@@ -751,11 +758,28 @@ struct EnhancedLiveSessionView: View {
                     // Game Selection Section (Cash Games)
                     if selectedLogType == .cashGame {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Select Game")
-                                .font(.plusJakarta(.headline, weight: .medium))
-                                .foregroundColor(.white)
-                                .padding(.leading, 6)
-                                .padding(.bottom, 2)
+                            HStack {
+                                Text("Select Game")
+                                    .font(.plusJakarta(.headline, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 6)
+                                
+                                Spacer()
+                                
+                                // Clean + button for adding games
+                                Button(action: { showingAddGame = true }) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 28, height: 28)
+                                        .background(
+                                            Circle()
+                                                .fill(Color.gray.opacity(0.3))
+                                        )
+                                }
+                                .padding(.trailing, 6)
+                            }
+                            .padding(.bottom, 2)
                             
                             if cashGameService.cashGames.isEmpty {
                                 HStack {
@@ -1396,6 +1420,9 @@ struct EnhancedLiveSessionView: View {
         tournamentRebuyCount = 0
         // Update UI mode
         sessionMode = .active
+
+        // Ensure "Session Started" activity appears immediately
+        updateLocalDataFromStore()
     }
     
     // MARK: - Tab Content Views
@@ -1459,6 +1486,7 @@ struct EnhancedLiveSessionView: View {
                         Text("Recent Activity")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.white)
+                            .padding([.top, .leading, .trailing], 4)
 
                         ForEach(recentUpdates.prefix(4)) { item in
                             // Get the share action (will be nil for notes)
@@ -1468,11 +1496,13 @@ struct EnhancedLiveSessionView: View {
                                 title: item.title,
                                 description: item.description,
                                 timestamp: item.timestamp,
-                                isPosted: false, // Assuming this is for UI state of the card
-                                onPost: shareAction // Pass the optional shareAction directly
+                                isPosted: false,
+                                onPost: nil // Share to feed removed as per new requirements
                             )
                         }
                     }
+                    .padding(12)
+                    .glassyBackground(cornerRadius: 16)
                     .padding(.horizontal)
                 }
             }
@@ -1524,33 +1554,31 @@ struct EnhancedLiveSessionView: View {
     // Notes Tab - For viewing and adding notes
     private var notesTabView: some View {
         VStack(spacing: 0) {
-            // Notes List
-            if notes.isEmpty {
+            // Use a simple @State array that gets refreshed
+            if displayNotes.isEmpty {
                 emptyNotesView
             } else {
                 ScrollView {
                     LazyVStack(spacing: 16) {
-                        ForEach(notes.indices, id: \.self) { index in
-                            // Safely access notes, ensuring reverse chronological order for display
-                            let noteIndex = notes.count - 1 - index
-                            if notes.indices.contains(noteIndex) {
-                                let note = notes[noteIndex]
-                                NoteCardView(noteText: note) // Use the new NoteCardView
-                                    .onTapGesture {
-                                        self.noteToEditId = String(noteIndex) // Store index as ID for editing
-                                        self.noteToEdit = note
-                                        self.showingEditNoteSheet = true
-                                    }
-                            }
+                        ForEach(Array(displayNotes.enumerated()).reversed(), id: \.offset) { index, note in
+                            NoteCardView(noteText: note)
+                                .onTapGesture {
+                                    self.noteToEditId = String(index)
+                                    self.noteToEdit = note
+                                    self.showingEditNoteSheet = true
+                                }
                         }
                     }
-                    .padding(.horizontal, 16) // Apply horizontal padding to the LazyVStack
-                    .padding(.top, 16) // Add some top padding as well
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
                 }
             }
         }
+        .onAppear {
+            refreshDisplayNotes()
+        }
         .sheet(isPresented: $showingSimpleNoteEditor, onDismiss: {
-            updateLocalDataFromStore() // Refresh local notes data when editor dismisses
+            refreshDisplayNotes()
         }) { 
             SimpleNoteEditorView(sessionStore: sessionStore, sessionId: sessionStore.liveSession.id)
         }
@@ -1558,12 +1586,12 @@ struct EnhancedLiveSessionView: View {
             if let noteToEdit = noteToEdit, let noteIdStr = noteToEditId, let noteIndex = Int(noteIdStr) {
                 EditNoteView(sessionStore: sessionStore, noteIndex: noteIndex, initialText: noteToEdit)
                     .onDisappear {
-                        updateLocalDataFromStore()
+                        refreshDisplayNotes()
                         self.noteToEdit = nil
                         self.noteToEditId = nil
                     }
             } else {
-                Text("Error loading note for editing.") // Fallback view
+                Text("Error loading note for editing.")
             }
         }
     }
@@ -1608,9 +1636,8 @@ struct EnhancedLiveSessionView: View {
                             HandDisplayCardView(
                                 hand: handData.hand, // Pass the ParsedHandHistory object
                                 onReplayTap: { 
-                                    // Placeholder for future replay functionality
-                                    // You would typically present a HandReplayView here, possibly passing handData.id or handData.hand
-
+                                    self.selectedHandForReplay = handData.hand
+                                    self.showingHandReplaySheet = true
                                 }, 
                                 location: "$\(Int(handData.hand.raw.gameInfo.smallBlind))/$\(Int(handData.hand.raw.gameInfo.bigBlind))", // Use stakes as location
                                 createdAt: handData.timestamp, // Use handData.timestamp
@@ -1626,6 +1653,16 @@ struct EnhancedLiveSessionView: View {
         .sheet(isPresented: $showingNewHandEntry) {
             NewHandEntryView(sessionId: sessionStore.liveSession.id)
                 .environmentObject(handStore)
+        }
+        .sheet(isPresented: $showingHandReplaySheet) {
+            if let handToReplay = selectedHandForReplay {
+                HandReplayView(hand: handToReplay, userId: userId)
+                    .environmentObject(postService)
+                    .environmentObject(userService)
+            } else {
+                Text("No hand selected for replay.")
+                    .foregroundColor(.white)
+            }
         }
         .onAppear {
             // Call method on the observed object instance
@@ -1789,14 +1826,7 @@ struct EnhancedLiveSessionView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-            )
+            .glassyBackground(cornerRadius: 16)
             
             // Controls row
             HStack(spacing: 12) {
@@ -1809,7 +1839,7 @@ struct EnhancedLiveSessionView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.3)))
+                    .glassyBackground(cornerRadius: 12)
                 }
 
                 Button(action: { showingCashoutPrompt = true }) {
@@ -1821,7 +1851,11 @@ struct EnhancedLiveSessionView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.red.opacity(0.25)))
+                    .glassyBackground(cornerRadius: 12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.red.opacity(0.5), lineWidth: 1)
+                    )
                 }
             }
         }
@@ -1842,10 +1876,7 @@ struct EnhancedLiveSessionView: View {
             }
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(red: 32/255, green: 34/255, blue: 38/255))
-            )
+            .glassyBackground(cornerRadius: 16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(Color.white.opacity(0.1), lineWidth: 1)
@@ -1893,10 +1924,7 @@ struct EnhancedLiveSessionView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.gray.opacity(0.3))
-                    )
+                    .glassyBackground(cornerRadius: 12)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Color.white.opacity(0.3), lineWidth: 1)
@@ -1915,10 +1943,7 @@ struct EnhancedLiveSessionView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.gray.opacity(0.3))
-                    )
+                    .glassyBackground(cornerRadius: 12)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Color.white.opacity(0.3), lineWidth: 1)
@@ -1940,26 +1965,14 @@ struct EnhancedLiveSessionView: View {
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(red: 35/255, green: 38/255, blue: 42/255))
-                )
+                .padding(.vertical, 12)
+                .glassyBackground(cornerRadius: 12)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
                 )
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
     }
     
     // Quick Update Button Component
@@ -1975,10 +1988,7 @@ struct EnhancedLiveSessionView: View {
                     .foregroundColor(isPositive ? .green : .red)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(red: 32/255, green: 34/255, blue: 38/255))
-                    )
+                    .glassyBackground(cornerRadius: 12)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(isPositive ? Color.green.opacity(0.5) : Color.red.opacity(0.5), lineWidth: 1)
@@ -2369,11 +2379,19 @@ struct EnhancedLiveSessionView: View {
         }
     }
     
+    // Simple function to refresh notes display
+    private func refreshDisplayNotes() {
+        displayNotes = sessionStore.enhancedLiveSession.notes
+    }
+    
     // Update local data from store
     private func updateLocalDataFromStore() {
         chipUpdates = sessionStore.enhancedLiveSession.chipUpdates
         handHistories = sessionStore.enhancedLiveSession.handHistories
         notes = sessionStore.enhancedLiveSession.notes
+        
+        // Also refresh display notes
+        refreshDisplayNotes()
 
         // Build recent updates array combining all three types
         var items: [UpdateItem] = []
@@ -3562,10 +3580,7 @@ struct EnhancedLiveSessionView: View {
             }
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
-        )
+        .glassyBackground(cornerRadius: 16)
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
@@ -3611,10 +3626,7 @@ struct EnhancedLiveSessionView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.white)
-            )
+            .glassyBackground(cornerRadius: 10, materialOpacity: 0.1, glassOpacity: 0.05)
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
@@ -3652,10 +3664,7 @@ struct EnhancedLiveSessionView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.white.opacity(0.05))
-            )
+            .glassyBackground(cornerRadius: 10, materialOpacity: 0.1, glassOpacity: 0.05)
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(Color.blue.opacity(0.3), lineWidth: 0.5)
@@ -3917,14 +3926,7 @@ struct EnhancedLiveSessionView: View {
             }
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(red: 28/255, green: 30/255, blue: 34/255))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
+        .glassyBackground(cornerRadius: 16)
     }
     
     // MARK: - Live Session Challenge Card
@@ -4197,4 +4199,34 @@ struct EditNoteView: View {
         }
     }
 }
+
+// MARK: - Glassy Background Modifier
+private struct GlassyBackground: ViewModifier {
+    var cornerRadius: CGFloat = 16
+    var materialOpacity: Double = 0.2
+    var glassOpacity: Double = 0.01
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(materialOpacity)
+                    
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(Color.white.opacity(glassOpacity))
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    }
+}
+
+extension View {
+    func glassyBackground(cornerRadius: CGFloat = 16, materialOpacity: Double = 0.2, glassOpacity: Double = 0.01) -> some View {
+        self.modifier(GlassyBackground(cornerRadius: cornerRadius, materialOpacity: materialOpacity, glassOpacity: glassOpacity))
+    }
+}
+
+
 

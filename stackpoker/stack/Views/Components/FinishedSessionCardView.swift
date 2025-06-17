@@ -10,6 +10,7 @@ struct FinishedSessionCardView: View {
     let duration: String
     let buyIn: Double
     let cashOut: Double
+    let isBackgroundTransparent: Bool
 
     // MARK: - Derived Properties
     private var profit: Double { cashOut - buyIn }
@@ -27,10 +28,11 @@ struct FinishedSessionCardView: View {
         ZStack {
             // Background with a subtle, premium border
             AppBackgroundView()
+                .opacity(isBackgroundTransparent ? 0.0 : 1.0)
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1.5)
+                        .stroke(Color.white.opacity(isBackgroundTransparent ? 0.0 : 0.12), lineWidth: 1.5)
                 )
 
             GeometryReader { geo in
@@ -55,6 +57,8 @@ struct FinishedSessionCardView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
 
+                        Spacer(minLength: 16)
+
                         // Profit display with a dedicated width to prevent clipping
                         VStack(alignment: .trailing, spacing: 4) {
                             Text("NET")
@@ -65,10 +69,9 @@ struct FinishedSessionCardView: View {
                                 .font(.system(size: 28, weight: .bold))
                                 .foregroundColor(profitColor)
                                 .lineLimit(1)
-                         
                                 .minimumScaleFactor(0.8)
                         }
-                        .frame(width: geo.size.width * 0.3) // Adjusted space to shift PNL
+                        .frame(width: geo.size.width * 0.25) // Reduced to push PNL further right
                     }
 
                     Spacer()
@@ -131,7 +134,8 @@ private struct MetricView: View {
             date: Date(),
             duration: "4H 15M",
             buyIn: 500,
-            cashOut: 1280
+            cashOut: 1280,
+            isBackgroundTransparent: false
         )
         FinishedSessionCardView(
             gameName: "No-Limit Hold'em Tournament",
@@ -139,7 +143,8 @@ private struct MetricView: View {
             date: Date(),
             duration: "2H 30M",
             buyIn: 250,
-            cashOut: 0 // This will now show "-$250"
+            cashOut: 0, // This will now show "-$250"
+            isBackgroundTransparent: false
         )
         FinishedSessionCardView(
             gameName: "NLH Tournament",
@@ -147,7 +152,8 @@ private struct MetricView: View {
             date: Date(),
             duration: "4H 15M",
             buyIn: 500,
-            cashOut: 250 // Example of a loss
+            cashOut: 250, // Example of a loss
+            isBackgroundTransparent: true
         )
     }
     .padding()

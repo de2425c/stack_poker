@@ -37,30 +37,16 @@ struct ImageCompositionView: View {
     @State private var currentMagnification: CGFloat = 0 // For live pinch gesture
     
     // Card Customization States
-    struct ColorOption: Identifiable, Hashable {
-        let id = UUID()
-        let name: String
-        let color: Color
-        let isLight: Bool // Hint for text color adjustments
-    }
-
-    let cardColorOptions: [ColorOption] = [
-        ColorOption(name: "Dark", color: Color(UIColor(red: 28/255, green: 28/255, blue: 32/255, alpha: 1.0)), isLight: false),
-        ColorOption(name: "Light", color: Color(UIColor.systemGray6), isLight: true),
-        ColorOption(name: "Theme", color: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)).opacity(0.7), isLight: false) // Example theme, adjust opacity
-    ]
-    @State private var selectedCardColor: Color
-    @State private var cardOpacity: Double = 1.0
+    @State private var isBackgroundTransparent: Bool = false
     
     // Sharing State
     @State private var isSharing: Bool = false
     @State private var imageToShare: UIImage?
 
-    // Initializer to set default selected color
+    // Initializer
     init(session: Session, backgroundImage: UIImage) {
         self.session = session
         self.backgroundImage = backgroundImage
-        _selectedCardColor = State(initialValue: cardColorOptions[0].color)
     }
 
     // To ensure date formatting is consistent
@@ -92,7 +78,8 @@ struct ImageCompositionView: View {
                 date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,
-                cashOut: session.cashout
+                cashOut: session.cashout,
+                isBackgroundTransparent: isBackgroundTransparent
             )
             .scaleEffect(cardScale + currentMagnification) // Include live magnification state
             .offset(x: interactiveCardOffset.width + currentDragOffset.width, // Include live drag state
@@ -117,7 +104,8 @@ struct ImageCompositionView: View {
                 date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,
-                cashOut: session.cashout
+                cashOut: session.cashout,
+                isBackgroundTransparent: isBackgroundTransparent
             )
             .scaleEffect(cardScale + currentMagnification) // Interactive scaling
             .offset(x: interactiveCardOffset.width + currentDragOffset.width,
@@ -174,48 +162,28 @@ struct ImageCompositionView: View {
 
                     Spacer()
 
-                    // Bottom Controls (Card Customization)
+                    // Bottom Controls (Transparency)
                     VStack(spacing: 15) {
-                        // Opacity Slider
-                        HStack {
-                            Image(systemName: "slider.horizontal.3").foregroundColor(.white).padding(.leading)
-                            Slider(value: $cardOpacity, in: 0.1...1.0)
-                                .padding(.horizontal)
-                             Text("\(Int(cardOpacity * 100))%")
-                                .foregroundColor(.white)
-                                .padding(.trailing)
-                        }
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.5))
-                        .cornerRadius(10)
-                        .padding(.horizontal)
-                        
-                        // Color Selection
-                        HStack(spacing: 15) {
-                            ForEach(cardColorOptions) { option in
-                                Button {
-                                    selectedCardColor = option.color
-                                } label: {
-                                    ZStack {
-                                        Circle()
-                                            .fill(option.color)
-                                            .frame(width: 40, height: 40)
-                                            .overlay(
-                                                Circle()
-                                                    .stroke(selectedCardColor == option.color ? Color.yellow : Color.white, lineWidth: selectedCardColor == option.color ? 3 : 1)
-                                            )
-                                        if selectedCardColor == option.color {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundColor(.yellow)
-                                        }
-                                    }
-                                }
+                        // Transparency Toggle
+                        Button {
+                            isBackgroundTransparent.toggle()
+                        } label: {
+                            HStack {
+                                Image(systemName: isBackgroundTransparent ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(isBackgroundTransparent ? .green : .white)
+                                    .padding(.leading)
+                                Text("Transparent Background")
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Image(systemName: "photo.fill.on.rectangle.fill")
+                                    .foregroundColor(.white)
+                                    .padding(.trailing)
                             }
+                            .padding(.vertical, 12)
+                            .background(Color.black.opacity(0.5))
+                            .cornerRadius(10)
+                            .padding(.horizontal)
                         }
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.5))
-                        .cornerRadius(10)
-                        .padding(.horizontal)
                     }
                     .padding(.bottom, proxy.safeAreaInsets.bottom + 10)
                 }

@@ -5,6 +5,7 @@ import FirebaseStorage
 import Charts
 import UIKit
 import UniformTypeIdentifiers
+import SwiftUIReorderableForEach
 
 // A transparent navigation container that provides navigation context without UI side effects
 struct TransparentNavigationView<Content: View>: UIViewControllerRepresentable {
@@ -62,6 +63,13 @@ struct ProfileView: View {
     @State private var selectedCarouselIndex = 0 // For carousel page selection
     @State private var selectedGraphTab = 0 // 0 = Bankroll, 1 = Profit, 2 = Monthly
     private let timeRanges = ["24H", "1W", "1M", "6M", "1Y", "All"] // Used by analyticsDetailContent
+    
+    // Performance stats customization
+    @State private var isCustomizingStats = false
+    @State private var selectedStats: [PerformanceStat] = [
+        .avgProfit, .bestSession, .winRate, .sessions, .hours, .avgSessionLength
+    ]
+    @State private var isDraggingAny = false
     
     // Chart interaction states
     @State private var selectedDataPoint: (date: Date, profit: Double)? = nil
@@ -154,16 +162,15 @@ struct ProfileView: View {
                     // Navigation cards / buttons
                     VStack(spacing: 16) {
                         // Recent Activity Card and Analytics Card side-by-side
-                        HStack(alignment: .top, spacing: 3) {
+                        HStack(alignment: .top, spacing: 13) {
                             compactNavigationCard(
-                                title: "Recent Activity",
+                                title: "Activity",
                                 iconName: "list.bullet.below.rectangle",
                                 baseColor: Color.blue, 
                                 action: { showActivityDetailView = true }
                             ) {
-                                Text("View your latest posts.")
+                                Text("See your latest posts")
                             }
-                            .frame(maxWidth: .infinity)
 
                             compactNavigationCard(
                                 title: "Analytics",
@@ -171,11 +178,9 @@ struct ProfileView: View {
                                 baseColor: Color.green, 
                                 action: { showAnalyticsDetailView = true }
                             ) {
-                                Text("Track your performance stats.")
+                                Text("Analyze your results")
                             }
-                            .frame(maxWidth: .infinity)
                         }
-                        .padding(.horizontal, -4)
 
                         // Hands Card
                         navigationCard(
@@ -267,7 +272,7 @@ struct ProfileView: View {
                             baseColor: Color.cyan, // Or any color you prefer
                             action: { showStakingDashboardView = true }
                         ) {
-                            Text("View and manage your stakes.")
+                            Text("View and manage your stakes")
                                 .font(.plusJakarta(.subheadline))
                                 .foregroundColor(.white.opacity(0.85))
                         }
@@ -305,7 +310,7 @@ struct ProfileView: View {
                                     }
                                 }
                             } else {
-                                Text("Set goals and track your poker journey.")
+                                Text("Set goals and track your poker journey")
                                     .font(.plusJakarta(.subheadline))
                                     .foregroundColor(.white.opacity(0.85))
                             }
@@ -317,6 +322,7 @@ struct ProfileView: View {
                     .padding(.top, 3) // Added 3 points of top padding to the VStack of cards
                 }
             }
+            .scrollDisabled(isDraggingAny)
         }
         // Removed .onChange(of: selectedTab)
         .sheet(isPresented: $showEdit) {
@@ -605,39 +611,35 @@ struct ProfileView: View {
         @ViewBuilder previewContent: () -> PreviewContent
     ) -> some View {
         Button(action: action) {
-            ZStack { // Wrap content in ZStack for better centering when stretched
-                // Background is applied below, to the ZStack i
-            //tself or Button
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: iconName)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(baseColor.opacity(0.9))
+                    .frame(width: 25)
 
-                HStack(alignment: .center, spacing: 10) { // Explicit .center for items
-                    Image(systemName: iconName)
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(baseColor.opacity(0.9))
-                        .frame(width: 25)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                            .lineLimit(2)
-                        
-                        previewContent()
-                            .font(.system(size: 13))
-                            .foregroundColor(.white.opacity(0.8))
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .layoutPriority(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
                     
-                    
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.6))
+                    previewContent()
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.8))
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(EdgeInsets(top: 14, leading: 20, bottom: 12, trailing: 20))
-                .frame(maxHeight: .infinity, alignment: .center) // ensure card stretches to full row height
+                .layoutPriority(1)
+                
+                Spacer(minLength: 0)
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.6))
             }
-            .background( // Apply background to the ZStack (or Button)
+            .padding(EdgeInsets(top: 14, leading: 10, bottom: 12, trailing: 10))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(Color.clear) 
                     .overlay(
@@ -649,6 +651,7 @@ struct ProfileView: View {
             .shadow(color: baseColor.opacity(0.1), radius: 3, x: 0, y: 1)
         }
         .buttonStyle(PlainButtonStyle())
+        .frame(maxWidth: .infinity) // Ensure each card takes equal width
     }
     
     // MARK: - Analytics Helper Properties (Unchanged, used by analyticsDetailContent)
@@ -721,6 +724,48 @@ struct ProfileView: View {
     private var averageSessionLength: Double {
         if totalSessions == 0 { return 0 }
         return totalHoursPlayed / Double(totalSessions)
+    }
+    
+    private var dollarPerHour: Double {
+        if totalHoursPlayed == 0 { return 0 }
+        return totalBankroll / totalHoursPlayed
+    }
+    
+    private var bbPerHour: Double {
+        if totalHoursPlayed == 0 { return 0 }
+        // Calculate average big blind from sessions
+        let totalBBs = filteredSessions.compactMap { session -> Double? in
+            let digits = session.stakes.replacingOccurrences(of: " $", with: "")
+            let comps = digits.replacingOccurrences(of: "$", with: "").split(separator: "/")
+            guard comps.count == 2, let bb = Double(comps[1]) else { return nil }
+            return bb
+        }
+        
+        if totalBBs.isEmpty { return 0 }
+        let avgBB = totalBBs.reduce(0, +) / Double(totalBBs.count)
+        if avgBB == 0 { return 0 }
+        return dollarPerHour / avgBB
+    }
+    
+    private func getStatValue(for stat: PerformanceStat) -> String {
+        switch stat {
+        case .avgProfit:
+            return "$\(Int(averageProfit).formattedWithCommas) / session"
+        case .bestSession:
+            return "$\(Int(bestSession?.profit ?? 0).formattedWithCommas)"
+        case .winRate:
+            return "\(Int(winRate))%"
+        case .sessions:
+            return "\(totalSessions)"
+        case .hours:
+            return "\(Int(totalHoursPlayed))"
+        case .avgSessionLength:
+            return String(format: "%.1f hrs", averageSessionLength)
+        case .dollarPerHour:
+            return "$\(Int(dollarPerHour).formattedWithCommas)/hr"
+        case .bbPerHour:
+            return String(format: "%.1f BB/hr", bbPerHour)
+        }
     }
 
     private var highestCashoutToBuyInRatio: (ratio: Double, session: Session)? {
@@ -1158,26 +1203,65 @@ struct ProfileView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 0)
 
-                // Slim Performance lines (no boxes)
-                Text("PERFORMANCE STATS")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.gray.opacity(0.8))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
+                // Performance Stats with Customization
+                HStack {
+                    Text("PERFORMANCE STATS")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(.gray.opacity(0.8))
                     
-                    VStack(spacing: 12) {
-                    performanceLine(icon: "dollarsign.circle.fill", color: .green, title: "Avg. Profit", value: "$\(Int(averageProfit).formattedWithCommas) / session")
-                    Divider().background(Color.white.opacity(0.1))
-                    performanceLine(icon: "star.fill", color: .yellow, title: "Best Session", value: "$\(Int(bestSession?.profit ?? 0).formattedWithCommas)")
-                    Divider().background(Color.white.opacity(0.1))
-                    performanceLine(icon: "list.star", color: .orange, title: "Sessions", value: "\(totalSessions)")
-                    Divider().background(Color.white.opacity(0.1))
-                    performanceLine(icon: "clock.fill", color: .purple, title: "Hours", value: "\(Int(totalHoursPlayed))")
-                    Divider().background(Color.white.opacity(0.1))
-                    performanceLine(icon: "timer", color: .pink, title: "Avg. Session Length", value: String(format: "%.1f hrs", averageSessionLength))
+                    if !isCustomizingStats {
+                        Text("\(selectedStats.count)/\(PerformanceStat.allCases.count)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.6))
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                            isCustomizingStats.toggle()
+                        }
+                    }) {
+                        Text(isCustomizingStats ? "Done" : "Customize Stats")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
+                
+                if isCustomizingStats {
+                    // Customization Interface
+                    CustomizeStatsView(selectedStats: $selectedStats, isDraggingAny: $isDraggingAny)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else {
+                    // Regular Stats Display as Beautiful Boxes
+                    if selectedStats.isEmpty {
+                        Text("No stats selected. Tap 'Customize Stats' to add some.")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 20)
+                            .padding(.horizontal, 20)
+                    } else {
+                        LazyVGrid(columns: [
+                            GridItem(.flexible()),
+                            GridItem(.flexible())
+                        ], spacing: 16) {
+                            ForEach(selectedStats, id: \.id) { stat in
+                                StatDisplayCard(
+                                    stat: stat,
+                                    value: getStatValue(for: stat)
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
             }
             .padding(.bottom, 24) // Slightly reduced bottom padding
         }
@@ -1855,6 +1939,317 @@ struct ActivityContentViewWrapper: View {
         }
         .navigationTitle("Recent Activity") 
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Performance Stat Enum
+enum PerformanceStat: String, CaseIterable, Identifiable, Equatable {
+    case avgProfit = "avg_profit"
+    case bestSession = "best_session"
+    case winRate = "win_rate"
+    case sessions = "sessions"
+    case hours = "hours"
+    case avgSessionLength = "avg_session_length"
+    case dollarPerHour = "dollar_per_hour"
+    case bbPerHour = "bb_per_hour"
+    
+    var id: String { rawValue }
+    
+    var title: String {
+        switch self {
+        case .avgProfit: return "Avg. Profit"
+        case .bestSession: return "Best Session"
+        case .winRate: return "Win Rate"
+        case .sessions: return "Sessions"
+        case .hours: return "Hours"
+        case .avgSessionLength: return "Avg. Session Length"
+        case .dollarPerHour: return "$/Hour"
+        case .bbPerHour: return "BB/Hour"
+        }
+    }
+    
+    var iconName: String {
+        switch self {
+        case .avgProfit: return "dollarsign.circle.fill"
+        case .bestSession: return "star.fill"
+        case .winRate: return "chart.pie.fill"
+        case .sessions: return "list.star"
+        case .hours: return "clock.fill"
+        case .avgSessionLength: return "timer"
+        case .dollarPerHour: return "chart.line.uptrend.xyaxis"
+        case .bbPerHour: return "speedometer"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .avgProfit: return .green
+        case .bestSession: return .yellow
+        case .winRate: return .cyan
+        case .sessions: return .orange
+        case .hours: return .purple
+        case .avgSessionLength: return .pink
+        case .dollarPerHour: return .mint
+        case .bbPerHour: return .teal
+        }
+    }
+}
+
+// MARK: - Customize Stats View
+struct CustomizeStatsView: View {
+    @Binding var selectedStats: [PerformanceStat]
+    @Binding var isDraggingAny: Bool
+    
+    @State private var allowReordering = true
+    @State private var combinedItems: [StatItem] = []
+    
+    private var availableStats: [PerformanceStat] {
+        PerformanceStat.allCases.filter { !selectedStats.contains($0) }
+    }
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            // Selected Stats Section Header
+            HStack {
+                Text("Selected Stats")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                
+                Text("\(selectedStats.count)/\(PerformanceStat.allCases.count)")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray)
+                
+                Spacer()
+            }
+            
+            // Combined Reorderable List with Visual Sections
+            VStack(spacing: 8) {
+                ReorderableForEach($combinedItems, allowReordering: $allowReordering) { item, isDragged in
+                    Group {
+                        if item.isHeader {
+                            // Section header
+                            HStack {
+                                Text(item.headerTitle ?? "")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, item.headerTitle == "Available Stats" ? 16 : 0)
+                        } else if let stat = item.stat {
+                            // Stat card
+                            ReorderableStatCard(
+                                stat: stat,
+                                isSelected: item.isSelected,
+                                isDragged: isDragged,
+                                onTap: {
+                                    withAnimation(.spring()) {
+                                        if item.isSelected {
+                                            selectedStats.removeAll { $0 == stat }
+                                        } else {
+                                            selectedStats.append(stat)
+                                        }
+                                        updateCombinedItems()
+                                    }
+                                }
+                            )
+                        } else {
+                            // Empty state
+                            Text(item.emptyMessage ?? "")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 20)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
+                                )
+                                .padding(.horizontal, 16)
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            updateCombinedItems()
+        }
+        .onChange(of: selectedStats) { _ in
+            isDraggingAny = false
+        }
+    }
+    
+    private func updateCombinedItems() {
+        var newItems: [StatItem] = []
+        
+        // Selected Stats Section
+        if selectedStats.isEmpty {
+            newItems.append(StatItem(emptyMessage: "Drag stats here to display them"))
+        } else {
+            for stat in selectedStats {
+                newItems.append(StatItem(stat: stat, isSelected: true))
+            }
+        }
+        
+        // Available Stats Section Header
+        newItems.append(StatItem(headerTitle: "Available Stats"))
+        
+        // Available Stats
+        if availableStats.isEmpty {
+            newItems.append(StatItem(emptyMessage: "All stats are currently selected"))
+        } else {
+            for stat in availableStats {
+                newItems.append(StatItem(stat: stat, isSelected: false))
+            }
+        }
+        
+        combinedItems = newItems
+    }
+}
+
+// MARK: - StatItem for Combined List
+struct StatItem: Identifiable, Hashable {
+    let id = UUID()
+    let stat: PerformanceStat?
+    let isSelected: Bool
+    let isHeader: Bool
+    let headerTitle: String?
+    let emptyMessage: String?
+    
+    init(stat: PerformanceStat, isSelected: Bool) {
+        self.stat = stat
+        self.isSelected = isSelected
+        self.isHeader = false
+        self.headerTitle = nil
+        self.emptyMessage = nil
+    }
+    
+    init(headerTitle: String) {
+        self.stat = nil
+        self.isSelected = false
+        self.isHeader = true
+        self.headerTitle = headerTitle
+        self.emptyMessage = nil
+    }
+    
+    init(emptyMessage: String) {
+        self.stat = nil
+        self.isSelected = false
+        self.isHeader = false
+        self.headerTitle = nil
+        self.emptyMessage = emptyMessage
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    
+    static func == (lhs: StatItem, rhs: StatItem) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+// MARK: - Stat Display Card (Main View)
+struct StatDisplayCard: View {
+    let stat: PerformanceStat
+    let value: String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: stat.iconName)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(stat.color)
+                    .frame(width: 24)
+                
+                Text(stat.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineLimit(1)
+                
+                Spacer()
+            }
+            
+            Text(value)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(stat.color.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .frame(height: 100)
+    }
+}
+
+// MARK: - Reorderable Stat Card Component
+struct ReorderableStatCard: View {
+    let stat: PerformanceStat
+    let isSelected: Bool
+    let isDragged: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Drag handle (only for selected stats)
+            if isSelected {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray.opacity(0.6))
+                    .frame(width: 20)
+            }
+            
+            // Icon
+            Image(systemName: stat.iconName)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(stat.color)
+                .frame(width: 20)
+            
+            // Title
+            Text(stat.title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Spacer()
+            
+            // Action button
+            Button(action: onTap) {
+                Image(systemName: isSelected ? "xmark" : "plus")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(isSelected ? .red : .green)
+                    .frame(width: 20, height: 20)
+                    .background(
+                        Circle()
+                            .fill((isSelected ? Color.red : Color.green).opacity(0.15))
+                    )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(isDragged ? Color.black.opacity(0.3) : Color.black.opacity(0.15))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(
+                            isDragged ? stat.color.opacity(0.5) : Color.gray.opacity(0.2), 
+                            lineWidth: isDragged ? 2 : 1
+                        )
+                )
+        )
+        .scaleEffect(isDragged ? 1.05 : 1.0)
+        .shadow(color: isDragged ? Color.black.opacity(0.3) : Color.clear, radius: isDragged ? 8 : 0, y: isDragged ? 4 : 0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isDragged)
     }
 }
 
@@ -2600,6 +2995,8 @@ struct ImportOptionsSheet: View {
         }
     }
 }
+
+
 
 // Add at the bottom of the file, outside any struct
 extension Int {

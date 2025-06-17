@@ -39,12 +39,19 @@ struct NoteCardView: View {
         }
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(red: 28/255, green: 30/255, blue: 34/255)) // Dark card background
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(0.2)
+                
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(0.01))
+            }
         )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1) // Subtle border
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
     }
 }
