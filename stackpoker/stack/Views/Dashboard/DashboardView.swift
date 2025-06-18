@@ -1368,11 +1368,51 @@ struct SessionsTab: View {
     @State private var editBuyIn = ""
     @State private var editCashout = ""
     @State private var editHours = ""
+    @State private var selectedDate: Date? = nil
 
+    private var selectedDateFormatted: String {
+        guard let date = selectedDate else { return "" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .long
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
     
     // Combined sessions and transactions grouped by time periods
     private var groupedItems: (today: [SessionOrTransaction], lastWeek: [SessionOrTransaction], older: [SessionOrTransaction]) {
         let calendar = Calendar.current
+        
+        // Filter sessions if a date is selected
+        let sessionsToDisplay: [Session]
+        if let date = selectedDate {
+            sessionsToDisplay = sessionStore.sessions.filter {
+                calendar.isDate($0.startDate, inSameDayAs: date)
+            }
+        } else {
+            sessionsToDisplay = sessionStore.sessions
+        }
+        
+        // Also filter transactions if a date is selected
+        let transactionsToDisplay: [BankrollTransaction]
+        if let date = selectedDate {
+            transactionsToDisplay = bankrollStore.transactions.filter {
+                calendar.isDate($0.timestamp, inSameDayAs: date)
+            }
+        } else {
+            transactionsToDisplay = bankrollStore.transactions
+        }
+        
+        let sessionItems = sessionsToDisplay.map { SessionOrTransaction.session($0) }
+        let transactionItems = transactionsToDisplay.map { SessionOrTransaction.transaction($0) }
+        
+        let allItems = (sessionItems + transactionItems).sorted { item1, item2 in
+            item1.date > item2.date
+        }
+        
+        if selectedDate != nil {
+            return (today: allItems, lastWeek: [], older: [])
+        }
+        
         let now = Date()
         let startOfToday = calendar.startOfDay(for: now)
         let oneWeekAgo = calendar.date(byAdding: .day, value: -7, to: startOfToday)!
@@ -1381,38 +1421,10 @@ struct SessionsTab: View {
         var lastWeek: [SessionOrTransaction] = []
         var older: [SessionOrTransaction] = []
         
-        // Convert sessions to SessionOrTransaction
-        let sessionItems = sessionStore.sessions.map { SessionOrTransaction.session($0) }
-        
-        // Convert bankroll transactions to SessionOrTransaction
-        let transactionItems = bankrollStore.transactions.map { SessionOrTransaction.transaction($0) }
-        
-        // Combine and sort by date (newest first)
-        let allItems = (sessionItems + transactionItems).sorted { item1, item2 in
-            switch (item1, item2) {
-            case let (.session(s1), .session(s2)):
-                return s1.startDate > s2.startDate
-            case let (.transaction(t1), .transaction(t2)):
-                return t1.timestamp > t2.timestamp
-            case let (.session(s), .transaction(t)):
-                return s.startDate > t.timestamp
-            case let (.transaction(t), .session(s)):
-                return t.timestamp > s.startDate
-            }
-        }
-        
         for item in allItems {
-            let itemDate: Date
-            switch item {
-            case .session(let session):
-                itemDate = session.startDate
-            case .transaction(let transaction):
-                itemDate = transaction.timestamp
-            }
-            
-            if calendar.isDate(itemDate, inSameDayAs: now) {
+            if calendar.isDate(item.date, inSameDayAs: now) {
                 today.append(item)
-            } else if itemDate >= oneWeekAgo && itemDate < startOfToday {
+            } else if item.date >= oneWeekAgo && item.date < startOfToday {
                 lastWeek.append(item)
             } else {
                 older.append(item)
@@ -1422,119 +1434,73 @@ struct SessionsTab: View {
         return (today, lastWeek, older)
     }
     
-
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) { // Root VStack of SessionsTab
-            // The old compact calendar toggle button is removed from here.
-            
+        VStack(alignment: .leading, spacing: 0) {
+            // Add top padding and remove side padding to fix squeezing
+            SessionsCalendarView(sessionStore: sessionStore, selectedDate: $selectedDate)
+                .padding(.top, 30)
+                .padding(.bottom, 10)
+
             ScrollView {
-                VStack(spacing: 22) {
-                    // Today's items
-                    if !groupedItems.today.isEmpty {
-                        EnhancedItemsSection(title: "Today", items: groupedItems.today, 
-                                                onSelect: { session in
-                                                    selectedSession = session
-                                                }, 
-                                                onDelete: { session in
-                            selectedSession = session
-                            showingDeleteAlert = true
-                        })
-                        .padding(.horizontal, 16)
-                    }
-                    
-                    // Last week's items
-                    if !groupedItems.lastWeek.isEmpty {
-                        EnhancedItemsSection(title: "Last Week", items: groupedItems.lastWeek, 
-                                                onSelect: { session in
-                                                    selectedSession = session
-                                                }, 
-                                                onDelete: { session in
-                            selectedSession = session
-                            showingDeleteAlert = true
-                        })
-                        .padding(.horizontal, 16)
-                    }
-                    
-                    // Older items
-                    if !groupedItems.older.isEmpty {
-                        EnhancedItemsSection(title: "All Time", items: groupedItems.older, 
-                                                onSelect: { session in
-                                                    selectedSession = session
-                                                }, 
-                                                onDelete: { session in
-                            selectedSession = session
-                            showingDeleteAlert = true
-                        })
-                        .padding(.horizontal, 16)
-                    }
-                    
-                    // Empty state
-                    if sessionStore.sessions.isEmpty && bankrollStore.transactions.isEmpty {
-                        EmptySessionsView()
-                            .padding(32)
-                    }
-                }
-                .padding(.bottom, 16)
-            }
-            // .padding(.top, 40) // Remove this, top padding applied to root VStack
-        }
-        .padding(.top, 50) // Apply 50 points of top padding to the root VStack of SessionsTab
-        .alert(isPresented: $showingDeleteAlert) {
-            Alert(
-                title: Text("Delete Session"),
-                message: Text("Are you sure you want to delete this session? This action cannot be undone."),
-                primaryButton: .destructive(Text("Delete")) {
-                    if let sessionToDelete = selectedSession {
-                        Task {
-                            // Call the existing deleteSession method in SessionStore
-                            sessionStore.deleteSession(sessionToDelete.id) { error in
-                                if let error = error {
-                                    // Handle error (e.g., show another alert or log)
-                                    print("Error deleting session: \(error.localizedDescription)")
-                                } else {
-                                    // Optionally, refresh or handle UI changes post-deletion if needed
-                                    // (SessionStore likely updates its `sessions` array which should reflect in UI)
-                                    print("Session \(sessionToDelete.id) deleted successfully.")
-                                }
-                                self.selectedSession = nil // Clear selection
+                if let date = selectedDate {
+                    if groupedItems.today.isEmpty {
+                        VStack {
+                            Spacer(minLength: 50)
+                            Text("No sessions recorded on")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            Text(selectedDateFormatted)
+                                .font(.subheadline)
+                                .foregroundColor(.gray)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        EnhancedItemsSection(
+                            title: "Sessions for \(selectedDateFormatted)", 
+                            items: groupedItems.today, 
+                            onSelect: { session in selectedSession = session },
+                            onDelete: { session in
+                                selectedSession = session
+                                showingDeleteAlert = true
                             }
+                        )
+                        .padding(.horizontal, 16)
+                    }
+                } else {
+                    VStack(spacing: 22) {
+                        if !groupedItems.today.isEmpty {
+                            EnhancedItemsSection(title: "Today", items: groupedItems.today, onSelect: { session in selectedSession = session }, onDelete: { session in
+                                selectedSession = session
+                                showingDeleteAlert = true
+                            })
+                            .padding(.horizontal, 16)
+                        }
+                        
+                        if !groupedItems.lastWeek.isEmpty {
+                            EnhancedItemsSection(title: "Last Week", items: groupedItems.lastWeek, onSelect: { session in selectedSession = session }, onDelete: { session in
+                                selectedSession = session
+                                showingDeleteAlert = true
+                            })
+                            .padding(.horizontal, 16)
+                        }
+                        
+                        if !groupedItems.older.isEmpty {
+                            EnhancedItemsSection(title: "All Time", items: groupedItems.older, onSelect: { session in selectedSession = session }, onDelete: { session in
+                                selectedSession = session
+                                showingDeleteAlert = true
+                            })
+                            .padding(.horizontal, 16)
+                        }
+                        
+                        if sessionStore.sessions.isEmpty && bankrollStore.transactions.isEmpty {
+                            EmptySessionsView()
+                                .padding(32)
                         }
                     }
-                },
-                secondaryButton: .cancel() {
-                    self.selectedSession = nil // Clear selection on cancel
                 }
-            )
-        }
-        .sheet(isPresented: $showEditSheet) {
-            if let sessionToEdit = selectedSession {
-                EditSessionSheetView(
-                    session: sessionToEdit,
-                    sessionStore: sessionStore,
-                    stakeService: StakeService()
-                )
-                .environmentObject(userService)
-                // onSave and onCancel are handled internally by EditSessionSheetView
-            } else {
-                // Fallback or error view if selectedSession is nil, though this should not happen if sheet is presented
-                Text("Error: No session selected for editing.")
             }
-        }
-        // Sheet for viewing session details
-        .sheet(item: $selectedSession, onDismiss: { selectedSession = nil }) { session in
-            SessionDetailView(session: session)
-                .environmentObject(sessionStore)
-                .environmentObject(userService)
-        }
-    }
-    
-    // Format currency in a beautiful way
-    private func formatCurrency(_ amount: Double) -> String {
-        if amount >= 0 {
-            return "+$\(Int(amount))"
-        } else {
-            return "-$\(abs(Int(amount)))"
+            .padding(.bottom, 16)
         }
     }
 }
