@@ -1368,9 +1368,7 @@ struct SessionsTab: View {
     @State private var editBuyIn = ""
     @State private var editCashout = ""
     @State private var editHours = ""
-    @State private var isCalendarExpanded: Bool = true // Calendar starts expanded
-    @State private var selectedDate: Date? = nil
-    @State private var currentMonth = Date()
+
     
     // Combined sessions and transactions grouped by time periods
     private var groupedItems: (today: [SessionOrTransaction], lastWeek: [SessionOrTransaction], older: [SessionOrTransaction]) {
@@ -1424,51 +1422,7 @@ struct SessionsTab: View {
         return (today, lastWeek, older)
     }
     
-    // Get items for a specific date
-    private func itemsForDate(_ date: Date) -> [SessionOrTransaction] {
-        let calendar = Calendar.current
-        let sessionItems = sessionStore.sessions.filter { session in
-            calendar.isDate(session.startDate, inSameDayAs: date)
-        }.map { SessionOrTransaction.session($0) }
-        
-        let transactionItems = bankrollStore.transactions.filter { transaction in
-            calendar.isDate(transaction.timestamp, inSameDayAs: date)
-        }.map { SessionOrTransaction.transaction($0) }
-        
-        return (sessionItems + transactionItems).sorted { item1, item2 in
-            switch (item1, item2) {
-            case let (.session(s1), .session(s2)):
-                return s1.startDate > s2.startDate
-            case let (.transaction(t1), .transaction(t2)):
-                return t1.timestamp > t2.timestamp
-            case let (.session(s), .transaction(t)):
-                return s.startDate > t.timestamp
-            case let (.transaction(t), .session(s)):
-                return t.timestamp > s.startDate
-            }
-        }
-    }
-    
-    // Calculate monthly profit including bankroll adjustments
-    private func monthlyProfit(_ date: Date) -> Double {
-        let calendar = Calendar.current
-        let month = calendar.component(.month, from: date)
-        let year = calendar.component(.year, from: date)
-        
-        let sessionProfit = sessionStore.sessions.filter { session in
-            let sessionMonth = calendar.component(.month, from: session.startDate)
-            let sessionYear = calendar.component(.year, from: session.startDate)
-            return sessionMonth == month && sessionYear == year
-        }.reduce(0) { $0 + $1.profit }
-        
-        let bankrollProfit = bankrollStore.transactions.filter { transaction in
-            let transactionMonth = calendar.component(.month, from: transaction.timestamp)
-            let transactionYear = calendar.component(.year, from: transaction.timestamp)
-            return transactionMonth == month && transactionYear == year
-        }.reduce(0) { $0 + $1.amount }
-        
-        return sessionProfit + bankrollProfit
-    }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { // Root VStack of SessionsTab
@@ -1476,107 +1430,8 @@ struct SessionsTab: View {
             
             ScrollView {
                 VStack(spacing: 22) {
-                    // Calendar View - always part of the layout, its content visibility is handled internally
-                    LuxuryCalendarView(
-                        sessions: sessionStore.sessions,
-                        currentMonth: $currentMonth,
-                        selectedDate: $selectedDate,
-                        monthlyProfit: monthlyProfit(currentMonth),
-                        isExpanded: $isCalendarExpanded // Pass binding
-                    )
-                    .padding(.top, 20) // Increased top padding for LuxuryCalendarView component
-                    .padding(.horizontal, 8) 
-                    
-                    // Selected Date Items
-                    if let selectedDate = selectedDate, !itemsForDate(selectedDate).isEmpty {
-                        VStack(alignment: .leading, spacing: 16) {
-                            // Date header
-                            let formatter = DateFormatter()
-                            
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("\(formatter.string(from: selectedDate))")
-                                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                                        .foregroundColor(.white)
-                                    
-                                    let itemsCount = itemsForDate(selectedDate).count
-                                    Text("\(itemsCount) \(itemsCount == 1 ? "item" : "items")")
-                                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                                        .foregroundColor(Color.gray.opacity(0.8))
-                                }
-                                
-                                Spacer()
-                                
-                                // Daily profit summary (sessions + bankroll adjustments)
-                                let dailyProfit = itemsForDate(selectedDate).reduce(0) { total, item in
-                                    switch item {
-                                    case .session(let session):
-                                        return total + session.profit
-                                    case .transaction(let transaction):
-                                        return total + transaction.amount
-                                    }
-                                }
-                                Text(formatCurrency(dailyProfit))
-                                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                                    .foregroundColor(dailyProfit >= 0 ? 
-                                                    Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
-                                                    Color.red)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        Capsule()
-                                            .fill(dailyProfit >= 0 ? 
-                                                  Color(UIColor(red: 25/255, green: 45/255, blue: 30/255, alpha: 0.3)) : 
-                                                  Color(UIColor(red: 45/255, green: 25/255, blue: 25/255, alpha: 0.3)))
-                                    )
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.top, 8)
-                            
-                            // Items for selected date with animation
-                            VStack(spacing: 12) {
-                                ForEach(Array(itemsForDate(selectedDate).enumerated()), id: \.element.id) { index, item in
-                                    switch item {
-                                    case .session(let session):
-                                        EnhancedSessionSummaryRow(
-                                            session: session,
-                                            onSelect: {
-                                                selectedSession = session
-                                            },
-                                            onDelete: {
-                                                selectedSession = session
-                                                showingDeleteAlert = true
-                                            }
-                                        )
-                                    case .transaction(let transaction):
-                                        BankrollTransactionRow(transaction: transaction)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                        }
-                        .padding(.vertical, 8)
-                        .background(
-                            ZStack { // Applying GlassyInputField style
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Material.ultraThinMaterial)
-                                    .opacity(0.2)
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color.white.opacity(0.01))
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
-                            }
-                            // .shadow(color: Color.black.opacity(0.1), radius: 5, y: 2) // Remove or make very subtle
-                        )
-                        .padding(.horizontal, 16)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .top).combined(with: .opacity),
-                            removal: .opacity
-                        ))
-                    }
-                    
                     // Today's items
-                    if !groupedItems.today.isEmpty && (selectedDate == nil || !Calendar.current.isDate(selectedDate!, inSameDayAs: Date())) {
+                    if !groupedItems.today.isEmpty {
                         EnhancedItemsSection(title: "Today", items: groupedItems.today, 
                                                 onSelect: { session in
                                                     selectedSession = session

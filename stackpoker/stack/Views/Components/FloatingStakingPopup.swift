@@ -4,7 +4,9 @@ struct FloatingStakingPopup: View {
     @Binding var isPresented: Bool
     @Binding var stakerConfigs: [StakerConfig]
     @ObservedObject var userService: UserService
+    @ObservedObject var manualStakerService: ManualStakerService
     
+    let userId: String
     let primaryTextColor: Color
     let secondaryTextColor: Color
     let glassOpacity: Double
@@ -108,22 +110,33 @@ struct FloatingStakingPopup: View {
                 
                 // Staker configurations
                 VStack(spacing: 20) {
-                    ForEach(stakerConfigs) { config in
-                        if let idx = stakerConfigs.firstIndex(where: { $0.id == config.id }) {
-                            ImprovedStakerInputView(
-                                config: $stakerConfigs[idx],
-                                userService: userService,
-                                primaryTextColor: primaryTextColor,
-                                secondaryTextColor: secondaryTextColor,
-                                glassOpacity: glassOpacity,
-                                materialOpacity: materialOpacity * 0.6,
-                                onRemove: {
-                                    removeStaker(id: config.id)
+                    ForEach(Array(stakerConfigs.enumerated()), id: \.element.id) { index, config in
+                        ImprovedStakerInputView(
+                            config: Binding(
+                                get: { 
+                                    // Safely get the config if index is still valid
+                                    index < stakerConfigs.count ? stakerConfigs[index] : config
+                                },
+                                set: { newValue in
+                                    // Safely set the config if index is still valid
+                                    if index < stakerConfigs.count {
+                                        stakerConfigs[index] = newValue
+                                    }
                                 }
-                            )
-                            .id(config.id)
-                            .padding(.horizontal, 24)
-                        }
+                            ),
+                            userService: userService,
+                            manualStakerService: manualStakerService,
+                            userId: userId,
+                            primaryTextColor: primaryTextColor,
+                            secondaryTextColor: secondaryTextColor,
+                            glassOpacity: glassOpacity,
+                            materialOpacity: materialOpacity * 0.6,
+                            onRemove: {
+                                removeStaker(id: config.id)
+                            }
+                        )
+                        .id(config.id)
+                        .padding(.horizontal, 24)
                     }
                 }
                 
@@ -195,21 +208,19 @@ struct FloatingStakingPopup: View {
     
     private func removeStaker(id idToRemove: UUID) {
         print("--- Staker Removal Attempt (id path) ---")
-        print("[\\(Date())] removeStaker called for id: \\(idToRemove)")
-        // Defer the removal slightly to allow SwiftUI to finish any in-flight updates for this view.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                if let safeIndex = stakerConfigs.firstIndex(where: { $0.id == idToRemove }) {
-                    stakerConfigs.remove(at: safeIndex)
-                }
-            }
-            print("[\\(Date())] After delayed removal, stakerConfigs count: \\(stakerConfigs.count), IDs: \\(stakerConfigs.map { $0.id })")
-            if stakerConfigs.isEmpty {
-                DispatchQueue.main.async {
-                    dismissPopup()
-                }
+        print("[\(Date())] removeStaker called for id: \(idToRemove)")
+        
+        // Use immediate removal with proper animation
+        withAnimation(.easeOut(duration: 0.3)) {
+            stakerConfigs.removeAll { $0.id == idToRemove }
+        }
+        
+        print("[\(Date())] After removal, stakerConfigs count: \(stakerConfigs.count), IDs: \(stakerConfigs.map { $0.id })")
+        
+        // If no stakers left, dismiss the popup
+        if stakerConfigs.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                dismissPopup()
             }
         }
     }

@@ -18,6 +18,11 @@ struct EventDetailView: View {
     @State private var error: String?
     @State private var showError = false
     @State private var showingLiveSession = false
+    @State private var showingStakingDetails = false
+    @State private var existingStakingInvites: [EventStakingInvite] = []
+    @State private var existingStakes: [Stake] = []
+    @StateObject private var eventStakingService = EventStakingService()
+    @StateObject private var stakeService = StakeService()
 
 
     // Computed properties for display
@@ -79,6 +84,11 @@ struct EventDetailView: View {
                         
                         participantsSection
                         
+                        // Show existing staking details if any exist
+                        if isAddedToSchedule && (!existingStakingInvites.isEmpty || !existingStakes.isEmpty) {
+                            existingStakingDetailsSection
+                        }
+                        
                         actionsButtonsSection
                     }
                     .padding(.horizontal, 20)
@@ -89,13 +99,26 @@ struct EventDetailView: View {
         .navigationBarHidden(true)
         .overlay(customNavigationBar, alignment: .top)
         .alert("Error", isPresented: $showError, actions: { Button("OK") {} }, message: { Text(error ?? "An unknown error occurred.") })
-        .onAppear(perform: checkIfAddedToSchedule)
+        .onAppear {
+            checkIfAddedToSchedule()
+            fetchExistingStakingInvites()
+            fetchExistingStakes()
+        }
         .sheet(isPresented: $showingLiveSession) {
             EnhancedLiveSessionView(
                 userId: Auth.auth().currentUser?.uid ?? "",
                 sessionStore: SessionStore(userId: Auth.auth().currentUser?.uid ?? ""),
                 preselectedEvent: event
             )
+        }
+        .sheet(isPresented: $showingStakingDetails, onDismiss: {
+            // Refresh staking data when returning from staking details
+            fetchExistingStakingInvites()
+            fetchExistingStakes()
+        }) {
+            EventStakingDetailsView(event: event)
+                .environmentObject(userService)
+                .environmentObject(ManualStakerService())
         }
     }
 
@@ -344,6 +367,30 @@ struct EventDetailView: View {
                 }
             }
             
+            // Add Staking Details Button (only show if event is added to schedule)
+            if isAddedToSchedule {
+                Button(action: {
+                    showingStakingDetails = true
+                }) {
+                    Label((existingStakingInvites.isEmpty && existingStakes.isEmpty) ? "Add Staking Details" : "Edit Staking Details", systemImage: "person.2.fill")
+                        .font(.system(size: 17, weight: .semibold, design: .default))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color(red: 255/255, green: 149/255, blue: 0/255),
+                                    Color(red: 255/255, green: 179/255, blue: 64/255)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .cornerRadius(12)
+                }
+            }
+            
             // Start Live Session Button
             Button(action: {
                 showingLiveSession = true
@@ -568,5 +615,283 @@ struct EventDetailView: View {
             day: simpleDate.day,
             hour: 18 // Default to 6 PM
         )) ?? Date()
+    }
+    
+    // MARK: - Existing Staking Details Section
+    private var existingStakingDetailsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Staking Configuration")
+                .font(.system(size: 20, weight: .semibold, design: .default))
+                .foregroundColor(.white)
+            
+            VStack(spacing: 12) {
+                // Show invites (app users)
+                ForEach(existingStakingInvites) { invite in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            StakerDisplayView(
+                                invite: invite,
+                                userService: userService
+                            )
+                            
+                            HStack(spacing: 8) {
+                                Text("\(invite.percentageBought, specifier: "%.1f")%")
+                                    .font(.system(size: 14, design: .default))
+                                    .foregroundColor(.gray)
+                                Text("•")
+                                    .foregroundColor(.gray)
+                                Text(formatCurrency(invite.amountBought))
+                                    .font(.system(size: 14, design: .default))
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        // Status badge
+                        HStack(spacing: 4) {
+                            Image(systemName: invite.status.icon)
+                                .font(.system(size: 12))
+                            Text(invite.status.displayName)
+                                .font(.system(size: 12, weight: .semibold, design: .default))
+                        }
+                        .foregroundColor(stakingStatusColor(invite.status))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(stakingStatusColor(invite.status).opacity(0.15))
+                        .clipShape(Capsule())
+                    }
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.white.opacity(0.05))
+                    )
+                }
+                
+                // Show stakes (manual stakers)
+                ForEach(existingStakes, id: \.id) { stake in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(stake.manualStakerDisplayName ?? "Manual Staker")
+                                .font(.system(size: 16, weight: .semibold, design: .default))
+                                .foregroundColor(.white)
+                            
+                            HStack(spacing: 8) {
+                                Text("\(stake.stakePercentage * 100, specifier: "%.1f")%")
+                                    .font(.system(size: 14, design: .default))
+                                    .foregroundColor(.gray)
+                                Text("•")
+                                    .foregroundColor(.gray)
+                                Text("\(stake.markup, specifier: "%.2f")x markup")
+                                    .font(.system(size: 14, design: .default))
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        // Status badge
+                        HStack(spacing: 4) {
+                            Image(systemName: stakeStatusIcon(stake.status))
+                                .font(.system(size: 12))
+                            Text(stake.status.displayName)
+                                .font(.system(size: 12, weight: .semibold, design: .default))
+                        }
+                        .foregroundColor(stakeStatusColor(stake.status))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(stakeStatusColor(stake.status).opacity(0.15))
+                        .clipShape(Capsule())
+                    }
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.white.opacity(0.05))
+                    )
+                }
+            }
+            
+            // Summary info
+            if let firstInvite = existingStakingInvites.first {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Global Settings")
+                        .font(.system(size: 14, weight: .semibold, design: .default))
+                        .foregroundColor(.white)
+                    HStack {
+                        Text("Max Bullets: \(firstInvite.maxBullets)")
+                            .font(.system(size: 13, design: .default))
+                            .foregroundColor(.gray)
+                        Text("•")
+                            .foregroundColor(.gray)
+                        Text("Markup: \(firstInvite.markup, specifier: "%.2f")x")
+                            .font(.system(size: 13, design: .default))
+                            .foregroundColor(.gray)
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+        .padding(.vertical, 16)
+    }
+    
+    private func stakingStatusColor(_ status: EventStakingInvite.InviteStatus) -> Color {
+        switch status {
+        case .pending: return .orange
+        case .accepted: return .green
+        case .declined: return .red
+        case .expired: return .gray
+        }
+    }
+    
+    private func stakeStatusColor(_ status: Stake.StakeStatus) -> Color {
+        switch status {
+        case .pendingAcceptance: return .orange
+        case .active: return .green
+        case .awaitingSettlement: return .blue
+        case .awaitingConfirmation: return .yellow
+        case .settled: return .gray
+        case .declined: return .red
+        case .cancelled: return .red
+        }
+    }
+    
+    private func stakeStatusIcon(_ status: Stake.StakeStatus) -> String {
+        switch status {
+        case .pendingAcceptance: return "clock"
+        case .active: return "checkmark.circle"
+        case .awaitingSettlement: return "hourglass"
+        case .awaitingConfirmation: return "questionmark.circle"
+        case .settled: return "checkmark.circle.fill"
+        case .declined: return "xmark.circle"
+        case .cancelled: return "xmark.circle"
+        }
+    }
+    
+    private func formatCurrency(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencySymbol = "$"
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: amount)) ?? String(format: "$%.2f", amount)
+    }
+    
+    // MARK: - Fetch Existing Staking Invites
+    private func fetchExistingStakingInvites() {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        
+        Task {
+            do {
+                let invites = try await eventStakingService.fetchStakingInvitesForEvent(eventId: event.id)
+                // Only show invites created by the current user
+                let userCreatedInvites = invites.filter { $0.stakedPlayerUserId == currentUserId }
+                
+                await MainActor.run {
+                    self.existingStakingInvites = userCreatedInvites
+                }
+            } catch {
+                print("Failed to fetch existing staking invites: \(error)")
+            }
+        }
+    }
+    
+    // MARK: - Fetch Existing Stakes
+    private func fetchExistingStakes() {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        
+        Task {
+            do {
+                let allStakes = try await stakeService.fetchStakes(forUser: currentUserId)
+                print("EventDetailView: Total stakes fetched: \(allStakes.count)")
+                print("EventDetailView: Looking for event name: '\(event.event_name)'")
+                
+                // Debug all stakes
+                for stake in allStakes {
+                    print("EventDetailView: Stake - sessionGameName: '\(stake.sessionGameName)', stakedPlayerUserId: '\(stake.stakedPlayerUserId)', isOffAppStake: '\(stake.isOffAppStake ?? false)', status: '\(stake.status)'")
+                }
+                
+                // Filter for stakes related to this event
+                let eventStakes = allStakes.filter { stake in
+                    let nameMatch = stake.sessionGameName == event.event_name
+                    let playerMatch = stake.stakedPlayerUserId == currentUserId
+                    let manualMatch = stake.isOffAppStake == true
+                    
+                    print("EventDetailView: Stake filter - nameMatch: \(nameMatch), playerMatch: \(playerMatch), manualMatch: \(manualMatch)")
+                    
+                    return nameMatch && playerMatch && manualMatch
+                }
+                
+                await MainActor.run {
+                    self.existingStakes = eventStakes
+                    print("EventDetailView: Found \(eventStakes.count) manual stakes for event '\(event.event_name)'")
+                }
+            } catch {
+                print("Failed to fetch existing stakes: \(error)")
+            }
+        }
+    }
+}
+
+// MARK: - Helper Views
+
+private struct StakerDisplayView: View {
+    let invite: EventStakingInvite
+    @ObservedObject var userService: UserService
+    
+    var body: some View {
+        Group {
+            if invite.isManualStaker {
+                manualStakerView
+            } else {
+                appUserStakerView
+            }
+        }
+    }
+    
+    private var manualStakerView: some View {
+        Text(invite.manualStakerDisplayName ?? "Manual Staker")
+            .font(.system(size: 16, weight: .semibold, design: .default))
+            .foregroundColor(.white)
+    }
+    
+    private var appUserStakerView: some View {
+        Group {
+            if let stakerProfile = userService.loadedUsers[invite.stakerUserId] {
+                HStack(spacing: 8) {
+                    profileImageView(for: stakerProfile)
+                    
+                    Text(stakerProfile.displayName ?? stakerProfile.username)
+                        .font(.system(size: 16, weight: .semibold, design: .default))
+                        .foregroundColor(.white)
+                }
+            } else {
+                Text("Loading staker...")
+                    .font(.system(size: 16, weight: .semibold, design: .default))
+                    .foregroundColor(.white)
+                    .onAppear {
+                        Task {
+                            await userService.fetchUser(id: invite.stakerUserId)
+                        }
+                    }
+            }
+        }
+    }
+    
+    private func profileImageView(for profile: UserProfile) -> some View {
+        AsyncImage(url: URL(string: profile.avatarURL ?? "")) { image in
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } placeholder: {
+            Circle()
+                .fill(Color.gray.opacity(0.3))
+                .overlay(
+                    Text(String(profile.displayName?.first ?? profile.username.first ?? "?"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white)
+                )
+        }
+        .frame(width: 24, height: 24)
+        .clipShape(Circle())
     }
 } 

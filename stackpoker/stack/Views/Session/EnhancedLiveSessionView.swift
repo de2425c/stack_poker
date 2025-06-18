@@ -13,7 +13,9 @@ struct EnhancedLiveSessionView: View {
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var handStore = HandStore(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var stakeService = StakeService() // Add StakeService
+    @StateObject private var manualStakerService = ManualStakerService() // Add ManualStakerService
     @StateObject private var challengeService = ChallengeService(userId: Auth.auth().currentUser?.uid ?? "") // Add ChallengeService
+    @StateObject private var eventStakingService = EventStakingService() // Add EventStakingService
     @State private var handEntryMinimized = false
     
     // Callback for when a session ends, passing the new session ID
@@ -215,6 +217,44 @@ struct EnhancedLiveSessionView: View {
         sessionStore.liveSession.isActive ? accentColor : Color.orange
     }
     
+    // Computed property to get valid staker configs
+    private var validStakerConfigs: [StakerConfig] {
+        let filtered = stakerConfigs.filter { config in
+            // Check if percentage and markup are filled (this is the essential data)
+            let hasValidData = !config.percentageSold.isEmpty && !config.markup.isEmpty
+            
+            // Check if the config has valid staker selection
+            let hasValidStaker: Bool
+            if config.isManualEntry {
+                hasValidStaker = config.selectedManualStaker != nil || !config.manualStakerName.isEmpty
+            } else {
+                // For app users, check if we have a selectedStaker OR if we can restore from originalStakeUserId
+                if config.selectedStaker != nil {
+                    hasValidStaker = true
+                } else if let originalUserId = config.originalStakeUserId,
+                          let existingProfile = userService.loadedUsers[originalUserId] {
+                    // Try to restore the staker profile if it's available
+                    print("[EnhancedLiveSessionView] Auto-restoring staker profile for validation: \(existingProfile.username)")
+                    // Note: We can't modify the config here in the computed property, but we know it's restorable
+                    hasValidStaker = true
+                } else {
+                    hasValidStaker = false
+                }
+            }
+            
+            let isValid = hasValidStaker && hasValidData
+            
+            if !isValid {
+                print("[EnhancedLiveSessionView] Invalid staker config: hasValidStaker=\(hasValidStaker), hasValidData=\(hasValidData), isManual=\(config.isManualEntry), percentage='\(config.percentageSold)', markup='\(config.markup)', selectedStaker=\(config.selectedStaker?.username ?? "nil"), originalUserId=\(config.originalStakeUserId ?? "nil")")
+            }
+            
+            return isValid
+        }
+        
+        print("[EnhancedLiveSessionView] validStakerConfigs: \(filtered.count) out of \(stakerConfigs.count) total configs")
+        return filtered
+    }
+    
     // MARK: - Main Body
     
     var body: some View {
@@ -234,6 +274,8 @@ struct EnhancedLiveSessionView: View {
                 isPresented: $showingStakingPopup,
                 stakerConfigs: $stakerConfigsForPopup, // Pass the copy here
                 userService: userService,
+                manualStakerService: manualStakerService,
+                userId: userId,
                 primaryTextColor: .white,
                 secondaryTextColor: Color.white.opacity(0.7),
                 glassOpacity: 0.01,
@@ -246,10 +288,29 @@ struct EnhancedLiveSessionView: View {
                 print("[EnhancedLiveSessionView] Popup dismissed. Syncing stakerConfigs.")
                 print("[EnhancedLiveSessionView] Before sync, main stakerConfigs count: \(stakerConfigs.count)")
                 print("[EnhancedLiveSessionView] Popup copy stakerConfigsForPopup count: \(stakerConfigsForPopup.count)")
+                
+                // Enhanced sync: preserve existing user profiles if they're missing in popup copy
+                for (index, popupConfig) in stakerConfigsForPopup.enumerated() {
+                    // If the popup config lost the selected staker but we have an originalStakeUserId,
+                    // try to restore it from the userService
+                    if popupConfig.selectedStaker == nil && !popupConfig.isManualEntry {
+                        if let originalUserId = popupConfig.originalStakeUserId,
+                           let existingProfile = userService.loadedUsers[originalUserId] {
+                            print("[EnhancedLiveSessionView] Restoring missing staker profile for \(existingProfile.username)")
+                            stakerConfigsForPopup[index].selectedStaker = existingProfile
+                        }
+                    }
+                }
+                
                 // It's crucial that stakerConfigs is updated to reflect changes made in the popup.
                 // This will include any additions or removals.
                 self.stakerConfigs = self.stakerConfigsForPopup
                 print("[EnhancedLiveSessionView] After sync, main stakerConfigs count: \(stakerConfigs.count)")
+                
+                // Verify that we still have valid configs after sync
+                let validCount = validStakerConfigs.count
+                print("[EnhancedLiveSessionView] After sync, valid configs: \(validCount)")
+                
                 // After syncing, you might need to save these stakes if the session is active
                 // or if they are meant to be persisted immediately without ending the session.
                 // For now, this just updates the @State, persistence happens on session end.
@@ -719,6 +780,11 @@ struct EnhancedLiveSessionView: View {
             }
             
             tournamentCasino = event.casino ?? ""
+            
+            // Automatically populate staker configuration from accepted event staking invites
+            Task {
+                await loadEventStakingInvites(for: event)
+            }
         }
         
         // Ensure user profile is loaded for posting
@@ -1014,12 +1080,12 @@ struct EnhancedLiveSessionView: View {
                                     .font(.plusJakarta(.headline, weight: .medium))
                                     .foregroundColor(.white)
                                 
-                                if stakerConfigs.isEmpty {
+                                if validStakerConfigs.isEmpty {
                                     Text("Tap to add stakers or configure stakes")
                                         .font(.plusJakarta(.caption, weight: .medium))
                                         .foregroundColor(.white.opacity(0.7))
                                 } else {
-                                    Text("\(stakerConfigs.count) staker\(stakerConfigs.count == 1 ? "" : "s") configured")
+                                    Text("\(validStakerConfigs.count) staker\(validStakerConfigs.count == 1 ? "" : "s") configured")
                                         .font(.plusJakarta(.caption, weight: .medium))
                                         .foregroundColor(.green.opacity(0.8))
                                 }
@@ -1028,7 +1094,7 @@ struct EnhancedLiveSessionView: View {
                             Spacer()
                             
                             HStack(spacing: 8) {
-                                if !stakerConfigs.isEmpty {
+                                if !validStakerConfigs.isEmpty {
                                     Image(systemName: "checkmark.circle.fill")
                                         .foregroundColor(.green)
                                         .font(.system(size: 16))
@@ -1052,7 +1118,7 @@ struct EnhancedLiveSessionView: View {
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 16)
-                                .stroke(stakerConfigs.isEmpty ? Color.white.opacity(0.2) : Color.green.opacity(0.5), lineWidth: 1)
+                                .stroke(validStakerConfigs.isEmpty ? Color.white.opacity(0.2) : Color.green.opacity(0.5), lineWidth: 1)
                         )
                     }
                     .padding(.horizontal)
@@ -1421,6 +1487,13 @@ struct EnhancedLiveSessionView: View {
         // Update UI mode
         sessionMode = .active
 
+        // Ensure staker configs are preserved after session starts
+        print("[EnhancedLiveSessionView] Session started with \(stakerConfigs.count) staker configs")
+        stakerConfigsForPopup = stakerConfigs
+        
+        // Restore any missing staker profiles that might have been lost
+        restoreMissingStakerProfiles()
+
         // Ensure "Session Started" activity appears immediately
         updateLocalDataFromStore()
     }
@@ -1475,7 +1548,10 @@ struct EnhancedLiveSessionView: View {
                 }
                 
                 // Staking Information Section
-                if !existingStakes.isEmpty || !stakerConfigs.isEmpty {
+                let shouldShowStaking = !existingStakes.isEmpty || !validStakerConfigs.isEmpty
+                let _ = print("[EnhancedLiveSessionView] shouldShowStaking=\(shouldShowStaking), existingStakes=\(existingStakes.count), validStakerConfigs=\(validStakerConfigs.count)")
+                
+                if shouldShowStaking {
                     stakingInfoSection
                         .padding(.horizontal)
                 }
@@ -2135,7 +2211,7 @@ struct EnhancedLiveSessionView: View {
         // Filter out configs that are truly empty or invalid before deciding to save session only or with stakes.
         let validConfigs = stakerConfigs.filter { config in
             if config.isManualEntry {
-                guard !config.manualStakerName.isEmpty else { return false }
+                guard config.selectedManualStaker != nil else { return false }
             } else {
                 guard let _ = config.selectedStaker else { return false }
             }
@@ -2214,6 +2290,7 @@ struct EnhancedLiveSessionView: View {
     ) async {
         let newDocumentId = Firestore.firestore().collection("sessions").document().documentID
         var mutableSessionData = sessionData
+        mutableSessionData["id"] = newDocumentId
 
         do {
             try await Firestore.firestore().collection("sessions").document(newDocumentId).setData(mutableSessionData)
@@ -2224,7 +2301,7 @@ struct EnhancedLiveSessionView: View {
             // Update session challenges
             await challengeService.updateSessionChallengesFromSession(session)
             
-            // Session/Log added successfully, now add stakes for each config
+            // Now handle stakes - update existing ones or create new ones
             var allStakesSuccessful = true
             var savedStakeCount = 0
 
@@ -2240,12 +2317,12 @@ struct EnhancedLiveSessionView: View {
                 let isOffApp: Bool
 
                 if config.isManualEntry {
-                    guard !config.manualStakerName.isEmpty else {
+                    guard let selectedManualStaker = config.selectedManualStaker else {
                         allStakesSuccessful = false
                         continue
                     }
-                    stakerIdToUse = Stake.OFF_APP_STAKER_ID
-                    manualName = config.manualStakerName
+                    stakerIdToUse = selectedManualStaker.id ?? Stake.OFF_APP_STAKER_ID
+                    manualName = selectedManualStaker.name
                     isOffApp = true
                 } else if let stakerProfile = config.selectedStaker {
                     stakerIdToUse = stakerProfile.id
@@ -2256,28 +2333,60 @@ struct EnhancedLiveSessionView: View {
                     continue
                 }
 
-                let newStake = Stake(
-                    sessionId: newDocumentId,
-                    sessionGameName: tournamentName ?? gameName,
-                    sessionStakes: stakes,
-                    sessionDate: startDateTime,
-                    stakerUserId: stakerIdToUse,
-                    stakedPlayerUserId: self.userId,
-                    stakePercentage: percentageSoldDouble / 100.0,
-                    markup: markupDouble,
-                    totalPlayerBuyInForSession: actualSessionBuyInForStaking,
-                    playerCashoutForSession: sessionCashout,
-                    isTournamentSession: isTournamentStake,
-                    manualStakerDisplayName: manualName,
-                    isOffAppStake: isOffApp
-                )
-                do {
-                    _ = try await stakeService.addStake(newStake)
-
-                    savedStakeCount += 1
-                } catch {
-
-                    allStakesSuccessful = false
+                                 // NEW: Check if this config has an existing stake ID to update
+                 if let originalStakeId = config.originalStakeId {
+                     // UPDATE existing stake with session data
+                     print("[EnhancedLiveSessionView] Updating existing stake ID: \(originalStakeId)")
+                    do {
+                        let updateData: [String: Any] = [
+                            Stake.CodingKeys.sessionId.rawValue: newDocumentId,
+                            Stake.CodingKeys.totalPlayerBuyInForSession.rawValue: actualSessionBuyInForStaking,
+                            Stake.CodingKeys.playerCashoutForSession.rawValue: sessionCashout,
+                            Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date()),
+                            Stake.CodingKeys.status.rawValue: Stake.StakeStatus.awaitingSettlement.rawValue
+                        ]
+                        
+                                                 try await stakeService.updateStake(stakeId: originalStakeId, updateData: updateData)
+                        savedStakeCount += 1
+                        print("[EnhancedLiveSessionView] Successfully updated existing stake")
+                    } catch {
+                        print("[EnhancedLiveSessionView] Failed to update existing stake: \(error)")
+                        allStakesSuccessful = false
+                    }
+                } else {
+                    // CREATE new stake
+                    print("[EnhancedLiveSessionView] Creating new stake for staker: \(stakerIdToUse)")
+                    
+                    // Calculate the settlement amount for this stake
+                    let profit = sessionCashout - actualSessionBuyInForStaking
+                    let stakerShare = profit * (percentageSoldDouble / 100.0)
+                    let adjustedStakerShare = stakerShare * markupDouble
+                    let settlementAmount = -adjustedStakerShare // Negative means player pays staker
+                    
+                    let newStake = Stake(
+                        sessionId: newDocumentId,
+                        sessionGameName: tournamentName ?? gameName,
+                        sessionStakes: stakes,
+                        sessionDate: startDateTime,
+                        stakerUserId: stakerIdToUse,
+                        stakedPlayerUserId: self.userId,
+                        stakePercentage: percentageSoldDouble / 100.0,
+                        markup: markupDouble,
+                        totalPlayerBuyInForSession: actualSessionBuyInForStaking,
+                        playerCashoutForSession: sessionCashout,
+                        storedAmountTransferredAtSettlement: settlementAmount,
+                        isTournamentSession: isTournamentStake,
+                        manualStakerDisplayName: manualName,
+                        isOffAppStake: isOffApp
+                    )
+                    do {
+                        _ = try await stakeService.addStake(newStake)
+                        savedStakeCount += 1
+                        print("[EnhancedLiveSessionView] Successfully created new stake")
+                    } catch {
+                        print("[EnhancedLiveSessionView] Failed to create new stake: \(error)")
+                        allStakesSuccessful = false
+                    }
                 }
             }
 
@@ -2291,18 +2400,18 @@ struct EnhancedLiveSessionView: View {
                 self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
                 if allStakesSuccessful && savedStakeCount == configs.count && savedStakeCount > 0 {
-
+                    print("[EnhancedLiveSessionView] All stakes processed successfully (\(savedStakeCount) total)")
                 } else if savedStakeCount > 0 {
-
+                    print("[EnhancedLiveSessionView] Partial success: \(savedStakeCount) of \(configs.count) stakes processed")
                 } else {
-
+                    print("[EnhancedLiveSessionView] Failed to process stakes")
                 }
                 
                 // Show share prompt instead of going directly to session detail
                 self.showingShareToFeedPrompt = true
             }
         } catch {
-
+            print("[EnhancedLiveSessionView] Failed to save session: \(error)")
             await MainActor.run {
                 self.isLoadingSave = false
             }
@@ -3420,7 +3529,7 @@ struct EnhancedLiveSessionView: View {
                     self.existingStakes = stakes
                     
                     // Convert existing stakes to StakerConfigs for editing
-                    self.stakerConfigs = stakes.compactMap { stake in
+                    self.stakerConfigs = stakes.compactMap { stake -> StakerConfig? in
                         // Only include stakes where current user is the staked player
                         guard stake.stakedPlayerUserId == self.userId else { return nil }
                         
@@ -3428,18 +3537,50 @@ struct EnhancedLiveSessionView: View {
                         config.markup = String(stake.markup)
                         config.percentageSold = String(stake.stakePercentage * 100) // Convert back to percentage
                         
-                        // Try to load the staker's profile
-                        if let stakerProfile = self.userService.loadedUsers[stake.stakerUserId] {
-                            config.selectedStaker = stakerProfile
-                        } else {
-                            // Load staker profile asynchronously
+                        // Store the original stake ID and user ID for updating
+                        config.originalStakeId = stake.id
+                        config.originalStakeUserId = stake.stakerUserId
+                        
+                        // Handle manual vs app stakers
+                        if stake.isOffAppStake ?? false {
+                            // This is a manual staker - try to load the manual staker profile
+                            config.isManualEntry = true
+                            
+                            // Try to load manual staker profile
                             Task {
-                                await self.userService.fetchUser(id: stake.stakerUserId)
-                                await MainActor.run {
-                                    if let fetchedProfile = self.userService.loadedUsers[stake.stakerUserId] {
-                                        // Update the config with the loaded profile
+                                do {
+                                    let manualStakerProfile = try await manualStakerService.getManualStaker(id: stake.stakerUserId)
+                                    await MainActor.run {
                                         if let index = self.stakerConfigs.firstIndex(where: { $0.id == config.id }) {
-                                            self.stakerConfigs[index].selectedStaker = fetchedProfile
+                                            self.stakerConfigs[index].selectedManualStaker = manualStakerProfile
+                                        }
+                                    }
+                                } catch {
+                                    // If we can't load the profile, fall back to legacy display name
+                                    await MainActor.run {
+                                        if let index = self.stakerConfigs.firstIndex(where: { $0.id == config.id }) {
+                                            self.stakerConfigs[index].manualStakerName = stake.manualStakerDisplayName ?? "Unknown Manual Staker"
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // This is an app user staker
+                            config.isManualEntry = false
+                            
+                            // Try to load the staker's profile
+                            if let stakerProfile = self.userService.loadedUsers[stake.stakerUserId] {
+                                config.selectedStaker = stakerProfile
+                            } else {
+                                // Load staker profile asynchronously
+                                Task {
+                                    await self.userService.fetchUser(id: stake.stakerUserId)
+                                    await MainActor.run {
+                                        if let fetchedProfile = self.userService.loadedUsers[stake.stakerUserId] {
+                                            // Update the config with the loaded profile
+                                            if let index = self.stakerConfigs.firstIndex(where: { $0.id == config.id }) {
+                                                self.stakerConfigs[index].selectedStaker = fetchedProfile
+                                            }
                                         }
                                     }
                                 }
@@ -3473,23 +3614,45 @@ struct EnhancedLiveSessionView: View {
                 Spacer()
                 
                 HStack(spacing: 8) {
-                    // Add Staker Button
+                                            // Add Staker Button
                     Button(action: {
                         // Prepare the copy for the popup
                         // If stakerConfigs is empty and existingStakes has items, populate from existing first.
                         if stakerConfigs.isEmpty && !existingStakes.isEmpty {
-                            self.stakerConfigs = existingStakes.compactMap { stake in
+                            self.stakerConfigs = existingStakes.compactMap { stake -> StakerConfig? in
                                 guard stake.stakedPlayerUserId == self.userId else { return nil }
                                 var config = StakerConfig()
                                 config.markup = String(stake.markup)
                                 config.percentageSold = String(stake.stakePercentage * 100)
                                 config.isManualEntry = stake.isOffAppStake ?? false
-                                config.manualStakerName = stake.manualStakerDisplayName ?? ""
-                                if let stakerProfile = self.userService.loadedUsers[stake.stakerUserId] {
-                                    config.selectedStaker = stakerProfile
-                                } else if !(stake.isOffAppStake ?? false) {
-                                    // Pre-fetch user for on-app stakes if not already loaded
-                                    Task { await self.userService.fetchUser(id: stake.stakerUserId) }
+                                
+                                if stake.isOffAppStake ?? false {
+                                    // Manual staker - try to load profile asynchronously
+                                    Task {
+                                        do {
+                                            let manualStakerProfile = try await manualStakerService.getManualStaker(id: stake.stakerUserId)
+                                            await MainActor.run {
+                                                if let index = self.stakerConfigs.firstIndex(where: { $0.id == config.id }) {
+                                                    self.stakerConfigs[index].selectedManualStaker = manualStakerProfile
+                                                }
+                                            }
+                                        } catch {
+                                            // Fall back to legacy display name
+                                            await MainActor.run {
+                                                if let index = self.stakerConfigs.firstIndex(where: { $0.id == config.id }) {
+                                                    self.stakerConfigs[index].manualStakerName = stake.manualStakerDisplayName ?? "Unknown Manual Staker"
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // App user staker
+                                    if let stakerProfile = self.userService.loadedUsers[stake.stakerUserId] {
+                                        config.selectedStaker = stakerProfile
+                                    } else {
+                                        // Pre-fetch user for on-app stakes if not already loaded
+                                        Task { await self.userService.fetchUser(id: stake.stakerUserId) }
+                                    }
                                 }
                                 return config
                             }
@@ -3498,7 +3661,11 @@ struct EnhancedLiveSessionView: View {
                         if stakerConfigs.isEmpty {
                             stakerConfigs.append(StakerConfig())
                         }
-                        stakerConfigsForPopup = stakerConfigs // Make a fresh copy for the popup
+                        stakerConfigsForPopup = stakerConfigs.map { config in
+                            var newConfig = config
+                            // Ensure originalStakeUserId is preserved during copy
+                            return newConfig
+                        }
                         print("[EnhancedLiveSessionView] Add Staker tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
                         showingStakingPopup = true
                     }) {
@@ -3520,18 +3687,40 @@ struct EnhancedLiveSessionView: View {
                         // Prepare the copy for the popup
                         // If stakerConfigs is empty and existingStakes has items, populate from existing first.
                         if stakerConfigs.isEmpty && !existingStakes.isEmpty {
-                            self.stakerConfigs = existingStakes.compactMap { stake in
+                            self.stakerConfigs = existingStakes.compactMap { stake -> StakerConfig? in
                                 guard stake.stakedPlayerUserId == self.userId else { return nil }
                                 var config = StakerConfig()
                                 config.markup = String(stake.markup)
                                 config.percentageSold = String(stake.stakePercentage * 100)
                                 config.isManualEntry = stake.isOffAppStake ?? false
-                                config.manualStakerName = stake.manualStakerDisplayName ?? ""
-                                if let stakerProfile = self.userService.loadedUsers[stake.stakerUserId] {
-                                    config.selectedStaker = stakerProfile
-                                } else if !(stake.isOffAppStake ?? false) {
-                                    // Pre-fetch user for on-app stakes if not already loaded
-                                    Task { await self.userService.fetchUser(id: stake.stakerUserId) }
+                                
+                                if stake.isOffAppStake ?? false {
+                                    // Manual staker - try to load profile asynchronously
+                                    Task {
+                                        do {
+                                            let manualStakerProfile = try await manualStakerService.getManualStaker(id: stake.stakerUserId)
+                                            await MainActor.run {
+                                                if let index = self.stakerConfigs.firstIndex(where: { $0.id == config.id }) {
+                                                    self.stakerConfigs[index].selectedManualStaker = manualStakerProfile
+                                                }
+                                            }
+                                        } catch {
+                                            // Fall back to legacy display name
+                                            await MainActor.run {
+                                                if let index = self.stakerConfigs.firstIndex(where: { $0.id == config.id }) {
+                                                    self.stakerConfigs[index].manualStakerName = stake.manualStakerDisplayName ?? "Unknown Manual Staker"
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // App user staker
+                                    if let stakerProfile = self.userService.loadedUsers[stake.stakerUserId] {
+                                        config.selectedStaker = stakerProfile
+                                    } else {
+                                        // Pre-fetch user for on-app stakes if not already loaded
+                                        Task { await self.userService.fetchUser(id: stake.stakerUserId) }
+                                    }
                                 }
                                 return config
                             }
@@ -3540,7 +3729,11 @@ struct EnhancedLiveSessionView: View {
                          if stakerConfigs.isEmpty {
                             stakerConfigs.append(StakerConfig())
                         }
-                        stakerConfigsForPopup = stakerConfigs // Make a fresh copy for the popup
+                        stakerConfigsForPopup = stakerConfigs.map { config in
+                            var newConfig = config
+                            // Ensure originalStakeUserId is preserved during copy
+                            return newConfig
+                        }
                         print("[EnhancedLiveSessionView] Edit Stakes tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
                         showingStakingPopup = true
                     }) {
@@ -3561,20 +3754,16 @@ struct EnhancedLiveSessionView: View {
                         .foregroundColor(.gray)
                 }
                 .padding(.vertical, 8)
-            } else if !existingStakes.isEmpty {
+            } else if !existingStakes.isEmpty || !validStakerConfigs.isEmpty {
                 VStack(spacing: 12) {
+                    // Show existing stakes first
                     ForEach(existingStakes.filter { $0.stakedPlayerUserId == userId }, id: \.id) { stake in
                         StakingInfoCard(stake: stake, userService: userService)
                     }
-                }
-            } else if !stakerConfigs.isEmpty {
-                VStack(spacing: 12) {
-                    ForEach(stakerConfigs, id: \.id) { config in
-                        if let staker = config.selectedStaker,
-                           !config.percentageSold.isEmpty,
-                           !config.markup.isEmpty {
-                            StakingConfigCard(config: config)
-                        }
+                    
+                    // Show configured stakers (that aren't already saved as stakes)
+                    ForEach(validStakerConfigs, id: \.id) { config in
+                        StakingConfigCard(config: getRestoreStakerConfig(config))
                     }
                 }
             }
@@ -3593,18 +3782,38 @@ struct EnhancedLiveSessionView: View {
     private struct StakingInfoCard: View {
         let stake: Stake
         @ObservedObject var userService: UserService
+        @State private var manualStakerProfile: ManualStakerProfile? = nil
+        @State private var isLoadingManualStaker = false
         
         var body: some View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    if let stakerProfile = userService.loadedUsers[stake.stakerUserId] {
-                        Text("\(stakerProfile.displayName ?? stakerProfile.username)")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.white)
+                    if stake.isOffAppStake ?? false {
+                        // Manual staker
+                        if let profile = manualStakerProfile {
+                            Text(profile.name)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                        } else if isLoadingManualStaker {
+                            Text("Loading manual staker...")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                        } else {
+                            Text(stake.manualStakerDisplayName ?? "Manual Staker")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
                     } else {
-                        Text("Loading staker...")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.white)
+                        // App user staker
+                        if let stakerProfile = userService.loadedUsers[stake.stakerUserId] {
+                            Text("\(stakerProfile.displayName ?? stakerProfile.username)")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                        } else {
+                            Text("Loading staker...")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
                     }
                     
                     Text("\(Int(stake.stakePercentage * 100))% at \(stake.markup, specifier: "%.2f")x markup")
@@ -3631,6 +3840,32 @@ struct EnhancedLiveSessionView: View {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
             )
+            .onAppear {
+                if stake.isOffAppStake ?? false {
+                    loadManualStakerProfile()
+                }
+            }
+        }
+        
+        private func loadManualStakerProfile() {
+            guard manualStakerProfile == nil && !isLoadingManualStaker else { return }
+            
+            isLoadingManualStaker = true
+            Task {
+                do {
+                    let manualStakerService = ManualStakerService()
+                    let profile = try await manualStakerService.getManualStaker(id: stake.stakerUserId)
+                    await MainActor.run {
+                        self.manualStakerProfile = profile
+                        self.isLoadingManualStaker = false
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.isLoadingManualStaker = false
+                        print("Error loading manual staker profile: \(error)")
+                    }
+                }
+            }
         }
     }
     
@@ -3641,9 +3876,15 @@ struct EnhancedLiveSessionView: View {
         var body: some View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(config.selectedStaker?.displayName ?? config.selectedStaker?.username ?? "Unknown")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.white)
+                    if config.isManualEntry {
+                        Text(config.selectedManualStaker?.name ?? (config.manualStakerName.isEmpty ? "Manual Staker" : config.manualStakerName))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                    } else {
+                        Text(config.selectedStaker?.displayName ?? config.selectedStaker?.username ?? "Loading...")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
                     
                     Text("\(config.percentageSold)% at \(config.markup)x markup")
                         .font(.system(size: 13))
@@ -3877,6 +4118,8 @@ struct EnhancedLiveSessionView: View {
                 isPresented: $showingStakingPopup,
                 stakerConfigs: $stakerConfigsForPopup, // Pass the copy here
                 userService: userService,
+                manualStakerService: manualStakerService,
+                userId: userId,
                 primaryTextColor: .white,
                 secondaryTextColor: Color.white.opacity(0.7),
                 glassOpacity: 0.01,
@@ -4043,6 +4286,201 @@ struct EnhancedLiveSessionView: View {
     }
     
     // MARK: - Helper Functions
+    
+    // Function to restore missing staker profiles when they get lost
+    private func restoreMissingStakerProfiles() {
+        for (index, config) in stakerConfigs.enumerated() {
+            if !config.isManualEntry && config.selectedStaker == nil {
+                if let originalUserId = config.originalStakeUserId,
+                   let existingProfile = userService.loadedUsers[originalUserId] {
+                    print("[EnhancedLiveSessionView] Restoring missing staker profile at index \(index): \(existingProfile.username)")
+                    stakerConfigs[index].selectedStaker = existingProfile
+                    
+                    // Also update popup copy if it exists
+                    if index < stakerConfigsForPopup.count {
+                        stakerConfigsForPopup[index].selectedStaker = existingProfile
+                    }
+                }
+            }
+        }
+    }
+    
+    // Function to get a config with restored staker profile if needed
+    private func getRestoreStakerConfig(_ config: StakerConfig) -> StakerConfig {
+        var restoredConfig = config
+        if !config.isManualEntry && config.selectedStaker == nil {
+            if let originalUserId = config.originalStakeUserId,
+               let existingProfile = userService.loadedUsers[originalUserId] {
+                restoredConfig.selectedStaker = existingProfile
+            }
+        }
+        return restoredConfig
+    }
+    
+    // Load and populate staker configuration from accepted event staking invites
+    private func loadEventStakingInvites(for event: Event) async {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        
+        do {
+            // Fetch accepted stakes for this event where current user is the player
+            let allStakes = try await stakeService.fetchStakes(forUser: currentUserId)
+            print("[EnhancedLiveSessionView] Total stakes fetched: \(allStakes.count)")
+            
+            // Debug all stakes first
+            for (index, stake) in allStakes.enumerated() {
+                print("[EnhancedLiveSessionView] Stake \(index): sessionGameName='\(stake.sessionGameName)', status=\(stake.status), stakedPlayerUserId=\(stake.stakedPlayerUserId), totalBuyIn=\(stake.totalPlayerBuyInForSession), cashout=\(stake.playerCashoutForSession), isOffAppStake=\(stake.isOffAppStake ?? false), manualDisplayName='\(stake.manualStakerDisplayName ?? "nil")', stakerUserId='\(stake.stakerUserId)'")
+            }
+            
+            // Count by type for debugging
+            let manualStakes = allStakes.filter { $0.isOffAppStake == true }
+            let appStakes = allStakes.filter { $0.isOffAppStake != true }
+            print("[EnhancedLiveSessionView] Total stakes breakdown: \(manualStakes.count) manual, \(appStakes.count) app stakers")
+            
+            let acceptedStakes = allStakes.filter { stake in
+                    // Filter for stakes that:
+                    // 1. Are active (accepted from event invite)
+                    // 2. Have event name matching
+                    // 3. User is the staked player
+                    // 4. Haven't started yet (no buy-in/cashout data)
+                    let statusMatch = stake.status == .active
+                    let nameMatch = stake.sessionGameName == event.event_name
+                    let playerMatch = stake.stakedPlayerUserId == currentUserId
+                    let notStartedMatch = stake.totalPlayerBuyInForSession == 0 && stake.playerCashoutForSession == 0
+                    
+                    let matches = statusMatch && nameMatch && playerMatch && notStartedMatch
+                    
+                    print("[EnhancedLiveSessionView] Checking stake: statusMatch=\(statusMatch), nameMatch=\(nameMatch), playerMatch=\(playerMatch), notStartedMatch=\(notStartedMatch), finalMatch=\(matches)")
+                    
+                    if matches {
+                        print("[EnhancedLiveSessionView] Found matching stake: \(stake.manualStakerDisplayName ?? "app user"), isOffAppStake: \(stake.isOffAppStake ?? false)")
+                    }
+                    return matches
+                }
+            
+            print("[EnhancedLiveSessionView] Filtered stakes for event '\(event.event_name)': \(acceptedStakes.count)")
+            
+            // Deduplicate stakes by unique identifier - for app users use stakerUserId, for manual stakers use stake ID
+            var deduplicatedStakes: [Stake] = []
+            var seenStakerKeys: Set<String> = []
+            
+            // Sort by date descending (most recent first) to keep the latest stake for each staker
+            let sortedStakes = acceptedStakes.sorted { $0.proposedAt > $1.proposedAt }
+            
+            for stake in sortedStakes {
+                // Create unique key for each staker
+                let stakerKey: String
+                if stake.isOffAppStake == true {
+                    // For manual stakers, use stake ID as unique key since they might share the same placeholder stakerUserId
+                    stakerKey = "manual_\(stake.id ?? UUID().uuidString)"
+                } else {
+                    // For app users, use stakerUserId as key
+                    stakerKey = "app_\(stake.stakerUserId)"
+                }
+                
+                if !seenStakerKeys.contains(stakerKey) {
+                    deduplicatedStakes.append(stake)
+                    seenStakerKeys.insert(stakerKey)
+                    print("[EnhancedLiveSessionView] Keeping stake for staker key: \(stakerKey), ID: \(stake.id ?? "nil")")
+                } else {
+                    print("[EnhancedLiveSessionView] Skipping duplicate stake for staker key: \(stakerKey), ID: \(stake.id ?? "nil")")
+                }
+            }
+            
+            print("[EnhancedLiveSessionView] After deduplication: \(deduplicatedStakes.count) unique stakers")
+            
+            await MainActor.run {
+                // Convert stakes to StakerConfig objects
+                self.stakerConfigs = deduplicatedStakes.compactMap { stake -> StakerConfig? in
+                    var config = StakerConfig()
+                    config.markup = String(stake.markup)
+                    config.percentageSold = String(stake.stakePercentage * 100)
+                    config.isManualEntry = stake.isOffAppStake ?? false
+                    
+                    // Store the original stake user ID for reference
+                    config.originalStakeUserId = stake.stakerUserId
+                    
+                    // Store the original stake ID so we can update it instead of creating a new one
+                    config.originalStakeId = stake.id
+                    
+                    if stake.isOffAppStake ?? false {
+                        // Manual staker
+                        config.manualStakerName = stake.manualStakerDisplayName ?? "Manual Staker"
+                        // Try to load manual staker profile asynchronously but safely
+                        let configId = config.id // Capture the config ID
+                        let stakerUserId = stake.stakerUserId // Capture the staker user ID
+                        Task { @MainActor in
+                            do {
+                                // Ensure the stakerUserId is valid before attempting to fetch
+                                guard !stakerUserId.isEmpty else {
+                                    print("[EnhancedLiveSessionView] Invalid stakerUserId for manual staker")
+                                    return
+                                }
+                                let manualStakerProfile = try await manualStakerService.getManualStaker(id: stakerUserId)
+                                // Find the config again by ID to ensure it still exists
+                                if let index = self.stakerConfigs.firstIndex(where: { $0.id == configId }) {
+                                    self.stakerConfigs[index].selectedManualStaker = manualStakerProfile
+                                    // Also update popup copy if it exists
+                                    if let popupIndex = self.stakerConfigsForPopup.firstIndex(where: { $0.id == configId }) {
+                                        self.stakerConfigsForPopup[popupIndex].selectedManualStaker = manualStakerProfile
+                                    }
+                                }
+                            } catch {
+                                print("[EnhancedLiveSessionView] Failed to load manual staker profile for ID '\(stakerUserId)': \(error)")
+                            }
+                        }
+                    } else {
+                        // App user staker - load synchronously first, then async if needed
+                        if let existingProfile = userService.loadedUsers[stake.stakerUserId] {
+                            config.selectedStaker = existingProfile
+                            print("[EnhancedLiveSessionView] Found existing profile for \(existingProfile.username)")
+                        } else {
+                            print("[EnhancedLiveSessionView] Need to load profile for user ID: \(stake.stakerUserId)")
+                            // Load asynchronously but ensure it gets assigned safely
+                            let configId = config.id // Capture the config ID
+                            let stakerUserId = stake.stakerUserId // Capture the staker user ID
+                            Task { @MainActor in
+                                await userService.fetchUser(id: stakerUserId)
+                                if let stakerProfile = self.userService.loadedUsers[stakerUserId] {
+                                    print("[EnhancedLiveSessionView] Loaded profile: \(stakerProfile.username)")
+                                    // Find the config again by ID to ensure it still exists
+                                    if let index = self.stakerConfigs.firstIndex(where: { $0.id == configId }) {
+                                        self.stakerConfigs[index].selectedStaker = stakerProfile
+                                        // Update the popup copy as well if it exists
+                                        if let popupIndex = self.stakerConfigsForPopup.firstIndex(where: { $0.id == configId }) {
+                                            self.stakerConfigsForPopup[popupIndex].selectedStaker = stakerProfile
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    return config
+                }
+                
+                // Update the popup copy as well
+                self.stakerConfigsForPopup = self.stakerConfigs
+                
+                // Auto-restore any missing staker profiles
+                self.restoreMissingStakerProfiles()
+                
+                print("[EnhancedLiveSessionView] Loaded \(self.stakerConfigs.count) stakers from event invites for event: \(event.event_name)")
+                
+                // Show a temporary visual indicator if stakes were loaded
+                if !self.stakerConfigs.isEmpty {
+                    // This will help you see if stakes are being loaded properly
+                    print("[EnhancedLiveSessionView] ✅ SUCCESS: Loaded \(self.stakerConfigs.count) staker configurations")
+                    for (index, config) in self.stakerConfigs.enumerated() {
+                        print("[EnhancedLiveSessionView] Staker \(index + 1): isManual=\(config.isManualEntry), percentage=\(config.percentageSold)%, markup=\(config.markup)x")
+                    }
+                } else {
+                    print("[EnhancedLiveSessionView] ⚠️ WARNING: No staker configurations loaded for event \(event.event_name)")
+                }
+            }
+        } catch {
+            print("[EnhancedLiveSessionView] Failed to load event staking invites: \(error)")
+        }
+    }
 }
 
 // Define the minimized floating control as a separate view

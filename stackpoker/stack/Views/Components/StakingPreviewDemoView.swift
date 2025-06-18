@@ -2,8 +2,12 @@ import SwiftUI
 
 struct StakingPreviewDemoView: View {
     @StateObject private var userService = UserService()
+    @StateObject private var manualStakerService = ManualStakerService()
     @State private var stakerConfigs: [StakerConfig] = [StakerConfig()]
     @State private var showStakingSection = true
+    
+    // Mock user ID for demo
+    private let demoUserId = "demo_user_id"
     
     private let primaryTextColor = Color.white
     private let secondaryTextColor = Color.white.opacity(0.7)
@@ -61,6 +65,8 @@ struct StakingPreviewDemoView: View {
                                 ImprovedStakerInputView(
                                     config: $configBinding,
                                     userService: userService,
+                                    manualStakerService: manualStakerService,
+                                    userId: demoUserId,
                                     primaryTextColor: primaryTextColor,
                                     secondaryTextColor: secondaryTextColor,
                                     glassOpacity: glassOpacity,

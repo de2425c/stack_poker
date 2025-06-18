@@ -541,9 +541,25 @@ struct StakerConfig: Identifiable {
     var markup: String = "1.0" // Default markup
     var percentageSold: String = ""
 
-    // New fields for manual staker entry
+    // Updated fields for manual staker entry with profile system
     var isManualEntry: Bool = false
+    var selectedManualStaker: ManualStakerProfile? = nil
+    var manualStakerSearchResults: [ManualStakerProfile] = []
+    var isCreatingNewManualStaker: Bool = false
+    
+    // Fields for creating new manual staker
+    var newManualStakerName: String = ""
+    var newManualStakerContact: String = ""
+    var newManualStakerNotes: String = ""
+    
+    // Legacy field for backward compatibility
     var manualStakerName: String = ""
+    
+    // Track original stake user ID for event staking auto-population
+    var originalStakeUserId: String? = nil
+    
+    // Track original stake ID for updating existing stakes instead of creating new ones
+    var originalStakeId: String? = nil
 }
 
 // New View for individual staker inputs
@@ -599,6 +615,7 @@ struct SessionFormView: View {
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var stakeService = StakeService() // Add StakeService
     @StateObject private var userService = UserService() // Add UserService to potentially fetch staker by username/ID later
+    @StateObject private var manualStakerService = ManualStakerService() // Add ManualStakerService
     
     // Colors & Font
     private let primaryTextColor = Color(red: 0.98, green: 0.96, blue: 0.94) // Light cream for high contrast
@@ -944,6 +961,8 @@ struct SessionFormView: View {
                 isPresented: $showingStakingPopup,
                 stakerConfigs: $stakerConfigsForPopup, // Pass the copy here
                 userService: userService,
+                manualStakerService: manualStakerService,
+                userId: userId,
                 primaryTextColor: primaryTextColor,
                 secondaryTextColor: secondaryTextColor,
                 glassOpacity: glassOpacity,
@@ -1161,7 +1180,7 @@ struct SessionFormView: View {
         // Filter out configs that are truly empty or invalid before deciding to save session only or with stakes.
         let validConfigs = stakerConfigs.filter { config in
             if config.isManualEntry {
-                guard !config.manualStakerName.isEmpty else { return false }
+                guard config.selectedManualStaker != nil else { return false }
             } else {
                 guard let _ = config.selectedStaker else { return false } // Must have an app staker
             }
@@ -1255,12 +1274,12 @@ struct SessionFormView: View {
                     let isOffApp: Bool
 
                     if config.isManualEntry {
-                        guard !config.manualStakerName.isEmpty else {
+                        guard let selectedManualStaker = config.selectedManualStaker else {
                             allStakesSuccessful = false
                             continue
                         }
-                        stakerIdToUse = Stake.OFF_APP_STAKER_ID
-                        manualName = config.manualStakerName
+                        stakerIdToUse = selectedManualStaker.id ?? Stake.OFF_APP_STAKER_ID
+                        manualName = selectedManualStaker.name
                         isOffApp = true
                     } else if let stakerProfile = config.selectedStaker {
                         stakerIdToUse = stakerProfile.id
@@ -1271,6 +1290,12 @@ struct SessionFormView: View {
                         continue
                     }
 
+                    // Calculate the settlement amount for this stake
+                    let profit = sessionCashout - actualSessionBuyInForStaking
+                    let stakerShare = profit * (percentageSoldDouble / 100.0)
+                    let adjustedStakerShare = stakerShare * markupDouble
+                    let settlementAmount = -adjustedStakerShare // Negative means player pays staker
+                    
                     let newStake = Stake(
                         sessionId: newDocumentId,
                         sessionGameName: tournamentName ?? gameName,
@@ -1282,6 +1307,7 @@ struct SessionFormView: View {
                         markup: markupDouble,
                         totalPlayerBuyInForSession: actualSessionBuyInForStaking,
                         playerCashoutForSession: sessionCashout,
+                        storedAmountTransferredAtSettlement: settlementAmount,
                         // status: .awaitingSettlement, // Status is now handled in Stake init based on isOffAppStake
                         isTournamentSession: isTournamentStake,
                         manualStakerDisplayName: manualName,

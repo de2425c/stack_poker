@@ -3,7 +3,9 @@ import SwiftUI
 struct ImprovedStakerInputView: View {
     @Binding var config: StakerConfig
     @ObservedObject var userService: UserService
+    @ObservedObject var manualStakerService: ManualStakerService
     
+    let userId: String
     let primaryTextColor: Color
     let secondaryTextColor: Color
     let glassOpacity: Double
@@ -23,14 +25,16 @@ struct ImprovedStakerInputView: View {
                     StakerSearchField(
                         config: $config,
                         userService: userService,
+                        manualStakerService: manualStakerService,
+                        userId: userId,
                         primaryTextColor: primaryTextColor,
                         secondaryTextColor: secondaryTextColor,
                         glassOpacity: glassOpacity,
                         materialOpacity: materialOpacity
                     )
                     
-                    // Only show percentage and markup fields if a staker is selected OR manual entry has a name
-                    if (config.selectedStaker != nil) || (config.isManualEntry && !config.manualStakerName.isEmpty) {
+                    // Only show percentage and markup fields if a staker is selected OR manual staker is selected
+                    if (config.selectedStaker != nil) || (config.isManualEntry && config.selectedManualStaker != nil) {
                         stakeDetailsFields
                     }
                 }
@@ -45,7 +49,7 @@ struct ImprovedStakerInputView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke((config.selectedStaker != nil || (config.isManualEntry && !config.manualStakerName.isEmpty)) ? primaryTextColor.opacity(0.3) : secondaryTextColor.opacity(0.2), lineWidth: 1)
+                .stroke((config.selectedStaker != nil || (config.isManualEntry && config.selectedManualStaker != nil)) ? primaryTextColor.opacity(0.3) : secondaryTextColor.opacity(0.2), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .animation(.easeInOut(duration: 0.3), value: isExpanded)
@@ -60,14 +64,14 @@ struct ImprovedStakerInputView: View {
                     .foregroundColor(primaryTextColor)
                 
                 if config.isManualEntry {
-                    if config.manualStakerName.isEmpty {
-                        Text("Enter staker name above")
-                            .font(.plusJakarta(.caption, weight: .medium))
-                            .foregroundColor(secondaryTextColor.opacity(0.7))
-                    } else {
-                        Text(config.manualStakerName)
+                    if let selectedManualStaker = config.selectedManualStaker {
+                        Text(selectedManualStaker.name)
                             .font(.plusJakarta(.caption, weight: .medium))
                             .foregroundColor(secondaryTextColor)
+                    } else {
+                        Text("Select or create manual staker")
+                            .font(.plusJakarta(.caption, weight: .medium))
+                            .foregroundColor(secondaryTextColor.opacity(0.7))
                     }
                 } else if let selectedStaker = config.selectedStaker {
                     Text("@\(selectedStaker.username)")
@@ -170,7 +174,7 @@ struct ImprovedStakerInputView: View {
     
     private var isValid: Bool {
         if config.isManualEntry {
-            guard !config.manualStakerName.isEmpty else { return false }
+            guard config.selectedManualStaker != nil else { return false }
         } else {
             guard config.selectedStaker != nil else { return false }
         }

@@ -13,7 +13,13 @@ class StakeService: ObservableObject {
         if stakeToSave.id == nil {
             stakeToSave.id = stakesCollectionRef.document().documentID
         }
+        
+        print("StakeService: Adding stake to Firestore with ID: \(stakeToSave.id!)")
+        print("StakeService: Stake details - sessionGameName: '\(stakeToSave.sessionGameName)', isOffAppStake: '\(stakeToSave.isOffAppStake ?? false)'")
+        
         try stakesCollectionRef.document(stakeToSave.id!).setData(from: stakeToSave)
+        
+        print("StakeService: Successfully saved stake with ID: \(stakeToSave.id!)")
         return stakeToSave.id!
     }
 
@@ -99,19 +105,52 @@ class StakeService: ObservableObject {
     // // }
 
     func initiateSettlement(stakeId: String, initiatorUserId: String) async throws {
+        // First, fetch the current stake to validate the operation
+        let stakeDoc = try await stakesCollectionRef.document(stakeId).getDocument()
+        guard let currentStake = try? stakeDoc.data(as: Stake.self) else {
+            throw NSError(domain: "StakeService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Stake not found"])
+        }
+        
+        // Validate that the stake is in the correct state for settlement initiation
+        guard currentStake.status == .awaitingSettlement else {
+            throw NSError(domain: "StakeService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Stake is not in awaiting settlement status"])
+        }
+        
+        // Validate that the initiator is either the staker or the player
+        guard currentStake.stakerUserId == initiatorUserId || currentStake.stakedPlayerUserId == initiatorUserId else {
+            throw NSError(domain: "StakeService", code: 403, userInfo: [NSLocalizedDescriptionKey: "User not authorized to initiate settlement"])
+        }
+        
         let dataToUpdate: [String: Any] = [
             Stake.CodingKeys.status.rawValue: Stake.StakeStatus.awaitingConfirmation.rawValue,
             Stake.CodingKeys.settlementInitiatorUserId.rawValue: initiatorUserId,
             Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
         ]
         try await stakesCollectionRef.document(stakeId).updateData(dataToUpdate)
-
     }
 
     func confirmSettlement(stakeId: String, confirmingUserId: String) async throws {
-        // It might be good to fetch the stake first to ensure it's in awaitingConfirmation status
-        // and that confirmingUserId is not the same as settlementInitiatorUserId.
-        // For brevity in MVP, we'll directly update.
+        // Fetch the current stake to validate the operation
+        let stakeDoc = try await stakesCollectionRef.document(stakeId).getDocument()
+        guard let currentStake = try? stakeDoc.data(as: Stake.self) else {
+            throw NSError(domain: "StakeService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Stake not found"])
+        }
+        
+        // Validate that the stake is in the correct state for confirmation
+        guard currentStake.status == .awaitingConfirmation else {
+            throw NSError(domain: "StakeService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Stake is not awaiting confirmation"])
+        }
+        
+        // Validate that the confirming user is not the same as the initiator
+        guard currentStake.settlementInitiatorUserId != confirmingUserId else {
+            throw NSError(domain: "StakeService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Cannot confirm your own settlement initiation"])
+        }
+        
+        // Validate that the confirming user is either the staker or the player
+        guard currentStake.stakerUserId == confirmingUserId || currentStake.stakedPlayerUserId == confirmingUserId else {
+            throw NSError(domain: "StakeService", code: 403, userInfo: [NSLocalizedDescriptionKey: "User not authorized to confirm settlement"])
+        }
+        
         let dataToUpdate: [String: Any] = [
             Stake.CodingKeys.status.rawValue: Stake.StakeStatus.settled.rawValue,
             Stake.CodingKeys.settlementConfirmerUserId.rawValue: confirmingUserId,
@@ -119,7 +158,39 @@ class StakeService: ObservableObject {
             Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
         ]
         try await stakesCollectionRef.document(stakeId).updateData(dataToUpdate)
-
+    }
+    
+    // Special method for manual stakers - player can mark as settled directly
+    func settleManualStake(stakeId: String, userId: String) async throws {
+        // Fetch the current stake to validate the operation
+        let stakeDoc = try await stakesCollectionRef.document(stakeId).getDocument()
+        guard let currentStake = try? stakeDoc.data(as: Stake.self) else {
+            throw NSError(domain: "StakeService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Stake not found"])
+        }
+        
+        // Validate that this is actually a manual stake
+        guard currentStake.isOffAppStake == true else {
+            throw NSError(domain: "StakeService", code: 400, userInfo: [NSLocalizedDescriptionKey: "This is not a manual stake"])
+        }
+        
+        // Validate that the stake is in a settleable state
+        guard currentStake.status == .awaitingSettlement || currentStake.status == .awaitingConfirmation else {
+            throw NSError(domain: "StakeService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Stake is not in a settleable state"])
+        }
+        
+        // Validate that the user is either the staked player OR the staker (both can settle manual stakes)
+        guard currentStake.stakedPlayerUserId == userId || currentStake.stakerUserId == userId else {
+            throw NSError(domain: "StakeService", code: 403, userInfo: [NSLocalizedDescriptionKey: "Only the staked player or staker can settle manual stakes"])
+        }
+        
+        let dataToUpdate: [String: Any] = [
+            Stake.CodingKeys.status.rawValue: Stake.StakeStatus.settled.rawValue,
+            Stake.CodingKeys.settlementInitiatorUserId.rawValue: userId,
+            Stake.CodingKeys.settlementConfirmerUserId.rawValue: userId, // Same user for manual stakes
+            Stake.CodingKeys.settledAt.rawValue: Timestamp(date: Date()),
+            Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
+        ]
+        try await stakesCollectionRef.document(stakeId).updateData(dataToUpdate)
     }
 
     // MARK: - Update Stake Percentage & Markup
@@ -130,6 +201,45 @@ class StakeService: ObservableObject {
             Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
         ]
         try await stakesCollectionRef.document(stakeId).updateData(data)
+    }
+    
+    // General method to update any stake fields
+    func updateStake(stakeId: String, updateData: [String: Any]) async throws {
+        var dataToUpdate = updateData
+        // Always update the lastUpdatedAt timestamp
+        dataToUpdate[Stake.CodingKeys.lastUpdatedAt.rawValue] = Timestamp(date: Date())
+        
+        try await stakesCollectionRef.document(stakeId).updateData(dataToUpdate)
+    }
+    
+    // Method to update session results for tournament stakes
+    func updateStakeSessionResults(stakeId: String, buyIn: Double, cashout: Double) async throws {
+        // First, fetch the current stake to validate the operation
+        let stakeDoc = try await stakesCollectionRef.document(stakeId).getDocument()
+        guard let currentStake = try? stakeDoc.data(as: Stake.self) else {
+            throw NSError(domain: "StakeService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Stake not found"])
+        }
+        
+        // Validate that the stake is active and can have results updated
+        guard currentStake.status == .active else {
+            throw NSError(domain: "StakeService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Can only update results for active stakes"])
+        }
+        
+        // Calculate the new settlement amount
+        let profit = cashout - buyIn
+        let stakerShare = profit * currentStake.stakePercentage
+        let adjustedStakerShare = stakerShare * currentStake.markup
+        let amountTransferred = -adjustedStakerShare // Negative means player pays staker
+        
+        let dataToUpdate: [String: Any] = [
+            Stake.CodingKeys.totalPlayerBuyInForSession.rawValue: buyIn,
+            Stake.CodingKeys.playerCashoutForSession.rawValue: cashout,
+            Stake.CodingKeys.storedAmountTransferredAtSettlement.rawValue: amountTransferred,
+            Stake.CodingKeys.status.rawValue: Stake.StakeStatus.awaitingSettlement.rawValue,
+            Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
+        ]
+        
+        try await stakesCollectionRef.document(stakeId).updateData(dataToUpdate)
     }
 
     // MARK: - Delete

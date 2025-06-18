@@ -18,6 +18,9 @@ struct Stake: Codable, Identifiable {
     var totalPlayerBuyInForSession: Double
     var playerCashoutForSession: Double
     
+    // Settlement amount - stored field for database persistence
+    var storedAmountTransferredAtSettlement: Double = 0
+    
     // --- Revised Financial Logic for "After-the-Fact" Staking ---
 
     // 1. Player's net result for the entire session.
@@ -39,6 +42,11 @@ struct Stake: Codable, Identifiable {
     //    Positive: Player pays Staker. Negative: Staker pays Player.
     //    This is what the staker receives minus what they paid.
     var amountTransferredAtSettlement: Double {
+        // If stored amount is set (non-zero or explicitly calculated), use it
+        // Otherwise fall back to computed value for backward compatibility
+        if storedAmountTransferredAtSettlement != 0 || (totalPlayerBuyInForSession > 0 && playerCashoutForSession > 0) {
+            return storedAmountTransferredAtSettlement
+        }
         return stakerShareOfCashout - stakerCost
     }
 
@@ -96,6 +104,7 @@ struct Stake: Codable, Identifiable {
         case markup
         case totalPlayerBuyInForSession
         case playerCashoutForSession
+        case storedAmountTransferredAtSettlement
         case settlementInitiatorUserId
         case settlementConfirmerUserId
         // Computed properties are not encoded/decoded directly
@@ -123,6 +132,7 @@ struct Stake: Codable, Identifiable {
         markup: Double,
         totalPlayerBuyInForSession: Double,
         playerCashoutForSession: Double,
+        storedAmountTransferredAtSettlement: Double = 0, // Default to 0, will be calculated
         status: StakeStatus = .awaitingSettlement, // Default for logged past games
         proposedAt: Date = Date(),
         lastUpdatedAt: Date = Date(),
@@ -143,6 +153,7 @@ struct Stake: Codable, Identifiable {
         self.markup = markup
         self.totalPlayerBuyInForSession = totalPlayerBuyInForSession
         self.playerCashoutForSession = playerCashoutForSession
+        self.storedAmountTransferredAtSettlement = storedAmountTransferredAtSettlement
         self.proposedAt = proposedAt
         self.lastUpdatedAt = lastUpdatedAt
         self.settlementInitiatorUserId = settlementInitiatorUserId
@@ -151,17 +162,17 @@ struct Stake: Codable, Identifiable {
         self.manualStakerDisplayName = manualStakerDisplayName
         self.isOffAppStake = isOffAppStake
 
-        if isOffAppStake == true {
-            self.status = .settled
-            self.settledAt = Date()
-            self.acceptedAt = Date() // For off-app, consider it accepted immediately
+        // Manual stakers now follow the same settlement flow as app users
+        self.status = status // Use the provided status or its default
+        if status == .awaitingSettlement || status == .active || status == .awaitingConfirmation || status == .settled {
+             self.acceptedAt = Date()
         } else {
-            self.status = status // Use the provided status or its default
-            if status == .awaitingSettlement || status == .active || status == .awaitingConfirmation || status == .settled {
-                 self.acceptedAt = Date()
-            } else {
-                 self.acceptedAt = nil
-            }
+             self.acceptedAt = nil
+        }
+        
+        // Only set settledAt if the status is actually settled
+        if status == .settled {
+            self.settledAt = Date()
         }
     }
 }

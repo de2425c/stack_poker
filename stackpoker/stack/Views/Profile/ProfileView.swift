@@ -486,7 +486,8 @@ struct ProfileView: View {
             .background(AppBackgroundView().ignoresSafeArea(.all))
             .accentColor(.white) 
             .environmentObject(userService) 
-            .environmentObject(StakeService()) 
+            .environmentObject(StakeService())
+            .environmentObject(ManualStakerService()) 
         }
         .fullScreenCover(isPresented: $showChallengesDetailView) {
             NavigationView {
