@@ -17,6 +17,16 @@ struct HomeGame: Identifiable, Codable {
     var buyInRequests: [BuyInRequest]
     var cashOutRequests: [CashOutRequest]
     var gameHistory: [GameEvent]
+    var smallBlind: Double?
+    var bigBlind: Double?
+    
+    // Computed property for stakes display
+    var stakesDisplay: String {
+        if let sb = smallBlind, let bb = bigBlind {
+            return "$\(Int(sb))/$\(Int(bb))"
+        }
+        return "Stakes not set"
+    }
     
     enum GameStatus: String, Codable {
         case active, completed
@@ -104,6 +114,8 @@ struct HomeGameView: View {
     let onGameCreated: ((HomeGame) -> Void)?
     
     @State private var gameTitle = ""
+    @State private var smallBlind = ""
+    @State private var bigBlind = ""
     @State private var isCreating = false
     @State private var error: String?
     @State private var showError = false
@@ -196,7 +208,7 @@ struct HomeGameView: View {
                                 GlassyInputField(
                                     icon: "gamecontroller.fill",
                                     title: "GAME TITLE",
-                                    labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
+                                    labelColor: .white.opacity(0.8)
                                 ) {
                                     TextField("", text: $gameTitle)
                                         .placeholders(when: gameTitle.isEmpty) {
@@ -207,16 +219,62 @@ struct HomeGameView: View {
                                         .foregroundColor(.white)
                                 }
                                 
-                                // Game rules explanation
+                                // Stakes input section using GlassyInputField
+                                HStack(spacing: 12) {
+                                    // Small Blind
+                                    GlassyInputField(
+                                        icon: "dollarsign.circle.fill",
+                                        title: "SMALL BLIND",
+                                        labelColor: .white.opacity(0.8)
+                                    ) {
+                                        TextField("", text: $smallBlind)
+                                            .placeholders(when: smallBlind.isEmpty) {
+                                                Text("$1").foregroundColor(.gray.opacity(0.7))
+                                            }
+                                            .font(.system(size: 16))
+                                            .keyboardType(.decimalPad)
+                                            .foregroundColor(.white)
+                                            .padding(.vertical, 10)
+                                    }
+                                    
+                                    // Big Blind
+                                    GlassyInputField(
+                                        icon: "dollarsign.circle.fill",
+                                        title: "BIG BLIND",
+                                        labelColor: .white.opacity(0.8)
+                                    ) {
+                                        TextField("", text: $bigBlind)
+                                            .placeholders(when: bigBlind.isEmpty) {
+                                                Text("$2").foregroundColor(.gray.opacity(0.7))
+                                            }
+                                            .font(.system(size: 16))
+                                            .keyboardType(.decimalPad)
+                                            .foregroundColor(.white)
+                                            .padding(.vertical, 10)
+                                    }
+                                }
+                                
+                                // Stakes preview (minimal styling)
+                                if !smallBlind.isEmpty && !bigBlind.isEmpty,
+                                   let sb = Double(smallBlind.replacingOccurrences(of: "$", with: "")),
+                                   let bb = Double(bigBlind.replacingOccurrences(of: "$", with: "")) {
+                                    Text("Stakes: $\(Int(sb))/$\(Int(bb))")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .padding(.top, 8)
+                                }
+                                
+                                // Game rules explanation (minimal styling)
                                 VStack(alignment: .leading, spacing: 16) {
-                                    Text("Home Game Rules")
+                                    Text("How it works")
                                         .font(.system(size: 18, weight: .bold))
                                         .foregroundColor(.white)
                                     
                                     HStack(alignment: .top, spacing: 12) {
-                                        Image(systemName: "1.circle.fill")
-                                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                            .font(.system(size: 20))
+                                        Text("1")
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                            .frame(width: 24, alignment: .center)
                                         
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text("Create the game")
@@ -230,9 +288,10 @@ struct HomeGameView: View {
                                     }
                                     
                                     HStack(alignment: .top, spacing: 12) {
-                                        Image(systemName: "2.circle.fill")
-                                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                            .font(.system(size: 20))
+                                        Text("2")
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                            .frame(width: 24, alignment: .center)
                                         
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text("Players join")
@@ -246,9 +305,10 @@ struct HomeGameView: View {
                                     }
                                     
                                     HStack(alignment: .top, spacing: 12) {
-                                        Image(systemName: "3.circle.fill")
-                                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                            .font(.system(size: 20))
+                                        Text("3")
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                            .frame(width: 24, alignment: .center)
                                         
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text("Track chips and cashouts")
@@ -262,9 +322,10 @@ struct HomeGameView: View {
                                     }
                                     
                                     HStack(alignment: .top, spacing: 12) {
-                                        Image(systemName: "4.circle.fill")
-                                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                            .font(.system(size: 20))
+                                        Text("4")
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                            .frame(width: 24, alignment: .center)
                                         
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text("Game summary")
@@ -281,18 +342,18 @@ struct HomeGameView: View {
                                 
                                 Spacer(minLength: 40)
                                 
-                                // Create button
+                                // Create button (minimal styling)
                                 Button(action: createGame) {
                                     HStack {
                                         if isCreating {
                                             ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                                 .frame(width: 20, height: 20)
                                                 .padding(.horizontal, 10)
                                         } else {
                                             Text("Create Game")
                                                 .font(.system(size: 17, weight: .semibold))
-                                                .foregroundColor(.black)
+                                                .foregroundColor(.white)
                                                 .padding(.horizontal, 20)
                                                 .frame(maxWidth: .infinity)
                                         }
@@ -300,8 +361,12 @@ struct HomeGameView: View {
                                     .frame(height: 54)
                                     .background(
                                         gameTitle.isEmpty || isCreating
-                                            ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5)
-                                            : Color(red: 123/255, green: 255/255, blue: 99/255)
+                                            ? Color.white.opacity(0.2)
+                                            : Color.white.opacity(0.1)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
                                     )
                                     .cornerRadius(16)
                                 }
@@ -414,6 +479,8 @@ struct HomeGameView: View {
                     creatorId: currentUser.uid,
                     creatorName: creatorName,
                     initialPlayers: [creatorInfo],
+                    smallBlind: parseStakesValue(smallBlind),
+                    bigBlind: parseStakesValue(bigBlind),
                     groupId: groupId
                 )
                 
@@ -437,6 +504,11 @@ struct HomeGameView: View {
                 }
             }
         }
+    }
+    
+    private func parseStakesValue(_ stakes: String) -> Double? {
+        let cleanedStakes = stakes.replacingOccurrences(of: "$", with: "")
+        return Double(cleanedStakes)
     }
 }
 

@@ -229,6 +229,12 @@ struct ProfileSetupView: View {
                     }
                     .padding(.horizontal, 24)
                 }
+                .onTapGesture {
+                    // Tap to dismiss keyboard when in step 2
+                    if currentStep == 2 {
+                        hideKeyboard()
+                    }
+                }
                 
                 // Close button - only show for actual new users who might want to sign out
                 if isNewUser {
@@ -268,6 +274,11 @@ struct ProfileSetupView: View {
                 .font(.custom("PlusJakartaSans-Medium", size: 16))
         }
 
+    }
+    
+    // Helper function to dismiss keyboard
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     // Dynamic button background color for step 1

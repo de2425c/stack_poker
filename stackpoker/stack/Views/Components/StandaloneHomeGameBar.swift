@@ -26,9 +26,16 @@ struct StandaloneHomeGameBar: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
+                    
                     Text(subtitle)
                         .font(.system(size: 12))
                         .foregroundColor(.gray)
+                    
+                    if game.smallBlind != nil || game.bigBlind != nil {
+                        Text(game.stakesDisplay)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+                    }
                 }
                 
                 Spacer()
@@ -92,7 +99,9 @@ struct StandaloneHomeGameBar_Previews: PreviewProvider {
             players: [],
             buyInRequests: [],
             cashOutRequests: [],
-            gameHistory: []
+            gameHistory: [],
+            smallBlind: 1.0,
+            bigBlind: 2.0
         )
         
         ZStack {

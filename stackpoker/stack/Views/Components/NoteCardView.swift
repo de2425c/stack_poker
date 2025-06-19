@@ -3,6 +3,8 @@ import SwiftUI
 // New NoteCardView for displaying notes with better UI
 struct NoteCardView: View {
     let noteText: String
+    var onShareTapped: (() -> Void)? = nil
+    
     // Attempt to get the current time for display, though this won't persist or update
     // For real timestamping, the note model itself would need a Date property.
     private var currentTime: String {
@@ -36,6 +38,21 @@ struct NoteCardView: View {
             }
             
             Spacer() // Pushes content to the left
+            
+            // Share button on the right side
+            if let onShareTapped = onShareTapped {
+                Button(action: onShareTapped) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                        .padding(8)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.1))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
         .padding(16)
         .background(

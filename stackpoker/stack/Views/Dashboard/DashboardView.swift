@@ -1502,6 +1502,40 @@ struct SessionsTab: View {
             }
             .padding(.bottom, 16)
         }
+        .sheet(item: Binding<SessionWrapper?>(
+            get: { selectedSession.map(SessionWrapper.init) },
+            set: { _ in selectedSession = nil }
+        )) { sessionWrapper in
+            NavigationView {
+                SessionDetailView(session: sessionWrapper.session)
+                    .environmentObject(sessionStore)
+                    .environmentObject(userService)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button("Done") {
+                                selectedSession = nil
+                            }
+                            .foregroundColor(.white)
+                        }
+                    }
+            }
+        }
+        .alert("Delete Session", isPresented: $showingDeleteAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                if let sessionToDelete = selectedSession {
+                    sessionStore.deleteSession(sessionToDelete.id) { error in
+                        if let error = error {
+                            print("Error deleting session: \(error)")
+                        }
+                    }
+                }
+                selectedSession = nil
+            }
+        } message: {
+            Text("Are you sure you want to delete this session? This action cannot be undone.")
+        }
     }
 }
 
@@ -1517,6 +1551,17 @@ enum SessionOrTransaction: Identifiable {
         case .transaction(let transaction):
             return "transaction_\(transaction.id)"
         }
+    }
+}
+
+// MARK: - SessionWrapper for sheet presentation
+struct SessionWrapper: Identifiable {
+    let id: String
+    let session: Session
+    
+    init(session: Session) {
+        self.id = session.id
+        self.session = session
     }
 }
 

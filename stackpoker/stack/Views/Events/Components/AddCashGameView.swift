@@ -10,6 +10,7 @@ struct AddCashGameView: View {
     @State private var smallBlind = ""
     @State private var bigBlind = ""
     @State private var straddle = ""
+    @State private var ante = ""
     @State private var isLoading = false
     
     var body: some View {
@@ -142,6 +143,27 @@ struct AddCashGameView: View {
                                     .padding()
                                     .background(glassyBackground())
                                 }
+                                
+                                // Optional Ante
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Ante (Optional)")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.gray)
+                                    
+                                    HStack {
+                                        Text("$")
+                                            .foregroundColor(.gray)
+                                        TextField("", text: $ante)
+                                            .keyboardType(.decimalPad)
+                                            .placeholderss(when: ante.isEmpty) {
+                                                Text("1")
+                                                    .foregroundColor(.gray.opacity(0.7))
+                                            }
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding()
+                                    .background(glassyBackground())
+                                }
                             }
                             
                             Spacer(minLength: 40)
@@ -212,6 +234,13 @@ struct AddCashGameView: View {
             }
         }
         
+        if !ante.isEmpty {
+            guard let anteValue = Double(ante),
+                  anteValue > 0 else {
+                return false
+            }
+        }
+        
         return true
     }
     
@@ -223,12 +252,14 @@ struct AddCashGameView: View {
                 let sb = Double(smallBlind) ?? 0
                 let bb = Double(bigBlind) ?? 0
                 let str = straddle.isEmpty ? nil : Double(straddle)
+                let anteValue = ante.isEmpty ? nil : Double(ante)
                 
                 try await cashGameService.addCashGame(
                     name: gameName,
                     smallBlind: sb,
                     bigBlind: bb,
                     straddle: str,
+                    ante: anteValue,
                     gameType: selectedGameType
                 )
                 

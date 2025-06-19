@@ -51,16 +51,25 @@ struct CashGame: Identifiable, Codable {
     let smallBlind: Double
     let bigBlind: Double
     let straddle: Double? // Optional straddle amount
+    let ante: Double? // Optional ante amount
     let location: String? // Optional location
     let gameType: PokerVariant // Added game type
     let createdAt: Date
     
     var stakes: String {
+        var stakes = "$\(Int(smallBlind))/$\(Int(bigBlind))"
+        
         if let straddle = straddle, straddle > 0 {
-            return "$\(Int(smallBlind))/$\(Int(bigBlind))/$\(Int(straddle))"
-        } else {
-            return "$\(Int(smallBlind))/$\(Int(bigBlind))"
+            stakes += "/$\(Int(straddle))"
         }
+        
+        if let ante = ante, ante > 0 {
+            // Format ante to remove unnecessary decimal places
+            let anteString = ante.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(ante)) : String(ante)
+            stakes += " (\(anteString))"
+        }
+        
+        return stakes
     }
     
     var dictionary: [String: Any] {
@@ -78,6 +87,10 @@ struct CashGame: Identifiable, Codable {
             dict["straddle"] = straddle
         }
         
+        if let ante = ante {
+            dict["ante"] = ante
+        }
+        
         if let location = location {
             dict["location"] = location
         }
@@ -91,6 +104,7 @@ struct CashGame: Identifiable, Codable {
          smallBlind: Double, 
          bigBlind: Double, 
          straddle: Double? = nil,
+         ante: Double? = nil,
          location: String? = nil,
          gameType: PokerVariant = .nlh,
          createdAt: Date = Date()) {
@@ -100,6 +114,7 @@ struct CashGame: Identifiable, Codable {
         self.smallBlind = smallBlind
         self.bigBlind = bigBlind
         self.straddle = straddle
+        self.ante = ante
         self.location = location
         self.gameType = gameType
         self.createdAt = createdAt
@@ -115,6 +130,7 @@ struct CashGame: Identifiable, Codable {
         }
         
         let straddle = dictionary["straddle"] as? Double
+        let ante = dictionary["ante"] as? Double
         let location = dictionary["location"] as? String
         let gameTypeString = dictionary["gameType"] as? String ?? "NLH"
         let gameType = PokerVariant(rawValue: gameTypeString) ?? .nlh
@@ -126,6 +142,7 @@ struct CashGame: Identifiable, Codable {
         self.smallBlind = smallBlind
         self.bigBlind = bigBlind
         self.straddle = straddle
+        self.ante = ante
         self.location = location
         self.gameType = gameType
         self.createdAt = createdAt

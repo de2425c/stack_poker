@@ -611,6 +611,8 @@ struct SessionFormView: View {
     @State private var showStakingSection = false // To toggle visibility of staking fields
     @State private var showingStakingPopup = false // New state for floating popup
     @State private var showGameSelectionAlert = false // Alert for missing game selection
+    @State private var showMissingFieldAlert = false // Alert for missing required fields
+    @State private var missingFieldName = "" // Track which field is missing
 
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var stakeService = StakeService() // Add StakeService
@@ -651,11 +653,7 @@ struct SessionFormView: View {
     }
     
     private func formatStakes(game: CashGame) -> String {
-        var stakes = "$\(Int(game.smallBlind))/$\(Int(game.bigBlind))"
-        if let straddle = game.straddle, straddle > 0 {
-            stakes += " $\(Int(straddle))"
-        }
-        return stakes
+        return game.stakes
     }
     
     var body: some View {
@@ -785,7 +783,6 @@ struct SessionFormView: View {
                                     glassOpacity: glassOpacity,
                                     materialOpacity: materialOpacity
                                 )
-                                .padding(.horizontal)
 
                                 // Game Info Section
                                 VStack(alignment: .leading, spacing: 10) {
@@ -897,6 +894,11 @@ struct SessionFormView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Please select a game before logging your session.")
+        }
+        .alert("Missing \(missingFieldName)", isPresented: $showMissingFieldAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Please enter a valid \(missingFieldName.lowercased()) before adding your session.")
         }
         .alert("Delete Cash Game?", isPresented: $showingDeleteGameAlert, presenting: gameToDelete) { gameToDelete in // Added delete confirmation alert
             Button("Delete \(gameToDelete.name)", role: .destructive) {
@@ -1043,6 +1045,39 @@ struct SessionFormView: View {
     }
 
     private func addSession() {
+        // Validate required fields before starting
+        let finalCashout = Double(cashout) ?? 0
+        
+        // Calculate final buy-in based on session type
+        let finalBuyIn: Double
+        if selectedLogType == .tournament {
+            let baseAmount = Double(baseBuyIn) ?? 0
+            finalBuyIn = baseAmount * Double(rebuyCount)
+            
+            // Validate tournament buy-in
+            if baseBuyIn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || baseAmount <= 0 {
+                // Show alert for missing buy-in
+                showMissingFieldAlert(field: "Buy-in")
+                return
+            }
+        } else {
+            finalBuyIn = Double(buyIn) ?? 0
+            
+            // Validate cash game buy-in
+            if buyIn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || finalBuyIn <= 0 {
+                // Show alert for missing buy-in
+                showMissingFieldAlert(field: "Buy-in")
+                return
+            }
+        }
+        
+        // Validate cashout
+        if cashout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Show alert for missing cashout
+            showMissingFieldAlert(field: "Cashout")
+            return
+        }
+        
         isLoading = true
         
         let calendar = Calendar.current
@@ -1062,16 +1097,6 @@ struct SessionFormView: View {
         }
         
         let calculatedHrsPlayed = Double(calculatedHoursPlayed) ?? 0
-        let finalCashout = Double(cashout) ?? 0
-        
-        // Calculate final buy-in based on session type
-        let finalBuyIn: Double
-        if selectedLogType == .tournament {
-            let baseAmount = Double(baseBuyIn) ?? 0
-            finalBuyIn = baseAmount * Double(rebuyCount)
-        } else {
-            finalBuyIn = Double(buyIn) ?? 0
-        }
 
         var sessionDetails: [String: Any] = [
             "userId": userId,
@@ -1361,6 +1386,12 @@ struct SessionFormView: View {
         
         return Double(cleanedString)
     }
+    
+    // Helper function to show missing field alert
+    private func showMissingFieldAlert(field: String) {
+        missingFieldName = field
+        showMissingFieldAlert = true
+    }
 }
 
 // Extracted View for Staking Inputs - This is now replaced by StakerInputView and the loop in SessionFormView
@@ -1386,10 +1417,14 @@ struct GameCard: View {
                     Text(stakes)
                         .font(.plusJakarta(.title3, weight: .bold))
                         .foregroundColor(titleColor)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                     
                     Text(name)
                         .font(.plusJakarta(.caption, weight: .medium))
                         .foregroundColor(subtitleColor)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
                 }
                 
                 Spacer()
@@ -1406,7 +1441,7 @@ struct GameCard: View {
                     )
             }
         }
-        .frame(width: 130)
+        .frame(minWidth: 130)
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
         .background(

@@ -36,6 +36,17 @@ struct FeedView: View {
     
     let userId: String
     
+    // Add computed property for dynamic top padding based on live session bar visibility
+    private var dynamicTopPadding: CGFloat {
+        // When LiveSessionBar is visible, minimal padding since it provides spacing
+        if sessionStore.showLiveSessionBar {
+            return 20 // Minimal padding when LiveSessionBar is present
+        } else {
+            // When no LiveSessionBar, need more padding to account for safe area
+            return 55 // Enough padding to clear the safe area and provide proper spacing
+        }
+    }
+    
     init(userId: String = Auth.auth().currentUser?.uid ?? "") {
         self.userId = userId
         _handStore = StateObject(wrappedValue: HandStore(userId: userId)) // Initialize HandStore
@@ -188,7 +199,7 @@ struct FeedView: View {
 
                     VStack(spacing: 0) {
                         // Add the same top spacing as the loaded feed
-                        Spacer().frame(height: 45)
+                        Spacer().frame(height: dynamicTopPadding)
                         
                         // Header should be in the same position as when loaded
                         feedHeader()
@@ -213,7 +224,7 @@ struct FeedView: View {
                 // Empty feed state
                 ScrollView { 
                     VStack(spacing: 0) {
-                        Spacer().frame(height: 45)
+                        Spacer().frame(height: dynamicTopPadding)
                         // Top spacer removed
                         feedHeader() // Add header here
                         
@@ -274,19 +285,22 @@ struct FeedView: View {
                 // Profile Picture and Search Icon (Left Aligned Group)
                 HStack(spacing: 12) {
                     if let profile = userService.currentUserProfile {
-                        // Removed NavigationLink wrapping the Group
-                        Group {
-                            if let avatarURLString = profile.avatarURL, let avatarURL = URL(string: avatarURLString) {
-                                KFImage(avatarURL)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 36, height: 36)
-                                    .clipShape(Circle())
-                                    .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                            } else {
-                                PlaceholderAvatarView(size: 36)
+                        // Profile picture with navigation to current user's profile
+                        NavigationLink(destination: UserProfileView(userId: userId).environmentObject(userService).environmentObject(postService)) {
+                            Group {
+                                if let avatarURLString = profile.avatarURL, let avatarURL = URL(string: avatarURLString) {
+                                    KFImage(avatarURL)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 36, height: 36)
+                                        .clipShape(Circle())
+                                        .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                                } else {
+                                    PlaceholderAvatarView(size: 36)
+                                }
                             }
                         }
+                        .buttonStyle(PlainButtonStyle())
                     } else {
                         // Placeholder if profile is not loaded
                         PlaceholderAvatarView(size: 36)
@@ -300,9 +314,8 @@ struct FeedView: View {
                             .foregroundColor(.white)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 16)
-
-                Spacer()
 
                 // Centered Stack Logo
                 Image("stack_logo") 
@@ -311,21 +324,10 @@ struct FeedView: View {
                     .foregroundColor(.white)   // Color set to white
                     .scaledToFit()
                     .frame(height: 35)      // User updated height
-                    .offset(x: -4) // Offset to shift left by 4 points
 
-                Spacer()
-
-                // Notification Bell and Write Post (Right Aligned Group)
-                HStack(spacing: 16) {
-                    Button(action: {
-                        // Placeholder action for notifications
-
-                    }) {
-                        Image(systemName: "bell.fill")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-
+                // Write Post (Right Aligned)
+                HStack {
+                    Spacer()
                     Button(action: {
                         showingNewPost = true
                     }) {
@@ -334,6 +336,7 @@ struct FeedView: View {
                             .foregroundColor(.white) // Changed from green to white
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 16)
             }
             .frame(height: 44) // Set a fixed height for the HStack
@@ -361,7 +364,7 @@ struct FeedView: View {
 
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 0) { 
-                    Spacer().frame(height: 45)
+                    Spacer().frame(height: dynamicTopPadding)
                     // Top spacer removed
                     feedHeader() // Header is now the first item in LazyVStack
 

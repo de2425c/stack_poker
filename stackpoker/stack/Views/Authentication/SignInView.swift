@@ -176,6 +176,7 @@ struct SignInView: View {
                             .padding(.top, 12)
                         }
                         .padding(.horizontal, 24)
+                        .padding(.bottom, 40) // Add bottom padding to prevent button cutoff
                     }
                     
                     // Close button

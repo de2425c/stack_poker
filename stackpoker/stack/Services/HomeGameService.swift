@@ -118,7 +118,7 @@ class HomeGameService: ObservableObject {
     // MARK: - Game Management
     
     /// Create a new home game
-    func createHomeGame(title: String, creatorId: String, creatorName: String, initialPlayers: [PlayerInfo], groupId: String? = nil, linkedEventId: String? = nil) async throws -> HomeGame {
+    func createHomeGame(title: String, creatorId: String, creatorName: String, initialPlayers: [PlayerInfo], smallBlind: Double? = nil, bigBlind: Double? = nil, groupId: String? = nil, linkedEventId: String? = nil) async throws -> HomeGame {
         let players = initialPlayers.map {
             HomeGame.Player(
                 id: UUID().uuidString,
@@ -147,6 +147,14 @@ class HomeGameService: ObservableObject {
             "buyInRequests": [],
             "cashOutRequests": [],
         ]
+        
+        // Add stakes if provided
+        if let smallBlind = smallBlind {
+            gameData["smallBlind"] = smallBlind
+        }
+        if let bigBlind = bigBlind {
+            gameData["bigBlind"] = bigBlind
+        }
         
         // Only add groupId if it's provided and not nil
         if let groupId = groupId {
@@ -206,7 +214,9 @@ class HomeGameService: ObservableObject {
                     amount: nil,
                     description: "Game created: \(title)"
                 )
-            ]
+            ],
+            smallBlind: smallBlind,
+            bigBlind: bigBlind
         )
     }
     
@@ -915,6 +925,79 @@ class HomeGameService: ObservableObject {
     
     // MARK: - Game End Handling
     
+    /// Update player values (current stack and total buy-in)
+    func updatePlayerValues(gameId: String, playerId: String, newCurrentStack: Double, newTotalBuyIn: Double) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        // First get the game and check ownership
+        let game = try await fetchHomeGame(gameId: gameId)
+        
+        guard let game = game else {
+            throw NSError(domain: "HomeGameService", code: 2, userInfo: [NSLocalizedDescriptionKey: "Game not found"])
+        }
+        
+        guard game.creatorId == currentUser.uid else {
+            throw NSError(domain: "HomeGameService", code: 3, userInfo: [NSLocalizedDescriptionKey: "Only the game creator can edit player values"])
+        }
+        
+        // Find the player
+        guard let player = game.players.first(where: { $0.id == playerId }) else {
+            throw NSError(domain: "HomeGameService", code: 4, userInfo: [NSLocalizedDescriptionKey: "Player not found"])
+        }
+        
+        // Process in transaction to prevent race conditions
+        try await db.runTransaction { transaction, errorPointer in
+            do {
+                let gameRef = self.db.collection("homeGames").document(gameId)
+                let gameDoc = try transaction.getDocument(gameRef)
+                
+                guard var gameData = gameDoc.data() else {
+                    throw NSError(domain: "HomeGameService", code: 5, userInfo: [NSLocalizedDescriptionKey: "Game data not found"])
+                }
+                
+                // Update the player's values
+                var players = gameData["players"] as? [[String: Any]] ?? []
+                for i in 0..<players.count {
+                    if let id = players[i]["id"] as? String, id == playerId {
+                        let oldCurrentStack = players[i]["currentStack"] as? Double ?? 0
+                        let oldTotalBuyIn = players[i]["totalBuyIn"] as? Double ?? 0
+                        
+                        players[i]["currentStack"] = newCurrentStack
+                        players[i]["totalBuyIn"] = newTotalBuyIn
+                        
+                        // Add event to game history about the update
+                        let event: [String: Any] = [
+                            "id": UUID().uuidString,
+                            "timestamp": Timestamp(date: Date()),
+                            "eventType": "playerUpdated", // Custom event type for player updates
+                            "userId": player.userId,
+                            "userName": player.displayName,
+                            "description": "\(player.displayName)'s values updated: Stack $\(Int(oldCurrentStack)) → $\(Int(newCurrentStack)), Buy-in $\(Int(oldTotalBuyIn)) → $\(Int(newTotalBuyIn))"
+                        ]
+                        
+                        var gameHistory = gameData["gameHistory"] as? [[String: Any]] ?? []
+                        gameHistory.append(event)
+                        
+                        // Update the game
+                        transaction.updateData([
+                            "players": players,
+                            "gameHistory": gameHistory
+                        ], forDocument: gameRef)
+                        
+                        break
+                    }
+                }
+                
+                return nil
+            } catch {
+                errorPointer?.pointee = error as NSError
+                return nil
+            }
+        }
+    }
+    
     /// Process a cashout during game end without requiring a request
     func processCashoutForGameEnd(gameId: String, playerId: String, userId: String, amount: Double) async throws {
         guard let currentUser = Auth.auth().currentUser else {
@@ -1146,7 +1229,9 @@ class HomeGameService: ObservableObject {
             players: players,
             buyInRequests: buyInRequests,
             cashOutRequests: cashOutRequests,
-            gameHistory: gameHistory
+            gameHistory: gameHistory,
+            smallBlind: data["smallBlind"] as? Double,
+            bigBlind: data["bigBlind"] as? Double
         )
     }
     

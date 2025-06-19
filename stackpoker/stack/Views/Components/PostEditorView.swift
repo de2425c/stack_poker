@@ -464,6 +464,33 @@ struct PostEditorView: View {
         }
     }
 
+    // Helper to extract chip update details from initialText
+    private func extractChipUpdateDetails() -> String? {
+        let lines = initialText.components(separatedBy: "\n")
+        
+        for line in lines {
+            if line.contains("Stack update:") || 
+               line.contains("Quick add:") || 
+               line.contains("Quick subtract:") ||
+               line.contains("Rebuy:") ||
+               (line.contains("Combined") && line.contains("updates")) {
+                return line.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        
+        // If we can't find a specific line, try to extract any meaningful update info
+        if initialText.contains("$") {
+            // Try to find the first line that contains dollar amounts
+            for line in lines {
+                if line.contains("$") && !line.contains("Session at") {
+                    return line.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+        
+        return nil
+    }
+    
     // Helper to find and extract session details from text
     private func extractSessionDetails() -> String {
         // Check if there are session details in the initialText
@@ -705,7 +732,16 @@ struct PostEditorView: View {
     private var isSessionStartPost: Bool {
         // Check if this is a session start post by looking at the content
         return initialText.contains("Started a new session") || 
-               (isSessionPost && showFullSessionCard && !isNote && !isHandPost && selectedCompletedSession == nil)
+               (isSessionPost && showFullSessionCard && !isNote && !isHandPost && selectedCompletedSession == nil && !isChipUpdatePost)
+    }
+    
+    // Add computed property to detect chip update posts
+    private var isChipUpdatePost: Bool {
+        return initialText.contains("Stack update:") || 
+               initialText.contains("Quick add:") || 
+               initialText.contains("Quick subtract:") ||
+               initialText.contains("Rebuy:") ||
+               initialText.contains("Combined") && initialText.contains("updates")
     }
 
     // Update the sessionDisplayView to handle session start posts differently
@@ -734,8 +770,38 @@ struct PostEditorView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 16)
+        } else if isChipUpdatePost {
+            // Chip update - show stack update info
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "dollarsign.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    
+                    Text("Stack Update")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                }
+                
+                // Game and stakes info
+                Text("\(sessionGameName) (\(sessionStakes))")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                
+                // Show the chip update details
+                if let updateDetails = extractChipUpdateDetails() {
+                    Text(updateDetails)
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.9))
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 16)
         } else if isSessionPost && sessionId != nil && showFullSessionCard && !isSessionStartPost {
-            // Other session posts with full card (chip updates, etc.)
+            // Other session posts with full card (remaining cases)
             SessionCard(text: extractSessionDetails())
                 .padding(.horizontal)
                 .padding(.bottom, 16)

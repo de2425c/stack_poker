@@ -88,6 +88,9 @@ struct EnhancedLiveSessionView: View {
     @State private var editGameName = ""
     @State private var editStakes = ""
     
+    // Add state for discard session confirmation
+    @State private var showingDiscardSessionAlert = false
+    
     // Add back the share to feed state variables (put them before the showingPostEditor declaration)
     @State private var shareToFeedContent = ""
     @State private var shareToFeedIsHand = false
@@ -128,6 +131,12 @@ struct EnhancedLiveSessionView: View {
     @State private var noteToEdit: String? = nil
     @State private var noteToEditId: String? = nil // Assuming notes will have IDs for reliable editing
     @State private var showingEditNoteSheet = false
+    
+    // Group sharing state for notes
+    @State private var showingGroupSelection = false
+    @State private var noteToShare: String?
+    @State private var showingShareSuccess = false
+    @State private var shareSuccessMessage = ""
     
     // Simple display array for notes - completely separate from complex session store
     @State private var displayNotes: [String] = []
@@ -414,7 +423,12 @@ struct EnhancedLiveSessionView: View {
                 Text("Would you like to share your session result?")
             }
         }
-        .sheet(isPresented: $showingPostEditor, onDismiss: { dismiss() }) { postEditorSheet }
+        .sheet(isPresented: $showingPostEditor, onDismiss: { 
+            // Only dismiss the session view if we're sharing a completed session result
+            if sessionDetails != nil {
+                dismiss()
+            }
+        }) { postEditorSheet }
         .sheet(isPresented: $showingHandWizard) {
             NavigationView {
                 NewHandEntryView(sessionId: sessionStore.liveSession.id)
@@ -426,6 +440,11 @@ struct EnhancedLiveSessionView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("You need to sign in to share content to the feed.")
+        }
+        .alert("Note Shared", isPresented: $showingShareSuccess) {
+            Button("OK") { }
+        } message: {
+            Text(shareSuccessMessage)
         }
     }
     
@@ -1243,11 +1262,7 @@ struct EnhancedLiveSessionView: View {
     
     // Helper function to format stakes
     private func formatStakes(game: CashGame) -> String {
-        var stakes = "$\(Int(game.smallBlind))/$\(Int(game.bigBlind))"
-        if let straddle = game.straddle, straddle > 0 {
-            stakes += " $\(Int(straddle))"
-        }
-        return stakes
+        return game.stakes
     }
     
     // Game card with stakes and name
@@ -1268,10 +1283,14 @@ struct EnhancedLiveSessionView: View {
                         Text(stakes)
                             .font(.plusJakarta(.title3, weight: .bold))
                             .foregroundColor(titleColor)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                         
                         Text(name)
                             .font(.plusJakarta(.caption, weight: .medium))
                             .foregroundColor(subtitleColor)
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
                     }
                     
                     Spacer()
@@ -1288,7 +1307,7 @@ struct EnhancedLiveSessionView: View {
                         )
                 }
             }
-            .frame(width: 130)
+            .frame(minWidth: 130)
             .padding(.vertical, 10)
             .padding(.horizontal, 12)
             .background(
@@ -1598,7 +1617,9 @@ struct EnhancedLiveSessionView: View {
         // Return appropriate action for other types
         return {
             if item.kind == .chip {
-                if let update = self.chipUpdates.first(where: { $0.id == item.id }) {
+                // Use combined chip updates for finding the update to share
+                let combinedChipUpdates = self.combineChipUpdatesWithinTimeWindow(self.chipUpdates, timeWindow: 30)
+                if let update = combinedChipUpdates.first(where: { $0.id == item.id }) {
                     let updateContent = "Stack update: $\(Int(update.amount))\(update.note != nil ? "\nNote: \(update.note!)" : "")"
                     self.showShareToFeedDialog(content: updateContent, isHand: false, handData: nil, updateId: update.id, isSharingChipUpdate: true)
                 }
@@ -1637,7 +1658,10 @@ struct EnhancedLiveSessionView: View {
                 ScrollView {
                     LazyVStack(spacing: 16) {
                         ForEach(Array(displayNotes.enumerated()).reversed(), id: \.offset) { index, note in
-                            NoteCardView(noteText: note)
+                            NoteCardView(noteText: note, onShareTapped: {
+                                noteToShare = note
+                                showingGroupSelection = true
+                            })
                                 .onTapGesture {
                                     self.noteToEditId = String(index)
                                     self.noteToEdit = note
@@ -1657,6 +1681,15 @@ struct EnhancedLiveSessionView: View {
             refreshDisplayNotes()
         }) { 
             SimpleNoteEditorView(sessionStore: sessionStore, sessionId: sessionStore.liveSession.id)
+        }
+        .sheet(isPresented: $showingGroupSelection) {
+            if let noteToShare = noteToShare {
+                GroupSelectionSheet(noteText: noteToShare) { group in
+                    // Handle successful sharing
+                    showingShareSuccess = true
+                    shareSuccessMessage = "Note shared to \(group.name)"
+                }
+            }
         }
         .sheet(isPresented: $showingEditNoteSheet) {
             if let noteToEdit = noteToEdit, let noteIdStr = noteToEditId, let noteIndex = Int(noteIdStr) {
@@ -1965,18 +1998,18 @@ struct EnhancedLiveSessionView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
-                // First row: +5, -5, +25, -25
+                // First row: reds on left, greens on right
                 HStack(spacing: 10) {
-                    QuickUpdateButton(amount: 5, isPositive: true, action: { quickUpdateChipStack(amount: 5) })
                     QuickUpdateButton(amount: 5, isPositive: false, action: { quickUpdateChipStack(amount: -5) })
-                    QuickUpdateButton(amount: 25, isPositive: true, action: { quickUpdateChipStack(amount: 25) })
                     QuickUpdateButton(amount: 25, isPositive: false, action: { quickUpdateChipStack(amount: -25) })
+                    QuickUpdateButton(amount: 5, isPositive: true, action: { quickUpdateChipStack(amount: 5) })
+                    QuickUpdateButton(amount: 25, isPositive: true, action: { quickUpdateChipStack(amount: 25) })
                 }
                 
-                // Second row: +100, -100
+                // Second row: reds on left, greens on right
                 HStack(spacing: 10) {
-                    QuickUpdateButton(amount: 100, isPositive: true, action: { quickUpdateChipStack(amount: 100) })
                     QuickUpdateButton(amount: 100, isPositive: false, action: { quickUpdateChipStack(amount: -100) })
+                    QuickUpdateButton(amount: 100, isPositive: true, action: { quickUpdateChipStack(amount: 100) })
                 }
             }
             
@@ -2515,7 +2548,9 @@ struct EnhancedLiveSessionView: View {
             timestamp: sessionStartTime
         ))
         
-        for chip in chipUpdates {
+        // Combine chip updates within 30 seconds and convert to UpdateItems
+        let combinedChipUpdates = combineChipUpdatesWithinTimeWindow(chipUpdates, timeWindow: 30)
+        for chip in combinedChipUpdates {
             items.append(UpdateItem(
                 id: chip.id,
                 kind: .chip,
@@ -2586,104 +2621,6 @@ struct EnhancedLiveSessionView: View {
         }
     }
     
-    // Chip stack graph
-    private struct ChipStackGraph: View {
-        let amounts: [Double]
-        let startAmount: Double
-        
-        // Colors for the graph
-        private let gradientTop = Color(red: 123/255, green: 255/255, blue: 99/255)
-        private let gradientBottom = Color(red: 123/255, green: 255/255, blue: 99/255, opacity: 0.2)
-        
-        private var graphColor: Color {
-            // Green if profit, red if loss
-            if let lastAmount = amounts.last, lastAmount >= startAmount {
-                return Color(red: 123/255, green: 255/255, blue: 99/255) // Green
-            } else {
-                return Color.red
-            }
-        }
-        
-        var body: some View {
-            if amounts.isEmpty {
-                Text("No chip updates yet")
-                    .font(.system(size: 14))
-                    .foregroundColor(.gray)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 100)
-            } else {
-                // Create a simple line graph visualization with gradient fill
-                GeometryReader { geometry in
-                    ZStack(alignment: .bottom) {
-                        // Draw gradient fill under the line
-                        graphPath(in: geometry)
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [
-                                        graphColor.opacity(0.6),
-                                        graphColor.opacity(0.1)
-                                    ]),
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                        
-                        // Draw the line path
-                        graphPath(in: geometry, closePath: false)
-                            .stroke(graphColor, lineWidth: 2)
-                    }
-                }
-                .padding(.bottom, 10)
-            }
-        }
-        
-        // Helper function to create the graph path
-        private func graphPath(in geometry: GeometryProxy, closePath: Bool = true) -> Path {
-            Path { path in
-                let width = geometry.size.width
-                let height = geometry.size.height - 10
-                
-                let allAmounts = [startAmount] + amounts
-                
-                // Find min and max values, adding a bit of padding
-                let minValue = (allAmounts.min() ?? 0) * 0.95
-                let maxValue = max((allAmounts.max() ?? startAmount), startAmount * 1.05)
-                let range = maxValue - minValue
-                
-                // Start point
-                let startY = height - height * CGFloat((startAmount - minValue) / range)
-                path.move(to: CGPoint(x: 0, y: startY))
-                
-                // Draw lines through points
-                for (index, amount) in amounts.enumerated() {
-                    let x = width * CGFloat(index + 1) / CGFloat(amounts.count)
-                    let y = height - height * CGFloat((amount - minValue) / range)
-                    
-                    // Use a smooth curve
-                    if index > 0 {
-                        let prevX = width * CGFloat(index) / CGFloat(amounts.count)
-                        let prevY = height - height * CGFloat((allAmounts[index] - minValue) / range)
-                        
-                        let controlPoint1 = CGPoint(x: prevX + (x - prevX) / 2, y: prevY)
-                        let controlPoint2 = CGPoint(x: prevX + (x - prevX) / 2, y: y)
-                        
-                        path.addCurve(to: CGPoint(x: x, y: y),
-                                     control1: controlPoint1,
-                                     control2: controlPoint2)
-                    } else {
-                        path.addLine(to: CGPoint(x: x, y: y))
-                    }
-                }
-                
-                // Close the path to create a filled shape
-                if closePath {
-                    path.addLine(to: CGPoint(x: width, y: height))
-                    path.addLine(to: CGPoint(x: 0, y: height))
-                    path.closeSubpath()
-                }
-            }
-        }
-    }
     
     // Helper to convert a parsed hand to a simple text format
     private func createSummaryFromParsedHand(hand: ParsedHandHistory) -> String {
@@ -2866,7 +2803,7 @@ struct EnhancedLiveSessionView: View {
                     completedSession: completedSession
                 )
                 .onDisappear {
-                    // When post editor closes, we need to dismiss the entire view
+                    // When post editor closes for completed session, we need to dismiss the entire view
                     dismiss()
                 }
             }
@@ -2974,6 +2911,8 @@ struct EnhancedLiveSessionView: View {
                 }
             }
         }
+        
+        // Don't dismiss the session view here - only dismiss for completed sessions
     }
     
     // Add new sheet for rebuy amount
@@ -3440,12 +3379,14 @@ struct EnhancedLiveSessionView: View {
                     .ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 16) {
-                        let relevantChipUpdates = chipUpdates
+                        // Use combined chip updates for sharing
+                        let combinedChipUpdates = combineChipUpdatesWithinTimeWindow(chipUpdates, timeWindow: 30)
+                        let relevantChipUpdates = combinedChipUpdates
                             .filter { chipUpdate in
                                 let isRebuy = chipUpdate.note?.lowercased().contains("rebuy") == true
                                 let previousAmount: Double
-                                if let index = chipUpdates.firstIndex(where: { $0.id == chipUpdate.id }), index > 0 {
-                                    previousAmount = chipUpdates[index - 1].amount
+                                if let index = combinedChipUpdates.firstIndex(where: { $0.id == chipUpdate.id }), index > 0 {
+                                    previousAmount = combinedChipUpdates[index - 1].amount
                                 } else {
                                     previousAmount = sessionStore.liveSession.buyIn
                                 }
@@ -4081,20 +4022,37 @@ struct EnhancedLiveSessionView: View {
                             }
                             .padding(.horizontal)
                             
-                            // Save Button
-                            Button(action: saveSessionChanges) {
-                                Text("Save Changes")
-                                    .font(.plusJakarta(.body, weight: .bold))
-                                    .foregroundColor(.black)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 16)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .fill(Color.white)
-                                    )
-                            }
-                            .padding(.horizontal)
-                            .padding(.bottom, 20)
+                                        // Save Button
+            Button(action: saveSessionChanges) {
+                Text("Save Changes")
+                    .font(.plusJakarta(.body, weight: .bold))
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.white)
+                    )
+            }
+            .padding(.horizontal)
+            
+            // Discard Session Button
+            Button(action: {
+                showingDiscardSessionAlert = true
+            }) {
+                Text("Discard Session")
+                    .font(.plusJakarta(.body, weight: .bold))
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.red, lineWidth: 2)
+                            .background(Color.clear)
+                    )
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 20)
                         }
                         .padding(.top, 20)
                     }
@@ -4126,6 +4084,14 @@ struct EnhancedLiveSessionView: View {
                 materialOpacity: 0.2
             )
         )
+        .alert("Discard Session?", isPresented: $showingDiscardSessionAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Discard", role: .destructive) {
+                discardSession()
+            }
+        } message: {
+            Text("This will delete your current session permanently. All session data, notes, and hand histories will be lost.")
+        }
     }
     
     // MARK: - Save Session Changes
@@ -4148,6 +4114,19 @@ struct EnhancedLiveSessionView: View {
         
         // Close the edit sheet
         showingEditSessionSheet = false
+    }
+    
+    // MARK: - Discard Session
+    
+    private func discardSession() {
+        // Clear the live session from the store
+        sessionStore.endAndClearLiveSession()
+        
+        // Close the edit sheet first
+        showingEditSessionSheet = false
+        
+        // Then dismiss the entire session view
+        dismiss()
     }
     
     // MARK: - Live Session Challenge Section
@@ -4286,6 +4265,104 @@ struct EnhancedLiveSessionView: View {
     }
     
     // MARK: - Helper Functions
+    
+    // Combine chip updates that occur within a specified time window (in seconds)
+    private func combineChipUpdatesWithinTimeWindow(_ updates: [ChipStackUpdate], timeWindow: TimeInterval) -> [ChipStackUpdate] {
+        guard !updates.isEmpty else { return [] }
+        
+        // Sort updates by timestamp to ensure proper ordering
+        let sortedUpdates = updates.sorted { $0.timestamp < $1.timestamp }
+        var combinedUpdates: [ChipStackUpdate] = []
+        var currentGroup: [ChipStackUpdate] = []
+        
+        for update in sortedUpdates {
+            if let lastInGroup = currentGroup.last {
+                // Check if this update is within the time window of the last update in the current group
+                if update.timestamp.timeIntervalSince(lastInGroup.timestamp) <= timeWindow {
+                    // Add to current group
+                    currentGroup.append(update)
+                } else {
+                    // Time window exceeded, finalize current group and start new one
+                    if let combinedUpdate = combineGroupOfUpdates(currentGroup) {
+                        combinedUpdates.append(combinedUpdate)
+                    }
+                    currentGroup = [update]
+                }
+            } else {
+                // First update in group
+                currentGroup = [update]
+            }
+        }
+        
+        // Don't forget to process the last group
+        if let combinedUpdate = combineGroupOfUpdates(currentGroup) {
+            combinedUpdates.append(combinedUpdate)
+        }
+        
+        return combinedUpdates
+    }
+    
+    // Combine a group of chip updates into a single update
+    private func combineGroupOfUpdates(_ group: [ChipStackUpdate]) -> ChipStackUpdate? {
+        guard !group.isEmpty else { return nil }
+        
+        // If only one update in group, return it as-is
+        if group.count == 1 {
+            return group.first
+        }
+        
+        // Combine multiple updates
+        let firstUpdate = group.first!
+        let lastUpdate = group.last!
+        
+        // Use the most recent timestamp
+        let timestamp = lastUpdate.timestamp
+        
+        // Use the final amount from the last update
+        let amount = lastUpdate.amount
+        
+        // Calculate the total change from first to last
+        let totalChange = lastUpdate.amount - firstUpdate.amount
+        
+        // Combine notes meaningfully, focusing on showing the sum
+        let notes = group.compactMap { $0.note }.filter { !$0.isEmpty }
+        let combinedNote: String?
+        
+        // Check if all notes are "Quick add/subtract" type to create a meaningful summary
+        let quickAddNotes = notes.filter { note in
+            note.lowercased().contains("quick add") || note.lowercased().contains("quick subtract")
+        }
+        
+        if quickAddNotes.count == notes.count && !quickAddNotes.isEmpty {
+            // All are quick updates - show the sum
+            let changeText = totalChange >= 0 ? "+$\(Int(totalChange))" : "-$\(Int(abs(totalChange)))"
+            combinedNote = "Quick add: \(changeText)"
+        } else if notes.isEmpty {
+            let changeText = totalChange >= 0 ? "+$\(Int(totalChange))" : "-$\(Int(abs(totalChange)))"
+            combinedNote = "Combined \(group.count) updates (\(changeText))"
+        } else if notes.count == 1 {
+            combinedNote = notes.first
+        } else {
+            // If multiple different notes, show a summary with total change
+            let uniqueNotes = Array(Set(notes))
+            if uniqueNotes.count == 1 {
+                combinedNote = uniqueNotes.first
+            } else {
+                let changeText = totalChange >= 0 ? "+$\(Int(totalChange))" : "-$\(Int(abs(totalChange)))"
+                combinedNote = "Combined \(group.count) updates (\(changeText)): \(uniqueNotes.joined(separator: "; "))"
+            }
+        }
+        
+        // Create combined update with a new ID that represents the combination
+        let combinedId = group.map { $0.id }.joined(separator: "_")
+        
+        return ChipStackUpdate(
+            id: combinedId,
+            amount: amount,
+            note: combinedNote,
+            timestamp: timestamp
+        )
+    }
     
     // Function to restore missing staker profiles when they get lost
     private func restoreMissingStakerProfiles() {

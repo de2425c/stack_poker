@@ -35,7 +35,7 @@ class CashGameService: ObservableObject {
             }
     }
     
-    func addCashGame(name: String, smallBlind: Double, bigBlind: Double, straddle: Double? = nil, location: String? = nil, gameType: PokerVariant = .nlh) async throws {
+    func addCashGame(name: String, smallBlind: Double, bigBlind: Double, straddle: Double? = nil, ante: Double? = nil, location: String? = nil, gameType: PokerVariant = .nlh) async throws {
         print("Adding new cash game: \(name) - \(smallBlind)/\(bigBlind) - \(gameType.rawValue)")
         let game = CashGame(
             userId: userId,
@@ -43,6 +43,7 @@ class CashGameService: ObservableObject {
             smallBlind: smallBlind,
             bigBlind: bigBlind,
             straddle: straddle,
+            ante: ante,
             location: location,
             gameType: gameType
         )

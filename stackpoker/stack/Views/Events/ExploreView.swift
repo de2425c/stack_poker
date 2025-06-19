@@ -111,6 +111,19 @@ enum BuyinRange: String, CaseIterable, Identifiable {
 }
 // --- End BuyinRange Enum ---
 
+// MARK: - Cached Event Model
+struct CachedEvent: Codable {
+    let id: String
+    let buyin_string: String
+    let date: String
+    let event_name: String
+    let series_name: String?
+    let description: String?
+    let time: String?
+    let buyin_usd: Double?
+    let casino: String?
+}
+
 // Old IdentifiableDate struct removed (was lines 4-16)
 
 // 1. Event Model (Updated for enhanced_events collection)
@@ -209,6 +222,112 @@ struct InfoRow: View {
     }
 }
 
+// MARK: - Series Card View
+struct SeriesCardView: View {
+    let seriesName: String
+    let eventCount: Int
+    let onSelect: () -> Void
+    
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 16) {
+                // Series Icon
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color(red: 64/255, green: 156/255, blue: 255/255),
+                                    Color(red: 100/255, green: 180/255, blue: 255/255)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 48, height: 48)
+                    
+                    // Use different icons for different series types
+                    Image(systemName: iconForSeries(seriesName))
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.white)
+                }
+                
+                // Series Info
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(seriesName)
+                        .font(.system(size: 18, weight: .semibold, design: .default))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    
+                    Text("\(eventCount) event\(eventCount == 1 ? "" : "s")")
+                        .font(.system(size: 14, weight: .medium, design: .default))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+                
+                // Arrow
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(
+                ZStack {
+                    // Base background
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.white.opacity(0.03),
+                                    Color.white.opacity(0.01)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    
+                    // Border
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.white.opacity(0.1),
+                                    Color.white.opacity(0.05)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.5
+                        )
+                }
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func iconForSeries(_ seriesName: String) -> String {
+        let lowercased = seriesName.lowercased()
+        
+        if lowercased.contains("wsop") || lowercased.contains("world series") {
+            return "crown"
+        } else if lowercased.contains("wpt") || lowercased.contains("world poker") {
+            return "globe"
+        } else if lowercased.contains("circuit") {
+            return "repeat"
+        } else if lowercased.contains("daily") || lowercased.contains("regular") {
+            return "calendar"
+        } else if lowercased.contains("tournament") {
+            return "trophy"
+        } else if lowercased.contains("other") {
+            return "folder"
+        } else {
+            return "suit.spade"
+        }
+    }
+}
+
 class ExploreViewModel: ObservableObject {
     @Published var allEvents: [Event] = []
     @Published var isLoading: Bool = false
@@ -222,6 +341,11 @@ class ExploreViewModel: ObservableObject {
     
     private var db = Firestore.firestore()
     private var cancellables = Set<AnyCancellable>() // For observing changes
+    
+    // MARK: - Caching Properties
+    private let cacheKey = "cached_enhanced_events"
+    private let cacheTimestampKey = "cached_events_timestamp"
+    private let cacheExpiryHours: TimeInterval = 6 // Cache expires after 6 hours
 
     init() {
         // Observe changes to allEvents to update series list
@@ -261,32 +385,155 @@ class ExploreViewModel: ObservableObject {
         self.selectedSeriesSet = self.selectedSeriesSet.filter { validSeries.contains($0) }
     }
 
+    // MARK: - Caching Methods
+    
+    private func loadCachedEvents() -> [Event]? {
+        guard let timestamp = UserDefaults.standard.object(forKey: cacheTimestampKey) as? Date else {
+            return nil // No cached timestamp
+        }
+        
+        // Check if cache is still valid (within expiry time)
+        let timeElapsed = Date().timeIntervalSince(timestamp)
+        if timeElapsed > (cacheExpiryHours * 3600) {
+            return nil // Cache expired
+        }
+        
+        // Load cached data
+        guard let cachedData = UserDefaults.standard.data(forKey: cacheKey) else {
+            return nil
+        }
+        
+        do {
+            let cachedEvents = try JSONDecoder().decode([CachedEvent].self, from: cachedData)
+            return cachedEvents.compactMap { cachedEvent in
+                Event(
+                    id: cachedEvent.id,
+                    buyin_string: cachedEvent.buyin_string,
+                    simpleDate: SimpleDate(from: cachedEvent.date) ?? SimpleDate(year: 2024, month: 1, day: 1),
+                    event_name: cachedEvent.event_name,
+                    series_name: cachedEvent.series_name,
+                    description: cachedEvent.description,
+                    time: cachedEvent.time,
+                    buyin_usd: cachedEvent.buyin_usd,
+                    casino: cachedEvent.casino
+                )
+            }
+        } catch {
+            print("Error loading cached events: \(error)")
+            return nil
+        }
+    }
+    
+    private func cacheEvents(_ events: [Event]) {
+        let cachedEvents = events.map { event in
+            CachedEvent(
+                id: event.id,
+                buyin_string: event.buyin_string,
+                date: "\(event.simpleDate.year)-\(String(format: "%02d", event.simpleDate.month))-\(String(format: "%02d", event.simpleDate.day))",
+                event_name: event.event_name,
+                series_name: event.series_name,
+                description: event.description,
+                time: event.time,
+                buyin_usd: event.buyin_usd,
+                casino: event.casino
+            )
+        }
+        
+        do {
+            let data = try JSONEncoder().encode(cachedEvents)
+            UserDefaults.standard.set(data, forKey: cacheKey)
+            UserDefaults.standard.set(Date(), forKey: cacheTimestampKey)
+        } catch {
+            print("Error caching events: \(error)")
+        }
+    }
+
     func fetchEvents() {
+        // Show loading immediately for responsive UI
         isLoading = true
         errorMessage = nil
         
-        db.collection("enhanced_events").order(by: "date").getDocuments { [weak self] (querySnapshot, error) in
-            guard let self = self else {
+        // Load cache in background to avoid blocking UI
+        Task {
+            // Try to load from cache first
+            if let cachedEvents = loadCachedEvents() {
+                await MainActor.run {
+                    print("📱 Loading events from cache (\(cachedEvents.count) events)")
+                    self.allEvents = cachedEvents
+                    self.isLoading = false
+                }
                 return
             }
-            DispatchQueue.main.async {
-                self.isLoading = false
-                if let error = error {
+            
+            // Cache miss or expired - fetch from Firebase
+            await MainActor.run {
+                print("🔄 Cache miss - fetching events from Firebase")
+            }
+            
+            do {
+                let querySnapshot = try await db.collection("enhanced_events").order(by: "date").getDocuments()
+                let parsedEvents = querySnapshot.documents.compactMap { Event(document: $0) }
+                
+                await MainActor.run {
+                    self.allEvents = parsedEvents
+                    self.isLoading = false
+                    
+                    // Cache the newly fetched events
+                    if !parsedEvents.isEmpty {
+                        Task.detached { [weak self] in
+                            self?.cacheEvents(parsedEvents)
+                            print("💾 Cached \(parsedEvents.count) events")
+                        }
+                    }
+                    
+                    if self.allEvents.isEmpty && !querySnapshot.documents.isEmpty {
+                        self.errorMessage = "Event data could not be processed or all events had empty buy-ins/invalid dates. Check console for details."
+                    } else if self.allEvents.isEmpty {
+                        self.errorMessage = "No events available (or all had empty buy-ins/invalid dates)."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
                     self.errorMessage = "Failed to load events: \(error.localizedDescription)"
-                    return
                 }
-                guard let documents = querySnapshot?.documents else {
-                    self.errorMessage = "No event documents found in 'enhanced_events'."
-                    return
+            }
+        }
+    }
+    
+    func refreshEvents() {
+        // Force refresh from Firebase (bypass cache)
+        print("🔄 Force refreshing events from Firebase")
+        isLoading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                let querySnapshot = try await db.collection("enhanced_events").order(by: "date").getDocuments()
+                let parsedEvents = querySnapshot.documents.compactMap { Event(document: $0) }
+                
+                await MainActor.run {
+                    self.allEvents = parsedEvents
+                    self.isLoading = false
+                    
+                    // Update cache with fresh data
+                    if !parsedEvents.isEmpty {
+                        Task.detached { [weak self] in
+                            self?.cacheEvents(parsedEvents)
+                            print("💾 Updated cache with \(parsedEvents.count) fresh events")
+                        }
+                    }
+                    
+                    if self.allEvents.isEmpty && !querySnapshot.documents.isEmpty {
+                        self.errorMessage = "Event data could not be processed or all events had empty buy-ins/invalid dates. Check console for details."
+                    } else if self.allEvents.isEmpty {
+                        self.errorMessage = "No events available (or all had empty buy-ins/invalid dates)."
+                    }
                 }
-                
-                let parsedEvents = documents.compactMap { Event(document: $0) }
-                self.allEvents = parsedEvents
-                
-                if self.allEvents.isEmpty && documents.count > 0 {
-                     self.errorMessage = "Event data could not be processed or all events had empty buy-ins/invalid dates. Check console for details."
-                } else if self.allEvents.isEmpty {
-                    self.errorMessage = "No events available (or all had empty buy-ins/invalid dates)."
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.errorMessage = "Failed to load events: \(error.localizedDescription)"
                 }
             }
         }
@@ -302,11 +549,12 @@ struct ExploreView: View {
     @State private var selectedTab: EventsTab = .events
     @State private var showingCreateEvent = false
     @State private var showingEventInvites = false
-    @State private var showingFilters = false
     @State private var showingEventHistory = false
     @State private var showingEventDetail = false
     @State private var selectedEvent: Event?
     @State private var selectedUserEvent: UserEvent? = nil // For UserEvent detail sheet
+    @State private var showingSeriesView = true // New: Controls whether to show series cards or events
+    @State private var selectedSeriesName: String? = nil // New: Currently selected series for detailed view
     var onEventSelected: ((Event) -> Void)? // Callback for when an event is selected
     var isSheetPresentation: Bool = false // New parameter to control top padding
     @Environment(\.dismiss) var dismiss // To dismiss the view if used as a sheet
@@ -456,21 +704,133 @@ struct ExploreView: View {
     
     /// Non-completed events for main feed
     private var activeUserEvents: [UserEvent] {
-        userEventService.userEvents.filter { event in
-            event.currentStatus != .completed
+        let now = Date()
+        return userEventService.userEvents.filter { event in
+            // Show events that are:
+            // 1. Not cancelled
+            // 2. Either upcoming OR within 24 hours of completion (still "active")
+            if event.status == .cancelled {
+                return false
+            }
+            
+            // For events with end dates, consider them completed 24 hours after end
+            if let endDate = event.endDate {
+                let completionThreshold = Calendar.current.date(byAdding: .hour, value: 24, to: endDate) ?? endDate
+                return now < completionThreshold
+            }
+            
+            // For events without end dates, consider them completed 24 hours after start
+            let completionThreshold = Calendar.current.date(byAdding: .hour, value: 24, to: event.startDate) ?? event.startDate
+            return now < completionThreshold
         }
     }
     
     /// Completed events for history (both UserEvents and public event RSVPs)
     private var completedUserEvents: [UserEvent] {
-        userEventService.userEvents.filter { event in
-            event.currentStatus == .completed
+        let now = Date()
+        return userEventService.userEvents.filter { event in
+            // Show events that are completed (24+ hours after end/start)
+            if event.status == .cancelled {
+                return true // Include cancelled events in history
+            }
+            
+            // For events with end dates, consider them completed 24 hours after end
+            if let endDate = event.endDate {
+                let completionThreshold = Calendar.current.date(byAdding: .hour, value: 24, to: endDate) ?? endDate
+                return now >= completionThreshold
+            }
+            
+            // For events without end dates, consider them completed 24 hours after start
+            let completionThreshold = Calendar.current.date(byAdding: .hour, value: 24, to: event.startDate) ?? event.startDate
+            return now >= completionThreshold
         }.sorted { $0.startDate > $1.startDate } // Most recent first
     }
 
     /// Total completed events count (UserEvents + Public RSVPs)
     private var totalCompletedEventsCount: Int {
         return completedUserEvents.count + completedPublicEventRSVPs.count
+    }
+
+    // MARK: - Series Grouping
+    private var groupedEventsBySeries: [String: [Event]] {
+        let eventsForCurrentFilters = viewModel.allEvents.filter { event in
+            // Apply date filter
+            if let currentFilterDate = selectedSimpleDate {
+                return event.simpleDate == currentFilterDate
+            } else if let fallbackDate = allAvailableDates.first?.simpleDate {
+                return event.simpleDate == fallbackDate
+            }
+            return false
+        }
+        
+        // Group by series, handling events without series
+        var grouped: [String: [Event]] = [:]
+        for event in eventsForCurrentFilters {
+            let seriesKey = event.series_name ?? "Other Events"
+            grouped[seriesKey, default: []].append(event)
+        }
+        
+        return grouped
+    }
+    
+    private var sortedSeriesNames: [String] {
+        return groupedEventsBySeries.keys.sorted { series1, series2 in
+            // Put "Other Events" at the end
+            if series1 == "Other Events" && series2 != "Other Events" {
+                return false
+            } else if series2 == "Other Events" && series1 != "Other Events" {
+                return true
+            }
+            
+            // Sort by event count (descending), then alphabetically
+            let count1 = groupedEventsBySeries[series1]?.count ?? 0
+            let count2 = groupedEventsBySeries[series2]?.count ?? 0
+            
+            if count1 != count2 {
+                return count1 > count2
+            }
+            return series1 < series2
+        }
+    }
+    
+    // Events for currently selected series (when in series detail view)
+    private var eventsForSelectedSeries: [Event] {
+        guard let seriesName = selectedSeriesName else { return [] }
+        
+        var eventsToFilter = viewModel.allEvents
+        
+        // Filter by series
+        if seriesName == "Other Events" {
+            eventsToFilter = eventsToFilter.filter { $0.series_name == nil }
+        } else {
+            eventsToFilter = eventsToFilter.filter { $0.series_name == seriesName }
+        }
+        
+        // Apply buy-in filter
+        if viewModel.selectedBuyinRange != .all {
+            eventsToFilter = eventsToFilter.filter { event in
+                let buyinAmount: Double?
+                if let usdBuyin = event.buyin_usd {
+                    buyinAmount = usdBuyin
+                } else {
+                    buyinAmount = parseBuyinFromString(event.buyin_string)
+                }
+                
+                guard let amount = buyinAmount else { return false }
+                return viewModel.selectedBuyinRange.contains(amount)
+            }
+        }
+        
+        // Apply date filter
+        if let currentFilterDate = selectedSimpleDate {
+            eventsToFilter = eventsToFilter.filter { $0.simpleDate == currentFilterDate }
+        } else if let fallbackDate = allAvailableDates.first?.simpleDate {
+            eventsToFilter = eventsToFilter.filter { $0.simpleDate == fallbackDate }
+        }
+        
+        return eventsToFilter.sorted { (event1, event2) -> Bool in
+            return event1.event_name.localizedCompare(event2.event_name) == .orderedAscending
+        }
     }
 
     var body: some View {
@@ -532,6 +892,7 @@ struct ExploreView: View {
                 }
             }
         }
+
         .sheet(isPresented: $showingCreateEvent) {
             CreateEventView { newEvent in
                 // Refresh user events when a new one is created
@@ -553,16 +914,7 @@ struct ExploreView: View {
             .environmentObject(userEventService)
             .environmentObject(userService)
         }
-        .sheet(isPresented: $showingFilters) {
-            EventFiltersView(
-                selectedDate: $selectedSimpleDate,
-                selectedBuyinRange: $viewModel.selectedBuyinRange,
-                selectedSeriesSet: $viewModel.selectedSeriesSet,
-                availableDates: allAvailableDates, // Use unfiltered dates!
-                availableSeries: viewModel.availableSeries,
-                currentSystemDate: currentSystemSimpleDate
-            )
-        }
+
         .sheet(isPresented: $showingEventDetail) {
             if let selectedEvent = selectedEvent {
                 EventDetailView(event: selectedEvent)
@@ -686,106 +1038,292 @@ struct ExploreView: View {
     
     @Namespace private var tabNamespace
     
-    // MARK: - Public Events View (Original Content)
+    // MARK: - Public Events View (Series-based)
     private var publicEventsView: some View {
-            VStack(spacing: 0) {
-                // --- Header: Filter Button & Date Display & Search Icon ---
-                HStack(spacing: 12) {
-                    // Filter Button
-                    Button(action: {
-                        showingFilters = true
-                    }) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 20, weight: .medium, design: .default))
-                            .foregroundColor(.white)
+        VStack(spacing: 0) {
+            // --- Header: Back Button & Centered Date Navigation & Buy-in Filter ---
+            HStack {
+                // Leading Section - Back Button or Filter
+                HStack {
+                    if !showingSeriesView {
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                showingSeriesView = true
+                                selectedSeriesName = nil
+                            }
+                        }) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 20, weight: .medium, design: .default))
+                                .foregroundColor(.white)
+                        }
+                    } else {
+                        // Buy-in Filter (Simple)
+                        Menu {
+                            ForEach(BuyinRange.allCases) { range in
+                                Button(action: {
+                                    viewModel.selectedBuyinRange = range
+                                }) {
+                                    HStack {
+                                        Text(range.rawValue)
+                                        if viewModel.selectedBuyinRange == range {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            ZStack {
+                                Image(systemName: "line.3.horizontal.decrease")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(.white)
+                                
+                                if viewModel.selectedBuyinRange != .all {
+                                    Circle()
+                                        .fill(Color(red: 64/255, green: 156/255, blue: 255/255))
+                                        .frame(width: 8, height: 8)
+                                        .offset(x: 10, y: -8)
+                                }
+                            }
+                        }
                     }
+                }
+                .frame(width: 60, alignment: .leading)
+                
+                Spacer()
+                
+                // --- Centered Date Navigation ---
+                HStack(spacing: 16) {
+                    // Previous Date Button
+                    Button(action: {
+                        navigateToDate(direction: -1)
+                    }) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(canNavigateToDate(direction: -1) ? 0.1 : 0.05))
+                                .frame(width: 32, height: 32)
+                            
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(canNavigateToDate(direction: -1) ? .white : .white.opacity(0.3))
+                        }
+                    }
+                    .disabled(!canNavigateToDate(direction: -1))
                     
-                    // --- Date Display ---
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Events On")
-                            .font(.system(size: 16, weight: .medium, design: .default))
-                            .foregroundColor(.white.opacity(0.7))
+                    // Date Display
+                    VStack(alignment: .center, spacing: 2) {
+                        if showingSeriesView {
+                            Text("Events On")
+                                .font(.system(size: 13, weight: .medium, design: .default))
+                                .foregroundColor(.white.opacity(0.7))
+                        }
                         Text(selectedDateDisplayString)
-                           .font(.system(size: 22, weight: .bold, design: .default))
+                           .font(.system(size: 16, weight: .bold, design: .default))
                             .foregroundColor(.white)
                            .lineLimit(1)
                     }
+                    .frame(minWidth: 120)
                     
-                    Spacer()
-                    
-                    // Search Icon
+                    // Next Date Button
                     Button(action: {
-                        // TODO: Implement search action
+                        navigateToDate(direction: 1)
                     }) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 20, weight: .medium, design: .default))
-                            .foregroundColor(.white)
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(canNavigateToDate(direction: 1) ? 0.1 : 0.05))
+                                .frame(width: 32, height: 32)
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(canNavigateToDate(direction: 1) ? .white : .white.opacity(0.3))
+                        }
+                    }
+                    .disabled(!canNavigateToDate(direction: 1))
+                }
+                
+                Spacer()
+                
+                // Trailing Section - Filter or Spacer
+                HStack {
+                    if !showingSeriesView {
+                        // Buy-in Filter (Simple)
+                        Menu {
+                            ForEach(BuyinRange.allCases) { range in
+                                Button(action: {
+                                    viewModel.selectedBuyinRange = range
+                                }) {
+                                    HStack {
+                                        Text(range.rawValue)
+                                        if viewModel.selectedBuyinRange == range {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            ZStack {
+                                Image(systemName: "line.3.horizontal.decrease")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(.white)
+                                
+                                if viewModel.selectedBuyinRange != .all {
+                                    Circle()
+                                        .fill(Color(red: 64/255, green: 156/255, blue: 255/255))
+                                        .frame(width: 8, height: 8)
+                                        .offset(x: 10, y: -8)
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(width: 60, alignment: .trailing)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 0)
+            .padding(.bottom, 16)
+            // --- End Header ---
+
+            if viewModel.isLoading {
+                Spacer()
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                Text("Loading Events...")
+                    .foregroundColor(.gray)
+                    .padding(.top, 8)
+                Spacer()
+            } else if let errorMessage = viewModel.errorMessage {
+                Spacer()
+                VStack(spacing: 10) {
+                     Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(.yellow)
+                    Text("Error")
+                        .font(.title2.weight(.bold))
+                        .foregroundColor(.white)
+                    Text(errorMessage)
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+                Spacer()
+            } else if showingSeriesView {
+                // Show series cards
+                seriesListView
+            } else {
+                // Show events within selected series
+                eventsWithinSeriesView
+            }
+        }
+    }
+    
+    // MARK: - Series List View
+    private var seriesListView: some View {
+        ScrollView {
+            if groupedEventsBySeries.isEmpty {
+                VStack {
+                    Spacer(minLength: 50)
+                    Image(systemName: identifiableUniqueSimpleDates.isEmpty ? "calendar.badge.plus" : "calendar.badge.exclamationmark")
+                            .font(.system(size: 50))
+                            .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                        .padding(.bottom, 10)
+                    Text(identifiableUniqueSimpleDates.isEmpty ? "No Events Available" : "No Events for Selected Date")
+                            .font(.system(size: 18, weight: .medium, design: .default))
+                            .foregroundColor(.gray)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(sortedSeriesNames, id: \.self) { seriesName in
+                        if let events = groupedEventsBySeries[seriesName] {
+                            SeriesCardView(
+                                seriesName: seriesName,
+                                eventCount: events.count,
+                                onSelect: {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                        selectedSeriesName = seriesName
+                                        showingSeriesView = false
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 0)
-                .padding(.bottom, 16)
-                // --- End Header ---
-
-                if viewModel.isLoading {
-                    Spacer()
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    Text("Loading Events...")
+                .padding(.bottom, 100)
+            }
+        }
+        .refreshable {
+            viewModel.refreshEvents()
+        }
+    }
+    
+    // MARK: - Events Within Series View
+    private var eventsWithinSeriesView: some View {
+        ScrollView {
+            if eventsForSelectedSeries.isEmpty {
+                VStack {
+                    Spacer(minLength: 50)
+                    Image(systemName: "calendar.badge.exclamationmark")
+                        .font(.system(size: 50))
+                        .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                        .padding(.bottom, 10)
+                    Text("No Events Found")
+                        .font(.system(size: 18, weight: .medium, design: .default))
                         .foregroundColor(.gray)
-                        .padding(.top, 8)
+                    Text("Try adjusting your filters")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray.opacity(0.8))
                     Spacer()
-                } else if let errorMessage = viewModel.errorMessage {
-                    Spacer()
-                    VStack(spacing: 10) {
-                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 40))
-                            .foregroundColor(.yellow)
-                        Text("Error")
-                            .font(.title2.weight(.bold))
-                            .foregroundColor(.white)
-                        Text(errorMessage)
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    }
-                    Spacer()
-                } else if filteredEvents.isEmpty {
-                    VStack {
-                        Spacer(minLength: 50)
-                        Image(systemName: identifiableUniqueSimpleDates.isEmpty ? "calendar.badge.plus" : "calendar.badge.exclamationmark")
-                                .font(.system(size: 50))
-                                .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
-                            .padding(.bottom, 10)
-                        Text(identifiableUniqueSimpleDates.isEmpty ? "No Events Available" : "No Events for Selected Date")
-                                .font(.system(size: 18, weight: .medium, design: .default))
-                                .foregroundColor(.gray)
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        VStack(spacing: 14) { // Reduced spacing between cards
-                            ForEach(filteredEvents) { event in 
-                                EventCardView(event: event, onSelect: {
-                                    if let onEventSelected = onEventSelected {
-                                        onEventSelected(event) // Call the callback if provided
-                                    } else {
-                                        // Show detail view
-                                        selectedEvent = event
-                                        showingEventDetail = true
-                                    }
-                                })
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(spacing: 14) {
+                    ForEach(eventsForSelectedSeries) { event in 
+                        EventCardView(event: event, onSelect: {
+                            if let onEventSelected = onEventSelected {
+                                onEventSelected(event) // Call the callback if provided
+                            } else {
+                                // Show detail view
+                                selectedEvent = event
+                                showingEventDetail = true
                             }
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 100)
+                        })
                     }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 100)
+            }
+        }
+        .refreshable {
+            viewModel.refreshEvents()
+        }
+    }
+    
+    // MARK: - Date Navigation Helpers
+    private func canNavigateToDate(direction: Int) -> Bool {
+        guard let currentDate = selectedSimpleDate else { return false }
+        
+        if let currentIndex = allAvailableDates.firstIndex(where: { $0.simpleDate == currentDate }) {
+            let newIndex = currentIndex + direction
+            return newIndex >= 0 && newIndex < allAvailableDates.count
+        }
+        return false
+    }
+    
+    private func navigateToDate(direction: Int) {
+        guard let currentDate = selectedSimpleDate else { return }
+        
+        if let currentIndex = allAvailableDates.firstIndex(where: { $0.simpleDate == currentDate }) {
+            let newIndex = currentIndex + direction
+            if newIndex >= 0 && newIndex < allAvailableDates.count {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    selectedSimpleDate = allAvailableDates[newIndex].simpleDate
                 }
             }
         }
+    }
     
     // MARK: - My Events View (User Events)
     private var myEventsView: some View {

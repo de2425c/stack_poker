@@ -25,17 +25,43 @@ struct GroupsView: View {
                 AppBackgroundView()
                     .ignoresSafeArea()
                 
-                // MODIFIED: Header is now outside the ScrollView for a fixed position
-                VStack(spacing: 0) { // Outer VStack to hold fixed header and ScrollView
-                    AppHeaderView(
-                        title: "Groups",
-                        showNotificationBadge: !groupService.pendingInvites.isEmpty,
-                        notificationAction: { showingInvites = true },
-                        actionButtonAction: { showingCreateGroup = true }
-                    )
-                    .padding(.horizontal, 16) // Standardized horizontal padding
-                    .padding(.top, 0) // Adjusted top padding to 0 to move header up by 15 points
-                    .padding(.bottom, 8) // Standard bottom padding
+                // Header with proper safe area handling
+                VStack(spacing: 0) {
+                    // Header
+                    HStack {
+                        Text("Groups")
+                            .font(.system(size: 22, weight: .bold, design: .default))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        // Invites button with notification badge
+                        Button(action: { showingInvites = true }) {
+                            ZStack {
+                                Image(systemName: "envelope")
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundColor(.white)
+                                
+                                if !groupService.pendingInvites.isEmpty {
+                                    Circle()
+                                        .fill(Color(red: 64/255, green: 156/255, blue: 255/255))
+                                        .frame(width: 8, height: 8)
+                                        .offset(x: 8, y: -8)
+                                }
+                            }
+                        }
+                        .padding(.trailing, 12)
+                        
+                        // Create group button
+                        Button(action: { showingCreateGroup = true }) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
 
                     ScrollView(showsIndicators: false) {
                         LazyVStack(spacing: 0) {
@@ -490,27 +516,7 @@ struct CreateGroupView: View {
                 
                 ScrollView {
                     VStack(spacing: 28) {
-                        // Header with icon
-                        VStack(spacing: 8) {
-                            Image(systemName: "person.3.sequence.fill")
-                                .font(.system(size: 40, design: .default))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                .padding(.bottom, 8)
-                            
-                            Text("Create New Group")
-                                .font(.system(size: 28, weight: .bold, design: .default))
-                                .foregroundColor(.white)
-                            
-                            Text("Connect with players who share your interests")
-                                .font(.system(size: 16, design: .default))
-                                .foregroundColor(.gray)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 24)
-                        }
-                        .padding(.top, 20)
-                        .opacity(nameFieldOpacity)
-                        
-                        // Group image selection
+                        // Group image selection - centered and first
                         VStack(spacing: 16) {
                             ZStack {
                                 Circle()
@@ -551,6 +557,8 @@ struct CreateGroupView: View {
                                 .font(.system(size: 14, design: .default))
                                 .foregroundColor(.gray)
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
                         .padding(.bottom, 16)
                         .opacity(imageOpacity)
                         
@@ -650,11 +658,11 @@ struct CreateGroupView: View {
             .onAppear {
                 // Animate elements sequentially
                 withAnimation(.easeOut(duration: 0.4).delay(0.1)) {
-                    nameFieldOpacity = 1.0
+                    imageOpacity = 1.0
                 }
                 
                 withAnimation(.easeOut(duration: 0.4).delay(0.2)) {
-                    imageOpacity = 1.0
+                    nameFieldOpacity = 1.0
                 }
                 
                 withAnimation(.easeOut(duration: 0.4).delay(0.3)) {
