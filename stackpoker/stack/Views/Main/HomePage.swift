@@ -15,13 +15,13 @@ struct HomePage: View {
     let userId: String
     @State private var showingMenu = false
     @State private var showingReplay = false
-    @State private var replayHand: ParsedHandHistory?
+    // REMOVED: @State private var replayHand: ParsedHandHistory?
     @State private var showingSessionForm = false
     @State private var showingLiveSession = false
     @State private var showingOpenHomeGameFlow = false
     @State private var liveSessionBarExpanded = false
     @StateObject private var sessionStore: SessionStore
-    @StateObject private var handStore: HandStore
+    // REMOVED: @StateObject private var handStore: HandStore
     @StateObject private var postService = PostService()
     @StateObject private var tabBarVisibility = TabBarVisibilityManager()
     @EnvironmentObject private var userService: UserService
@@ -32,12 +32,18 @@ struct HomePage: View {
     @State private var gameForDetailView: HomeGame?
     @State private var showGameDetailView = false
     @State private var activeHostedStandaloneGame: HomeGame?
-    @State private var showNewHandEntryViewSheet = false
+    
+    // Game invites
+    @State private var pendingInvites: [HomeGame.GameInvite] = []
+    @State private var inviteListener: ListenerRegistration?
+    @State private var showingInviteAcceptSheet = false
+    @State private var selectedInvite: HomeGame.GameInvite?
+    // REMOVED: @State private var showNewHandEntryViewSheet = false
     
     init(userId: String) {
         self.userId = userId
         _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId))
-        _handStore = StateObject(wrappedValue: HandStore(userId: userId))
+        // REMOVED: _handStore = StateObject(wrappedValue: HandStore(userId: userId))
     }
     
     enum Tab {
@@ -72,6 +78,18 @@ struct HomePage: View {
                             self.showGameDetailView = true
                         })
                         .padding(.top, (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0)
+                    }
+                    
+                    // Game Invites Bar
+                    if !pendingInvites.isEmpty {
+                        GameInvitesBar(
+                            invites: pendingInvites,
+                            onTap: { invite in
+                                selectedInvite = invite
+                                showingInviteAcceptSheet = true
+                            }
+                        )
+                        .padding(.top, activeHostedStandaloneGame == nil ? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0 : 0)
                     }
                     
                     // Live session bar (if active)
@@ -135,7 +153,7 @@ struct HomePage: View {
                         
                         GroupsView()
                             .environmentObject(userService)
-                            .environmentObject(handStore)
+                            // REMOVED: .environmentObject(handStore)
                             .environmentObject(sessionStore)
                             .environmentObject(postService)
                             .environmentObject(tabBarVisibility)
@@ -143,7 +161,7 @@ struct HomePage: View {
                         
                         ProfileView(userId: userId)
                             .environmentObject(userService)
-                            .environmentObject(handStore)
+                            // REMOVED: .environmentObject(handStore)
                             .environmentObject(sessionStore)
                             .environmentObject(postService)
                             .environmentObject(tabBarVisibility)
@@ -173,8 +191,8 @@ struct HomePage: View {
                         userId: userId,
                         showSessionForm: $showingSessionForm,
                         showingLiveSession: $showingLiveSession,
-                        showingOpenHomeGameFlow: $showingOpenHomeGameFlow,
-                        showNewHandEntryViewSheet: $showNewHandEntryViewSheet
+                        showingOpenHomeGameFlow: $showingOpenHomeGameFlow
+                        // REMOVED: showNewHandEntryViewSheet: $showNewHandEntryViewSheet
                     )
                     .zIndex(1)
                 }
@@ -209,17 +227,23 @@ struct HomePage: View {
             }
             .ignoresSafeArea(edges: .bottom)
             .ignoresSafeArea(.keyboard)
+            // REMOVED: Hand replay functionality
+            /*
             .fullScreenCover(isPresented: $showingReplay) {
                 if let hand = replayHand {
                     HandReplayView(hand: hand, userId: userId)
                 }
             }
+            */
             .sheet(isPresented: $showingSessionForm) {
                 SessionFormView(userId: userId)
             }
+            // REMOVED: Hand entry sheet
+            /*
             .sheet(isPresented: $showNewHandEntryViewSheet) {
                 NewHandEntryView()
             }
+            */
             .sheet(isPresented: $showingOpenHomeGameFlow, onDismiss: {
                 // If showing game detail, the sheet dismissal should let the navigation link activate
                 if self.gameForDetailView != nil {
@@ -247,6 +271,20 @@ struct HomePage: View {
             .fullScreenCover(isPresented: $showingLiveSession) {
                 EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
             }
+            .sheet(isPresented: $showingInviteAcceptSheet) {
+                if let invite = selectedInvite {
+                    InviteAcceptanceSheet(
+                        invite: invite,
+                        onComplete: { accepted, buyInAmount in
+                            showingInviteAcceptSheet = false
+                            // Don't navigate to game detail - the home game bar will show automatically
+                            // when the user becomes a player in the game
+                            selectedInvite = nil
+                        }
+                    )
+                    .environmentObject(sessionStore)
+                }
+            }
             .onAppear {
                 pageLevelHomeGameService.startListeningForActiveStandaloneGame(userId: self.userId) { game in
                     DispatchQueue.main.async {
@@ -255,6 +293,13 @@ struct HomePage: View {
                 }
 
                 loadActiveHostedStandaloneGame()
+                
+                // Start listening for game invites
+                inviteListener = pageLevelHomeGameService.listenForPendingInvites(userId: userId) { invites in
+                    DispatchQueue.main.async {
+                        self.pendingInvites = invites
+                    }
+                }
                 
                 // Add observer for standalone game bar refresh
                 NotificationCenter.default.addObserver(
@@ -269,6 +314,8 @@ struct HomePage: View {
                 // Remove observer when view disappears
                 NotificationCenter.default.removeObserver(self)
                 pageLevelHomeGameService.stopListeningForActiveStandaloneGame()
+                inviteListener?.remove()
+                inviteListener = nil
             }
             .environmentObject(tabBarVisibility)
         }
@@ -877,7 +924,7 @@ struct AddMenuOverlay: View {
     @Binding var showSessionForm: Bool
     @Binding var showingLiveSession: Bool
     @Binding var showingOpenHomeGameFlow: Bool
-    @Binding var showNewHandEntryViewSheet: Bool
+    // REMOVED: @Binding var showNewHandEntryViewSheet: Bool
 
     var body: some View {
         ZStack {
@@ -950,7 +997,8 @@ struct AddMenuOverlay: View {
                                 }
                             )
                             
-                            // Add Hand button
+                            // REMOVED: Add Hand button
+                            /*
                             MenuRow(
                                 icon: "doc.text",
                                 title: "Add Hand",
@@ -959,6 +1007,7 @@ struct AddMenuOverlay: View {
                                     showingMenu = false
                                 }
                             )
+                            */
                             
                             // Bottom padding
                             Color.clear.frame(height: 16)
@@ -976,9 +1025,12 @@ struct AddMenuOverlay: View {
                 .transition(.opacity)
             }
         }
+        // REMOVED: Hand entry sheet
+        /*
         .sheet(isPresented: $showNewHandEntryViewSheet) {
             NewHandEntryView()
         }
+        */
     }
     
     private func closeMenu() {
@@ -1152,5 +1204,324 @@ struct HandInputView: View {
     var body: some View {
         // Implementation of HandInputView
         Text("Hand Input View")
+    }
+}
+
+// MARK: - Game Invites Components
+
+struct GameInvitesBar: View {
+    let invites: [HomeGame.GameInvite]
+    let onTap: (HomeGame.GameInvite) -> Void
+    
+    private var firstInvite: HomeGame.GameInvite? {
+        invites.first
+    }
+    
+    var body: some View {
+        if let invite = firstInvite {
+            Button(action: {
+                onTap(invite)
+            }) {
+                HStack(spacing: 16) {
+                    // Invite icon
+                    Circle()
+                        .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Image(systemName: "person.badge.plus")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.black)
+                        )
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Game Invite")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.white)
+                            
+                            if invites.count > 1 {
+                                Text("+\(invites.count - 1) more")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.2))
+                                    )
+                            }
+                        }
+                        
+                        Text("\(invite.hostName) invited you to \"\(invite.gameTitle)\"")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.8))
+                            .lineLimit(1)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 0)
+                        .fill(Color(UIColor(red: 28/255, green: 30/255, blue: 34/255, alpha: 0.95)))
+                        .overlay(
+                            Rectangle()
+                                .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                .frame(height: 1),
+                            alignment: .bottom
+                        )
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+}
+
+struct InviteAcceptanceSheet: View {
+    @Environment(\.presentationMode) var presentationMode
+    @EnvironmentObject var sessionStore: SessionStore
+    @StateObject private var homeGameService = HomeGameService()
+    
+    let invite: HomeGame.GameInvite
+    let onComplete: (Bool, Double?) -> Void
+    
+    @State private var buyInAmount: String = ""
+    @State private var isProcessing = false
+    @State private var error: String?
+    @State private var showError = false
+    
+    var body: some View {
+        ZStack {
+            AppBackgroundView()
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Custom navigation header
+                HStack {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .disabled(isProcessing)
+                    .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Text("Game Invitation")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    // Invisible spacer for balance
+                    Rectangle()
+                        .fill(Color.clear)
+                        .frame(width: 44, height: 44)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+                
+                VStack(spacing: 24) {
+                    // Header
+                    VStack(spacing: 16) {
+                        Circle()
+                            .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
+                            .frame(width: 80, height: 80)
+                            .overlay(
+                                Image(systemName: "person.badge.plus")
+                                    .font(.system(size: 32, weight: .medium))
+                                    .foregroundColor(.black)
+                            )
+                        
+                        VStack(spacing: 8) {
+                            Text("You've been invited to join")
+                                .font(.system(size: 16))
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    }
+                    
+                    // Game details card
+                    VStack(spacing: 16) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Game")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Text(invite.gameTitle)
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                            
+                            Spacer()
+                            
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text("Host")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Text(invite.hostName)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        
+                        if let message = invite.message, !message.isEmpty {
+                            Divider()
+                                .background(Color.white.opacity(0.2))
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Message")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Text(message)
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .padding(20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                    )
+                    
+                    // Buy-in amount
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Buy-in Amount")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                        
+                        HStack {
+                            Text("$")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.white)
+                            
+                            TextField("0", text: $buyInAmount)
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.white)
+                                .keyboardType(.numberPad)
+                        }
+                        .padding(16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                )
+                        )
+                    }
+                    
+                    Spacer()
+                    
+                    // Action buttons
+                    VStack(spacing: 12) {
+                        Button(action: acceptInvite) {
+                            HStack {
+                                if isProcessing {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 16, weight: .semibold))
+                                }
+                                
+                                Text(isProcessing ? "Joining..." : "Accept & Join Game")
+                                    .font(.system(size: 18, weight: .bold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 56)
+                            .foregroundColor(.black)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                    .opacity(isValidBuyIn && !isProcessing ? 1.0 : 0.5)
+                            )
+                        }
+                        .disabled(!isValidBuyIn || isProcessing)
+                        
+                        Button(action: declineInvite) {
+                            Text("Decline")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                        }
+                        .disabled(isProcessing)
+                    }
+                    .padding(.bottom, 20)
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+        .alert(isPresented: $showError) {
+            Alert(
+                title: Text("Error"),
+                message: Text(error ?? "An unknown error occurred"),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+    
+    private var isValidBuyIn: Bool {
+        guard let amount = Double(buyInAmount), amount > 0 else { return false }
+        return true
+    }
+    
+    private func acceptInvite() {
+        guard let amount = Double(buyInAmount), amount > 0 else { return }
+        
+        isProcessing = true
+        
+        Task {
+            do {
+                // Accept the invite
+                try await homeGameService.acceptGameInvite(inviteId: invite.id)
+                
+                // Request buy-in for the game
+                try await homeGameService.requestBuyIn(gameId: invite.gameId, amount: amount)
+                
+                await MainActor.run {
+                    isProcessing = false
+                    onComplete(true, amount)
+                }
+            } catch {
+                await MainActor.run {
+                    isProcessing = false
+                    self.error = error.localizedDescription
+                    showError = true
+                }
+            }
+        }
+    }
+    
+    private func declineInvite() {
+        isProcessing = true
+        
+        Task {
+            do {
+                try await homeGameService.declineGameInvite(inviteId: invite.id)
+                
+                await MainActor.run {
+                    isProcessing = false
+                    onComplete(false, nil)
+                }
+            } catch {
+                await MainActor.run {
+                    isProcessing = false
+                    self.error = error.localizedDescription
+                    showError = true
+                }
+            }
+        }
     }
 } 

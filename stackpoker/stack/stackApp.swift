@@ -309,6 +309,8 @@ struct stackApp: App {
                       .environmentObject(postService)
                 }
             }
+            .autocorrectionDisabled(true)     
+            .textInputAutocapitalization(.never)
             .onChange(of: authViewModel.appFlow) { newFlow in
                 // Hide the initial Lottie once the app has determined its flow
                 if newFlow != .loading {

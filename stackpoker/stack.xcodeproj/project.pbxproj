@@ -270,6 +270,7 @@
 				66B354F32E00F6F6007F8FA0 /* XCRemoteSwiftPackageReference "reorderable" */,
 				66B354F62E00F811007F8FA0 /* XCRemoteSwiftPackageReference "DragAndDropKit" */,
 				66B354F92E00F980007F8FA0 /* XCRemoteSwiftPackageReference "swiftui-reorderable-foreach" */,
+				66BE65F52E04707600F5CFAC /* XCRemoteSwiftPackageReference "or-tools" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 66EA95682DBC1E0B0076E0AD /* Products */;
@@ -712,6 +713,14 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 1.0.0;
+			};
+		};
+		66BE65F52E04707600F5CFAC /* XCRemoteSwiftPackageReference "or-tools" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/or-tools.git";
+			requirement = {
+				branch = stable;
+				kind = branch;
 			};
 		};
 		66EA95A82DBC24810076E0AD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {

@@ -1198,7 +1198,7 @@ struct HandSummaryRow: View {
     @State private var showingDeleteAlert = false
     @EnvironmentObject var postService: PostService
     @EnvironmentObject var userService: UserService
-    @EnvironmentObject var handStore: HandStore
+    // REMOVED: @EnvironmentObject var handStore: HandStore
     
     private func formatMoney(_ amount: Double) -> String {
         if amount >= 0 {
@@ -1339,7 +1339,8 @@ struct HandSummaryRow: View {
                 title: Text("Delete Hand"),
                 message: Text("Are you sure you want to delete this hand? This action cannot be undone."),
                 primaryButton: .destructive(Text("Delete")) {
-                    // Delete the hand
+                    // REMOVED: Hand deletion functionality for launch
+                    /*
                     Task {
                         do {
                             try await handStore.deleteHand(id: id)
@@ -1347,6 +1348,7 @@ struct HandSummaryRow: View {
 
                         }
                     }
+                    */
                 },
                 secondaryButton: .cancel()
             )

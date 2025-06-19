@@ -14,7 +14,6 @@ struct ManagePlayerSheet: View {
     let gameId: String
     let onComplete: () -> Void
     
-    @State private var currentStack: String = ""
     @State private var totalBuyIn: String = ""
     @State private var isProcessing = false
     @State private var error: String?
@@ -54,40 +53,14 @@ struct ManagePlayerSheet: View {
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white.opacity(0.8))
                             
-                            HStack(spacing: 20) {
-                                VStack(spacing: 8) {
-                                    Text("$\(Int(player.currentStack))")
-                                        .font(.system(size: 20, weight: .bold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("Current Stack")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.gray)
-                                }
-                                .frame(maxWidth: .infinity)
+                            VStack(spacing: 8) {
+                                Text("$\(Int(player.totalBuyIn))")
+                                    .font(.system(size: 28, weight: .bold))
+                                    .foregroundColor(.white)
                                 
-                                VStack(spacing: 8) {
-                                    Text("$\(Int(player.totalBuyIn))")
-                                        .font(.system(size: 20, weight: .bold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("Total Buy-In")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.gray)
-                                }
-                                .frame(maxWidth: .infinity)
-                                
-                                VStack(spacing: 8) {
-                                    let profit = player.currentStack - player.totalBuyIn
-                                    Text("\(profit >= 0 ? "+" : "")\(Int(profit))")
-                                        .font(.system(size: 20, weight: .bold))
-                                        .foregroundColor(profit >= 0 ? .green : .red)
-                                    
-                                    Text("Profit/Loss")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.gray)
-                                }
-                                .frame(maxWidth: .infinity)
+                                Text("Total Buy-In")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
                             }
                         }
                         .padding(20)
@@ -99,25 +72,9 @@ struct ManagePlayerSheet: View {
                         
                         // Edit fields
                         VStack(spacing: 16) {
-                            Text("EDIT VALUES")
+                            Text("EDIT BUY-IN")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white.opacity(0.8))
-                            
-                            // Current Stack input
-                            GlassyInputField(
-                                icon: "creditcard.fill",
-                                title: "CURRENT STACK",
-                                labelColor: .white.opacity(0.8)
-                            ) {
-                                TextField("", text: $currentStack)
-                                    .placeholders(when: currentStack.isEmpty) {
-                                        Text("$\(Int(player.currentStack))").foregroundColor(.gray.opacity(0.7))
-                                    }
-                                    .font(.system(size: 17))
-                                    .keyboardType(.decimalPad)
-                                    .foregroundColor(.white)
-                                    .padding(.vertical, 10)
-                            }
                             
                             // Total Buy-In input
                             GlassyInputField(
@@ -146,7 +103,7 @@ struct ManagePlayerSheet: View {
                                         .frame(width: 20, height: 20)
                                         .padding(.horizontal, 10)
                                 } else {
-                                    Text("Update Player")
+                                    Text("Update Buy-In")
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundColor(.white)
                                         .padding(.horizontal, 20)
@@ -190,7 +147,6 @@ struct ManagePlayerSheet: View {
             }
             .onAppear {
                 // Initialize with current values
-                currentStack = "\(Int(player.currentStack))"
                 totalBuyIn = "\(Int(player.totalBuyIn))"
             }
             .onTapGesture {
@@ -200,16 +156,14 @@ struct ManagePlayerSheet: View {
     }
     
     private func hasChanges() -> Bool {
-        let newCurrentStack = Double(currentStack.replacingOccurrences(of: "$", with: "")) ?? player.currentStack
         let newTotalBuyIn = Double(totalBuyIn.replacingOccurrences(of: "$", with: "")) ?? player.totalBuyIn
         
-        return newCurrentStack != player.currentStack || newTotalBuyIn != player.totalBuyIn
+        return newTotalBuyIn != player.totalBuyIn
     }
     
     private func updatePlayer() {
         guard hasChanges() else { return }
         
-        let newCurrentStack = Double(currentStack.replacingOccurrences(of: "$", with: "")) ?? player.currentStack
         let newTotalBuyIn = Double(totalBuyIn.replacingOccurrences(of: "$", with: "")) ?? player.totalBuyIn
         
         isProcessing = true
@@ -219,7 +173,7 @@ struct ManagePlayerSheet: View {
                 try await homeGameService.updatePlayerValues(
                     gameId: gameId,
                     playerId: player.id,
-                    newCurrentStack: newCurrentStack,
+                    newCurrentStack: player.currentStack,
                     newTotalBuyIn: newTotalBuyIn
                 )
                 

@@ -34,17 +34,17 @@ struct SessionDetailView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.presentationMode) var presentationMode
     
-    // HandStore for fetching hands related to this session
-    @StateObject private var handStore: HandStore
+    // REMOVED: HandStore for fetching hands related to this session
+    // @StateObject private var handStore: HandStore
     
     // StakeService for fetching stakes related to this session
     @StateObject private var stakeService = StakeService()
     @EnvironmentObject var userService: UserService // Add UserService for stake user lookups
     
     // State for fetched hands, notes, and stakes
-    @State private var sessionHands: [SavedHand] = []
+    // REMOVED: @State private var sessionHands: [SavedHand] = []
     @State private var sessionStakes: [Stake] = []
-    @State private var isLoadingHands: Bool = false
+    // REMOVED: @State private var isLoadingHands: Bool = false
     @State private var isLoadingStakes: Bool = false
 
     // State for presenting image picker and composition view
@@ -53,8 +53,8 @@ struct SessionDetailView: View {
     @State private var showImageComposer = false
     
     // State for navigating to HandReplayView
-    @State private var selectedHandForReplay: ParsedHandHistory? = nil
-    @State private var showingHandReplaySheet: Bool = false // Use a sheet for replay for now
+    // REMOVED: @State private var selectedHandForReplay: ParsedHandHistory? = nil
+    // REMOVED: @State private var showingHandReplaySheet: Bool = false // Use a sheet for replay for now
     
     // State for presenting EditSessionView with NavigationView instead of sheet
     @State private var showingEditView = false // Changed from showingEditSheet
@@ -97,9 +97,9 @@ struct SessionDetailView: View {
     
     init(session: Session) {
         self.session = session
-        // Initialize HandStore with the current user's ID.
+        // REMOVED: Initialize HandStore with the current user's ID.
         // Ensure proper fallback or error handling if UID is nil in a real app.
-        _handStore = StateObject(wrappedValue: HandStore(userId: Auth.auth().currentUser?.uid ?? ""))
+        // _handStore = StateObject(wrappedValue: HandStore(userId: Auth.auth().currentUser?.uid ?? ""))
     }
     
     private func formatDuration(hours: Double) -> String {
@@ -131,7 +131,7 @@ struct SessionDetailView: View {
                         // Staking Details Section
                         stakingSectionView()
                         
-                        handsSectionView()
+                        // REMOVED: handsSectionView()
                         notesSectionView()
                         
                         Spacer(minLength: 30)
@@ -164,6 +164,8 @@ struct SessionDetailView: View {
                         }
                 }
             }
+            // REMOVED: Hand replay sheet
+            /*
             .sheet(isPresented: $showingHandReplaySheet) { 
                 if let handToReplay = selectedHandForReplay {
                     HandReplayView(hand: handToReplay, userId: session.userId) 
@@ -171,6 +173,7 @@ struct SessionDetailView: View {
                     Text("No hand selected for replay.") 
                 }
             }
+            */
             .fullScreenCover(isPresented: $showingEditView) {
                 NavigationView {
                     EditSessionSheetView(
@@ -318,6 +321,8 @@ struct SessionDetailView: View {
         .padding(.bottom, 25)
     }
 
+    // REMOVED: Hands Section functionality
+    /*
     // Extracted Hands Section
     @ViewBuilder
     private func handsSectionView() -> some View {
@@ -352,6 +357,7 @@ struct SessionDetailView: View {
                 .padding()
         }
     }
+    */
 
     // Extracted Notes Section
     @ViewBuilder
@@ -376,6 +382,8 @@ struct SessionDetailView: View {
     }
 
     private func fetchSessionDetails() {
+        // REMOVED: Hands fetching functionality
+        /*
         // -----------------------------
         // 1. HANDS
         // -----------------------------
@@ -390,6 +398,7 @@ struct SessionDetailView: View {
             self.isLoadingHands = false
             self.sessionHands = []
         }
+        */
 
         // -----------------------------
         // 2. STAKES

@@ -6,7 +6,7 @@ struct ChallengeDetailView: View {
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var userService: UserService
     @EnvironmentObject private var postService: PostService
-    @EnvironmentObject private var handStore: HandStore
+    // REMOVED: @EnvironmentObject private var handStore: HandStore
     
     @Binding var challenge: Challenge
     let userId: String
@@ -257,7 +257,7 @@ struct ChallengeDetailView: View {
             )
             .environmentObject(postService)
             .environmentObject(userService)
-            .environmentObject(handStore)
+            // REMOVED: .environmentObject(handStore)
             .environmentObject(sessionStore)
         }
     }

@@ -2,9 +2,9 @@
 
 import SwiftUI
 import FirebaseAuth
-import PhotosUI // Keep if used elsewhere in the file
-import Combine // Keep if used elsewhere in the file
-import Foundation // Keep if used elsewhere in the file
+import PhotosUI
+import Combine
+import Foundation
 import FirebaseFirestore
 
 struct SaveHomeGameSessionView: View {
@@ -22,6 +22,7 @@ struct SaveHomeGameSessionView: View {
     @State private var isSaving = false
     @State private var error: String?
     @State private var showErrorAlert = false
+    @State private var showSuccessAnimation = false
     
     var body: some View {
         ZStack {
@@ -31,222 +32,80 @@ struct SaveHomeGameSessionView: View {
             
             // Main content
             VStack(spacing: 0) {
-                // Custom navigation bar
+                // Modern navigation header
                 HStack {
                     Button(action: {
                         presentationMode.wrappedValue.dismiss()
                     }) {
-                        Text("Cancel")
-                            .foregroundColor(.white)
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
+                        HStack(spacing: 6) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 16, weight: .medium))
+                            Text("Cancel")
+                                .font(.system(size: 17))
+                        }
+                        .foregroundColor(.white)
                     }
                     
                     Spacer()
                     
-                    Text("Save Home Game")
-                        .font(.system(size: 18, weight: .bold))
+                    Text("Save Session")
+                        .font(.system(size: 20, weight: .bold))
                         .foregroundColor(.white)
                     
                     Spacer()
                     
                     Button(action: saveSession) {
-                        Text("Save")
-                            .foregroundColor(.black)
-                            .font(.system(size: 16, weight: .semibold))
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 16)
-                            .background(
-                                Capsule()
-                                    .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
-                            )
+                        if isSaving {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                .frame(width: 16, height: 16)
+                        } else {
+                            Text("Save")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(.black)
+                        }
                     }
-                    .disabled(sessionName.isEmpty || sessionStakes.isEmpty || isSaving)
-                    .opacity((sessionName.isEmpty || sessionStakes.isEmpty || isSaving) ? 0.6 : 1.0)
+                    .frame(width: 60, height: 36)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(isFormValid ? Color(red: 123/255, green: 255/255, blue: 99/255) : Color.gray.opacity(0.3))
+                    )
+                    .disabled(!isFormValid || isSaving)
+                    .animation(.easeInOut(duration: 0.2), value: isFormValid)
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
                 .padding(.top, 16)
-                .padding(.bottom, 12)
+                .padding(.bottom, 20)
                 
                 // Scroll content
-                ScrollView {
-                    // Add top spacing for navigation bar clearance
-                    Color.clear.frame(height: 60)
-                    
-                    VStack(spacing: 24) {
-                        // Session Details Card
-                        VStack(spacing: 20) {
-                            // Section header
-                            HStack {
-                                Text("SESSION DETAILS")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                Spacer()
-                            }
-                            .padding(.bottom, 4)
-                            
-                            // Details with dividers
-                            detailRow(label: "Profit/Loss", value: formatMoney(pnl), 
-                                      valueColor: pnl >= 0 ? Color(red: 123/255, green: 255/255, blue: 99/255) : .red)
-                            
-                            Divider().background(Color.gray.opacity(0.3))
-                            
-                            detailRow(label: "Buy-in", value: formatMoney(buyIn))
-                            
-                            Divider().background(Color.gray.opacity(0.3))
-                            
-                            detailRow(label: "Cash Out", value: formatMoney(cashOut))
-                            
-                            Divider().background(Color.gray.opacity(0.3))
-                            
-                            detailRow(label: "Duration", value: formatDuration(duration))
-                            
-                            Divider().background(Color.gray.opacity(0.3))
-                            
-                            detailRow(label: "Date", value: date.formatted(date: .abbreviated, time: .shortened))
-                        }
-                        .padding(20)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                            .fill(Color(UIColor(red: 30/255, green: 32/255, blue: 36/255, alpha: 1.0)))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            Color.white.opacity(0.1),
-                                            Color.clear,
-                                            Color.clear
-                                        ]),
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
-                        .padding(.horizontal, 16)
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(spacing: 32) {
+                        // Hero section with session summary
+                        heroSectionView
                         
-                        // Session Info Input Card
-                        VStack(spacing: 20) {
-                            // Section header
-                            HStack {
-                                Text("SESSION INFO")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                Spacer()
-                            }
-                            .padding(.bottom, 4)
-                            
-                            // Name input using GlassyInputField
-                            GlassyInputField(
-                                icon: "gamecontroller.fill",
-                                title: "SESSION NAME",
-                                labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
-                            ) {
-                                TextField("", text: $sessionName)
-                                    .placeholder(when: sessionName.isEmpty) {
-                                        Text("e.g., Friday Night Game").foregroundColor(.gray.opacity(0.7))
-                                    }
-                                    .font(.system(size: 17))
-                                    .padding(.vertical, 10)
-                                    .foregroundColor(.white)
-                            }
-                            
-                            // Stakes input using GlassyInputField
-                            GlassyInputField(
-                                icon: "dollarsign.circle.fill",
-                                title: "STAKES",
-                                labelColor: Color(red: 123/255, green: 255/255, blue: 99/255)
-                            ) {
-                                TextField("", text: $sessionStakes)
-                                    .placeholder(when: sessionStakes.isEmpty) {
-                                        Text("e.g., 1/2 NLH").foregroundColor(.gray.opacity(0.7))
-                                    }
-                                    .font(.system(size: 17))
-                                    .padding(.vertical, 10)
-                                    .foregroundColor(.white)
-                            }
-                        }
-                        .padding(20)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                            .fill(Color(UIColor(red: 30/255, green: 32/255, blue: 36/255, alpha: 1.0)))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            Color.white.opacity(0.1),
-                                            Color.clear,
-                                            Color.clear
-                                        ]),
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
-                        .padding(.horizontal, 16)
+                        // Session details card
+                        sessionDetailsCard
                         
-                        // Save button for larger screens
-                        Button(action: saveSession) {
-                            HStack {
-                                if isSaving {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .black))
-                                        .frame(width: 20, height: 20)
-                                        .padding(.horizontal, 10)
-                                } else {
-                                    Text("Save Session")
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundColor(.black)
-                                        .padding(.horizontal, 20)
-                                        .frame(maxWidth: .infinity)
-                                }
-                            }
-                            .frame(height: 54)
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill((sessionName.isEmpty || sessionStakes.isEmpty || isSaving) ? 
-                                          Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5) : 
-                                          Color(red: 123/255, green: 255/255, blue: 99/255))
-                            )
-                        }
-                        .disabled(sessionName.isEmpty || sessionStakes.isEmpty || isSaving)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 30)
+                        // Input form
+                        inputFormCard
+                        
+                        // Save button (mobile-friendly)
+                        saveButtonView
                     }
-                    .padding(.top, 16)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, 40)
                 }
+            }
+            
+            // Success animation overlay
+            if showSuccessAnimation {
+                successOverlay
             }
             
             // Loading overlay
             if isSaving {
-                Color.black.opacity(0.6)
-                    .edgesIgnoringSafeArea(.all)
-                
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
-                        .scaleEffect(1.5)
-                    
-                    Text("Saving Session...")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white)
-                }
-                .padding(24)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(UIColor(red: 30/255, green: 32/255, blue: 36/255, alpha: 0.95)))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
+                loadingOverlay
             }
         }
         .alert("Error Saving Session", isPresented: $showErrorAlert) {
@@ -254,31 +113,318 @@ struct SaveHomeGameSessionView: View {
         } message: {
             Text(error ?? "An unknown error occurred.")
         }
-        .statusBar(hidden: false)
-        // Add tap to dismiss keyboard
         .onTapGesture {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            hideKeyboard()
         }
-        // Fix keyboard movement issues
         .ignoresSafeArea(.keyboard)
     }
     
-    // Helper function to create consistent detail rows
-    private func detailRow(label: String, value: String, valueColor: Color = .white) -> some View {
-        HStack {
+    // MARK: - Computed Properties
+    
+    private var isFormValid: Bool {
+        !sessionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !sessionStakes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
+    // MARK: - View Components
+    
+    private var heroSectionView: some View {
+        VStack(spacing: 16) {
+            // Icon and title
+            VStack(spacing: 12) {
+                Image(systemName: "trophy.circle.fill")
+                    .font(.system(size: 48, weight: .medium))
+                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                    .shadow(color: Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.3), radius: 8, x: 0, y: 4)
+                
+                Text("Session Complete")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.white)
+                
+                Text("Save this session to your poker tracker")
+                    .font(.system(size: 16))
+                    .foregroundColor(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
+            }
+            
+            // Quick stats
+            HStack(spacing: 24) {
+                quickStatView(
+                    icon: pnl >= 0 ? "arrow.up.circle.fill" : "arrow.down.circle.fill",
+                    value: formatMoney(pnl),
+                    label: "P&L",
+                    color: pnl >= 0 ? Color(red: 123/255, green: 255/255, blue: 99/255) : .red
+                )
+                
+                quickStatView(
+                    icon: "clock.fill",
+                    value: formatDuration(duration),
+                    label: "Duration",
+                    color: .blue
+                )
+                
+                quickStatView(
+                    icon: "dollarsign.circle.fill",
+                    value: formatMoney(buyIn),
+                    label: "Buy-in",
+                    color: .orange
+                )
+            }
+        }
+        .padding(24)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.2),
+                                    Color.clear,
+                                    Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.1)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+        )
+        .shadow(color: Color.black.opacity(0.1), radius: 20, x: 0, y: 10)
+    }
+    
+    private func quickStatView(icon: String, value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundColor(color)
+            
+            Text(value)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white)
+            
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity)
+    }
+    
+    private var sessionDetailsCard: some View {
+        VStack(spacing: 20) {
+            // Header
+            HStack {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                
+                Text("SESSION BREAKDOWN")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                
+                Spacer()
+            }
+            
+            // Details grid
+            VStack(spacing: 16) {
+                detailRow(
+                    icon: "banknote.fill",
+                    label: "Buy-in",
+                    value: formatMoney(buyIn),
+                    color: .orange
+                )
+                
+                detailRow(
+                    icon: "arrow.up.right.circle.fill",
+                    label: "Cash Out",
+                    value: formatMoney(cashOut),
+                    color: .blue
+                )
+                
+                detailRow(
+                    icon: pnl >= 0 ? "plus.circle.fill" : "minus.circle.fill",
+                    label: "Net Result",
+                    value: formatMoney(pnl),
+                    color: pnl >= 0 ? Color(red: 123/255, green: 255/255, blue: 99/255) : .red
+                )
+                
+                detailRow(
+                    icon: "clock.badge.fill",
+                    label: "Session Time",
+                    value: formatDuration(duration),
+                    color: .purple
+                )
+                
+                detailRow(
+                    icon: "calendar.circle.fill",
+                    label: "Date",
+                    value: formatDate(date),
+                    color: .cyan
+                )
+            }
+        }
+        .padding(24)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.systemGray6).opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+    
+    private func detailRow(icon: String, label: String, value: String, color: Color) -> some View {
+        HStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(color)
+                .frame(width: 20)
+            
             Text(label)
                 .font(.system(size: 16))
-                .foregroundColor(.gray)
+                .foregroundColor(.white.opacity(0.8))
             
             Spacer()
             
             Text(value)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(valueColor)
+                .foregroundColor(.white)
         }
     }
     
-    // Helper function to format money (copied for self-containment)
+    private var inputFormCard: some View {
+        VStack(spacing: 24) {
+            // Header
+            HStack {
+                Image(systemName: "pencil.circle.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                
+                Text("SESSION DETAILS")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                
+                Spacer()
+            }
+            
+            // Form inputs
+            VStack(spacing: 20) {
+                // Session name input
+                ModernInputField(
+                    icon: "gamecontroller.fill",
+                    title: "Session Name",
+                    text: $sessionName,
+                    placeholder: "Friday Night Game"
+                )
+                
+                // Stakes input
+                ModernInputField(
+                    icon: "dollarsign.circle.fill",
+                    title: "Stakes",
+                    text: $sessionStakes,
+                    placeholder: "1/2 NLH"
+                )
+            }
+        }
+        .padding(24)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.systemGray6).opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+    
+    private var saveButtonView: some View {
+        Button(action: saveSession) {
+            HStack(spacing: 12) {
+                if isSaving {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                        .frame(width: 20, height: 20)
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20, weight: .medium))
+                    
+                    Text("Save Session")
+                        .font(.system(size: 18, weight: .semibold))
+                }
+            }
+            .foregroundColor(.black)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isFormValid ? Color(red: 123/255, green: 255/255, blue: 99/255) : Color.gray.opacity(0.3))
+                    .shadow(
+                        color: isFormValid ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.3) : Color.clear,
+                        radius: 12,
+                        x: 0,
+                        y: 6
+                    )
+            )
+        }
+        .disabled(!isFormValid || isSaving)
+        .animation(.easeInOut(duration: 0.2), value: isFormValid)
+        .animation(.easeInOut(duration: 0.2), value: isSaving)
+    }
+    
+    private var successOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.8)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 20) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 64, weight: .medium))
+                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                    .scaleEffect(showSuccessAnimation ? 1.0 : 0.5)
+                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showSuccessAnimation)
+                
+                Text("Session Saved!")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .opacity(showSuccessAnimation ? 1.0 : 0.0)
+                    .animation(.easeInOut(duration: 0.4).delay(0.2), value: showSuccessAnimation)
+            }
+        }
+        .transition(.opacity)
+    }
+    
+    private var loadingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.7)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 20) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
+                    .scaleEffect(1.5)
+                
+                Text("Saving Session...")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.white)
+            }
+            .padding(32)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.3), radius: 30, x: 0, y: 15)
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+    }
+    
+    // MARK: - Helper Functions
+    
     private func formatMoney(_ amount: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
@@ -286,7 +432,6 @@ struct SaveHomeGameSessionView: View {
         return formatter.string(from: NSNumber(value: amount)) ?? "$\(Int(amount))"
     }
 
-    // Helper function to format duration
     private func formatDuration(_ duration: TimeInterval) -> String {
         guard duration > 0 else { return "0m" }
         let totalMinutes = Int(duration / 60)
@@ -294,12 +439,24 @@ struct SaveHomeGameSessionView: View {
         let minutes = totalMinutes % 60
         return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
     }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+    
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
 
     private func saveSession() {
+        guard isFormValid else { return }
+        
         isSaving = true
         error = nil
         
-        // Get current user ID directly from Auth
         guard let userId = Auth.auth().currentUser?.uid else {
             DispatchQueue.main.async {
                 self.error = "Failed to get user ID"
@@ -309,12 +466,11 @@ struct SaveHomeGameSessionView: View {
             return
         }
         
-        // Create the dictionary for SessionStore with accurate buyIn and cashOut values
         let sessionData: [String: Any] = [
             "userId": userId,
             "gameType": "Home Game",
-            "gameName": sessionName,
-            "stakes": sessionStakes,
+            "gameName": sessionName.trimmingCharacters(in: .whitespacesAndNewlines),
+            "stakes": sessionStakes.trimmingCharacters(in: .whitespacesAndNewlines),
             "startDate": Timestamp(date: date.addingTimeInterval(-duration)),
             "startTime": Timestamp(date: date.addingTimeInterval(-duration)),
             "endTime": Timestamp(date: date),
@@ -325,7 +481,6 @@ struct SaveHomeGameSessionView: View {
             "createdAt": FieldValue.serverTimestamp()
         ]
         
-        // Call the SessionStore method with completion handler
         sessionStore.addSession(sessionData) { saveError in
             DispatchQueue.main.async {
                 self.isSaving = false
@@ -333,10 +488,69 @@ struct SaveHomeGameSessionView: View {
                     self.error = "Failed to save session: \(saveError.localizedDescription)"
                     self.showErrorAlert = true
                 } else {
-                    self.presentationMode.wrappedValue.dismiss()
+                    // Show success animation
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        self.showSuccessAnimation = true
+                    }
+                    
+                    // Dismiss after delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        self.presentationMode.wrappedValue.dismiss()
+                    }
                 }
             }
         }
     }
 }
+
+// MARK: - Modern Input Field
+
+struct ModernInputField: View {
+    let icon: String
+    let title: String
+    @Binding var text: String
+    let placeholder: String
+    
+    @FocusState private var isFocused: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                
+                Text(title.uppercased())
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+            }
+            
+            TextField("", text: $text)
+                .placeholder(when: text.isEmpty) {
+                    Text(placeholder)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .font(.system(size: 17))
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.systemGray6).opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(
+                                    isFocused ? Color(red: 123/255, green: 255/255, blue: 99/255) : Color.white.opacity(0.1),
+                                    lineWidth: isFocused ? 2 : 1
+                                )
+                        )
+                )
+                .focused($isFocused)
+                .animation(.easeInOut(duration: 0.2), value: isFocused)
+        }
+    }
+}
+
+// MARK: - Extensions
+
 

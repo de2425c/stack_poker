@@ -298,9 +298,12 @@ struct PlayerRow: View {
             Spacer()
             
             VStack(alignment: .trailing, spacing: 4) {
-                Text("Current: $\(Int(player.currentStack))")
+                let profit = player.currentStack - player.totalBuyIn
+                Text("\(profit >= 0 ? "+" : "")\(Int(profit))")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                    .foregroundColor(profit >= 0 ?
+                                     Color(red: 123/255, green: 255/255, blue: 99/255) :
+                                        Color.red)
                 
                 Text("Buy-in: $\(Int(player.totalBuyIn))")
                     .font(.system(size: 14))
@@ -628,6 +631,10 @@ struct GameEventRow: View {
             }
         }
         
+        private var netProfitLoss: Double {
+            return player.currentStack - player.totalBuyIn
+        }
+        
         var body: some View {
             HStack {
                 // Player name
@@ -658,6 +665,15 @@ struct GameEventRow: View {
                                      (player.currentStack >= player.totalBuyIn ?
                                       Color(red: 123/255, green: 255/255, blue: 99/255) : .red) : .gray)
                     .frame(width: 80, alignment: .trailing)
+                
+                // Net profit/loss
+                Text(player.status == .cashedOut ? 
+                     "\(netProfitLoss >= 0 ? "+" : "")\(Int(netProfitLoss))" : "—")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(player.status == .cashedOut ?
+                                     (netProfitLoss >= 0 ?
+                                      Color(red: 123/255, green: 255/255, blue: 99/255) : .red) : .gray)
+                    .frame(width: 80, alignment: .trailing)
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 16)
@@ -669,13 +685,182 @@ struct GameEventRow: View {
         }
     }
     
+    // Settlement Transaction Row for optimal settlement display
+    struct SettlementTransactionRow: View {
+        let transaction: HomeGameDetailView.SettlementTransaction
+        let index: Int
+        
+        var body: some View {
+            HStack(spacing: 12) {
+                // Transaction number
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
+                        .frame(width: 28, height: 28)
+                    
+                    Text("\(index)")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.black)
+                }
+                
+                // Transaction details
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(transaction.fromPlayer)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                        
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
+                        
+                        Text(transaction.toPlayer)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    
+                    Text("Payment settles debt")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+                
+                // Amount
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("$\(Int(transaction.amount))")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                    
+                    Text("amount")
+                        .font(.system(size: 10))
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.3), lineWidth: 1)
+            )
+            .padding(.horizontal, 16)
+        }
+    }
+    
+    // Modern Settlement Transaction Row with improved design
+    struct ModernSettlementTransactionRow: View {
+        let transaction: HomeGameDetailView.SettlementTransaction
+        let index: Int
+        @State private var showCopied = false
+        
+        var body: some View {
+            Button(action: {
+                // Copy amount to clipboard
+                UIPasteboard.general.string = "\(Int(transaction.amount))"
+                
+                // Show feedback
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showCopied = true
+                }
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showCopied = false
+                    }
+                }
+            }) {
+                HStack(spacing: 16) {
+                    // Step indicator
+                    ZStack {
+                        Circle()
+                            .fill(Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.2))
+                            .frame(width: 36, height: 36)
+                        
+                        Text("\(index)")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                    }
+                    
+                    // Transaction flow
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text(transaction.fromPlayer)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                            
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.gray)
+                            
+                            Text(transaction.toPlayer)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        
+                        Text("Debt settlement")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray.opacity(0.8))
+                    }
+                    
+                    Spacer()
+                    
+                    // Amount with copy feedback
+                    VStack(alignment: .trailing, spacing: 4) {
+                        if showCopied {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                
+                                Text("Copied!")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                            }
+                        } else {
+                            Text("$\(Int(transaction.amount))")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(UIColor(red: 28/255, green: 30/255, blue: 34/255, alpha: 1.0)))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.white.opacity(0.1),
+                                    Color.clear,
+                                    Color.clear
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .padding(.horizontal, 16)
+                .clipped()
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+    
     // CashOut view to request cashing out
     struct CashOutView: View {
         @Environment(\.presentationMode) var presentationMode
         @StateObject private var homeGameService = HomeGameService()
         
         let gameId: String
-        let currentStack: Double
         let onComplete: () -> Void
         
         @State private var cashOutAmount: String = ""
@@ -692,20 +877,6 @@ struct GameEventRow: View {
                     VStack(spacing: 24) {
                         // Add top spacing for navigation bar clearance
                         Color.clear.frame(height: 60)
-                        
-                        // Stack information
-                        HStack {
-                            Text("Current Stack:")
-                                .font(.system(size: 16))
-                                .foregroundColor(.gray)
-                            
-                            Spacer()
-                            
-                            Text("$\(Int(currentStack))")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                        }
-                        .padding(.horizontal, 4)
                         
                         // Amount input using GlassyInputField
                         GlassyInputField(

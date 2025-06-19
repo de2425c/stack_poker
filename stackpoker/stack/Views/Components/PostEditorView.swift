@@ -11,7 +11,7 @@ struct PostEditorView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var postService: PostService
     @EnvironmentObject var userService: UserService
-    @EnvironmentObject var handStore: HandStore
+    // REMOVED: @EnvironmentObject var handStore: HandStore
     @EnvironmentObject var sessionStore: SessionStore
 
     // Required properties
@@ -23,8 +23,8 @@ struct PostEditorView: View {
     var prefilledContent: String?
     var challengeToShare: Challenge?
     var isChallengeUpdate: Bool // True if sharing an UPDATE, false if sharing a NEW challenge
-    // Use @State for the hand so it can be modified by hand selection
-    @State private var hand: ParsedHandHistory?
+    // REMOVED: Hand-related state
+    // @State private var hand: ParsedHandHistory?
     var sessionId: String?
     var isSessionPost: Bool
     var isNote: Bool  // New property to identify note posts
@@ -39,7 +39,7 @@ struct PostEditorView: View {
     @State private var isLoading = false
     @State private var selectedImages: [UIImage] = []
     @State private var imageSelection: [PhotosPickerItem] = []
-    @State private var showingHandSelection = false
+    // REMOVED: @State private var showingHandSelection = false
     @State private var location: String = ""
     @FocusState private var isTextEditorFocused: Bool
 
@@ -51,13 +51,13 @@ struct PostEditorView: View {
     // Add new state for challenge display model
     @State private var challengeDisplayModel: ChallengeDisplayModel?
 
-    // Initializer to set up the initial hand state
+    // Initializer to set up the initial state
     init(userId: String,
          initialText: String = "",
          prefilledContent: String? = nil,
          challengeToShare: Challenge? = nil,
          isChallengeUpdate: Bool = false,
-         initialHand: ParsedHandHistory? = nil, // Renamed for clarity in init
+         initialHand: ParsedHandHistory? = nil, // REMOVED: No longer used
          sessionId: String? = nil,
          isSessionPost: Bool = false,
          isNote: Bool = false,
@@ -71,7 +71,7 @@ struct PostEditorView: View {
         self.prefilledContent = prefilledContent
         self.challengeToShare = challengeToShare
         self.isChallengeUpdate = isChallengeUpdate
-        _hand = State(initialValue: initialHand) // Initialize @State hand
+        // REMOVED: _hand = State(initialValue: initialHand)
         self.sessionId = sessionId
         self.isSessionPost = isSessionPost
         self.isNote = isNote
@@ -91,7 +91,8 @@ struct PostEditorView: View {
 
     // Determines if this is a hand post
     private var isHandPost: Bool {
-        hand != nil
+        // REMOVED: Hand post functionality
+        return false // hand != nil
     }
 
     // Create a SessionCard component to display full session details
@@ -202,6 +203,7 @@ struct PostEditorView: View {
     var body: some View {
         NavigationView {
             GeometryReader { geometry in
+                let screenSize = geometry.size
                 ZStack {
                     // Background
                     AppBackgroundView().ignoresSafeArea()
@@ -220,14 +222,16 @@ struct PostEditorView: View {
                                 .padding(.horizontal)
                         }
 
-                        // Hand Summary (only for hand posts)
-                        if isHandPost, let handData = hand {
+                        // REMOVED: Hand Summary functionality
+                        /*
+                        if isHandPost, let handData = initialHand {
                             HandSummaryView(hand: handData)
                                 .padding(.horizontal)
                             locationTextField
                                 .padding(.horizontal)
                                 .padding(.bottom, 8)
                         }
+                        */
 
                         // Completed Session Display
                         if let completedSession = selectedCompletedSession {
@@ -404,6 +408,8 @@ struct PostEditorView: View {
                 }
             }
         }
+        // REMOVED: .sheet(isPresented: $showingHandSelection)
+        /*
         .sheet(isPresented: $showingHandSelection) {
             HandHistorySelectionView(onHandSelected: { handId in
                 Task {
@@ -414,6 +420,7 @@ struct PostEditorView: View {
             })
             .environmentObject(HandStore(userId: userId))
         }
+        */
         .sheet(isPresented: $showingSessionSelection) {
             SessionSelectionView(onSessionSelected: { session in
                 self.selectedCompletedSession = session
@@ -648,21 +655,21 @@ struct PostEditorView: View {
                 }
             }
             
-            do {
-                // Use the main createPost method from PostService directly
-                try await postService.createPost(
-                    content: finalContent,
-                    userId: userId,
-                    username: validUsername,
-                    displayName: displayName,
-                    profileImage: profileImage,
-                    imageURLs: finalImageURLs, // Pass the uploaded image URLs
-                    postType: postTypeToUse, // This will be .text or .hand based on logic above
-                    handHistory: self.hand, // Pass hand if it's a hand post (set in shareHand or if initialHand was provided)
-                    sessionId: sessionId,
-                    location: currentSessionLocation, // Pass the session location
-                    isNote: isNote
-                )
+                                do {
+                        // Use the main createPost method from PostService directly
+                        try await postService.createPost(
+                            content: finalContent,
+                            userId: userId,
+                            username: validUsername,
+                            displayName: displayName,
+                            profileImage: profileImage,
+                            imageURLs: finalImageURLs, // Pass the uploaded image URLs
+                            postType: postTypeToUse, // This will be .text or .hand based on logic above
+                            handHistory: nil, // REMOVED: self.hand - no longer passing hand data
+                            sessionId: sessionId,
+                            location: currentSessionLocation, // Pass the session location
+                            isNote: isNote
+                        )
                 try await postService.fetchPosts()
                 DispatchQueue.main.async {
                     isLoading = false
@@ -676,56 +683,10 @@ struct PostEditorView: View {
         }
     }
 
-    // Share a hand post
+    // REMOVED: Share a hand post functionality
     private func shareHand() {
-        // Ensure username is available
-        guard let username = userService.currentUserProfile?.username else {
-            // Optionally show an alert to the user or handle this case appropriately
-            return
-        }
-        // The hand object should be set if this is a hand post
-        guard let handToShare = self.hand else {
-            return
-        }
-        // Comment for the hand (postText) can be empty if the user doesn't add one
-        // but if it's empty and not a session post, it might look odd. However, allow it.
-
-        let profileImage = userService.currentUserProfile?.avatarURL
-        let displayName = userService.currentUserProfile?.displayName
-
-        // Add session info for hands if available
-        var handPostContent = postText
-        if isSessionPost && !sessionGameName.isEmpty && !sessionStakes.isEmpty {
-            let sessionInfo = "SESSION_INFO:\(sessionGameName):\(sessionStakes)\n"
-            handPostContent = sessionInfo + postText
-        }
-
-        isLoading = true
-
-        Task {
-            do {
-                // Call the main createHandPost which now internally uses the comprehensive createPost
-                try await postService.createHandPost(
-                    content: handPostContent, // This is the comment + any prepended SESSION_INFO
-                    userId: userId,
-                    username: username,
-                    displayName: displayName,
-                    profileImage: profileImage,
-                    hand: handToShare,
-                    sessionId: sessionId,
-                    location: self.location // Use the @State location for hand posts
-                )
-                try await postService.fetchPosts()
-                DispatchQueue.main.async {
-                    isLoading = false
-                    dismiss()
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    isLoading = false
-                }
-            }
-        }
+        // This function is no longer used
+        createPost() // Fallback to regular post
     }
 
     // Add a new computed property to detect session start posts
@@ -910,7 +871,7 @@ struct PostEditorView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) { 
                     photoPickerButton
-                    handPickerButton
+                    // REMOVED: handPickerButton - hand functionality disabled for launch
                     sessionPickerButton 
                 }
                 .padding(.horizontal, 16) 
@@ -982,10 +943,12 @@ struct PostEditorView: View {
         }
     }
 
+    // REMOVED: Hand picker functionality for launch
+    /*
     @ViewBuilder
     private var handPickerButton: some View {
         Button(action: {
-            showingHandSelection = true
+            // Hand functionality removed
         }) {
             VStack(spacing: 6) { 
                 Image(systemName: "suit.spade.fill") 
@@ -1001,6 +964,7 @@ struct PostEditorView: View {
             )
         }
     }
+    */
 
     @ViewBuilder
     private var sessionPickerButton: some View {

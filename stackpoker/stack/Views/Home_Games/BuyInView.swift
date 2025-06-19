@@ -27,14 +27,35 @@ struct BuyInView: View {
         @State private var game: HomeGame?
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                AppBackgroundView()
-                    .ignoresSafeArea()
+        ZStack {
+            AppBackgroundView()
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Custom navigation header
+                HStack {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Text("Buy In")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    // Invisible spacer to balance the layout
+                    Rectangle()
+                        .fill(Color.clear)
+                        .frame(width: 44, height: 44)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
                 
                 VStack(spacing: 24) {
-                    // Add top spacing for navigation bar clearance
-                    Color.clear.frame(height: 60)
                     
                     // Amount input using GlassyInputField
                     GlassyInputField(
@@ -97,32 +118,23 @@ struct BuyInView: View {
                 .padding(.top, 16)
                 .padding(.bottom, 40)
             }
-            .navigationBarTitle("Buy In", displayMode: .inline)
-            .navigationBarItems(
-                leading: Button(action: {
-                    presentationMode.wrappedValue.dismiss()
-                }) {
-                    Text("Cancel")
-                        .foregroundColor(.white)
-                }
-            )
-            .alert(isPresented: $showError) {
-                Alert(
-                    title: Text("Error"),
-                    message: Text(error ?? "An unknown error occurred"),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
-            .onAppear {
-                fetchGame()
-            }
-            // Add tap to dismiss keyboard
-            .onTapGesture {
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            }
-            // Fix keyboard movement issues
-            .ignoresSafeArea(.keyboard)
         }
+        .alert(isPresented: $showError) {
+            Alert(
+                title: Text("Error"),
+                message: Text(error ?? "An unknown error occurred"),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+        .onAppear {
+            fetchGame()
+        }
+        // Add tap to dismiss keyboard
+        .onTapGesture {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        // Fix keyboard movement issues
+        .ignoresSafeArea(.keyboard)
     }
     
     private func isValidAmount() -> Bool {

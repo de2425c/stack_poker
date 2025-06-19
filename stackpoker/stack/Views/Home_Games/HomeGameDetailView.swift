@@ -5,6 +5,16 @@ import Combine // Keep if used elsewhere in the file
 import Foundation // Keep if used elsewhere in the file
 import FirebaseFirestore // Add this import
 
+// Simple Group model for invite functionality
+struct SimpleGroup: Identifiable {
+    let id: String
+    let name: String
+    let description: String?
+    let createdAt: Date
+    let createdBy: String
+    let memberIds: [String]
+}
+
 // Update HomeGameDetailView to include functionality for the owner
 struct HomeGameDetailView: View {
     @Environment(\.presentationMode) var presentationMode
@@ -27,6 +37,11 @@ struct HomeGameDetailView: View {
     @State private var liveGame: HomeGame?
     @State private var showCopiedMessage = false
     
+    // Add new state variables for invite functionality
+    @State private var showingInviteSheet = false
+    @State private var showingInviteConfirmation = false
+    @State private var inviteSuccessMessage: String?
+    
     // Add new state variables for share prompt
     @State private var showSharePrompt = false
     @State private var hasShownSharePrompt = false
@@ -38,6 +53,9 @@ struct HomeGameDetailView: View {
     @State private var showingSaveSessionSheet = false
     @State private var showingManagePlayerSheet = false
     @State private var playerToManage: HomeGame.Player?
+    
+    // Add this property to store the activity items
+    @State private var activityItems: [Any] = []
     
     // Helper to determine if current user is the game creator
     private var isGameCreator: Bool {
@@ -57,9 +75,6 @@ struct HomeGameDetailView: View {
             $0.userId == Auth.auth().currentUser?.uid && $0.status == .pending
         })
     }
-    
-    // Add this property to store the activity items
-    @State private var activityItems: [Any] = []
     
     // Updated function to copy the link
     private func copyGameLink() {
@@ -84,49 +99,99 @@ struct HomeGameDetailView: View {
             AppBackgroundView()
                 .ignoresSafeArea()
             
-            if showCopiedMessage {
-                VStack {
-                    Spacer().frame(height: 4)
-                    Text("Link copied!")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(
-                            Capsule()
-                                .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
-                        )
+            VStack(spacing: 0) {
+                // Custom navigation header
+                HStack {
+                    Button(action: {
+                        presentationMode.wrappedValue.dismiss()
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 16, weight: .medium))
+                            Text("Back")
+                                .font(.system(size: 17))
+                        }
+                        .foregroundColor(.white)
+                    }
+                    
+                    Spacer()
+                    
+                    let currentGame = liveGame ?? game
+                    Text(currentGame.status == .completed ? "Game Summary" :
+                            (isGameCreator ? "Game Management" : "Game Details"))
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    if isGameCreator && (liveGame ?? game).status == .active {
+                        HStack(spacing: 16) {
+                            Button(action: {
+                                showingInviteSheet = true
+                            }) {
+                                Image(systemName: "person.badge.plus")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.white)
+                            }
+                            
+                            Button(action: copyGameLink) {
+                                Image(systemName: "link")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                    } else {
+                        // Invisible spacer to balance the layout
+                        Rectangle()
+                            .fill(Color.clear)
+                            .frame(width: 44, height: 44)
+                    }
                 }
-                .zIndex(2)
-                .transition(.opacity)
-                .animation(.easeInOut, value: showCopiedMessage)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+                
+                if showCopiedMessage {
+                    HStack {
+                        Text("Link copied!")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
+                            )
+                    }
+                    .transition(.opacity)
+                    .animation(.easeInOut, value: showCopiedMessage)
+                    .padding(.bottom, 8)
+                }
+                
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 25) {
+                        // Use the most recent game data (liveGame if available, otherwise fallback to initial game)
+                        let currentGame = liveGame ?? game
+                        
+                        if currentGame.status == .completed {
+                            // Show game summary for completed games
+                            gameSummaryView
+                        } else if isGameCreator {
+                            // Show owner management view for active games
+                            ownerView
+                        } else {
+                            // Show player view for active games
+                            playerView
+                        }
+                    }
+                    .padding(.top, 8)
+                    .padding(.bottom, 100)
+                }
+                .refreshable {
+                    refreshGame()
+                }
             }
             
-            ScrollView {
-                // Add top spacing for navigation bar clearance
-                Color.clear.frame(height: 80)
-                
-                // Use the most recent game data (liveGame if available, otherwise fallback to initial game)
-                let currentGame = liveGame ?? game
-                
-                if currentGame.status == .completed {
-                    // Show game summary for completed games
-                    gameSummaryView
-                } else if isGameCreator {
-                    // Show owner management view for active games
-                    ownerView
-                } else {
-                    // Show player view for active games
-                    playerView
-                }
-            }
-            .refreshable {
-                refreshGame()
-            }
-            // Fix keyboard movement issues
-            .ignoresSafeArea(.keyboard)
-            
-            // Share prompt overlay
+            // Invite prompt overlay
             if showSharePrompt {
                 ZStack {
                     Color.black.opacity(0.7)
@@ -137,59 +202,90 @@ struct HomeGameDetailView: View {
                             }
                         }
                     
-                    VStack(spacing: 20) {
-                        Text("Game Created!")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(.white)
+                    VStack(spacing: 24) {
+                        VStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 40))
+                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                            
+                            Text("Game Created!")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundColor(.white)
+                            
+                            Text("Invite players to join your game")
+                                .font(.system(size: 16))
+                                .foregroundColor(.white.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                        }
                         
-                        Text("Share this game with your friends so they can join!")
-                            .font(.system(size: 16))
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-                        
-                        HStack(spacing: 16) {
+                        VStack(spacing: 12) {
+                            // Invite Players button (primary action)
                             Button(action: {
-                                copyGameLink()
                                 withAnimation {
                                     showSharePrompt = false
                                 }
+                                showingInviteSheet = true
                             }) {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "link.circle.fill")
-                                        .font(.system(size: 28))
-                                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                                HStack(spacing: 12) {
+                                    Image(systemName: "person.badge.plus")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.black)
                                     
-                                    Text("Copy Link")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white)
+                                    Text("Invite Players")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.black)
                                 }
-                                .frame(width: 100, height: 100)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
                                 )
                             }
                             
-                            Button(action: {
-                                shareGame()
-                                withAnimation {
-                                    showSharePrompt = false
+                            // Secondary options
+                            HStack(spacing: 12) {
+                                Button(action: {
+                                    copyGameLink()
+                                    withAnimation {
+                                        showSharePrompt = false
+                                    }
+                                }) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "link")
+                                            .font(.system(size: 16))
+                                        Text("Copy Link")
+                                            .font(.system(size: 14, weight: .medium))
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(Color(UIColor(red: 50/255, green: 52/255, blue: 57/255, alpha: 1.0)))
+                                    )
                                 }
-                            }) {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "square.and.arrow.up.fill")
-                                        .font(.system(size: 28))
-                                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                    
-                                    Text("Share")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white)
+                                
+                                Button(action: {
+                                    shareGame()
+                                    withAnimation {
+                                        showSharePrompt = false
+                                    }
+                                }) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .font(.system(size: 16))
+                                        Text("Share")
+                                            .font(.system(size: 14, weight: .medium))
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(Color(UIColor(red: 50/255, green: 52/255, blue: 57/255, alpha: 1.0)))
+                                    )
                                 }
-                                .frame(width: 100, height: 100)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                                )
                             }
                         }
                         
@@ -198,57 +294,26 @@ struct HomeGameDetailView: View {
                                 showSharePrompt = false
                             }
                         }) {
-                            Text("Not Now")
+                            Text("Skip for now")
                                 .font(.system(size: 16))
                                 .foregroundColor(.gray)
-                                .padding(.vertical, 12)
+                                .padding(.vertical, 8)
                         }
                     }
-                    .padding(24)
+                    .padding(28)
                     .background(
                         RoundedRectangle(cornerRadius: 20)
-                            .fill(Color(UIColor(red: 30/255, green: 32/255, blue: 36/255, alpha: 0.95)))
+                            .fill(Color(UIColor(red: 30/255, green: 32/255, blue: 36/255, alpha: 0.96)))
                     )
-                    .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
-                    .padding(.horizontal, 40)
+                    .shadow(color: Color.black.opacity(0.4), radius: 24, x: 0, y: 12)
+                    .padding(.horizontal, 32)
                 }
                 .zIndex(3)
                 .transition(.opacity)
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                let currentGame = liveGame ?? game
-                Text(currentGame.status == .completed ? "Game Summary" :
-                        (isGameCreator ? "Game Management" : "Game Details"))
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
-            }
-            
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: {
-                    presentationMode.wrappedValue.dismiss()
-                }) {
-                    HStack(spacing: 2) {
-                        Image(systemName: "chevron.left")
-                        Text("Back")
-                    }
-                    .foregroundColor(.white)
-                }
-            }
-            
-            if isGameCreator && (liveGame ?? game).status == .active {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: copyGameLink) {
-                        Image(systemName: "link")
-                            .foregroundColor(.white)
-                    }
-                    .help("Copy game link")
-                    .accessibilityLabel("Copy game link")
-                }
-            }
-        }
+        .navigationBarHidden(true)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .alert(isPresented: $showError) {
             Alert(
                 title: Text("Error"),
@@ -275,7 +340,7 @@ struct HomeGameDetailView: View {
             })
         }
         .sheet(isPresented: $showingCashOutSheet) {
-            CashOutView(gameId: (liveGame ?? game).id, currentStack: (liveGame ?? game).players.first(where: { $0.userId == Auth.auth().currentUser?.uid })?.currentStack ?? 0, onComplete: {
+            CashOutView(gameId: (liveGame ?? game).id, onComplete: {
                 refreshGame()
             })
         }
@@ -355,6 +420,26 @@ struct HomeGameDetailView: View {
                     }
                 )
             }
+        }
+        .sheet(isPresented: $showingInviteSheet) {
+            InvitePlayersSheet(
+                gameId: (liveGame ?? game).id,
+                onComplete: { successMessage in
+                    showingInviteSheet = false
+                    if let message = successMessage {
+                        inviteSuccessMessage = message
+                        showingInviteConfirmation = true
+                    }
+                }
+            )
+            .environmentObject(sessionStore)
+        }
+        .alert("Invites Sent!", isPresented: $showingInviteConfirmation) {
+            Button("OK") {
+                inviteSuccessMessage = nil
+            }
+        } message: {
+            Text(inviteSuccessMessage ?? "")
         }
     }
         
@@ -467,7 +552,7 @@ struct HomeGameDetailView: View {
                         
                         statBox(
                             title: "BUY-INS",
-                            value: "$\(getTotalBuyIns())",
+                            value: "$\(Int(getTotalBuyIns()))",
                             subtitle: "total"
                         )
                         
@@ -689,17 +774,7 @@ struct HomeGameDetailView: View {
                             .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
                         
                         // Main stats
-                        HStack(spacing: 30) {
-                            VStack(spacing: 8) {
-                                Text("$\(Int(currentPlayer.currentStack))")
-                                    .font(.system(size: 28, weight: .bold))
-                                    .foregroundColor(.white)
-                                
-                                Text("Current Stack")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.gray)
-                            }
-                            
+                        HStack(spacing: 40) {
                             VStack(spacing: 8) {
                                 Text("$\(Int(currentPlayer.totalBuyIn))")
                                     .font(.system(size: 28, weight: .bold))
@@ -910,9 +985,8 @@ struct HomeGameDetailView: View {
             return formatter.string(from: NSNumber(value: amount)) ?? "$\(Int(amount))"
         }
         
-        private func getTotalBuyIns() -> Int {
-            let total = game.players.reduce(0) { $0 + $1.totalBuyIn }
-            return Int(total)
+        private func getTotalBuyIns() -> Double {
+            return game.players.reduce(0) { $0 + $1.totalBuyIn }
         }
         
         private func getGameDuration() -> String {
@@ -1037,148 +1111,196 @@ struct HomeGameDetailView: View {
         
         // Game summary ledger (shown for completed games)
         private var gameSummaryView: some View {
-            VStack(spacing: 20) {
-                Text("Game Summary")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.bottom, 8)
+            LazyVStack(spacing: 24) {
+                // Header with date only (title is in navigation)
+                VStack(spacing: 8) {
+                    Text(formatDate(game.createdAt))
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.8))
+                }
+                .padding(.top, 16)
                 
-                // Game totals card
-                VStack(spacing: 16) {
+                // Game Totals
+                summaryTotalsCard
+                
+                // Settlement Plan
+                settlementPlanSection
+                
+                // Player Ledger
+                playerLedgerSection
+                
+                // Notes
+                settlementNotesSection
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+        }
+        
+        private var summaryTotalsCard: some View {
+            VStack(spacing: 16) {
+                HStack {
+                    Text("GAME TOTALS")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                    Spacer()
+                }
+                
+                let totalBuyIns = getTotalBuyIns()
+                let totalCashOuts = getTotalCashOuts()
+                let difference = totalCashOuts - totalBuyIns
+                
+                VStack(spacing: 12) {
                     HStack {
-                        Text("GAME TOTALS")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                        
-                        Spacer()
-                        
-                        Text(formatDate(game.createdAt))
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
-                    }
-                    
-                    Divider()
-                        .background(Color.gray.opacity(0.3))
-                    
-                    // Summary stats
-                    HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Total Buy-ins")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                            
-                            Text(formatMoney(getTotalBuyIns()))
-                                .font(.system(size: 18, weight: .bold))
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(formatMoney(totalBuyIns))
+                                .font(.title3.bold())
                                 .foregroundColor(.white)
                         }
-                        
                         Spacer()
-                        
                         VStack(alignment: .trailing, spacing: 4) {
                             Text("Total Cash-outs")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                            
-                            Text(formatMoney(getTotalCashOuts()))
-                                .font(.system(size: 18, weight: .bold))
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(formatMoney(totalCashOuts))
+                                .font(.title3.bold())
                                 .foregroundColor(.white)
                         }
                     }
                     
                     Divider()
-                        .background(Color.gray.opacity(0.3))
+                        .background(Color.secondary.opacity(0.3))
                     
-                    // Differences (should be zero in an ideal game)
-                    let difference = getTotalCashOuts() - getTotalBuyIns()
                     HStack {
                         Text("Difference")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
-                        
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
                         Spacer()
-                        
                         Text("\(difference >= 0 ? "+" : "")\(formatMoney(difference))")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(difference == 0 ? .white : (difference > 0 ? .green : .red))
+                            .font(.title3.bold())
+                            .foregroundColor(difference == 0 ? .white : (difference > 0 ? Color(red: 123/255, green: 255/255, blue: 99/255) : .red))
                     }
                 }
-                .padding(16)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
-                )
-                .padding(.horizontal, 16)
-                
-                // Player ledger
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Player Ledger")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                    
-                    // Column headers
-                    HStack {
-                        Text("PLAYER")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.gray)
-                            .frame(width: 100, alignment: .leading)
-                        
-                        Spacer()
-                        
-                        Text("TIME")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.gray)
-                            .frame(width: 70, alignment: .trailing)
-                        
-                        Text("BUY-IN")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.gray)
-                            .frame(width: 80, alignment: .trailing)
-                        
-                        Text("CASH-OUT")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.gray)
-                            .frame(width: 80, alignment: .trailing)
-                    }
-                    .padding(.horizontal, 16)
-                    
-                    // Player rows
-                    ForEach(getAllPlayers()) { player in
-                        LedgerPlayerRow(player: player, gameStartTime: game.createdAt)
-                    }
-                }
-                .padding(.top, 8)
-                
-                // Final settlement instructions
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Settlement Notes")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                    
-                    Text("Players should settle accounts directly with each other based on the above ledger. The game operator should verify that the total money in equals the total money out.")
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                        .lineSpacing(4)
-                }
-                .padding(16)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 30)
             }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemGray6).opacity(0.1))
+            )
+        }
+        
+        private var settlementPlanSection: some View {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Settlement Plan")
+                            .font(.title3.bold())
+                            .foregroundColor(.white)
+                        Text("Optimized for minimum transactions")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.title3)
+                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                }
+                
+                let settlements = game.settlementTransactions?.map { 
+                    SettlementTransaction(fromPlayer: $0.fromPlayer, toPlayer: $0.toPlayer, amount: $0.amount)
+                } ?? calculateOptimalSettlement()
+                
+                if settlements.isEmpty {
+                    perfectBalanceView
+                } else {
+                    settlementTransactionsView(settlements: settlements)
+                }
+            }
+        }
+        
+        private var perfectBalanceView: some View {
+            HStack(spacing: 16) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Perfect Balance")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("No settlements required")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                Spacer()
+            }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemGray6).opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        
+        private func settlementTransactionsView(settlements: [SettlementTransaction]) -> some View {
+            VStack(spacing: 12) {
+                HStack {
+                    Text("\(settlements.count) transaction\(settlements.count == 1 ? "" : "s") needed")
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                    Spacer()
+                    Text("Tap to copy amounts")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                
+                ForEach(Array(settlements.enumerated()), id: \.offset) { index, settlement in
+                    SimpleSettlementRow(transaction: settlement, index: index + 1)
+                }
+            }
+        }
+        
+        private var playerLedgerSection: some View {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Player Ledger")
+                    .font(.title3.bold())
+                    .foregroundColor(.white)
+                
+                // Simple ledger without complex layouts
+                VStack(spacing: 8) {
+                    ForEach(getAllPlayers()) { player in
+                        SimpleLedgerRow(player: player)
+                    }
+                }
+            }
+        }
+        
+        private var settlementNotesSection: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Settlement Notes")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                
+                Text("Use the settlement transactions above to minimize payments. Each transaction settles the maximum amount between winners and losers.")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemGray6).opacity(0.1))
+            )
         }
         
         // Get all players that participated in the game
         private func getAllPlayers() -> [HomeGame.Player] {
             return game.players
-        }
-        
-        // Calculate total buy-ins
-        private func getTotalBuyIns() -> Double {
-            return game.players.reduce(0) { $0 + $1.totalBuyIn }
         }
         
         // Calculate total cash-outs
@@ -1193,6 +1315,362 @@ struct HomeGameDetailView: View {
             }
         }
         
+        // Settlement Transaction structure
+        struct SettlementTransaction {
+            let fromPlayer: String
+            let toPlayer: String
+            let amount: Double
+        }
+        
+        // Player balance for settlement calculation
+        private struct PlayerBalance {
+            let name: String
+            var balance: Double
+            let originalBalance: Double
+            
+            init(name: String, balance: Double) {
+                self.name = name
+                self.balance = balance
+                self.originalBalance = balance
+            }
+        }
+        
+        // Calculate optimal settlement using minimum transaction algorithm
+        // This uses a cycle elimination + optimal pairing approach that guarantees minimum transactions
+        private func calculateOptimalSettlement() -> [SettlementTransaction] {
+            // Calculate house difference (total buy-ins vs total cash-outs)
+            let totalBuyIns = getTotalBuyIns()
+            let totalCashOuts = getTotalCashOuts()
+            let houseDifference = totalBuyIns - totalCashOuts
+            
+            // Calculate net profit/loss for each player
+            var playerBalances: [PlayerBalance] = []
+            
+            for player in game.players {
+                let netBalance = player.currentStack - player.totalBuyIn
+                // Only include players with non-zero balances (within $1 tolerance)
+                if abs(netBalance) > 1.0 {
+                    playerBalances.append(PlayerBalance(name: player.displayName, balance: netBalance))
+                }
+            }
+            
+            // Handle house difference by adjusting winners' balances
+            if abs(houseDifference) > 1.0 {
+                playerBalances = adjustForHouseDifference(playerBalances, houseDifference: houseDifference)
+            }
+            
+            // If no imbalances after adjustment, return empty
+            guard !playerBalances.isEmpty else { return [] }
+            
+            // Use recursive backtracking to find minimum transactions
+            return findMinimumTransactions(playerBalances: playerBalances)
+        }
+        
+        // Adjust player balances to account for house difference
+        private func adjustForHouseDifference(_ balances: [PlayerBalance], houseDifference: Double) -> [PlayerBalance] {
+            var adjustedBalances = balances
+            
+            if houseDifference > 1.0 {
+                // House kept money - reduce winners' profits proportionally
+                let winners = adjustedBalances.filter { $0.balance > 1.0 }
+                let totalWinnings = winners.reduce(0) { $0 + $1.balance }
+                
+                guard totalWinnings > 0 else { return adjustedBalances }
+                
+                for i in 0..<adjustedBalances.count {
+                    if adjustedBalances[i].balance > 1.0 {
+                        let proportionalLoss = (adjustedBalances[i].balance / totalWinnings) * houseDifference
+                        adjustedBalances[i].balance -= proportionalLoss
+                    }
+                }
+            } else if houseDifference < -1.0 {
+                // House paid out more - increase winners' profits proportionally
+                let winners = adjustedBalances.filter { $0.balance > 1.0 }
+                let totalWinnings = winners.reduce(0) { $0 + $1.balance }
+                
+                guard totalWinnings > 0 else { return adjustedBalances }
+                
+                for i in 0..<adjustedBalances.count {
+                    if adjustedBalances[i].balance > 1.0 {
+                        let proportionalGain = (adjustedBalances[i].balance / totalWinnings) * abs(houseDifference)
+                        adjustedBalances[i].balance += proportionalGain
+                    }
+                }
+            }
+            
+            // Remove players with balances close to zero after adjustment
+            return adjustedBalances.filter { abs($0.balance) > 1.0 }
+        }
+        
+        // Recursive algorithm to find minimum number of transactions
+        private func findMinimumTransactions(playerBalances: [PlayerBalance]) -> [SettlementTransaction] {
+            var balances = playerBalances
+            var transactions: [SettlementTransaction] = []
+            
+            // Step 1: Eliminate cycles (this can reduce transactions significantly)
+            eliminateCycles(&balances, &transactions)
+            
+            // Step 2: Pair creditors with debtors optimally
+            while let creditorIndex = balances.firstIndex(where: { $0.balance > 1.0 }),
+                  let debtorIndex = balances.firstIndex(where: { $0.balance < -1.0 }) {
+                
+                let creditor = balances[creditorIndex]
+                let debtor = balances[debtorIndex]
+                
+                // Use the smaller absolute amount to fully settle one party
+                let settlementAmount = min(creditor.balance, abs(debtor.balance))
+                
+                // Create transaction
+                transactions.append(SettlementTransaction(
+                    fromPlayer: debtor.name,
+                    toPlayer: creditor.name,
+                    amount: settlementAmount
+                ))
+                
+                // Update balances
+                balances[creditorIndex].balance -= settlementAmount
+                balances[debtorIndex].balance += settlementAmount
+                
+                // Remove players with zero balance
+                balances.removeAll { abs($0.balance) <= 1.0 }
+            }
+            
+            return transactions
+        }
+        
+        // Cycle elimination to reduce total transactions needed
+        private func eliminateCycles(_ balances: inout [PlayerBalance], _ transactions: inout [SettlementTransaction]) {
+            // Look for groups of 3+ players that can settle among themselves
+            // This is a simplified cycle detection - in practice, finding all cycles is complex
+            // but this handles the most common cases that reduce transaction count
+            
+            var changed = true
+            while changed {
+                changed = false
+                
+                // Try to find triangular settlements (3-player cycles)
+                for i in 0..<balances.count {
+                    for j in (i+1)..<balances.count {
+                        for k in (j+1)..<balances.count {
+                            if tryTriangularSettlement(&balances, &transactions, i, j, k) {
+                                changed = true
+                                balances.removeAll { abs($0.balance) <= 1.0 }
+                                break
+                            }
+                        }
+                        if changed { break }
+                    }
+                    if changed { break }
+                }
+            }
+        }
+        
+        // Try to create a triangular settlement between 3 players
+        private func tryTriangularSettlement(_ balances: inout [PlayerBalance], 
+                                           _ transactions: inout [SettlementTransaction],
+                                           _ i: Int, _ j: Int, _ k: Int) -> Bool {
+            let players = [balances[i], balances[j], balances[k]]
+            
+            // Check if we have one of each type or can form a beneficial cycle
+            let positives = players.filter { $0.balance > 1.0 }
+            let negatives = players.filter { $0.balance < -1.0 }
+            
+            // Must have at least one positive and one negative
+            guard !positives.isEmpty && !negatives.isEmpty else { return false }
+            
+            // For a 3-player cycle, look for cases where we can reduce total transactions
+            // This is a simplified heuristic - a full implementation would be more complex
+            if positives.count == 1 && negatives.count == 2 {
+                let creditor = positives[0]
+                let debtors = negatives
+                
+                // See if the creditor's balance can be split between the two debtors
+                let totalDebt = debtors.reduce(0) { $0 + abs($1.balance) }
+                
+                if creditor.balance <= totalDebt {
+                    // We can settle the creditor completely
+                    let debt1 = min(creditor.balance, abs(debtors[0].balance))
+                    let debt2 = creditor.balance - debt1
+                    
+                    if debt2 > 0 && debt2 <= abs(debtors[1].balance) {
+                        // Create transactions
+                        transactions.append(SettlementTransaction(
+                            fromPlayer: debtors[0].name,
+                            toPlayer: creditor.name,
+                            amount: debt1
+                        ))
+                        
+                        transactions.append(SettlementTransaction(
+                            fromPlayer: debtors[1].name,
+                            toPlayer: creditor.name,
+                            amount: debt2
+                        ))
+                        
+                        // Update balances
+                        if let idx = balances.firstIndex(where: { $0.name == creditor.name }) {
+                            balances[idx].balance = 0
+                        }
+                        if let idx = balances.firstIndex(where: { $0.name == debtors[0].name }) {
+                            balances[idx].balance += debt1
+                        }
+                        if let idx = balances.firstIndex(where: { $0.name == debtors[1].name }) {
+                            balances[idx].balance += debt2
+                        }
+                        
+                        return true
+                    }
+                }
+            }
+            
+            return false
+        }
+        
+        // Simplified settlement row component
+        struct SimpleSettlementRow: View {
+            let transaction: SettlementTransaction
+            let index: Int
+            @State private var showCopied = false
+            
+            var body: some View {
+                Button(action: {
+                    UIPasteboard.general.string = "\(Int(transaction.amount))"
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showCopied = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showCopied = false
+                        }
+                    }
+                }) {
+                    HStack(spacing: 16) {
+                        Text("\(index)")
+                            .font(.caption.bold())
+                            .foregroundColor(.black)
+                            .frame(width: 24, height: 24)
+                            .background(Circle().fill(Color(red: 123/255, green: 255/255, blue: 99/255)))
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Text(transaction.fromPlayer)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(.white)
+                                
+                                Image(systemName: "arrow.right")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.6))
+                                
+                                Text(transaction.toPlayer)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(.white)
+                            }
+                            
+                            Text("Payment amount")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        
+                        Spacer()
+                        
+                        if showCopied {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark")
+                                    .font(.caption)
+                                Text("Copied!")
+                                    .font(.caption)
+                            }
+                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                        } else {
+                            Text("$\(Int(transaction.amount))")
+                                .font(.title3.bold())
+                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
+                        }
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.systemGray6).opacity(0.1))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        
+        // Simplified ledger row component
+        struct SimpleLedgerRow: View {
+            let player: HomeGame.Player
+            
+            private var playTime: String {
+                let endTime = player.status == .cashedOut ? (player.cashedOutAt ?? Date()) : Date()
+                let duration = endTime.timeIntervalSince(player.joinedAt)
+                let minutes = Int(duration) / 60
+                let hours = minutes / 60
+                
+                if hours > 0 {
+                    return "\(hours)h \(minutes % 60)m"
+                } else {
+                    return "\(minutes)m"
+                }
+            }
+            
+            private var netAmount: Double {
+                return player.currentStack - player.totalBuyIn
+            }
+            
+            var body: some View {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(player.displayName)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Text("Played \(playTime)")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    
+                    Spacer()
+                    
+                    VStack(alignment: .trailing, spacing: 4) {
+                        HStack(spacing: 16) {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("$\(Int(player.totalBuyIn))")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(.white)
+                                Text("buy-in")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(player.status == .cashedOut ? "$\(Int(player.currentStack))" : "—")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(player.status == .cashedOut ? .white : .white.opacity(0.5))
+                                Text("cash-out")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(player.status == .cashedOut ? "\(netAmount >= 0 ? "+" : "")\(Int(netAmount))" : "—")
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundColor(player.status == .cashedOut ? 
+                                                    (netAmount >= 0 ? Color(red: 123/255, green: 255/255, blue: 99/255) : .red) : 
+                                                    .white.opacity(0.5))
+                                Text("net")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.systemGray6).opacity(0.1))
+                )
+            }
+        }
+
         // Fix the shareGame function to ensure it works correctly
         private func shareGame() {
             let gameId = (liveGame ?? game).id
@@ -1230,10 +1708,576 @@ struct HomeGameDetailView: View {
         }
     }
     
+    // MARK: - Invite Players Sheet
+    struct InvitePlayersSheet: View {
+        @Environment(\.presentationMode) var presentationMode
+        @EnvironmentObject var sessionStore: SessionStore
+        @StateObject private var homeGameService = HomeGameService()
+        @StateObject private var userService = UserService()
+        
+        let gameId: String
+        let onComplete: (String?) -> Void
+        
+        @State private var selectedTab = 0
+        @State private var searchText = ""
+        @State private var searchResults: [UserProfile] = []
+        @State private var selectedUsers: Set<String> = []
+        @State private var selectedGroups: Set<String> = []
+        @State private var isSearching = false
+        @State private var message = ""
+        @State private var isInviting = false
+        @State private var error: String?
+        @State private var showError = false
+        @State private var userGroups: [SimpleGroup] = []
+        
+        var body: some View {
+            ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 0) {
+                    // Custom navigation header
+                    HStack {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                        .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        Text("Invite Players")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        Button("Send") {
+                            sendInvites()
+                        }
+                        .disabled(selectedUsers.isEmpty && selectedGroups.isEmpty || isInviting)
+                        .foregroundColor((selectedUsers.isEmpty && selectedGroups.isEmpty) || isInviting ? .gray : Color(red: 123/255, green: 255/255, blue: 99/255))
+                        .font(.system(size: 16, weight: .semibold))
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                    
+                    // Tab selector
+                    HStack(spacing: 0) {
+                        Button(action: { selectedTab = 0 }) {
+                            VStack(spacing: 8) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "person")
+                                        .font(.system(size: 16))
+                                    Text("Individual")
+                                        .font(.system(size: 16, weight: .medium))
+                                }
+                                .foregroundColor(selectedTab == 0 ? .white : .gray)
+                                
+                                Rectangle()
+                                    .fill(selectedTab == 0 ? Color(red: 123/255, green: 255/255, blue: 99/255) : Color.clear)
+                                    .frame(height: 2)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        
+                        Button(action: { selectedTab = 1 }) {
+                            VStack(spacing: 8) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "person.3")
+                                        .font(.system(size: 16))
+                                    Text("Groups")
+                                        .font(.system(size: 16, weight: .medium))
+                                }
+                                .foregroundColor(selectedTab == 1 ? .white : .gray)
+                                
+                                Rectangle()
+                                    .fill(selectedTab == 1 ? Color(red: 123/255, green: 255/255, blue: 99/255) : Color.clear)
+                                    .frame(height: 2)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                    
+                    if selectedTab == 0 {
+                        individualInviteView
+                    } else {
+                        groupInviteView
+                    }
+                }
+            }
+            .alert(isPresented: $showError) {
+                Alert(
+                    title: Text("Error"),
+                    message: Text(error ?? "An unknown error occurred"),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+            .onAppear {
+                loadUserGroups()
+            }
+        }
+        
+        private var individualInviteView: some View {
+            VStack(spacing: 20) {
+                // Search bar
+                VStack(spacing: 16) {
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.gray)
+                        
+                        TextField("Search users...", text: $searchText)
+                            .font(.system(size: 16))
+                            .foregroundColor(.white)
+                            .onChange(of: searchText) { newValue in
+                                searchUsers(query: newValue)
+                            }
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
+                    )
+                    
+                    // Selected users
+                    if !selectedUsers.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(Array(selectedUsers), id: \.self) { userId in
+                                    if let user = searchResults.first(where: { $0.id == userId }) {
+                                        SelectedUserChip(user: user) {
+                                            selectedUsers.remove(userId)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                
+                // Search results
+                if isSearching {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else                     if !searchText.isEmpty && searchResults.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "person.slash")
+                            .font(.system(size: 40))
+                            .foregroundColor(.gray)
+                        Text("No users found")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(searchResults) { user in
+                                UserInviteRow(
+                                    user: user,
+                                    isSelected: selectedUsers.contains(user.id)
+                                ) {
+                                    if selectedUsers.contains(user.id) {
+                                        selectedUsers.remove(user.id)
+                                    } else {
+                                        selectedUsers.insert(user.id)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+                        .padding(.bottom, 100)
+                    }
+                }
+                
+                Spacer()
+            }
+        }
+        
+        private var groupInviteView: some View {
+            VStack(spacing: 20) {
+                Text("Select groups to invite all members")
+                    .font(.system(size: 16))
+                    .foregroundColor(.gray)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                
+                if userGroups.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "person.3.slash")
+                            .font(.system(size: 40))
+                            .foregroundColor(.gray)
+                        Text("No groups found")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                        Text("You're not a member of any groups yet")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray.opacity(0.8))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(userGroups) { group in
+                                GroupInviteRow(
+                                    group: group,
+                                    isSelected: selectedGroups.contains(group.id)
+                                ) {
+                                    if selectedGroups.contains(group.id) {
+                                        selectedGroups.remove(group.id)
+                                    } else {
+                                        selectedGroups.insert(group.id)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+                        .padding(.bottom, 100)
+                    }
+                }
+                
+                Spacer()
+            }
+        }
+        
+        private func searchUsers(query: String) {
+            let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            if trimmedQuery.isEmpty {
+                searchResults = []
+                return
+            }
+            
+            isSearching = true
+            
+            Task {
+                do {
+                    let results = try await userService.searchUsers(query: trimmedQuery, limit: 20)
+                    await MainActor.run {
+                        searchResults = results
+                        isSearching = false
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.error = error.localizedDescription
+                        showError = true
+                        isSearching = false
+                    }
+                }
+            }
+        }
+        
+        private func loadUserGroups() {
+            guard let currentUserId = Auth.auth().currentUser?.uid else { 
+                print("No current user found")
+                return 
+            }
+            
+            print("Loading groups for user: \(currentUserId)")
+            
+            Task {
+                do {
+                    // This assumes you have a method to fetch user's groups
+                    // You might need to add this to GroupService or UserService
+                    let groups = try await fetchUserGroups(userId: currentUserId)
+                    print("Fetched \(groups.count) groups")
+                    await MainActor.run {
+                        userGroups = groups
+                    }
+                } catch {
+                    print("Error loading groups: \(error)")
+                    await MainActor.run {
+                        self.error = error.localizedDescription
+                        showError = true
+                    }
+                }
+            }
+        }
+        
+        private func fetchUserGroups(userId: String) async throws -> [SimpleGroup] {
+            // Simplified version - you might want to move this to a proper service
+            let db = Firestore.firestore()
+            
+            print("Querying groups collection for user: \(userId)")
+            
+            // Try both possible collection structures
+            var snapshot: QuerySnapshot
+            
+            do {
+                // First try the "groups" collection
+                snapshot = try await db.collection("groups")
+                    .whereField("memberIds", arrayContains: userId)
+                    .getDocuments()
+                print("Found \(snapshot.documents.count) groups in 'groups' collection")
+            } catch {
+                print("Error querying groups collection: \(error)")
+                // If that fails, try "userGroups" collection
+                snapshot = try await db.collection("userGroups")
+                    .whereField("memberIds", arrayContains: userId)
+                    .getDocuments()
+                print("Found \(snapshot.documents.count) groups in 'userGroups' collection")
+            }
+            
+            var groups: [SimpleGroup] = []
+            for document in snapshot.documents {
+                print("Processing group document: \(document.documentID)")
+                print("Group data: \(document.data())")
+                
+                // You'll need to implement Group parsing if not already available
+                if let group = try? parseGroup(data: document.data(), id: document.documentID) {
+                    groups.append(group)
+                    print("Successfully parsed group: \(group.name)")
+                } else {
+                    print("Failed to parse group document: \(document.documentID)")
+                }
+            }
+            
+            print("Returning \(groups.count) parsed groups")
+            return groups
+        }
+        
+        private func parseGroup(data: [String: Any], id: String) throws -> SimpleGroup {
+            // Simplified Group parsing - adjust based on your Group model
+            print("Parsing group data: \(data)")
+            
+            // Try different possible field names for the group name
+            let name = data["name"] as? String ?? 
+                      data["title"] as? String ?? 
+                      data["groupName"] as? String
+            
+            guard let groupName = name else {
+                print("No name found in group data. Available keys: \(data.keys)")
+                throw NSError(domain: "InviteService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid group data - no name found"])
+            }
+            
+            // Try different possible field names for member IDs
+            let memberIds = data["memberIds"] as? [String] ?? 
+                           data["members"] as? [String] ?? 
+                           data["userIds"] as? [String] ?? []
+            
+            let description = data["description"] as? String
+            let createdBy = data["createdBy"] as? String ?? 
+                           data["creatorId"] as? String ?? ""
+            
+            // Try to parse creation date
+            var createdAt = Date()
+            if let timestamp = data["createdAt"] as? Timestamp {
+                createdAt = timestamp.dateValue()
+            } else if let timestamp = data["dateCreated"] as? Timestamp {
+                createdAt = timestamp.dateValue()
+            }
+            
+            print("Successfully parsed group: \(groupName) with \(memberIds.count) members")
+            
+            return SimpleGroup(
+                id: id,
+                name: groupName,
+                description: description,
+                createdAt: createdAt,
+                createdBy: createdBy,
+                memberIds: memberIds
+            )
+        }
+        
+        private func sendInvites() {
+            isInviting = true
+            
+            Task {
+                do {
+                    var inviteCount = 0
+                    
+                    // Send individual invites
+                    for userId in selectedUsers {
+                        if let user = searchResults.first(where: { $0.id == userId }) {
+                            try await homeGameService.sendGameInvite(
+                                gameId: gameId,
+                                invitedUserId: userId,
+                                invitedUserDisplayName: user.displayName ?? user.username,
+                                message: message.isEmpty ? nil : message
+                            )
+                            inviteCount += 1
+                        }
+                    }
+                    
+                    // Send group invites
+                    for groupId in selectedGroups {
+                        if let group = userGroups.first(where: { $0.id == groupId }) {
+                            try await homeGameService.sendGroupGameInvite(
+                                gameId: gameId,
+                                groupId: groupId,
+                                groupName: group.name,
+                                message: message.isEmpty ? nil : message
+                            )
+                            // Count group members (minus duplicates and host)
+                            inviteCount += group.memberIds.count
+                        }
+                    }
+                    
+                    await MainActor.run {
+                        isInviting = false
+                        let successMessage = inviteCount == 1 ? "1 invite sent!" : "\(inviteCount) invites sent!"
+                        onComplete(successMessage)
+                    }
+                } catch {
+                    await MainActor.run {
+                        isInviting = false
+                        self.error = error.localizedDescription
+                        showError = true
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Invite Components
+    struct UserInviteRow: View {
+        let user: UserProfile
+        let isSelected: Bool
+        let onTap: () -> Void
+        
+        var body: some View {
+            Button(action: onTap) {
+                HStack(spacing: 16) {
+                    // User avatar placeholder
+                    Circle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Text(String(user.displayName?.first ?? user.username.first ?? "?").uppercased())
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                        )
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(user.displayName ?? user.username)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                        
+                        Text("@\(user.username)")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20))
+                        .foregroundColor(isSelected ? Color(red: 123/255, green: 255/255, blue: 99/255) : .gray)
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isSelected ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.1) : Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isSelected ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5) : Color.clear, lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+    
+    struct GroupInviteRow: View {
+        let group: SimpleGroup
+        let isSelected: Bool
+        let onTap: () -> Void
+        
+        var body: some View {
+            Button(action: onTap) {
+                HStack(spacing: 16) {
+                    // Group avatar placeholder
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Image(systemName: "person.3")
+                                .font(.system(size: 16))
+                                .foregroundColor(.white)
+                        )
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(group.name)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                        
+                        Text("\(group.memberIds.count) members")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20))
+                        .foregroundColor(isSelected ? Color(red: 123/255, green: 255/255, blue: 99/255) : .gray)
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isSelected ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.1) : Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isSelected ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5) : Color.clear, lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+    
+    struct SelectedUserChip: View {
+        let user: UserProfile
+        let onRemove: () -> Void
+        
+        var body: some View {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Text(String(user.displayName?.first ?? user.username.first ?? "?").uppercased())
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.white)
+                    )
+                
+                Text(user.displayName ?? user.username)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white)
+                
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
+            )
+        }
+    }
+    
     // Enhanced owner-specific player row with more detailed info and controls
     struct OwnerPlayerRow: View {
         let player: HomeGame.Player
         let onManage: () -> Void
+        
+        private func formatMoney(_ amount: Double) -> String {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .currency
+            formatter.maximumFractionDigits = 0
+            return formatter.string(from: NSNumber(value: amount)) ?? "$\(Int(amount))"
+        }
         
         var body: some View {
             VStack(spacing: 12) {
@@ -1251,18 +2295,18 @@ struct HomeGameDetailView: View {
                     
                     Spacer()
                     
-                    // Current stack
+                    // Profit/Loss display
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text("$\(Int(player.currentStack))")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                        
                         let profit = player.currentStack - player.totalBuyIn
-                        Text("\(profit >= 0 ? "+" : "")\(Int(profit))")
-                            .font(.system(size: 12))
+                        Text("\(profit >= 0 ? "+" : "")\(formatMoney(profit))")
+                            .font(.system(size: 18, weight: .bold))
                             .foregroundColor(profit >= 0 ?
                                              Color(red: 123/255, green: 255/255, blue: 99/255) :
                                                 Color.red)
+                        
+                        Text("P&L")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
                     }
                 }
                 

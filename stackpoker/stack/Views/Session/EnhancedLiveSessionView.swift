@@ -11,7 +11,6 @@ struct EnhancedLiveSessionView: View {
     @ObservedObject var sessionStore: SessionStore
     var preselectedEvent: Event? = nil // Optional preselected event
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
-    @StateObject private var handStore = HandStore(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var stakeService = StakeService() // Add StakeService
     @StateObject private var manualStakerService = ManualStakerService() // Add ManualStakerService
     @StateObject private var challengeService = ChallengeService(userId: Auth.auth().currentUser?.uid ?? "") // Add ChallengeService
@@ -52,7 +51,6 @@ struct EnhancedLiveSessionView: View {
     
     // Data model values - initialized onAppear
     @State private var chipUpdates: [ChipStackUpdate] = []
-    @State private var handHistories: [HandHistoryEntry] = []
     @State private var notes: [String] = []
     @State private var sessionPosts: [Post] = []
     @State private var isLoadingSessionPosts = false
@@ -62,7 +60,7 @@ struct EnhancedLiveSessionView: View {
     
     // Single lightweight struct for feed display
     private struct UpdateItem: Identifiable {
-        enum Kind { case chip, note, hand, sessionStart }
+        enum Kind { case chip, note, sessionStart } // REMOVED: hand
         let id: String
         let kind: Kind
         let title: String
@@ -71,7 +69,7 @@ struct EnhancedLiveSessionView: View {
     }
     
     // New states
-    @State private var showingHandWizard = false
+    // REMOVED: @State private var showingHandWizard = false
     
     // Add a state variable for minimizing the entire session
     @State private var sessionMinimized = false
@@ -123,7 +121,6 @@ struct EnhancedLiveSessionView: View {
     @State private var showingShareToFeedPrompt = false
     @State private var sessionDetails: (buyIn: Double, cashout: Double, profit: Double, duration: String, gameName: String, stakes: String, sessionId: String)? = nil
     @State private var showingSimpleNoteEditor = false // New state for presenting the note editor
-    @State private var showingNewHandEntry = false // New state for presenting NewHandEntryView
     @State private var completedSessionToShowInSheet: Session? = nil // For sheet presentation
     @State private var showSessionDetailSheet = false // Controls sheet presentation
     
@@ -144,15 +141,10 @@ struct EnhancedLiveSessionView: View {
     // State for Post Tab sharing options
     @State private var showingPostShareOptions = false
     
-    // State for replay functionality
-    @State private var selectedHandForReplay: ParsedHandHistory? = nil
-    @State private var showingHandReplaySheet = false
-    
     // MARK: - Enum Definitions
     enum LiveSessionTab {
         case session
         case notes
-        case hands
         case posts
     }
     
@@ -429,13 +421,6 @@ struct EnhancedLiveSessionView: View {
                 dismiss()
             }
         }) { postEditorSheet }
-        .sheet(isPresented: $showingHandWizard) {
-            NavigationView {
-                NewHandEntryView(sessionId: sessionStore.liveSession.id)
-                    .environmentObject(handStore)
-            }
-            .onDisappear { checkForNewHands() }
-        }
         .alert("Sign In Required", isPresented: $showingNoProfileAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -450,10 +435,10 @@ struct EnhancedLiveSessionView: View {
     
     private var activeSessionView: some View {
         activeSessionContent // Call the new extracted view
-            .sheet(isPresented: $showingPostShareOptions) { postShareOptionsSheet }
-            .sheet(isPresented: $showingShareHandSelector) { shareHandSelectorSheet }
-            .sheet(isPresented: $showingShareNoteSelector) { shareNoteSelectorSheet }
-            .sheet(isPresented: $showingShareChipUpdateSelector) { shareChipUpdateSelectorSheet }
+                    .sheet(isPresented: $showingPostShareOptions) { postShareOptionsSheet }
+        // REMOVED: .sheet(isPresented: $showingShareHandSelector) { shareHandSelectorSheet }
+        .sheet(isPresented: $showingShareNoteSelector) { shareNoteSelectorSheet }
+        .sheet(isPresented: $showingShareChipUpdateSelector) { shareChipUpdateSelectorSheet }
     }
     
     // New extracted view for the core content of activeSessionView
@@ -467,10 +452,6 @@ struct EnhancedLiveSessionView: View {
                 
                 notesTabView
                     .tag(LiveSessionTab.notes)
-                    .contentShape(Rectangle())
-                
-                handsTabView
-                    .tag(LiveSessionTab.hands)
                     .contentShape(Rectangle())
                 
                 postsTabView
@@ -499,7 +480,6 @@ struct EnhancedLiveSessionView: View {
         HStack(spacing: 0) {
             tabButton(title: "Session", icon: "timer", tab: .session)
             tabButton(title: "Notes", icon: "note.text", tab: .notes)
-            tabButton(title: "Hands", icon: "suit.spade", tab: .hands)
             tabButton(title: "Posts", icon: "text.bubble", tab: .posts)
         }
         .padding(.horizontal, 20)
@@ -641,8 +621,6 @@ struct EnhancedLiveSessionView: View {
             EmptyView()
         } else if selectedTab == .notes {
             plusButton(action: { showingSimpleNoteEditor = true })
-        } else if selectedTab == .hands {
-            plusButton(action: { showingNewHandEntry = true })
         } else if selectedTab == .posts {
             plusButton(action: { showingPostShareOptions = true })
         } else if selectedTab == .session {
@@ -764,16 +742,10 @@ struct EnhancedLiveSessionView: View {
             
             loadSessionPosts()
             
-            // Check for hands associated with this session
-            Task {
-                // Wait a moment for hands to initialize
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-                
-                // Check for new hands when view appears
-                await MainActor.run {
-                    checkForNewHands()
-                }
-            }
+            // REMOVED: Hand checking functionality for launch
+            // Task {
+            //     // Hand functionality removed
+            // }
         } else {
             // No active session, show setup
             sessionMode = .setup
@@ -1623,17 +1595,6 @@ struct EnhancedLiveSessionView: View {
                     let updateContent = "Stack update: $\(Int(update.amount))\(update.note != nil ? "\nNote: \(update.note!)" : "")"
                     self.showShareToFeedDialog(content: updateContent, isHand: false, handData: nil, updateId: update.id, isSharingChipUpdate: true)
                 }
-            } else if item.kind == .hand {
-                // Directly find the SavedHand using item.id from handStore
-                if let savedHand = self.handStore.savedHands.first(where: { $0.id == item.id }) {
-                    // Pass the ParsedHandHistory from the found SavedHand
-                    // The content for showShareToFeedDialog can be minimal or derived, as PostEditorView will use the ParsedHandHistory
-                    let handContentSummary = self.createSummaryFromParsedHand(hand: savedHand.hand) // Optional: for a brief text part if needed
-                    self.showShareToFeedDialog(content: "", isHand: true, handData: savedHand.hand, updateId: savedHand.id)
-                } else {
-
-                    // Optionally, show an alert to the user that the hand data couldn't be loaded for sharing
-                }
             } else if item.kind == .sessionStart {
                 // For session start updates, share basic session info
                 let postContent: String
@@ -1718,81 +1679,6 @@ struct EnhancedLiveSessionView: View {
                 .foregroundColor(.white)
             
             Text("Add notes to track your thoughts during the session")
-                .font(.system(size: 14))
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-            
-            Spacer()
-        }
-        .padding()
-    }
-    
-    // Hands Tab - For viewing and adding hand histories
-    private var handsTabView: some View {
-        VStack(spacing: 0) {
-            // Filter hands directly in the ForEach to ensure it observes changes to handStore.savedHands
-            let currentSessionHands = handStore.savedHands.filter { $0.sessionId == sessionStore.liveSession.id }
-                                                              .sorted(by: { $0.timestamp > $1.timestamp })
-
-            if currentSessionHands.isEmpty {
-                emptyHandsView // Keep the empty state view
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 16) {
-                        // Use handData.id for ForEach identification, as SavedHand is Identifiable
-                        ForEach(currentSessionHands) { handData in 
-                            HandDisplayCardView(
-                                hand: handData.hand, // Pass the ParsedHandHistory object
-                                onReplayTap: { 
-                                    self.selectedHandForReplay = handData.hand
-                                    self.showingHandReplaySheet = true
-                                }, 
-                                location: "$\(Int(handData.hand.raw.gameInfo.smallBlind))/$\(Int(handData.hand.raw.gameInfo.bigBlind))", // Use stakes as location
-                                createdAt: handData.timestamp, // Use handData.timestamp
-                                showReplayInFeed: false // Set to false to SHOW the replay button
-                            )
-                            .padding(.horizontal) // Add some horizontal padding to the card
-                        }
-                    }
-                    .padding(.vertical, 16) // Padding for the content within ScrollView
-                }
-            }
-        }
-        .sheet(isPresented: $showingNewHandEntry) {
-            NewHandEntryView(sessionId: sessionStore.liveSession.id)
-                .environmentObject(handStore)
-        }
-        .sheet(isPresented: $showingHandReplaySheet) {
-            if let handToReplay = selectedHandForReplay {
-                HandReplayView(hand: handToReplay, userId: userId)
-                    .environmentObject(postService)
-                    .environmentObject(userService)
-            } else {
-                Text("No hand selected for replay.")
-                    .foregroundColor(.white)
-            }
-        }
-        .onAppear {
-            // Call method on the observed object instance
-            self.handStore.loadSavedHands() // Or fetchSavedHands() if that's the correct method name
-            self.checkForNewHands() 
-        }
-    }
-    
-    private var emptyHandsView: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            
-            Image(systemName: "suit.spade.fill")
-                .font(.system(size: 40))
-                .foregroundColor(.gray.opacity(0.7))
-            
-            Text("No Hand Histories")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.white)
-            
-            Text("Track memorable hands from your session")
                 .font(.system(size: 14))
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
@@ -2529,7 +2415,6 @@ struct EnhancedLiveSessionView: View {
     // Update local data from store
     private func updateLocalDataFromStore() {
         chipUpdates = sessionStore.enhancedLiveSession.chipUpdates
-        handHistories = sessionStore.enhancedLiveSession.handHistories
         notes = sessionStore.enhancedLiveSession.notes
         
         // Also refresh display notes
@@ -2568,15 +2453,6 @@ struct EnhancedLiveSessionView: View {
                 title: "Note",
                 description: note,
                 timestamp: pseudoDate
-            ))
-        }
-        for hand in handHistories {
-            items.append(UpdateItem(
-                id: hand.id,
-                kind: .hand,
-                title: "Hand Saved",
-                description: "Tap to view",
-                timestamp: hand.timestamp
             ))
         }
         // sort by time desc
@@ -2669,38 +2545,10 @@ struct EnhancedLiveSessionView: View {
         return summary
     }
     
-    // Function to check for new hands after wizard is closed
-    private func checkForNewHands() {
-
-
-
-        
-        // Filter hands for this session and log
-        let sessionHands = handStore.savedHands.filter { $0.sessionId == sessionStore.liveSession.id }
-
-        
-        // Process each hand
-        for hand in sessionHands {
-            // Verify hand is not already tracked in this session
-            let isAlreadyTracked = handHistories.contains { entry in
-                entry.content.contains("Hand ID: \(hand.id)")
-            }
-            
-            if !isAlreadyTracked {
-
-                
-                // Create a content String from the hand to add to the session
-                let handSummary = createSummaryFromParsedHand(hand: hand.hand)
-                
-                // Add ID to identify it
-                let contentWithId = "Hand ID: \(hand.id)\n\(handSummary)"
-                
-                // Add it to the session
-                sessionStore.addHandHistory(content: contentWithId)
-                updateLocalDataFromStore()
-            }
-        }
-    }
+    // REMOVED: Function to check for new hands - disabled for launch
+    // private func checkForNewHands() {
+    //     // Hand functionality removed for launch
+    // }
     
     // Helper function to clean up hand history content (remove ID line)
     private func cleanHandHistoryContent(_ content: String) -> String {
@@ -2881,7 +2729,6 @@ struct EnhancedLiveSessionView: View {
         }
         .environmentObject(postService)
         .environmentObject(userService)
-        .environmentObject(handStore)
         .environmentObject(sessionStore)
     }
     
@@ -3220,10 +3067,13 @@ struct EnhancedLiveSessionView: View {
                         showingPostShareOptions = false
                     }
 
+                    // REMOVED: Share a Hand button
+                    /*
                     GlassyActionButton(title: "Share a Hand", systemImage: "suit.spade.fill") {
                         showingShareHandSelector = true
                         showingPostShareOptions = false
                     }
+                    */
 
                     GlassyActionButton(title: "Share a Note", systemImage: "note.text") {
                         showingShareNoteSelector = true
@@ -3310,66 +3160,7 @@ struct EnhancedLiveSessionView: View {
         .accentColor(.white)
     }
 
-    // Update shareHandSelectorSheet to use HandDisplayCardView
-    private var shareHandSelectorSheet: some View {
-        NavigationView {
-            ZStack {
-                AppBackgroundView()
-                    .ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: 16) {
-                        let sessionHands = handStore.savedHands
-                            .filter { $0.sessionId == sessionStore.liveSession.id }
-                            .sorted(by: { $0.timestamp > $1.timestamp })
-
-                        if sessionHands.isEmpty {
-                            VStack {
-                                Spacer()
-                                Text("No hands recorded for this session yet.")
-                                    .foregroundColor(.gray)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal)
-                                Spacer()
-                            }
-                            .frame(height: 300)
-                        } else {
-                            ForEach(sessionHands) { savedHand in
-                                Button(action: {
-                                    showShareToFeedDialog(
-                                        content: "",
-                                        isHand: true,
-                                        handData: savedHand.hand,
-                                        updateId: savedHand.id
-                                    )
-                                    showingShareHandSelector = false
-                                }) {
-                                    HandDisplayCardView(
-                                        hand: savedHand.hand,
-                                        onReplayTap: {},
-                                        location: "$\(Int(savedHand.hand.raw.gameInfo.smallBlind))/$(Int(savedHand.hand.raw.gameInfo.bigBlind))",
-                                        createdAt: savedHand.timestamp,
-                                        showReplayInFeed: false
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 120)
-                }
-            }
-            .navigationTitle("Select Hand")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { showingShareHandSelector = false }
-                        .foregroundColor(.white)
-                }
-            }
-        }
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        .accentColor(.white)
-    }
+    // REMOVED: shareHandSelectorSheet - hand functionality disabled for launch
 
     // Update shareChipUpdateSelectorSheet to use SessionUpdateCard style
     private var shareChipUpdateSelectorSheet: some View {

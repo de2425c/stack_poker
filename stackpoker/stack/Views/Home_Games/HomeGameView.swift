@@ -17,6 +17,7 @@ struct HomeGame: Identifiable, Codable {
     var buyInRequests: [BuyInRequest]
     var cashOutRequests: [CashOutRequest]
     var gameHistory: [GameEvent]
+    var settlementTransactions: [SettlementTransaction]?
     var smallBlind: Double?
     var bigBlind: Double?
     
@@ -101,6 +102,77 @@ struct HomeGame: Identifiable, Codable {
         
         enum EventType: String, Codable {
             case playerJoined, playerLeft, buyIn, cashOut, gameCreated, gameEnded
+        }
+    }
+    
+    struct SettlementTransaction: Identifiable, Codable {
+        var id: String
+        var fromPlayer: String
+        var toPlayer: String
+        var amount: Double
+        var index: Int
+        
+        func toDictionary() -> [String: Any] {
+            return [
+                "id": id,
+                "fromPlayer": fromPlayer,
+                "toPlayer": toPlayer,
+                "amount": amount,
+                "index": index
+            ]
+        }
+    }
+    
+    // MARK: - Game Invites
+    struct GameInvite: Identifiable, Codable {
+        var id: String
+        var gameId: String
+        var gameTitle: String
+        var hostId: String
+        var hostName: String
+        var invitedUserId: String
+        var invitedUserDisplayName: String
+        var invitedGroupId: String? // For group invites
+        var invitedGroupName: String? // For group invites
+        var message: String?
+        var createdAt: Date
+        var status: InviteStatus
+        var respondedAt: Date?
+        
+        enum InviteStatus: String, CaseIterable, Codable {
+            case pending = "pending"
+            case accepted = "accepted"
+            case declined = "declined"
+            case expired = "expired"
+        }
+        
+        func toDictionary() -> [String: Any] {
+            var dict: [String: Any] = [
+                "id": id,
+                "gameId": gameId,
+                "gameTitle": gameTitle,
+                "hostId": hostId,
+                "hostName": hostName,
+                "invitedUserId": invitedUserId,
+                "invitedUserDisplayName": invitedUserDisplayName,
+                "createdAt": Timestamp(date: createdAt),
+                "status": status.rawValue
+            ]
+            
+            if let message = message {
+                dict["message"] = message
+            }
+            if let invitedGroupId = invitedGroupId {
+                dict["invitedGroupId"] = invitedGroupId
+            }
+            if let invitedGroupName = invitedGroupName {
+                dict["invitedGroupName"] = invitedGroupName
+            }
+            if let respondedAt = respondedAt {
+                dict["respondedAt"] = Timestamp(date: respondedAt)
+            }
+            
+            return dict
         }
     }
 }

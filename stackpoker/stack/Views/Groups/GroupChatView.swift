@@ -37,7 +37,7 @@ struct GroupChatView: View {
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var groupService = GroupService()
     private let homeGameService = HomeGameService()
-    @EnvironmentObject private var handStore: HandStore
+    // REMOVED: @EnvironmentObject private var handStore: HandStore
     @EnvironmentObject private var postService: PostService
     @EnvironmentObject private var userService: UserService
     @EnvironmentObject private var sessionStore: SessionStore
@@ -46,7 +46,7 @@ struct GroupChatView: View {
     // State for messages that we manually update from the subscription
     @State private var messageText = ""
     @State private var showingImagePicker = false
-    @State private var showingHandPicker = false
+    // REMOVED: @State private var showingHandPicker = false
     @State private var showingHomeGameView = false
     @State private var selectedImage: UIImage?
     @State private var imagePickerItem: PhotosPickerItem?
@@ -251,11 +251,14 @@ struct GroupChatView: View {
                         Label("Photo", systemImage: "photo")
                     }
                     
+                    // REMOVED: Hand sharing button
+                    /*
                     Button(action: {
                         showingHandPicker = true
                     }) {
                         Label("Hands", systemImage: "doc.text")
                     }
+                    */
                     
                     Button(action: {
                         showingHomeGameView = true
@@ -601,6 +604,8 @@ struct GroupChatView: View {
             // Clean up the message listener
             groupService.cleanupGroupListener()
         }
+        // REMOVED: Hand picker sheet
+        /*
         .sheet(isPresented: $showingHandPicker) {
             HandHistorySelectionView { handId in
                 sendHandHistory(handId)
@@ -610,6 +615,7 @@ struct GroupChatView: View {
             .environmentObject(postService)
             .environmentObject(userService)
         }
+        */
         .sheet(isPresented: $showingHomeGameView) {
             HomeGameView(groupId: group.id, onGameCreated: { game in
                 // Create and send home game message
@@ -679,12 +685,7 @@ struct GroupChatView: View {
                 .navigationBarHidden(true)
         }
         // Remove sheet-specific presentation settings
-        .onPreferenceChange(ViewRenderTimeKey.self) { _ in
-            // Debug - capture render end time
-            renderEndTime = Date()
 
-        }
-        .preference(key: ViewRenderTimeKey.self, value: Date())
         // Global full-screen image viewer
         .fullScreenCover(item: $viewerImageURL) { url in
             FullScreenImageView(imageURL: url, onDismiss: { viewerImageURL = nil })
@@ -929,6 +930,8 @@ struct GroupChatView: View {
         }
     }
     
+    // REMOVED: Hand history sending functionality
+    /*
     private func sendHandHistory(_ handId: String) {
         Task {
             do {
@@ -948,6 +951,7 @@ struct GroupChatView: View {
             }
         }
     }
+    */
     
     private func sendHomeGameMessage(_ game: HomeGame) {
         Task {
@@ -1175,7 +1179,7 @@ struct SingleMessageView: View {
     
     // Environment objects
     @EnvironmentObject private var userService: UserService
-    @EnvironmentObject private var handStore: HandStore
+    // REMOVED: @EnvironmentObject private var handStore: HandStore
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var postService: PostService
     @EnvironmentObject private var tabBarVisibility: TabBarVisibilityManager
@@ -1292,41 +1296,11 @@ struct SingleMessageView: View {
             } else {
                 EmptyView()
             }
+        
         case .hand:
-            if let handId = message.handHistoryId {
-                HStack {
-                    if isCurrentUser {
-                        Spacer(minLength: 40)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        // Sender name (only if not current user and should show)
-                        if showSenderName {
-                            Text(senderName)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                .padding(.leading, 2)
-                        }
-                        
-                        VStack(spacing: 6) {
-                            HandMessageView(handId: handId, ownerUserId: message.handOwnerUserId ?? message.senderId)
-                            
-                            HStack {
-                                Spacer()
-                                Text(formattedTime(message.timestamp))
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.white.opacity(0.8))
-                            }
-                        }
-                    }
-                    
-                    if !isCurrentUser {
-                        Spacer(minLength: 40)
-                    }
-                }
-            } else {
-                EmptyView()
-            }
+            // REMOVED: Hand message functionality for launch
+            EmptyView()
+            
         case .homeGame:
             if let gameId = message.homeGameId {
                 HStack {
@@ -1348,7 +1322,6 @@ struct SingleMessageView: View {
                                             ownerId: message.senderId,
                                             groupId: message.groupId)
                                 .environmentObject(userService)
-                                .environmentObject(handStore)
                                 .environmentObject(sessionStore)
                                 .environmentObject(postService)
                                 .environmentObject(tabBarVisibility)
@@ -1373,145 +1346,5 @@ struct SingleMessageView: View {
     }
 }
 
-// Replacement for ChatHandPreview using HandDisplayCardView
-struct HandMessageView: View {
-    let handId: String
-    let ownerUserId: String
-    
-    @State private var isLoading = true
-    @State private var showingDetail = false
-    @State private var savedHand: SavedHand?
-    @State private var loadError: String?
-    @State private var showError = false
-    
-    @EnvironmentObject private var handStore: HandStore
-    @EnvironmentObject private var postService: PostService
-    @EnvironmentObject private var userService: UserService
-    
-    private var userId: String {
-        Auth.auth().currentUser?.uid ?? ""
-    }
-    
-    var body: some View {
-        Button(action: {
-            if savedHand != nil {
-                showingDetail = true
-            } else if loadError != nil {
-                showError = true
-            }
-        }) {
-            VStack(alignment: .leading, spacing: 8) {
-                if isLoading {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 120)
-                } else if let hand = savedHand {
-                    // Use HandDisplayCardView for displaying the hand
-                    HandDisplayCardView(
-                        hand: hand.hand, 
-                        onReplayTap: { showingDetail = true },
-                        location: nil,
-                        createdAt: hand.timestamp,
-                        showReplayInFeed: false
-                    )
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 0.8)))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(
-                                        LinearGradient(
-                                            gradient: Gradient(colors: [
-                                                Color.white.opacity(0.2),
-                                                Color.white.opacity(0.05),
-                                                Color.clear
-                                            ]),
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 0.8
-                                    )
-                            )
-                    )
-                } else {
-                    Text(loadError ?? "Hand not found")
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 80)
-                        .multilineTextAlignment(.center)
-                }
-            }
-            .padding(8)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 0.5)))
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-        .sheet(isPresented: $showingDetail) {
-            if let hand = savedHand {
-                HandReplayView(hand: hand.hand, userId: userId)
-                    .environmentObject(postService)
-                    .environmentObject(userService)
-            }
-        }
-        .alert(isPresented: $showError) {
-            Alert(
-                title: Text("Hand Not Available"),
-                message: Text(loadError ?? "The hand history could not be loaded."),
-                dismissButton: .default(Text("OK"))
-            )
-        }
-        .onAppear {
-            fetchHand()
-        }
-    }
-    
-    private func fetchHand() {
-        isLoading = true
-        loadError = nil
-        
-        // Try to get the hand from the user's own collection first
-        if let hand = handStore.savedHands.first(where: { $0.id == handId }) {
-            savedHand = hand
-            isLoading = false
-            return
-        }
-        
-        // If not found, try to fetch it as a shared hand
-        Task {
-            do {
-                if let shared = try await handStore.fetchSharedHand(handId: handId, ownerUserId: ownerUserId) {
-                    await MainActor.run {
-                        savedHand = shared
-                        isLoading = false
-                    }
-                } else {
-                    await MainActor.run {
-                        loadError = "This hand is no longer available."
-                        isLoading = false
-                    }
-                }
-            } catch {
-
-                await MainActor.run {
-                    loadError = "Failed to load hand: \(error.localizedDescription)"
-                    isLoading = false
-                }
-            }
-        }
-    }
-}
-
-// Custom preference key to track view rendering time 
-struct ViewRenderTimeKey: PreferenceKey {
-    static var defaultValue: Date = Date()
-    
-    static func reduce(value: inout Date, nextValue: () -> Date) {
-        value = nextValue()
-    }
-}
+// REMOVED: Hand message view functionality - all hand-related code has been commented out for launch
 

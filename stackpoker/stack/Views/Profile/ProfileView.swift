@@ -39,7 +39,7 @@ struct ProfileView: View {
     let userId: String
     @EnvironmentObject private var userService: UserService
     @StateObject private var sessionStore: SessionStore
-    @StateObject private var handStore: HandStore
+    // REMOVED: @StateObject private var handStore: HandStore
     @StateObject private var bankrollStore: BankrollStore
     @StateObject private var challengeService: ChallengeService
     @StateObject private var challengeProgressTracker: ChallengeProgressTracker
@@ -53,7 +53,7 @@ struct ProfileView: View {
     // State for full-screen card views
     @State private var showActivityDetailView = false
     @State private var showAnalyticsDetailView = false
-    @State private var showHandsDetailView = false
+    // REMOVED: @State private var showHandsDetailView = false
     @State private var showSessionsDetailView = false
     @State private var showStakingDashboardView = false // New state for Staking Dashboard
     @State private var showChallengesDetailView = false // New state for Challenges Dashboard
@@ -89,11 +89,11 @@ struct ProfileView: View {
         self.userId = userId
         let bankrollStore = BankrollStore(userId: userId)
         let sessionStore = SessionStore(userId: userId, bankrollStore: bankrollStore)
-        let handStore = HandStore(userId: userId)
+        // REMOVED: let handStore = HandStore(userId: userId)
         let challengeService = ChallengeService(userId: userId, bankrollStore: bankrollStore)
         
         _sessionStore = StateObject(wrappedValue: sessionStore)
-        _handStore = StateObject(wrappedValue: handStore)
+        // REMOVED: _handStore = StateObject(wrappedValue: handStore)
         _bankrollStore = StateObject(wrappedValue: bankrollStore)
         _challengeService = StateObject(wrappedValue: challengeService)
         _challengeProgressTracker = StateObject(wrappedValue: ChallengeProgressTracker(challengeService: challengeService, sessionStore: sessionStore))
@@ -182,7 +182,8 @@ struct ProfileView: View {
                             }
                         }
 
-                        // Hands Card
+                        // REMOVED: Hands Card
+                        /*
                         navigationCard(
                             title: "Hands (\(handStore.savedHands.count))",
                             iconName: "suit.spade.fill",
@@ -218,6 +219,7 @@ struct ProfileView: View {
                                     .foregroundColor(.white.opacity(0.85))
                             }
                         }
+                        */
                         
                         // Sessions Card
                         navigationCard(
@@ -411,6 +413,8 @@ struct ProfileView: View {
                 BankrollAdjustmentSheet(bankrollStore: bankrollStore, currentTotalBankroll: totalBankroll)
             }
         }
+        // REMOVED: .fullScreenCover(isPresented: $showHandsDetailView)
+        /*
         .fullScreenCover(isPresented: $showHandsDetailView) {
             NavigationView {
                 ZStack {
@@ -436,6 +440,7 @@ struct ProfileView: View {
             .environmentObject(handStore)
             .environmentObject(userService)
         }
+        */
         .fullScreenCover(isPresented: $showSessionsDetailView) {
             NavigationView {
                 ZStack {
@@ -511,14 +516,14 @@ struct ProfileView: View {
             .environmentObject(sessionStore)
             .environmentObject(userService)
             .environmentObject(challengeProgressTracker)
-            .environmentObject(handStore)
+            // REMOVED: .environmentObject(handStore)
             .environmentObject(postService)
         }
         .navigationBarHidden(true)
         .environmentObject(userService)
         .environmentObject(postService)
         .environmentObject(sessionStore)
-        .environmentObject(handStore)
+        // REMOVED: .environmentObject(handStore)
         .environmentObject(challengeService)
         .onAppear {
             if userService.currentUserProfile == nil {

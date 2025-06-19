@@ -6,7 +6,7 @@ import FirebaseStorage
 struct GroupsView: View {
     @StateObject private var groupService = GroupService()
     @EnvironmentObject private var userService: UserService
-    @EnvironmentObject private var handStore: HandStore
+    // REMOVED: @EnvironmentObject private var handStore: HandStore
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var postService: PostService
     @EnvironmentObject private var tabBarVisibility: TabBarVisibilityManager
@@ -114,7 +114,7 @@ struct GroupsView: View {
                                 selectedGroupForChat.map { grp in
                     GroupChatView(group: grp)
                         .environmentObject(userService)
-                        .environmentObject(handStore)
+                        // REMOVED: .environmentObject(handStore)
                         .environmentObject(sessionStore)
                         .environmentObject(postService)
                         .environmentObject(tabBarVisibility)

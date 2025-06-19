@@ -6,7 +6,7 @@ struct ChallengeDashboardView: View {
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var userService: UserService
     @EnvironmentObject private var postService: PostService
-    @EnvironmentObject private var handStore: HandStore
+    // REMOVED: @EnvironmentObject private var handStore: HandStore
     
     let userId: String
     
@@ -242,7 +242,7 @@ struct ChallengeDashboardView: View {
                     .environmentObject(sessionStore)
                     .environmentObject(userService)
                     .environmentObject(postService)
-                    .environmentObject(handStore)
+                    // REMOVED: .environmentObject(handStore)
             }
         }
         .fullScreenCover(isPresented: $showingChallengeCompleted) {

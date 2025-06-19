@@ -215,6 +215,7 @@ class HomeGameService: ObservableObject {
                     description: "Game created: \(title)"
                 )
             ],
+            settlementTransactions: nil,
             smallBlind: smallBlind,
             bigBlind: bigBlind
         )
@@ -295,10 +296,15 @@ class HomeGameService: ObservableObject {
                 
                 gameHistory.append(endEvent)
                 
+                // Calculate settlement transactions and store them
+                let settlementTransactions = self.calculateSettlementTransactions(for: players)
+                let settlementTransactionsData = settlementTransactions.map { $0.toDictionary() }
+                
                 // Update the game status to completed
                 transaction.updateData([
                     "players": players,
                     "gameHistory": gameHistory,
+                    "settlementTransactions": settlementTransactionsData,
                     "status": HomeGame.GameStatus.completed.rawValue
                 ], forDocument: gameRef)
                 
@@ -545,6 +551,7 @@ class HomeGameService: ObservableObject {
                 
                 // Check if player already exists
                 var players = gameData["players"] as? [[String: Any]] ?? []
+                var playerIds = gameData["playerIds"] as? [String] ?? []
                 let existingPlayerIndex = players.firstIndex(where: { ($0["userId"] as? String) == request.userId })
                 
                 if let index = existingPlayerIndex {
@@ -555,6 +562,11 @@ class HomeGameService: ObservableObject {
                     players[index]["currentStack"] = currentStack + request.amount
                     players[index]["totalBuyIn"] = totalBuyIn + request.amount
                     players[index]["status"] = HomeGame.Player.PlayerStatus.active.rawValue
+                    
+                    // Ensure userId is in playerIds array
+                    if !playerIds.contains(request.userId) {
+                        playerIds.append(request.userId)
+                    }
                 } else {
                     // Add new player
                     let player: [String: Any] = [
@@ -567,6 +579,11 @@ class HomeGameService: ObservableObject {
                         "status": HomeGame.Player.PlayerStatus.active.rawValue
                     ]
                     players.append(player)
+                    
+                    // Add userId to playerIds array
+                    if !playerIds.contains(request.userId) {
+                        playerIds.append(request.userId)
+                    }
                 }
                 
                 // Add event to game history
@@ -587,6 +604,7 @@ class HomeGameService: ObservableObject {
                 transaction.updateData([
                     "buyInRequests": buyInRequests,
                     "players": players,
+                    "playerIds": playerIds,
                     "gameHistory": gameHistory
                 ], forDocument: gameRef)
                 
@@ -753,6 +771,7 @@ class HomeGameService: ObservableObject {
                 
                 // Check if player already exists
                 var players = gameData["players"] as? [[String: Any]] ?? []
+                var playerIds = gameData["playerIds"] as? [String] ?? []
                 let existingPlayerIndex = players.firstIndex(where: { ($0["userId"] as? String) == currentUser.uid })
                 
                 if let index = existingPlayerIndex {
@@ -763,6 +782,11 @@ class HomeGameService: ObservableObject {
                     players[index]["currentStack"] = currentStack + amount
                     players[index]["totalBuyIn"] = totalBuyIn + amount
                     players[index]["status"] = HomeGame.Player.PlayerStatus.active.rawValue
+                    
+                    // Ensure userId is in playerIds array
+                    if !playerIds.contains(currentUser.uid) {
+                        playerIds.append(currentUser.uid)
+                    }
                 } else {
                     // Add new player
                     let player: [String: Any] = [
@@ -775,6 +799,11 @@ class HomeGameService: ObservableObject {
                         "status": HomeGame.Player.PlayerStatus.active.rawValue
                     ]
                     players.append(player)
+                    
+                    // Add userId to playerIds array
+                    if !playerIds.contains(currentUser.uid) {
+                        playerIds.append(currentUser.uid)
+                    }
                 }
                 
                 // Add event to game history
@@ -794,6 +823,7 @@ class HomeGameService: ObservableObject {
                 // Update the game
                 transaction.updateData([
                     "players": players,
+                    "playerIds": playerIds,
                     "gameHistory": gameHistory
                 ], forDocument: gameRef)
                 
@@ -1084,6 +1114,54 @@ class HomeGameService: ObservableObject {
         }
     }
     
+    // MARK: - Settlement Calculation
+    
+    /// Calculate settlement transactions for completed game
+    private func calculateSettlementTransactions(for playersData: [[String: Any]]) -> [HomeGame.SettlementTransaction] {
+        var playerBalances: [(name: String, balance: Double)] = []
+        
+        // Calculate net profit/loss for each player
+        for playerData in playersData {
+            guard let displayName = playerData["displayName"] as? String,
+                  let currentStack = playerData["currentStack"] as? Double,
+                  let totalBuyIn = playerData["totalBuyIn"] as? Double else { continue }
+            
+            let netBalance = currentStack - totalBuyIn
+            if abs(netBalance) > 1.0 {
+                playerBalances.append((name: displayName, balance: netBalance))
+            }
+        }
+        
+        var transactions: [HomeGame.SettlementTransaction] = []
+        var index = 1
+        
+        // Simple settlement algorithm - pair creditors with debtors
+        while let creditorIndex = playerBalances.firstIndex(where: { $0.balance > 1.0 }),
+              let debtorIndex = playerBalances.firstIndex(where: { $0.balance < -1.0 }) {
+            
+            let creditor = playerBalances[creditorIndex]
+            let debtor = playerBalances[debtorIndex]
+            
+            let settlementAmount = min(creditor.balance, abs(debtor.balance))
+            
+            transactions.append(HomeGame.SettlementTransaction(
+                id: UUID().uuidString,
+                fromPlayer: debtor.name,
+                toPlayer: creditor.name,
+                amount: settlementAmount,
+                index: index
+            ))
+            
+            playerBalances[creditorIndex].balance -= settlementAmount
+            playerBalances[debtorIndex].balance += settlementAmount
+            
+            playerBalances.removeAll { abs($0.balance) <= 1.0 }
+            index += 1
+        }
+        
+        return transactions
+    }
+    
     // MARK: - Helper Methods
     
     /// Parse a home game from Firestore data
@@ -1216,6 +1294,29 @@ class HomeGameService: ObservableObject {
             }
         }
         
+        // Parse settlement transactions
+        var settlementTransactions: [HomeGame.SettlementTransaction] = []
+        if let settlementsData = data["settlementTransactions"] as? [[String: Any]] {
+            for settlementData in settlementsData {
+                if let settlementId = settlementData["id"] as? String,
+                   let fromPlayer = settlementData["fromPlayer"] as? String,
+                   let toPlayer = settlementData["toPlayer"] as? String,
+                   let amount = settlementData["amount"] as? Double,
+                   let index = settlementData["index"] as? Int {
+                    
+                    let settlement = HomeGame.SettlementTransaction(
+                        id: settlementId,
+                        fromPlayer: fromPlayer,
+                        toPlayer: toPlayer,
+                        amount: amount,
+                        index: index
+                    )
+                    
+                    settlementTransactions.append(settlement)
+                }
+            }
+        }
+        
         return HomeGame(
             id: id,
             title: title,
@@ -1230,6 +1331,7 @@ class HomeGameService: ObservableObject {
             buyInRequests: buyInRequests,
             cashOutRequests: cashOutRequests,
             gameHistory: gameHistory,
+            settlementTransactions: settlementTransactions.isEmpty ? nil : settlementTransactions,
             smallBlind: data["smallBlind"] as? Double,
             bigBlind: data["bigBlind"] as? Double
         )
@@ -1250,5 +1352,297 @@ class HomeGameService: ObservableObject {
         } catch {
             // Handle parsing error
         }
+    }
+    
+    // MARK: - Game Invites
+    
+    /// Send an invite to a user for a specific game
+    func sendGameInvite(
+        gameId: String, 
+        invitedUserId: String, 
+        invitedUserDisplayName: String, 
+        message: String? = nil
+    ) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        // Get the game to verify ownership and get details
+        guard let game = try await fetchHomeGame(gameId: gameId) else {
+            throw NSError(domain: "HomeGameService", code: 2, userInfo: [NSLocalizedDescriptionKey: "Game not found"])
+        }
+        
+        guard game.creatorId == currentUser.uid else {
+            throw NSError(domain: "HomeGameService", code: 3, userInfo: [NSLocalizedDescriptionKey: "Only the game creator can send invites"])
+        }
+        
+        guard game.status == .active else {
+            throw NSError(domain: "HomeGameService", code: 4, userInfo: [NSLocalizedDescriptionKey: "Cannot invite to completed games"])
+        }
+        
+        // Check if user is already invited or playing
+        let existingInvites = try await fetchGameInvites(gameId: gameId)
+        let hasExistingInvite = existingInvites.contains { 
+            $0.invitedUserId == invitedUserId && $0.status == .pending 
+        }
+        
+        if hasExistingInvite {
+            throw NSError(domain: "HomeGameService", code: 5, userInfo: [NSLocalizedDescriptionKey: "User already has a pending invite"])
+        }
+        
+        // Check if user is already playing
+        let isAlreadyPlaying = game.players.contains { $0.userId == invitedUserId }
+        if isAlreadyPlaying {
+            throw NSError(domain: "HomeGameService", code: 6, userInfo: [NSLocalizedDescriptionKey: "User is already playing in this game"])
+        }
+        
+        // Create the invite
+        let inviteId = UUID().uuidString
+        let invite = HomeGame.GameInvite(
+            id: inviteId,
+            gameId: gameId,
+            gameTitle: game.title,
+            hostId: currentUser.uid,
+            hostName: game.creatorName,
+            invitedUserId: invitedUserId,
+            invitedUserDisplayName: invitedUserDisplayName,
+            invitedGroupId: nil,
+            invitedGroupName: nil,
+            message: message,
+            createdAt: Date(),
+            status: .pending,
+            respondedAt: nil
+        )
+        
+        // Save the invite to Firestore
+        try await db.collection("gameInvites").document(inviteId).setData(invite.toDictionary())
+    }
+    
+    /// Send invites to all members of a group
+    func sendGroupGameInvite(
+        gameId: String,
+        groupId: String,
+        groupName: String,
+        message: String? = nil
+    ) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        // Get the game to verify ownership
+        guard let game = try await fetchHomeGame(gameId: gameId) else {
+            throw NSError(domain: "HomeGameService", code: 2, userInfo: [NSLocalizedDescriptionKey: "Game not found"])
+        }
+        
+        guard game.creatorId == currentUser.uid else {
+            throw NSError(domain: "HomeGameService", code: 3, userInfo: [NSLocalizedDescriptionKey: "Only the game creator can send invites"])
+        }
+        
+        guard game.status == .active else {
+            throw NSError(domain: "HomeGameService", code: 4, userInfo: [NSLocalizedDescriptionKey: "Cannot invite to completed games"])
+        }
+        
+        // Get group members
+        let groupDoc = try await db.collection("groups").document(groupId).getDocument()
+        guard let groupData = groupDoc.data(),
+              let memberIds = groupData["memberIds"] as? [String] else {
+            throw NSError(domain: "HomeGameService", code: 5, userInfo: [NSLocalizedDescriptionKey: "Could not fetch group members"])
+        }
+        
+        // Get existing invites to avoid duplicates
+        let existingInvites = try await fetchGameInvites(gameId: gameId)
+        let alreadyInvitedUserIds = Set(existingInvites.filter { $0.status == .pending }.map { $0.invitedUserId })
+        let alreadyPlayingUserIds = Set(game.players.map { $0.userId })
+        
+        // Send invites to each member (except host and already invited/playing users)
+        for memberId in memberIds {
+            if memberId != currentUser.uid && 
+               !alreadyInvitedUserIds.contains(memberId) && 
+               !alreadyPlayingUserIds.contains(memberId) {
+                
+                // Get user display name
+                let userDoc = try await db.collection("users").document(memberId).getDocument()
+                let userDisplayName = userDoc.data()?["displayName"] as? String ?? 
+                                    userDoc.data()?["username"] as? String ?? "Unknown"
+                
+                let inviteId = UUID().uuidString
+                let invite = HomeGame.GameInvite(
+                    id: inviteId,
+                    gameId: gameId,
+                    gameTitle: game.title,
+                    hostId: currentUser.uid,
+                    hostName: game.creatorName,
+                    invitedUserId: memberId,
+                    invitedUserDisplayName: userDisplayName,
+                    invitedGroupId: groupId,
+                    invitedGroupName: groupName,
+                    message: message,
+                    createdAt: Date(),
+                    status: .pending,
+                    respondedAt: nil
+                )
+                
+                try await db.collection("gameInvites").document(inviteId).setData(invite.toDictionary())
+            }
+        }
+    }
+    
+    /// Fetch all invites for a specific game
+    func fetchGameInvites(gameId: String) async throws -> [HomeGame.GameInvite] {
+        let snapshot = try await db.collection("gameInvites")
+            .whereField("gameId", isEqualTo: gameId)
+            .order(by: "createdAt", descending: true)
+            .getDocuments()
+        
+        var invites: [HomeGame.GameInvite] = []
+        for document in snapshot.documents {
+            if let invite = try? parseGameInvite(data: document.data(), id: document.documentID) {
+                invites.append(invite)
+            }
+        }
+        
+        return invites
+    }
+    
+    /// Fetch pending invites for the current user
+    func fetchPendingInvites(for userId: String) async throws -> [HomeGame.GameInvite] {
+        let snapshot = try await db.collection("gameInvites")
+            .whereField("invitedUserId", isEqualTo: userId)
+            .whereField("status", isEqualTo: HomeGame.GameInvite.InviteStatus.pending.rawValue)
+            .order(by: "createdAt", descending: true)
+            .getDocuments()
+        
+        var invites: [HomeGame.GameInvite] = []
+        for document in snapshot.documents {
+            if let invite = try? parseGameInvite(data: document.data(), id: document.documentID) {
+                // Only include invites for active games
+                if let game = try? await fetchHomeGame(gameId: invite.gameId), game.status == .active {
+                    invites.append(invite)
+                }
+            }
+        }
+        
+        return invites
+    }
+    
+    /// Accept a game invite and prompt for buy-in
+    func acceptGameInvite(inviteId: String) async throws -> HomeGame.GameInvite {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        // Get the invite
+        let inviteDoc = try await db.collection("gameInvites").document(inviteId).getDocument()
+        guard let inviteData = inviteDoc.data(),
+              let invite = try? parseGameInvite(data: inviteData, id: inviteId) else {
+            throw NSError(domain: "HomeGameService", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invite not found"])
+        }
+        
+        guard invite.invitedUserId == currentUser.uid else {
+            throw NSError(domain: "HomeGameService", code: 3, userInfo: [NSLocalizedDescriptionKey: "Not authorized to accept this invite"])
+        }
+        
+        guard invite.status == .pending else {
+            throw NSError(domain: "HomeGameService", code: 4, userInfo: [NSLocalizedDescriptionKey: "Invite is no longer pending"])
+        }
+        
+        // Check if game is still active
+        guard let game = try await fetchHomeGame(gameId: invite.gameId), game.status == .active else {
+            throw NSError(domain: "HomeGameService", code: 5, userInfo: [NSLocalizedDescriptionKey: "Game is no longer active"])
+        }
+        
+        // Update invite status
+        try await db.collection("gameInvites").document(inviteId).updateData([
+            "status": HomeGame.GameInvite.InviteStatus.accepted.rawValue,
+            "respondedAt": Timestamp(date: Date())
+        ])
+        
+        // Return updated invite
+        var updatedInvite = invite
+        updatedInvite.status = .accepted
+        updatedInvite.respondedAt = Date()
+        
+        return updatedInvite
+    }
+    
+    /// Decline a game invite
+    func declineGameInvite(inviteId: String) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "HomeGameService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        // Get the invite to verify ownership
+        let inviteDoc = try await db.collection("gameInvites").document(inviteId).getDocument()
+        guard let inviteData = inviteDoc.data(),
+              let invite = try? parseGameInvite(data: inviteData, id: inviteId) else {
+            throw NSError(domain: "HomeGameService", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invite not found"])
+        }
+        
+        guard invite.invitedUserId == currentUser.uid else {
+            throw NSError(domain: "HomeGameService", code: 3, userInfo: [NSLocalizedDescriptionKey: "Not authorized to decline this invite"])
+        }
+        
+        guard invite.status == .pending else {
+            throw NSError(domain: "HomeGameService", code: 4, userInfo: [NSLocalizedDescriptionKey: "Invite is no longer pending"])
+        }
+        
+        // Update invite status
+        try await db.collection("gameInvites").document(inviteId).updateData([
+            "status": HomeGame.GameInvite.InviteStatus.declined.rawValue,
+            "respondedAt": Timestamp(date: Date())
+        ])
+    }
+    
+    /// Listen for real-time updates to pending invites
+    func listenForPendingInvites(userId: String, onChange: @escaping ([HomeGame.GameInvite]) -> Void) -> ListenerRegistration {
+        return db.collection("gameInvites")
+            .whereField("invitedUserId", isEqualTo: userId)
+            .whereField("status", isEqualTo: HomeGame.GameInvite.InviteStatus.pending.rawValue)
+            .order(by: "createdAt", descending: true)
+            .addSnapshotListener { snapshot, error in
+                guard let documents = snapshot?.documents else { return }
+                
+                var invites: [HomeGame.GameInvite] = []
+                for document in documents {
+                    if let invite = try? self.parseGameInvite(data: document.data(), id: document.documentID) {
+                        invites.append(invite)
+                    }
+                }
+                
+                onChange(invites)
+            }
+    }
+    
+    /// Parse a game invite from Firestore data
+    private func parseGameInvite(data: [String: Any], id: String) throws -> HomeGame.GameInvite {
+        guard let gameId = data["gameId"] as? String,
+              let gameTitle = data["gameTitle"] as? String,
+              let hostId = data["hostId"] as? String,
+              let hostName = data["hostName"] as? String,
+              let invitedUserId = data["invitedUserId"] as? String,
+              let invitedUserDisplayName = data["invitedUserDisplayName"] as? String,
+              let createdAtTimestamp = data["createdAt"] as? Timestamp,
+              let statusRaw = data["status"] as? String,
+              let status = HomeGame.GameInvite.InviteStatus(rawValue: statusRaw) else {
+            throw NSError(domain: "HomeGameService", code: 100, userInfo: [NSLocalizedDescriptionKey: "Invalid invite data format"])
+        }
+        
+        let respondedAt = (data["respondedAt"] as? Timestamp)?.dateValue()
+        
+        return HomeGame.GameInvite(
+            id: id,
+            gameId: gameId,
+            gameTitle: gameTitle,
+            hostId: hostId,
+            hostName: hostName,
+            invitedUserId: invitedUserId,
+            invitedUserDisplayName: invitedUserDisplayName,
+            invitedGroupId: data["invitedGroupId"] as? String,
+            invitedGroupName: data["invitedGroupName"] as? String,
+            message: data["message"] as? String,
+            createdAt: createdAtTimestamp.dateValue(),
+            status: status,
+            respondedAt: respondedAt
+        )
     }
 } 

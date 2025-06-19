@@ -3,11 +3,13 @@ import FirebaseAuth
 
 struct HandHistorySelectionView: View {
     @Environment(\.presentationMode) var presentationMode
-    @EnvironmentObject var handStore: HandStore
+    // REMOVED: @EnvironmentObject var handStore: HandStore
     let onHandSelected: (String) -> Void
     
     @State private var searchText = ""
     
+    // REMOVED: Hand filtering functionality for launch
+    /*
     var filteredHands: [SavedHand] {
         if searchText.isEmpty {
             return handStore.savedHands
@@ -24,6 +26,10 @@ struct HandHistorySelectionView: View {
                        finalHand.contains(searchText.lowercased())
             }
         }
+    }
+    */
+    var filteredHands: [SavedHand] {
+        return [] // Return empty array since hand functionality is disabled
     }
     
     var body: some View {
@@ -47,7 +53,8 @@ struct HandHistorySelectionView: View {
                     .padding(.horizontal)
                     .padding(.top, 8)
                     
-                    if handStore.savedHands.isEmpty {
+                    // REMOVED: Hand functionality disabled for launch
+                    if true { // Always show empty state
                         Spacer()
                         VStack(spacing: 16) {
                             Image(systemName: "doc.text")
@@ -58,7 +65,7 @@ struct HandHistorySelectionView: View {
                                 .font(.system(size: 20, weight: .bold))
                                 .foregroundColor(.white)
                             
-                            Text("You don't have any saved hand histories to share")
+                            Text("Hand functionality is temporarily disabled")
                                 .font(.system(size: 16))
                                 .foregroundColor(.gray)
                                 .multilineTextAlignment(.center)
