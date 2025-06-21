@@ -18,6 +18,7 @@ struct UserEventDetailView: View {
     @State private var showingManageEvent = false
     @State private var attendees: [EventRSVP] = []
     @State private var isStartingBanking = false
+    @State private var showingBankingConfirmation = false
 
     // Computed properties for display
     private var formattedStartDate: String {
@@ -79,6 +80,14 @@ struct UserEventDetailView: View {
         .navigationBarHidden(true) // Fully custom navigation experience
         .overlay(customNavigationBar, alignment: .top)
         .alert("Error", isPresented: $showError, actions: { Button("OK") {} }, message: { Text(error ?? "An unknown error occurred.") })
+        .alert("Start Banking", isPresented: $showingBankingConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Start Banking") {
+                startBanking()
+            }
+        } message: {
+            Text("Make sure all players have RSVP'd before starting banking. Game invites will be sent to all attendees so they can join the banking session.")
+        }
         .onAppear(perform: fetchEventData)
         .sheet(isPresented: $showingManageEvent) {
             ManageEventView(event: event)
@@ -311,7 +320,7 @@ struct UserEventDetailView: View {
         VStack(spacing: 16) {
             if isEventCreator {
                 if event.isBanked && event.linkedGameId == nil && event.currentStatus != .completed {
-                    Button(action: startBanking) {
+                    Button(action: { showingBankingConfirmation = true }) {
                         HStack {
                             if isStartingBanking {
                                 ProgressView()
@@ -570,6 +579,8 @@ struct UserEventDetailView: View {
                     isStartingBanking = false
                     // Refresh the event data to get the new linkedGameId
                     fetchEventData()
+                    // Dismiss the sheet/view after successful banking start
+                    presentationMode.wrappedValue.dismiss()
                 }
             } catch {
                 await MainActor.run {

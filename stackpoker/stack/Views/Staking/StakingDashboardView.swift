@@ -410,7 +410,10 @@ struct StakingDashboardView: View {
                             backedPerformanceView
                         }
                         
-                        // Event invites are now shown in calendar view only
+                        // Pending Staking Requests Section
+                        if !pendingStakingRequests.isEmpty {
+                            pendingStakingRequestsSection
+                        }
                         
                         // Partner summary cards (only show if there are stakes or manual stakers)
                         if !stakesByPartner.isEmpty {
@@ -451,6 +454,43 @@ struct StakingDashboardView: View {
             }
         }
         .padding(.top, 10)
+    }
+    
+    // MARK: - Pending Staking Requests
+    private var pendingStakingRequests: [Stake] {
+        stakes.filter { stake in
+            stake.status == .pendingAcceptance && stake.stakerUserId == currentUserId
+        }
+    }
+    
+    @ViewBuilder
+    private var pendingStakingRequestsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Pending Staking Requests")
+                .font(.plusJakarta(.title2, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Text("Others have invited you to stake them")
+                .font(.plusJakarta(.caption, weight: .medium))
+                .foregroundColor(.gray)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            LazyVStack(spacing: 12) {
+                ForEach(pendingStakingRequests) { stake in
+                    PendingStakeRequestCard(
+                        stake: stake,
+                        currentUserId: currentUserId ?? "",
+                        userService: userService,
+                        stakeService: stakeService,
+                        onStatusChanged: {
+                            fetchStakesData() // Refresh data after accepting/declining
+                        }
+                    )
+                }
+            }
+        }
+        .padding(.horizontal, 16)
     }
     
     @ViewBuilder
@@ -640,6 +680,11 @@ struct StakeCompactCard: View {
     private var partnerId: String { playerIsCurrentUser ? stake.stakerUserId : stake.stakedPlayerUserId }
     
     private var partnerName: String {
+        // Add safety check for empty partnerId
+        guard !partnerId.isEmpty else {
+            return "Unknown User"
+        }
+        
         if stake.isOffAppStake == true, let manualName = stake.manualStakerDisplayName, !manualName.isEmpty {
             return manualName
         } else if let profile = userService.loadedUsers[partnerId] {
@@ -647,7 +692,7 @@ struct StakeCompactCard: View {
         } else {
             // This should not happen if pre-loading worked correctly
             print("Dashboard: WARNING - User profile not loaded for \(partnerId)")
-            return "User \(partnerId.prefix(8))..."
+            return "Loading..."
         }
     }
     private var roleLine: String {
@@ -2072,6 +2117,253 @@ struct StakeDetailViewWrapper: View {
             // This prevents the white screen issue by ensuring all state is initialized
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isViewReady = true
+            }
+        }
+    }
+}
+
+// MARK: - Pending Stake Request Card
+struct PendingStakeRequestCard: View {
+    let stake: Stake
+    let currentUserId: String
+    let userService: UserService
+    let stakeService: StakeService
+    let onStatusChanged: () -> Void
+    
+    @State private var isProcessing = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+    
+    private var playerProfile: UserProfile? {
+        userService.loadedUsers[stake.stakedPlayerUserId]
+    }
+    
+    private var playerName: String {
+        if let profile = playerProfile {
+            return profile.displayName ?? profile.username
+        } else {
+            return "Unknown Player"
+        }
+    }
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header info
+            HStack(spacing: 12) {
+                // Player avatar or placeholder
+                Group {
+                    if let profile = playerProfile,
+                       let avatarURL = profile.avatarURL, !avatarURL.isEmpty,
+                       let url = URL(string: avatarURL) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img
+                                    .resizable()
+                                    .scaledToFill()
+                            default:
+                                Circle()
+                                    .fill(Color.blue.opacity(0.3))
+                                    .overlay(
+                                        Image(systemName: "person.fill")
+                                            .foregroundColor(.white)
+                                    )
+                            }
+                        }
+                        .frame(width: 40, height: 40)
+                        .clipShape(Circle())
+                    } else {
+                        Circle()
+                            .fill(Color.blue.opacity(0.3))
+                            .overlay(
+                                Text(String(playerName.prefix(1)))
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(.white)
+                            )
+                            .frame(width: 40, height: 40)
+                    }
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(playerName) wants you to stake them")
+                        .font(.plusJakarta(.subheadline, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                    
+                    Text("\(stake.sessionGameName)")
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                    
+                    Text("\(stake.sessionDate, style: .date)")
+                        .font(.plusJakarta(.caption2, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+            }
+            
+            // Staking details
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Percentage")
+                        .font(.plusJakarta(.caption2, weight: .medium))
+                        .foregroundColor(.gray)
+                        .textCase(.uppercase)
+                    Text("\(stake.stakePercentage * 100, specifier: "%.0f")%")
+                        .font(.plusJakarta(.callout, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Markup")
+                        .font(.plusJakarta(.caption2, weight: .medium))
+                        .foregroundColor(.gray)
+                        .textCase(.uppercase)
+                    Text("\(stake.markup, specifier: "%.1f")x")
+                        .font(.plusJakarta(.callout, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Game")
+                        .font(.plusJakarta(.caption2, weight: .medium))
+                        .foregroundColor(.gray)
+                        .textCase(.uppercase)
+                    Text(stake.sessionStakes)
+                        .font(.plusJakarta(.callout, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                
+                Spacer()
+            }
+            
+            // Action buttons
+            HStack(spacing: 12) {
+                // Decline button
+                Button(action: {
+                    declineStakeRequest()
+                }) {
+                    Text("Decline")
+                        .font(.plusJakarta(.subheadline, weight: .semibold))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.red.opacity(0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                }
+                .disabled(isProcessing)
+                
+                // Accept button
+                Button(action: {
+                    acceptStakeRequest()
+                }) {
+                    HStack {
+                        if isProcessing {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.8)
+                        } else {
+                            Text("Accept")
+                                .font(.plusJakarta(.subheadline, weight: .semibold))
+                        }
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.green)
+                    )
+                }
+                .disabled(isProcessing)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+        )
+        .alert("Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
+        .onAppear {
+            // Load player profile if not already loaded
+            if playerProfile == nil && !stake.stakedPlayerUserId.isEmpty {
+                Task {
+                    await userService.fetchUser(id: stake.stakedPlayerUserId)
+                }
+            }
+        }
+    }
+    
+    private func acceptStakeRequest() {
+        guard let stakeId = stake.id else { return }
+        isProcessing = true
+        
+        Task {
+            do {
+                // Update stake status to active
+                let updateData: [String: Any] = [
+                    Stake.CodingKeys.status.rawValue: Stake.StakeStatus.active.rawValue,
+                    Stake.CodingKeys.acceptedAt.rawValue: Timestamp(date: Date()),
+                    Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
+                ]
+                
+                try await stakeService.updateStake(stakeId: stakeId, updateData: updateData)
+                
+                await MainActor.run {
+                    isProcessing = false
+                    onStatusChanged()
+                }
+            } catch {
+                await MainActor.run {
+                    isProcessing = false
+                    errorMessage = "Failed to accept stake request: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
+    }
+    
+    private func declineStakeRequest() {
+        guard let stakeId = stake.id else { return }
+        isProcessing = true
+        
+        Task {
+            do {
+                // Update stake status to declined
+                let updateData: [String: Any] = [
+                    Stake.CodingKeys.status.rawValue: Stake.StakeStatus.declined.rawValue,
+                    Stake.CodingKeys.declinedAt.rawValue: Timestamp(date: Date()),
+                    Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
+                ]
+                
+                try await stakeService.updateStake(stakeId: stakeId, updateData: updateData)
+                
+                await MainActor.run {
+                    isProcessing = false
+                    onStatusChanged()
+                }
+            } catch {
+                await MainActor.run {
+                    isProcessing = false
+                    errorMessage = "Failed to decline stake request: \(error.localizedDescription)"
+                    showError = true
+                }
             }
         }
     }

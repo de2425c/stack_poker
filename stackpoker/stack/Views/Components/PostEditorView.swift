@@ -39,6 +39,9 @@ struct PostEditorView: View {
     @State private var isLoading = false
     @State private var selectedImages: [UIImage] = []
     @State private var imageSelection: [PhotosPickerItem] = []
+    @State private var imageToCrop: UIImage? = nil
+    @State private var showingImageCropper = false
+    @State private var triggerPhotoPicker = false
     // REMOVED: @State private var showingHandSelection = false
     @State private var location: String = ""
     @FocusState private var isTextEditorFocused: Bool
@@ -80,13 +83,8 @@ struct PostEditorView: View {
         self.sessionStakes = sessionStakes
         _currentSessionLocation = State(initialValue: sessionLocation) // Initialize currentSessionLocation
         _selectedCompletedSession = State(initialValue: completedSession) // Initialize selectedCompletedSession
-        // Set a more descriptive default title for completed sessions
-        if let session = completedSession {
-            let profitText = session.profit >= 0 ? "+$\(Int(session.profit))" : "-$\(Int(abs(session.profit)))"
-            _completedSessionTitle = State(initialValue: "\(session.gameName) Session (\(profitText))")
-        } else {
-            _completedSessionTitle = State(initialValue: "")
-        }
+        // Initialize with empty title - user should provide their own title
+        _completedSessionTitle = State(initialValue: "")
     }
 
     // Determines if this is a hand post
@@ -242,25 +240,27 @@ struct PostEditorView: View {
                                     .foregroundColor(.white)
                                     .padding(.bottom, 2)
 
-                                // Caption TextEditor - Directly below title
-                                TextEditor(text: $postText) // Using postText for caption here
-                                    .foregroundColor(postText == "Describe your session..." ? .gray.opacity(0.6) : .white) // Placeholder color
-                                    .font(.system(size: 16))
-                                    .frame(height: 80) // Fixed height for caption editor
-                                    .scrollContentBackground(.hidden)
-                                    .background(Color.black.opacity(0.1))
-                                    .cornerRadius(8)
-                                    .onTapGesture {
-                                        if postText == "Describe your session..." {
-                                            postText = "" // Clear placeholder on tap
-                                        }
+                                // Caption TextEditor - Directly below title  
+                                ZStack(alignment: .topLeading) {
+                                    TextEditor(text: $postText) // Using postText for caption here
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 16))
+                                        .frame(height: 80) // Fixed height for caption editor
+                                        .scrollContentBackground(.hidden)
+                                        .background(Color.black.opacity(0.1))
+                                        .cornerRadius(8)
+                                        .focused($isTextEditorFocused)
+                                    
+                                    // Proper placeholder text that doesn't interfere with actual content
+                                    if postText.isEmpty && !isTextEditorFocused {
+                                        Text("Describe your session...")
+                                            .foregroundColor(.gray.opacity(0.6))
+                                            .font(.system(size: 16))
+                                            .padding(.horizontal, 20)
+                                            .padding(.top, 8)
                                     }
-                                    .onAppear {
-                                        if postText.isEmpty { // Set placeholder if empty
-                                            postText = "Describe your session..."
-                                        }
-                                    }
-                                    .padding(.bottom, 12)
+                                }
+                                .padding(.bottom, 12)
                                 
                                 // Session Stats - Strava-like prominent display
                                 // Arrange in HStacks for a row-based metric display
@@ -362,12 +362,20 @@ struct PostEditorView: View {
             }
             .onChange(of: imageSelection) { newValue in
                 Task {
-                    selectedImages.removeAll()
+                    // Process new images one by one for cropping
                     for item in newValue {
                         if let data = try? await item.loadTransferable(type: Data.self),
                            let image = UIImage(data: data) {
-                            selectedImages.append(image)
+                            await MainActor.run {
+                                imageToCrop = image
+                                showingImageCropper = true
+                            }
+                            break // Only process one image at a time
                         }
+                    }
+                    // Clear the selection after processing
+                    await MainActor.run {
+                        imageSelection.removeAll()
                     }
                 }
             }
@@ -428,6 +436,22 @@ struct PostEditorView: View {
             })
             .environmentObject(sessionStore) // Pass the sessionStore
         }
+        .fullScreenCover(isPresented: $showingImageCropper) {
+            if let image = imageToCrop {
+                ImageCropperView(
+                    image: image,
+                    onCropComplete: { croppedImage in
+                        selectedImages.append(croppedImage)
+                        imageToCrop = nil
+                        showingImageCropper = false
+                    },
+                    onCancel: {
+                        imageToCrop = nil
+                        showingImageCropper = false
+                    }
+                )
+            }
+        }
     }
 
     // Computed properties for UI customization
@@ -457,7 +481,7 @@ struct PostEditorView: View {
 
     private var placeholderText: String {
         if selectedCompletedSession != nil {
-            return "Describe your session..." // This won't be used by TextEditor directly if we handle placeholder manually
+            return "Add a comment about your session..." // Changed to avoid confusion with the manual placeholder
         } else if isSessionStartPost {
             return "Add a comment about starting your session..."
         } else if isSessionPost {
@@ -673,6 +697,8 @@ struct PostEditorView: View {
                 try await postService.fetchPosts()
                 DispatchQueue.main.async {
                     isLoading = false
+                    // Post notification for successful post creation
+                    NotificationCenter.default.post(name: NSNotification.Name("PostCreatedSuccessfully"), object: nil)
                     dismiss()
                 }
             } catch {
@@ -708,30 +734,7 @@ struct PostEditorView: View {
     // Update the sessionDisplayView to handle session start posts differently
     @ViewBuilder
     private var sessionDisplayView: some View {
-        if isSessionStartPost {
-            // Session start - clean text display without the green box
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                    
-                    Text("Started Session")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                    
-                    Spacer()
-                }
-                
-                // Game and stakes info
-                Text("\(sessionGameName) (\(sessionStakes))")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.white)
-                    .lineLimit(2)
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 16)
-        } else if isChipUpdatePost {
+        if isChipUpdatePost {
             // Chip update - show stack update info
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -758,6 +761,29 @@ struct PostEditorView: View {
                         .font(.system(size: 16))
                         .foregroundColor(.white.opacity(0.9))
                 }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 16)
+        } else if isSessionStartPost {
+            // Session start - clean text display without the green box
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    
+                    Text("Started Session")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                }
+                
+                // Game and stakes info
+                Text("\(sessionGameName) (\(sessionStakes))")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
             }
             .padding(.horizontal)
             .padding(.bottom, 16)
@@ -889,7 +915,7 @@ struct PostEditorView: View {
 
     @ViewBuilder
     private var photoPickerButton: some View {
-        PhotosPicker(selection: $imageSelection, maxSelectionCount: 4, matching: .images) {
+        PhotosPicker(selection: $imageSelection, maxSelectionCount: 1, matching: .images) {
             VStack(spacing: 6) { 
                 Image(systemName: "photo.on.rectangle.angled")
                     .font(.system(size: 22)) 
@@ -907,15 +933,35 @@ struct PostEditorView: View {
 
     @ViewBuilder
     private var selectedImagesPreview: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(0..<selectedImages.count, id: \.self) { index in
-                    imagePreviewItem(at: index)
-                }
+        VStack(spacing: 0) {
+            ForEach(0..<selectedImages.count, id: \.self) { index in
+                imagePreviewItem(at: index)
             }
-            .padding(.top, 4)
-            .padding(.horizontal, 16)
+            
+            // Add more images button (only show if we have less than 4 images)
+            if selectedImages.count < 4 {
+                PhotosPicker(selection: $imageSelection, maxSelectionCount: 1, matching: .images) {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                        
+                        Text("Add another photo")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.white.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
         }
+        .padding(.top, 4)
     }
 
     @ViewBuilder
@@ -924,8 +970,8 @@ struct PostEditorView: View {
             Image(uiImage: selectedImages[index])
                 .resizable()
                 .scaledToFill()
-                .frame(width: 100, height: 100)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .aspectRatio(1, contentMode: .fill) // Square aspect ratio
+                .clipped() // Crop to square
 
             Button(action: {
                 selectedImages.remove(at: index)

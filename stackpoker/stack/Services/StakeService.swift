@@ -14,13 +14,17 @@ class StakeService: ObservableObject {
             stakeToSave.id = stakesCollectionRef.document().documentID
         }
         
-        print("StakeService: Adding stake to Firestore with ID: \(stakeToSave.id!)")
+        guard let stakeId = stakeToSave.id else {
+            throw NSError(domain: "StakeService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Stake ID is missing"])
+        }
+        
+        print("StakeService: Adding stake to Firestore with ID: \(stakeId)")
         print("StakeService: Stake details - sessionGameName: '\(stakeToSave.sessionGameName)', isOffAppStake: '\(stakeToSave.isOffAppStake ?? false)'")
         
-        try stakesCollectionRef.document(stakeToSave.id!).setData(from: stakeToSave)
+        try stakesCollectionRef.document(stakeId).setData(from: stakeToSave)
         
-        print("StakeService: Successfully saved stake with ID: \(stakeToSave.id!)")
-        return stakeToSave.id!
+        print("StakeService: Successfully saved stake with ID: \(stakeId)")
+        return stakeId
     }
 
     // MARK: - Read
@@ -225,11 +229,10 @@ class StakeService: ObservableObject {
             throw NSError(domain: "StakeService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Can only update results for active stakes"])
         }
         
-        // Calculate the new settlement amount
-        let profit = cashout - buyIn
-        let stakerShare = profit * currentStake.stakePercentage
-        let adjustedStakerShare = stakerShare * currentStake.markup
-        let amountTransferred = -adjustedStakerShare // Negative means player pays staker
+        // Calculate the settlement amount using the correct formula
+        let stakerCost = buyIn * currentStake.stakePercentage * currentStake.markup
+        let stakerShareOfCashout = cashout * currentStake.stakePercentage
+        let amountTransferred = stakerShareOfCashout - stakerCost
         
         let dataToUpdate: [String: Any] = [
             Stake.CodingKeys.totalPlayerBuyInForSession.rawValue: buyIn,

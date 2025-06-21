@@ -69,20 +69,22 @@ struct UserProfileView: View {
                         StatView(count: localFollowingCount, label: "Following")
                         Spacer()
                         if !isCurrentUserProfile {
-                            Button(action: toggleFollow) {
-                                Text(isFollowing ? "Unfollow" : "Follow")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(isFollowing ? .white : .black)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(isFollowing ? Color.gray.opacity(0.7) : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                    .cornerRadius(20)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .stroke(isFollowing ? Color.gray : Color.clear, lineWidth: 1)
-                                    )
-                            }
-                            .disabled(isProcessingFollow)
+                                                    Button(action: toggleFollow) {
+                            Text(isFollowing ? "Unfollow" : "Follow")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(isFollowing ? .white : .black)
+                                .lineLimit(1)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(isFollowing ? Color.gray.opacity(0.7) : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                .cornerRadius(20)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .stroke(isFollowing ? Color.gray : Color.clear, lineWidth: 1)
+                                )
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .disabled(isProcessingFollow)
                             
                             // Block Button
                             Button(action: { 
@@ -102,11 +104,13 @@ struct UserProfileView: View {
                                 Text("Edit Profile")
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(.white)
+                                    .lineLimit(1)
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 8)
                                     .background(Color.gray.opacity(0.5))
                                     .cornerRadius(20)
                             }
+                            .fixedSize(horizontal: true, vertical: false)
                         }
                     }
                     .padding(.horizontal)

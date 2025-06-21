@@ -1041,6 +1041,8 @@ struct GroupDetailView: View {
     @State private var isLoadingUsers = false
     @State private var isLoadingMembers = false
     @State private var selectedTab = 0 // 0 = Info, 1 = Members, 2 = Invites
+    @State private var showDeleteConfirmation = false
+    @State private var isDeletingGroup = false
     
     // For image upload
     @State private var selectedImage: UIImage?
@@ -1065,7 +1067,6 @@ struct GroupDetailView: View {
     }
     
     var body: some View {
-        // Remove the NavigationView since we're now using regular navigation
         ZStack {
             // Background
             AppBackgroundView()
@@ -1229,7 +1230,14 @@ struct GroupDetailView: View {
                 ScrollView {
                     if selectedTab == 0 {
                         // Group Info Tab
-                        GroupInfoView(group: group)
+                        GroupInfoView(
+                            group: group, 
+                            isOwner: isOwner, 
+                            onDeleteTapped: { 
+                                showDeleteConfirmation = true 
+                            },
+                            isDeletingGroup: isDeletingGroup
+                        )
                     } else if selectedTab == 1 {
                         // Members Tab
                         MembersView(
@@ -1261,6 +1269,14 @@ struct GroupDetailView: View {
                     dismissButton: .default(Text("OK"))
                 )
             })
+            .alert("Delete Group", isPresented: $showDeleteConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) {
+                    deleteGroup()
+                }
+            } message: {
+                Text("Are you sure you want to delete this group? This action cannot be undone. All messages and data will be permanently lost.")
+            }
         }
         .onAppear {
             if selectedTab == 1 {
@@ -1273,8 +1289,6 @@ struct GroupDetailView: View {
             // Hide dropdown when tapping outside
             isDropdownVisible = false
         }
-        .navigationBarHidden(true) // Hide the navigation bar
-        .edgesIgnoringSafeArea(.all) // Use .all instead of just .top for full screen
     }
     
     private func loadTransferableImage(from imageSelection: PhotosPickerItem?) {
@@ -1361,6 +1375,30 @@ struct GroupDetailView: View {
         }
     }
     
+    private func deleteGroup() {
+        isDeletingGroup = true
+        
+        Task {
+            do {
+                try await groupService.deleteGroup(groupId: group.id)
+                
+                await MainActor.run {
+                    isDeletingGroup = false
+                    // Notify that group data changed
+                    NotificationCenter.default.post(name: NSNotification.Name("GroupDataChanged"), object: nil)
+                    // Dismiss the view
+                    presentationMode.wrappedValue.dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = error.localizedDescription
+                    self.showError = true
+                    isDeletingGroup = false
+                }
+            }
+        }
+    }
+    
     private func inviteUser() {
         guard let selectedUser = selectedUser else { return }
         
@@ -1391,6 +1429,9 @@ struct GroupDetailView: View {
 // Add padding to the GroupInfoView
 struct GroupInfoView: View {
     let group: UserGroup
+    let isOwner: Bool
+    let onDeleteTapped: () -> Void
+    let isDeletingGroup: Bool
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1447,6 +1488,45 @@ struct GroupInfoView: View {
                         .background(Color(red: 30/255, green: 30/255, blue: 35/255))
                         .cornerRadius(10)
                         .padding(.horizontal, 16)
+                }
+            }
+            
+            // Delete button for group owner
+            if isOwner {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Danger Zone")
+                        .font(.system(size: 20, weight: .bold, design: .default))
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 20)
+                    
+                    Button(action: onDeleteTapped) {
+                        HStack {
+                            if isDeletingGroup {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                                    .padding(.trailing, 8)
+                            } else {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .padding(.trailing, 8)
+                            }
+                            
+                            Text(isDeletingGroup ? "Deleting Group..." : "Delete Group")
+                                .font(.system(size: 16, weight: .semibold, design: .default))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.red.opacity(isDeletingGroup ? 0.6 : 1.0))
+                        )
+                    }
+                    .disabled(isDeletingGroup)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
                 }
             }
             

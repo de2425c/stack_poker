@@ -36,19 +36,27 @@ struct FeedView: View {
     
     let userId: String
     
-    // Add computed property for dynamic top padding based on live session bar visibility
+    // Parameters to track whether bars are showing
+    let hasStandaloneGameBar: Bool
+    let hasInviteBar: Bool
+    let hasLiveSessionBar: Bool
+    
+    // Add computed property for dynamic top padding based on bar visibility
     private var dynamicTopPadding: CGFloat {
-        // When LiveSessionBar is visible, minimal padding since it provides spacing
-        if sessionStore.showLiveSessionBar {
-            return 20 // Minimal padding when LiveSessionBar is present
+        // When any top bars are visible, use minimal padding since they provide spacing
+        if hasLiveSessionBar || hasStandaloneGameBar || hasInviteBar {
+            return 0 // No padding when bars are present - they handle safe area
         } else {
-            // When no LiveSessionBar, need more padding to account for safe area
+            // When no bars, need padding to account for safe area
             return 55 // Enough padding to clear the safe area and provide proper spacing
         }
     }
     
-    init(userId: String = Auth.auth().currentUser?.uid ?? "") {
+    init(userId: String = Auth.auth().currentUser?.uid ?? "", hasStandaloneGameBar: Bool = false, hasInviteBar: Bool = false, hasLiveSessionBar: Bool = false) {
         self.userId = userId
+        self.hasStandaloneGameBar = hasStandaloneGameBar
+        self.hasInviteBar = hasInviteBar
+        self.hasLiveSessionBar = hasLiveSessionBar
         _handStore = StateObject(wrappedValue: HandStore(userId: userId)) // Initialize HandStore
         
         // Create bankrollStore first, then pass it to sessionStore
@@ -905,35 +913,33 @@ struct BasicPostCardView: View {
                     }
                 }
                 
-                // Images
+                // Images - Square display with side padding
                 if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(imageURLs, id: \.self) { url in
-                                if let imageUrl = URL(string: url) {
-                                    KFImage(imageUrl)
-                                        .placeholder {
-                                            Rectangle()
-                                                .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                                .overlay(
-                                                    ProgressView()
-                                                        .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                                )
-                                        }
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(height: 350) // Removed UIScreen.main.bounds.width, fixed height
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .contentShape(Rectangle()) // Ensure the whole area is tappable
-                                        .onTapGesture {
-                                            onImageTapped?(url)
-                                        }
-                                }
+                    VStack(spacing: 0) {
+                        ForEach(imageURLs, id: \.self) { url in
+                            if let imageUrl = URL(string: url) {
+                                KFImage(imageUrl)
+                                    .placeholder {
+                                        Rectangle()
+                                            .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                            .overlay(
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                            )
+                                    }
+                                    .resizable()
+                                    .scaledToFill()
+                                    .aspectRatio(1, contentMode: .fill) // Square aspect ratio
+                                    .clipped() // Crop to square
+                                    .cornerRadius(8) // Add slight rounding
+                                    .contentShape(Rectangle()) // Ensure the whole area is tappable
+                                    .onTapGesture {
+                                        onImageTapped?(url)
+                                    }
                             }
                         }
-                        .padding(.leading, 8)
-                        .padding(.trailing, 8)
                     }
+                    .padding(.horizontal, 16) // Add side padding
                     .padding(.top, 10)
                     .padding(.bottom, 14)
                 }
@@ -1345,33 +1351,31 @@ struct PostCardView: View {
                 }
             }
             
-            // Images - Twitter-like layout
+            // Images - Square display with side padding
             if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(imageURLs, id: \.self) { url in
-                            if let imageUrl = URL(string: url) {
-                                KFImage(imageUrl)
-                                    .placeholder {
-                                        Rectangle()
-                                            .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                            .overlay(
-                                                ProgressView()
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                            )
-                                    }
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(height: 350) // Removed UIScreen.main.bounds.width, fixed height
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .contentShape(Rectangle()) // Ensure the whole area is tappable
-                                    // PostCardView doesn't handle image taps
-                            }
+                VStack(spacing: 0) {
+                    ForEach(imageURLs, id: \.self) { url in
+                        if let imageUrl = URL(string: url) {
+                            KFImage(imageUrl)
+                                .placeholder {
+                                    Rectangle()
+                                        .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                        .overlay(
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                        )
+                                }
+                                .resizable()
+                                .scaledToFill()
+                                .aspectRatio(1, contentMode: .fill) // Square aspect ratio
+                                .clipped() // Crop to square
+                                .cornerRadius(8) // Add slight rounding
+                                .contentShape(Rectangle()) // Ensure the whole area is tappable
+                                // PostCardView doesn't handle image taps
                         }
                     }
-                    .padding(.leading, 8)
-                    .padding(.trailing, 8)
                 }
+                .padding(.horizontal, 16) // Add side padding
                 .padding(.top, 10)
                 .padding(.bottom, 14)
             }
@@ -2640,37 +2644,33 @@ private struct PostBodyContentView: View {
                                     showReplayInFeed: true)
             }
             
-            // Images with enhanced styling
+            // Images - Square display with side padding
             if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                VStack(alignment: .leading) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(imageURLs, id: \.self) { url in
-                                if let imageUrl = URL(string: url) {
-                                    KFImage(imageUrl)
-                                        .placeholder {
-        ZStack {
-                                                Rectangle()
-                                                    .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                            }
-                                        }
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(height: 350) // Removed UIScreen.main.bounds.width, fixed height
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .contentShape(Rectangle()) // Ensure the whole area is tappable
-                                        .onTapGesture {
-                                            onImageTapped?(url)
-                                        }
+                VStack(spacing: 0) {
+                    ForEach(imageURLs, id: \.self) { url in
+                        if let imageUrl = URL(string: url) {
+                            KFImage(imageUrl)
+                                .placeholder {
+                                    Rectangle()
+                                        .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                        .overlay(
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        )
                                 }
-                            }
+                                .resizable()
+                                .scaledToFill()
+                                .aspectRatio(1, contentMode: .fill) // Square aspect ratio
+                                .clipped() // Crop to square
+                                .cornerRadius(8) // Add slight rounding
+                                .contentShape(Rectangle()) // Ensure the whole area is tappable
+                                .onTapGesture {
+                                    onImageTapped?(url)
+                                }
                         }
-                        .padding(.leading, 16) // Keep horizontal padding for the content within ScrollView
-                        .padding(.trailing, 8) // Adjusted for better spacing
                     }
                 }
+                .padding(.horizontal, 16) // Add side padding
                 .padding(.top, 8)
             }
         }

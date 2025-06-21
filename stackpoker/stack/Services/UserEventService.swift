@@ -122,7 +122,7 @@ class UserEventService: ObservableObject {
         }
     }
     
-    /// Start banking for an event - creates home game and adds all going RSVPs
+    /// Start banking for an event - creates home game and sends invites to all going RSVPs
     func startBankingForEvent(eventId: String) async throws {
         guard let currentUser = Auth.auth().currentUser else {
             throw UserEventServiceError.notAuthenticated
@@ -145,8 +145,7 @@ class UserEventService: ObservableObject {
         let rsvps = try await fetchEventRSVPs(eventId: eventId)
         let goingRSVPs = rsvps.filter { $0.status == .going }
         
-        // For banked games, start with just the creator to avoid players with 0 buy-in
-        // Other players will join via buy-in requests when they access the game
+        // Create the home game with just the creator (host)
         let playerInfoList: [HomeGameService.PlayerInfo] = [
             .init(userId: event.creatorId, displayName: event.creatorName)
         ]
@@ -159,6 +158,18 @@ class UserEventService: ObservableObject {
             initialPlayers: playerInfoList,
             linkedEventId: event.id
         )
+        
+        // Send game invites to all other RSVP'd players (excluding the creator)
+        for rsvp in goingRSVPs {
+            if rsvp.userId != event.creatorId {
+                try await homeGameService.sendGameInvite(
+                    gameId: newHomeGame.id,
+                    invitedUserId: rsvp.userId,
+                    invitedUserDisplayName: rsvp.userDisplayName,
+                    message: "You're invited to join the banking for '\(event.title)' that you RSVP'd to!"
+                )
+            }
+        }
         
         // Update the event with the linkedGameId
         try await db.collection("userEvents").document(event.id).updateData([

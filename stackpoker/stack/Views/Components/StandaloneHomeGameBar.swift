@@ -16,71 +16,62 @@ struct StandaloneHomeGameBar: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Image(systemName: "house.circle.fill")
-                    .font(.system(size: 16))
+                    .font(.system(size: 18))
                     .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                 
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(game.title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
                     
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundColor(.gray)
-                    
-                    if game.smallBlind != nil || game.bigBlind != nil {
-                        Text(game.stakesDisplay)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
+                    HStack(spacing: 8) {
+                        Text(subtitle)
+                            .font(.system(size: 13))
+                            .foregroundColor(.gray)
+                        
+                        if game.smallBlind != nil || game.bigBlind != nil {
+                            Text("•")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            
+                            Text(game.stakesDisplay)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.9)))
+                        }
                     }
                 }
                 
                 Spacer()
                 
                 Text("ACTIVE")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.black)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
                     .background(
                         Capsule()
                             .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                     )
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .padding(.top, (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0)
             .background(
                 LinearGradient(
                     gradient: Gradient(colors: [
-                        Color(red: 30/255, green: 32/255, blue: 40/255),
-                        Color(red: 22/255, green: 24/255, blue: 30/255)
+                        Color(red: 32/255, green: 34/255, blue: 42/255),
+                        Color(red: 26/255, green: 28/255, blue: 34/255)
                     ]),
                     startPoint: .top,
                     endPoint: .bottom
                 )
+                .ignoresSafeArea(edges: .top)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.white.opacity(0.2),
-                                Color.white.opacity(0.05)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            )
-            .shadow(color: Color.black.opacity(0.15), radius: 5, y: 2)
         }
         .buttonStyle(PlainButtonStyle())
-        .padding(.horizontal, 12)
     }
 }
 

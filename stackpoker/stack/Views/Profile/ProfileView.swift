@@ -66,9 +66,7 @@ struct ProfileView: View {
     
     // Performance stats customization
     @State private var isCustomizingStats = false
-    @State private var selectedStats: [PerformanceStat] = [
-        .avgProfit, .bestSession, .winRate, .sessions, .hours, .avgSessionLength
-    ]
+    @State private var selectedStats: [PerformanceStat] = []
     @State private var isDraggingAny = false
     
     // Chart interaction states
@@ -526,6 +524,9 @@ struct ProfileView: View {
         // REMOVED: .environmentObject(handStore)
         .environmentObject(challengeService)
         .onAppear {
+            // Load saved selected stats
+            loadSelectedStats()
+            
             if userService.currentUserProfile == nil {
                 Task { try? await userService.fetchUserProfile() }
             }
@@ -549,6 +550,9 @@ struct ProfileView: View {
             } else {
 
             }
+        }
+        .onChange(of: selectedStats) { _ in
+            saveSelectedStats()
         }
     }
 
@@ -708,7 +712,8 @@ struct ProfileView: View {
     private var averageProfit: Double {
         let totalSessions = filteredSessions.count
         if totalSessions == 0 { return 0 }
-        return totalBankroll / Double(totalSessions)
+        let sessionProfitOnly = filteredSessions.reduce(0) { $0 + $1.profit }
+        return sessionProfitOnly / Double(totalSessions)
     }
     
     private var totalSessions: Int {
@@ -734,23 +739,39 @@ struct ProfileView: View {
     
     private var dollarPerHour: Double {
         if totalHoursPlayed == 0 { return 0 }
-        return totalBankroll / totalHoursPlayed
+        let sessionProfitOnly = filteredSessions.reduce(0) { $0 + $1.profit }
+        return sessionProfitOnly / totalHoursPlayed
     }
     
     private var bbPerHour: Double {
-        if totalHoursPlayed == 0 { return 0 }
-        // Calculate average big blind from sessions
-        let totalBBs = filteredSessions.compactMap { session -> Double? in
-            let digits = session.stakes.replacingOccurrences(of: " $", with: "")
-            let comps = digits.replacingOccurrences(of: "$", with: "").split(separator: "/")
-            guard comps.count == 2, let bb = Double(comps[1]) else { return nil }
-            return bb
+        // Calculate BB/hour properly: total BB won / total hours
+        let cashGameSessions = filteredSessions.filter { 
+            $0.gameType.lowercased().contains("cash") 
         }
         
-        if totalBBs.isEmpty { return 0 }
-        let avgBB = totalBBs.reduce(0, +) / Double(totalBBs.count)
-        if avgBB == 0 { return 0 }
-        return dollarPerHour / avgBB
+        guard !cashGameSessions.isEmpty else { return 0 }
+        
+        var totalBBWon: Double = 0
+        var totalHours: Double = 0
+        
+        for session in cashGameSessions {
+            guard session.hoursPlayed > 0 else { continue }
+            
+            // Parse big blind from stakes (e.g., "$1/$2" -> 2.0)
+            let digits = session.stakes.replacingOccurrences(of: " $", with: "")
+            let comps = digits.replacingOccurrences(of: "$", with: "").split(separator: "/")
+            guard comps.count == 2, let bb = Double(comps[1]), bb > 0 else { continue }
+            
+            // Convert session profit to BB won for this session
+            let bbWonThisSession = session.profit / bb
+            totalBBWon += bbWonThisSession
+            totalHours += session.hoursPlayed
+        }
+        
+        guard totalHours > 0 else { return 0 }
+        
+        // Total BB won divided by total hours
+        return totalBBWon / totalHours
     }
     
     private func getStatValue(for stat: PerformanceStat) -> String {
@@ -1261,11 +1282,18 @@ struct ProfileView: View {
                                     stat: stat,
                                     value: getStatValue(for: stat)
                                 )
+                                .onAppear {
+                                    print("📊 Displaying stat card for: \(stat.title)")
+                                }
                             }
                         }
+                        .id(selectedStats.map(\.id).joined(separator: ",")) // Force refresh when stats change
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
                         .transition(.opacity.combined(with: .move(edge: .top)))
+                        .onAppear {
+                            print("📈 Stats grid appeared with \(selectedStats.count) stats: \(selectedStats.map(\.title))")
+                        }
                     }
                 }
             }
@@ -1886,6 +1914,27 @@ struct ProfileView: View {
         // tournaments – use location if available otherwise series/gameName
         return (session.location ?? session.gameName).trimmingCharacters(in: .whitespaces)
     }
+    
+    // MARK: - Selected Stats Persistence
+    private func saveSelectedStats() {
+        let statsStrings = selectedStats.map { $0.rawValue }
+        UserDefaults.standard.set(statsStrings, forKey: "selectedStats_\(userId)")
+    }
+    
+    private func loadSelectedStats() {
+        if let savedStatsStrings = UserDefaults.standard.object(forKey: "selectedStats_\(userId)") as? [String] {
+            let savedStats = savedStatsStrings.compactMap { PerformanceStat(rawValue: $0) }
+            if !savedStats.isEmpty {
+                selectedStats = savedStats
+            } else {
+                // Use default if nothing saved or invalid data
+                selectedStats = [.avgProfit, .bestSession, .winRate, .sessions, .hours, .avgSessionLength]
+            }
+        } else {
+            // Use default for first time users
+            selectedStats = [.avgProfit, .bestSession, .winRate, .sessions, .hours, .avgSessionLength]
+        }
+    }
 
     private func monthlyProfitCurrent() -> Double {
         let calendar = Calendar.current
@@ -1955,7 +2004,7 @@ enum PerformanceStat: String, CaseIterable, Identifiable, Equatable {
     case winRate = "win_rate"
     case sessions = "sessions"
     case hours = "hours"
-    case avgSessionLength = "avg_session_length"
+    case avgSessionLength = "avg_length"
     case dollarPerHour = "dollar_per_hour"
     case bbPerHour = "bb_per_hour"
     
@@ -2008,6 +2057,7 @@ struct CustomizeStatsView: View {
     
     @State private var allowReordering = true
     @State private var combinedItems: [StatItem] = []
+    @State private var isUpdatingFromDrag = false
     
     private var availableStats: [PerformanceStat] {
         PerformanceStat.allCases.filter { !selectedStats.contains($0) }
@@ -2052,8 +2102,10 @@ struct CustomizeStatsView: View {
                                     withAnimation(.spring()) {
                                         if item.isSelected {
                                             selectedStats.removeAll { $0 == stat }
+                                            print("🔴 Removed \(stat.title), now selected: \(selectedStats.map(\.title))")
                                         } else {
                                             selectedStats.append(stat)
+                                            print("🟢 Added \(stat.title), now selected: \(selectedStats.map(\.title))")
                                         }
                                         updateCombinedItems()
                                     }
@@ -2079,8 +2131,36 @@ struct CustomizeStatsView: View {
         .onAppear {
             updateCombinedItems()
         }
-        .onChange(of: selectedStats) { _ in
+        .onChange(of: selectedStats) { newStats in
+            guard !isUpdatingFromDrag else { return }
             isDraggingAny = false
+            updateCombinedItems()
+        }
+        .onChange(of: combinedItems) { newItems in
+            // When items are reordered via drag, update selectedStats
+            let newSelectedStats = newItems.compactMap { item -> PerformanceStat? in
+                if let stat = item.stat {
+                    // Check if this stat is in the "selected" section (before "Available Stats" header)
+                    if let availableHeaderIndex = newItems.firstIndex(where: { $0.headerTitle == "Available Stats" }),
+                       let statIndex = newItems.firstIndex(where: { $0.stat?.id == stat.id }),
+                       statIndex < availableHeaderIndex {
+                        return stat
+                    }
+                }
+                return nil
+            }
+            
+            // Only update if different to avoid infinite loop
+            if newSelectedStats.map(\.id) != selectedStats.map(\.id) {
+                isUpdatingFromDrag = true
+                selectedStats = newSelectedStats
+                print("🔄 Reordered via drag, now selected: \(newSelectedStats.map(\.title))")
+                
+                // Reset flag after a brief delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isUpdatingFromDrag = false
+                }
+            }
         }
     }
     
@@ -2154,44 +2234,71 @@ struct StatItem: Identifiable, Hashable {
     }
 }
 
-// MARK: - Stat Display Card (Main View)
+// MARK: - Stat Display Card (Main View) - Clean design without gradients
 struct StatDisplayCard: View {
     let stat: PerformanceStat
     let value: String
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: stat.iconName)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(stat.color)
-                    .frame(width: 24)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header with icon and title
+            HStack(spacing: 8) {
+                // Circular icon background
+                ZStack {
+                    Circle()
+                        .fill(stat.color.opacity(0.15))
+                        .frame(width: 28, height: 28)
+                    
+                    Image(systemName: stat.iconName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(stat.color)
+                }
                 
-                Text(stat.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.9))
+                Text(stat.title.uppercased())
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+                    .tracking(0.5)
                     .lineLimit(1)
                 
                 Spacer()
             }
+            .padding(.bottom, 12)
             
+            // Value - large and prominent
             Text(value)
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.6)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            
+            // Subtle accent line at bottom
+            HStack {
+                Spacer()
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(stat.color)
+                    .frame(width: 30, height: 2)
+            }
+            .padding(.top, 8)
         }
-        .padding(16)
+        .padding(20)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(stat.color.opacity(0.2), lineWidth: 1)
-                )
+            ZStack {
+                // Glassy background
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Material.ultraThinMaterial)
+                    .opacity(0.3)
+                
+                // Subtle overlay for depth
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.white.opacity(0.02))
+                
+                // Border
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            }
         )
-        .frame(height: 100)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 }
 

@@ -4,6 +4,7 @@ struct LiveSessionBar: View {
     @ObservedObject var sessionStore: SessionStore
     @Binding var isExpanded: Bool
     var onTap: () -> Void
+    let isFirstBar: Bool
     
     // Computed properties for formatted time
     private var formattedElapsedTime: String {
@@ -203,57 +204,25 @@ struct LiveSessionBar: View {
                         )
                 }
                 .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-                .padding(.bottom, 2)
+                .padding(.vertical, 12)
                 .contentShape(Rectangle())
                 .onTapGesture {
-
                     onTap()
                 }
             }
         }
+        .padding(.top, isFirstBar ? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0 : 0)
         .background(
-            ZStack {
-                // Gradient background
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(red: 30/255, green: 32/255, blue: 40/255),
-                        Color(red: 22/255, green: 24/255, blue: 30/255)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                
-                // Subtle pattern overlay
-                DiamondPatternView()
-                    .opacity(0.05)
-            }
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 30/255, green: 32/255, blue: 40/255),
+                    Color(red: 22/255, green: 24/255, blue: 30/255)
+                ]),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: isFirstBar ? .top : [])
         )
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            // Glowing border that pulses when active
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            sessionStore.liveSession.isActive ? accentColor.opacity(0.7) : Color.white.opacity(0.1),
-                            sessionStore.liveSession.isActive ? accentColor.opacity(0.3) : Color.white.opacity(0.05)
-                        ]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.5
-                )
-                .opacity(sessionStore.liveSession.isActive ? 1.0 : 0.6)
-                .animation(
-                    sessionStore.liveSession.isActive ? 
-                        Animation.easeInOut(duration: 2).repeatForever(autoreverses: true) : 
-                        .default,
-                    value: sessionStore.liveSession.isActive
-                )
-        )
-        .shadow(color: statusColor.opacity(sessionStore.liveSession.isActive ? 0.15 : 0.05), radius: 16, y: 8)
-        .padding(.horizontal, 12)
     }
 }
 
@@ -345,7 +314,8 @@ struct DiamondPatternView: View {
                     return store
                 }(),
                 isExpanded: .constant(true),
-                onTap: {}
+                onTap: {},
+                isFirstBar: true
             )
             
             Spacer()
@@ -365,7 +335,8 @@ struct DiamondPatternView: View {
                     return store
                 }(),
                 isExpanded: .constant(false),
-                onTap: {}
+                onTap: {},
+                isFirstBar: false
             )
             
             Spacer()

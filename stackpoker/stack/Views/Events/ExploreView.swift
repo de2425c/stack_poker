@@ -331,6 +331,8 @@ struct SeriesCardView: View {
 class ExploreViewModel: ObservableObject {
     @Published var allEvents: [Event] = []
     @Published var isLoading: Bool = false
+    @Published var loadingProgress: Double = 0.0
+    @Published var loadingMessage: String = ""
     @Published var errorMessage: String? = nil
     
     // --- Updated Filter Properties (removed country/state) ---
@@ -346,11 +348,15 @@ class ExploreViewModel: ObservableObject {
     private let cacheKey = "cached_enhanced_events"
     private let cacheTimestampKey = "cached_events_timestamp"
     private let cacheExpiryHours: TimeInterval = 6 // Cache expires after 6 hours
+    
+    // MARK: - Performance Properties
+    private var updateSeriesWorkItem: DispatchWorkItem?
 
     init() {
-        // Observe changes to allEvents to update series list
+        // Observe changes to allEvents to update series list with debouncing
         $allEvents
             .receive(on: DispatchQueue.main)
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateAvailableSeries()
             }
@@ -358,109 +364,145 @@ class ExploreViewModel: ObservableObject {
     }
 
     private func updateAvailableSeries() {
-        guard !allEvents.isEmpty else {
-            self.availableSeries = []
-            return
-        }
+        Task.detached { [weak self] in
+            guard let self = self else { return }
+            
+            let events = await MainActor.run { self.allEvents }
+            
+            guard !events.isEmpty else {
+                await MainActor.run {
+                    self.availableSeries = []
+                }
+                return
+            }
 
-        var seriesCounts: [String: Int] = [:]
-        for event in allEvents {
-            if let series = event.series_name, !series.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                seriesCounts[series, default: 0] += 1
+            var seriesCounts: [String: Int] = [:]
+            for event in events {
+                if let series = event.series_name, !series.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    seriesCounts[series, default: 0] += 1
+                }
+            }
+
+            // Sort series: by count (descending), then alphabetically for ties
+            let sortedSeries = seriesCounts.sorted { (item1, item2) -> Bool in
+                if item1.value != item2.value {
+                    return item1.value > item2.value // Higher count first
+                }
+                return item1.key < item2.key // Alphabetical for ties
+            }.map { $0.key }
+
+            await MainActor.run {
+                self.availableSeries = sortedSeries
+                
+                // If current selectedSeriesSet contains series no longer available, remove them
+                let validSeries = Set(self.availableSeries)
+                self.selectedSeriesSet = self.selectedSeriesSet.filter { validSeries.contains($0) }
             }
         }
-
-        // Sort series: by count (descending), then alphabetically for ties
-        let sortedSeries = seriesCounts.sorted { (item1, item2) -> Bool in
-            if item1.value != item2.value {
-                return item1.value > item2.value // Higher count first
-            }
-            return item1.key < item2.key // Alphabetical for ties
-        }.map { $0.key }
-
-        self.availableSeries = sortedSeries
-        
-        // If current selectedSeriesSet contains series no longer available, remove them
-        let validSeries = Set(self.availableSeries)
-        self.selectedSeriesSet = self.selectedSeriesSet.filter { validSeries.contains($0) }
     }
 
     // MARK: - Caching Methods
     
-    private func loadCachedEvents() -> [Event]? {
-        guard let timestamp = UserDefaults.standard.object(forKey: cacheTimestampKey) as? Date else {
-            return nil // No cached timestamp
-        }
-        
-        // Check if cache is still valid (within expiry time)
-        let timeElapsed = Date().timeIntervalSince(timestamp)
-        if timeElapsed > (cacheExpiryHours * 3600) {
-            return nil // Cache expired
-        }
-        
-        // Load cached data
-        guard let cachedData = UserDefaults.standard.data(forKey: cacheKey) else {
-            return nil
-        }
-        
-        do {
-            let cachedEvents = try JSONDecoder().decode([CachedEvent].self, from: cachedData)
-            return cachedEvents.compactMap { cachedEvent in
-                Event(
-                    id: cachedEvent.id,
-                    buyin_string: cachedEvent.buyin_string,
-                    simpleDate: SimpleDate(from: cachedEvent.date) ?? SimpleDate(year: 2024, month: 1, day: 1),
-                    event_name: cachedEvent.event_name,
-                    series_name: cachedEvent.series_name,
-                    description: cachedEvent.description,
-                    time: cachedEvent.time,
-                    buyin_usd: cachedEvent.buyin_usd,
-                    casino: cachedEvent.casino
-                )
+    private func loadCachedEvents() async -> [Event]? {
+        return await withCheckedContinuation { continuation in
+            Task.detached {
+                guard let timestamp = UserDefaults.standard.object(forKey: self.cacheTimestampKey) as? Date else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                // Check if cache is still valid (within expiry time)
+                let timeElapsed = Date().timeIntervalSince(timestamp)
+                if timeElapsed > (self.cacheExpiryHours * 3600) {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                // Load cached data
+                guard let cachedData = UserDefaults.standard.data(forKey: self.cacheKey) else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                do {
+                    let cachedEvents = try JSONDecoder().decode([CachedEvent].self, from: cachedData)
+                    let events = cachedEvents.compactMap { cachedEvent in
+                        Event(
+                            id: cachedEvent.id,
+                            buyin_string: cachedEvent.buyin_string,
+                            simpleDate: SimpleDate(from: cachedEvent.date) ?? SimpleDate(year: 2024, month: 1, day: 1),
+                            event_name: cachedEvent.event_name,
+                            series_name: cachedEvent.series_name,
+                            description: cachedEvent.description,
+                            time: cachedEvent.time,
+                            buyin_usd: cachedEvent.buyin_usd,
+                            casino: cachedEvent.casino
+                        )
+                    }
+                    continuation.resume(returning: events)
+                } catch {
+                    print("Error loading cached events: \(error)")
+                    continuation.resume(returning: nil)
+                }
             }
-        } catch {
-            print("Error loading cached events: \(error)")
-            return nil
         }
     }
     
-    private func cacheEvents(_ events: [Event]) {
-        let cachedEvents = events.map { event in
-            CachedEvent(
-                id: event.id,
-                buyin_string: event.buyin_string,
-                date: "\(event.simpleDate.year)-\(String(format: "%02d", event.simpleDate.month))-\(String(format: "%02d", event.simpleDate.day))",
-                event_name: event.event_name,
-                series_name: event.series_name,
-                description: event.description,
-                time: event.time,
-                buyin_usd: event.buyin_usd,
-                casino: event.casino
-            )
-        }
-        
-        do {
-            let data = try JSONEncoder().encode(cachedEvents)
-            UserDefaults.standard.set(data, forKey: cacheKey)
-            UserDefaults.standard.set(Date(), forKey: cacheTimestampKey)
-        } catch {
-            print("Error caching events: \(error)")
-        }
+    private func cacheEvents(_ events: [Event]) async {
+        await Task.detached {
+            let cachedEvents = events.map { event in
+                CachedEvent(
+                    id: event.id,
+                    buyin_string: event.buyin_string,
+                    date: "\(event.simpleDate.year)-\(String(format: "%02d", event.simpleDate.month))-\(String(format: "%02d", event.simpleDate.day))",
+                    event_name: event.event_name,
+                    series_name: event.series_name,
+                    description: event.description,
+                    time: event.time,
+                    buyin_usd: event.buyin_usd,
+                    casino: event.casino
+                )
+            }
+            
+            do {
+                let data = try JSONEncoder().encode(cachedEvents)
+                UserDefaults.standard.set(data, forKey: self.cacheKey)
+                UserDefaults.standard.set(Date(), forKey: self.cacheTimestampKey)
+            } catch {
+                print("Error caching events: \(error)")
+            }
+        }.value
     }
 
     func fetchEvents() {
         // Show loading immediately for responsive UI
-        isLoading = true
-        errorMessage = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.isLoading = true
+            self?.loadingProgress = 0.0
+            self?.loadingMessage = "Checking cache..."
+            self?.errorMessage = nil
+        }
         
         // Load cache in background to avoid blocking UI
         Task {
             // Try to load from cache first
-            if let cachedEvents = loadCachedEvents() {
+            await MainActor.run {
+                self.loadingProgress = 0.2
+                self.loadingMessage = "Loading cached events..."
+            }
+            
+            if let cachedEvents = await loadCachedEvents() {
                 await MainActor.run {
                     print("📱 Loading events from cache (\(cachedEvents.count) events)")
+                    self.loadingProgress = 1.0
+                    self.loadingMessage = "Events loaded!"
                     self.allEvents = cachedEvents
-                    self.isLoading = false
+                    
+                    // Small delay to show completion
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        self.isLoading = false
+                        self.loadingMessage = ""
+                    }
                 }
                 return
             }
@@ -468,33 +510,52 @@ class ExploreViewModel: ObservableObject {
             // Cache miss or expired - fetch from Firebase
             await MainActor.run {
                 print("🔄 Cache miss - fetching events from Firebase")
+                self.loadingProgress = 0.3
+                self.loadingMessage = "Fetching from server..."
             }
             
             do {
                 let querySnapshot = try await db.collection("enhanced_events").order(by: "date").getDocuments()
-                let parsedEvents = querySnapshot.documents.compactMap { Event(document: $0) }
                 
                 await MainActor.run {
+                    self.loadingProgress = 0.7
+                    self.loadingMessage = "Processing events..."
+                }
+                
+                // Process documents on background thread
+                let parsedEvents = await Task.detached {
+                    return querySnapshot.documents.compactMap { Event(document: $0) }
+                }.value
+                
+                await MainActor.run {
+                    self.loadingProgress = 1.0
+                    self.loadingMessage = "Events loaded!"
                     self.allEvents = parsedEvents
-                    self.isLoading = false
-                    
-                    // Cache the newly fetched events
-                    if !parsedEvents.isEmpty {
-                        Task.detached { [weak self] in
-                            self?.cacheEvents(parsedEvents)
-                            print("💾 Cached \(parsedEvents.count) events")
-                        }
-                    }
                     
                     if self.allEvents.isEmpty && !querySnapshot.documents.isEmpty {
                         self.errorMessage = "Event data could not be processed or all events had empty buy-ins/invalid dates. Check console for details."
                     } else if self.allEvents.isEmpty {
                         self.errorMessage = "No events available (or all had empty buy-ins/invalid dates)."
                     }
+                    
+                    // Small delay to show completion
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        self.isLoading = false
+                        self.loadingMessage = ""
+                    }
+                }
+                
+                // Cache the newly fetched events in background
+                if !parsedEvents.isEmpty {
+                    Task.detached { [weak self] in
+                        await self?.cacheEvents(parsedEvents)
+                        print("💾 Cached \(parsedEvents.count) events")
+                    }
                 }
             } catch {
                 await MainActor.run {
                     self.isLoading = false
+                    self.loadingMessage = ""
                     self.errorMessage = "Failed to load events: \(error.localizedDescription)"
                 }
             }
@@ -504,35 +565,61 @@ class ExploreViewModel: ObservableObject {
     func refreshEvents() {
         // Force refresh from Firebase (bypass cache)
         print("🔄 Force refreshing events from Firebase")
-        isLoading = true
-        errorMessage = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.isLoading = true
+            self?.loadingProgress = 0.0
+            self?.loadingMessage = "Refreshing events..."
+            self?.errorMessage = nil
+        }
         
         Task {
+            await MainActor.run {
+                self.loadingProgress = 0.3
+                self.loadingMessage = "Fetching latest events..."
+            }
+            
             do {
                 let querySnapshot = try await db.collection("enhanced_events").order(by: "date").getDocuments()
-                let parsedEvents = querySnapshot.documents.compactMap { Event(document: $0) }
                 
                 await MainActor.run {
+                    self.loadingProgress = 0.7
+                    self.loadingMessage = "Processing events..."
+                }
+                
+                // Process documents on background thread
+                let parsedEvents = await Task.detached {
+                    return querySnapshot.documents.compactMap { Event(document: $0) }
+                }.value
+                
+                await MainActor.run {
+                    self.loadingProgress = 1.0
+                    self.loadingMessage = "Events refreshed!"
                     self.allEvents = parsedEvents
-                    self.isLoading = false
-                    
-                    // Update cache with fresh data
-                    if !parsedEvents.isEmpty {
-                        Task.detached { [weak self] in
-                            self?.cacheEvents(parsedEvents)
-                            print("💾 Updated cache with \(parsedEvents.count) fresh events")
-                        }
-                    }
                     
                     if self.allEvents.isEmpty && !querySnapshot.documents.isEmpty {
                         self.errorMessage = "Event data could not be processed or all events had empty buy-ins/invalid dates. Check console for details."
                     } else if self.allEvents.isEmpty {
                         self.errorMessage = "No events available (or all had empty buy-ins/invalid dates)."
                     }
+                    
+                    // Small delay to show completion
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        self.isLoading = false
+                        self.loadingMessage = ""
+                    }
+                }
+                
+                // Update cache with fresh data in background
+                if !parsedEvents.isEmpty {
+                    Task.detached { [weak self] in
+                        await self?.cacheEvents(parsedEvents)
+                        print("💾 Updated cache with \(parsedEvents.count) fresh events")
+                    }
                 }
             } catch {
                 await MainActor.run {
                     self.isLoading = false
+                    self.loadingMessage = ""
                     self.errorMessage = "Failed to load events: \(error.localizedDescription)"
                 }
             }
@@ -1184,12 +1271,49 @@ struct ExploreView: View {
 
             if viewModel.isLoading {
                 Spacer()
-                ProgressView()
-                    .scaleEffect(1.5)
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                Text("Loading Events...")
-                    .foregroundColor(.gray)
-                    .padding(.top, 8)
+                VStack(spacing: 16) {
+                    // Progress Circle
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.2), lineWidth: 4)
+                            .frame(width: 80, height: 80)
+                        
+                        Circle()
+                            .trim(from: 0, to: viewModel.loadingProgress)
+                            .stroke(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 64/255, green: 156/255, blue: 255/255),
+                                        Color(red: 100/255, green: 180/255, blue: 255/255)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                            )
+                            .frame(width: 80, height: 80)
+                            .rotationEffect(.degrees(-90))
+                            .animation(.easeInOut(duration: 0.3), value: viewModel.loadingProgress)
+                        
+                        Image(systemName: "calendar")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    
+                    VStack(spacing: 8) {
+                        Text(viewModel.loadingMessage.isEmpty ? "Loading Events..." : viewModel.loadingMessage)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                            .animation(.easeInOut(duration: 0.2), value: viewModel.loadingMessage)
+                        
+                        if viewModel.loadingProgress > 0 {
+                            Text("\(Int(viewModel.loadingProgress * 100))%")
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundColor(.gray)
+                                .animation(.easeInOut(duration: 0.2), value: viewModel.loadingProgress)
+                        }
+                    }
+                }
                 Spacer()
             } else if let errorMessage = viewModel.errorMessage {
                 Spacer()
@@ -1405,12 +1529,39 @@ struct ExploreView: View {
             // --- Content ---
             if userEventService.isLoading {
                 Spacer()
-                ProgressView()
-                    .scaleEffect(1.5)
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                Text("Loading Your Events...")
-                    .foregroundColor(.gray)
-                    .padding(.top, 8)
+                VStack(spacing: 16) {
+                    // Progress Circle
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.2), lineWidth: 4)
+                            .frame(width: 80, height: 80)
+                        
+                        Circle()
+                            .trim(from: 0, to: 0.7) // Indeterminate progress
+                            .stroke(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 64/255, green: 156/255, blue: 255/255),
+                                        Color(red: 100/255, green: 180/255, blue: 255/255)
+                                    ]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                            )
+                            .frame(width: 80, height: 80)
+                            .rotationEffect(.degrees(-90))
+                            .animation(.linear(duration: 1.5).repeatForever(autoreverses: false), value: userEventService.isLoading)
+                        
+                        Image(systemName: "person.calendar")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    
+                    Text("Loading Your Events...")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                }
                 Spacer()
             } else if activeUserEvents.isEmpty && userEventService.publicEventRSVPs.isEmpty {
                 VStack {

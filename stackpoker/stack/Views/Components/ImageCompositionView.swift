@@ -29,6 +29,7 @@ struct ImageCompositionView: View {
 
     let session: Session
     let backgroundImage: UIImage
+    let onDismiss: () -> Void // Add closure for parent to handle dismissal
 
     // State for card manipulation (drag and scale)
     @State private var interactiveCardOffset: CGSize = .zero
@@ -44,9 +45,10 @@ struct ImageCompositionView: View {
     @State private var imageToShare: UIImage?
 
     // Initializer
-    init(session: Session, backgroundImage: UIImage) {
+    init(session: Session, backgroundImage: UIImage, onDismiss: @escaping () -> Void) {
         self.session = session
         self.backgroundImage = backgroundImage
+        self.onDismiss = onDismiss
     }
 
     // To ensure date formatting is consistent
@@ -139,7 +141,7 @@ struct ImageCompositionView: View {
                     // Top Controls (Dismiss and Share)
                     HStack {
                         Button {
-                            dismiss()
+                            onDismiss()
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.title)
@@ -309,7 +311,8 @@ struct ImageCompositionView_Previews: PreviewProvider {
         if #available(iOS 16.0, *) {
             ImageCompositionView(
                 session: createSampleSession(),
-                backgroundImage: UIImage(systemName: "photo.fill") ?? UIImage() // Placeholder image
+                backgroundImage: UIImage(systemName: "photo.fill") ?? UIImage(), // Placeholder image
+                onDismiss: {}
             )
         } else {
             Text("ImageCompositionView requires iOS 16.0+")

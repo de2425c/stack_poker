@@ -12,7 +12,6 @@ struct CreateEventView: View {
     @State private var eventTitle = ""
     @State private var eventDescription = ""
     @State private var eventType: UserEvent.EventType = .homeGame // Preselected
-    @State private var isPublic = false // Add public/private toggle
     @State private var startDate = Date().addingTimeInterval(3600) // Default to 1 hour from now
     @State private var endDate: Date?
     @State private var hasEndDate = false
@@ -135,94 +134,6 @@ struct CreateEventView: View {
                                     .foregroundColor(.gray)
                                     .padding(.horizontal, 16)
                                     .padding(.top, 4)
-                            }
-                            
-                            // Public/Private Section
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("Event Visibility")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 16)
-                                
-                                VStack(spacing: 12) {
-                                    // Private Option
-                                    Button(action: {
-                                        isPublic = false
-                                    }) {
-                                        HStack(spacing: 12) {
-                                            Image(systemName: "lock.fill")
-                                                .font(.system(size: 18))
-                                                .foregroundColor(!isPublic ? .black : .white)
-                                            
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text("Private Event")
-                                                    .font(.system(size: 16, weight: .semibold))
-                                                    .foregroundColor(!isPublic ? .black : .white)
-                                                
-                                                Text("Invite only")
-                                                    .font(.system(size: 12))
-                                                    .foregroundColor(!isPublic ? .black.opacity(0.7) : .gray)
-                                            }
-                                            
-                                            Spacer()
-                                            
-                                            if !isPublic {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .font(.system(size: 20))
-                                                    .foregroundColor(.black)
-                                            }
-                                        }
-                                        .padding(16)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(!isPublic ? .white : Color.white.opacity(0.08))
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 12)
-                                                        .stroke(!isPublic ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
-                                                )
-                                        )
-                                    }
-                                    .padding(.horizontal, 16)
-                                    
-                                    // Public Option
-                                    Button(action: {
-                                        isPublic = true
-                                    }) {
-                                        HStack(spacing: 12) {
-                                            Image(systemName: "globe")
-                                                .font(.system(size: 18))
-                                                .foregroundColor(isPublic ? .black : .white)
-                                            
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text("Public Event")
-                                                    .font(.system(size: 16, weight: .semibold))
-                                                    .foregroundColor(isPublic ? .black : .white)
-                                                
-                                                Text("Anyone can find and join")
-                                                    .font(.system(size: 12))
-                                                    .foregroundColor(isPublic ? .black.opacity(0.7) : .gray)
-                                            }
-                                            
-                                            Spacer()
-                                            
-                                            if isPublic {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .font(.system(size: 20))
-                                                    .foregroundColor(.black)
-                                            }
-                                        }
-                                        .padding(16)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(isPublic ? .white : Color.white.opacity(0.08))
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 12)
-                                                        .stroke(isPublic ? Color.clear : Color.white.opacity(0.2), lineWidth: 1)
-                                                )
-                                        )
-                                    }
-                                    .padding(.horizontal, 16)
-                                }
                             }
                             
                             // Home Game Banking Section
@@ -365,11 +276,14 @@ struct CreateEventView: View {
                                     title: "START DATE & TIME",
                                     labelColor: .gray
                                 ) {
-                                    DatePicker("", selection: $startDate, displayedComponents: [.date, .hourAndMinute])
-                                        .datePickerStyle(.compact)
-                                        .colorScheme(.dark)
-                                        .accentColor(.white)
-                                        .padding(.vertical, 8)
+                                    HStack {
+                                        Spacer()
+                                        DatePicker("", selection: $startDate, displayedComponents: [.date, .hourAndMinute])
+                                            .datePickerStyle(.compact)
+                                            .colorScheme(.dark)
+                                            .accentColor(.white)
+                                            .padding(.vertical, 8)
+                                    }
                                 }
                                 .padding(.horizontal, 16)
                                 
@@ -391,14 +305,17 @@ struct CreateEventView: View {
                                             title: "END DATE & TIME",
                                             labelColor: .gray
                                         ) {
-                                            DatePicker("", selection: Binding(
-                                                get: { endDate ?? startDate.addingTimeInterval(3600) },
-                                                set: { endDate = $0 }
-                                            ), displayedComponents: [.date, .hourAndMinute])
-                                                .datePickerStyle(.compact)
-                                                .colorScheme(.dark)
-                                                .accentColor(.white)
-                                                .padding(.vertical, 8)
+                                            HStack {
+                                                Spacer()
+                                                DatePicker("", selection: Binding(
+                                                    get: { endDate ?? startDate.addingTimeInterval(3600) },
+                                                    set: { endDate = $0 }
+                                                ), displayedComponents: [.date, .hourAndMinute])
+                                                    .datePickerStyle(.compact)
+                                                    .colorScheme(.dark)
+                                                    .accentColor(.white)
+                                                    .padding(.vertical, 8)
+                                            }
                                         }
                                         .padding(.horizontal, 16)
                                     }
@@ -463,17 +380,18 @@ struct CreateEventView: View {
                                                 .padding(.vertical, 10)
                                         }
                                         .padding(.horizontal, 16)
-                                    }
-                                    
-                                    HStack {
-                                        Toggle("Enable waitlist", isOn: $waitlistEnabled)
-                                            .font(.system(size: 16))
-                                            .foregroundColor(.white)
-                                            .toggleStyle(SwitchToggleStyle(tint: .white))
                                         
-                                        Spacer()
+                                        // Only show waitlist toggle when player limit is set
+                                        HStack {
+                                            Toggle("Enable waitlist", isOn: $waitlistEnabled)
+                                                .font(.system(size: 16))
+                                                .foregroundColor(.white)
+                                                .toggleStyle(SwitchToggleStyle(tint: .white))
+                                            
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal, 16)
                                     }
-                                    .padding(.horizontal, 16)
                                 }
                             }
                             
@@ -554,8 +472,8 @@ struct CreateEventView: View {
                     endDate: hasEndDate ? endDate : nil,
                     location: hasLocation ? location.trimmingCharacters(in: .whitespacesAndNewlines) : nil,
                     maxParticipants: maxParticipantsInt,
-                    waitlistEnabled: waitlistEnabled,
-                    isPublic: isPublic,
+                    waitlistEnabled: hasMaxParticipants ? waitlistEnabled : false, // Only enable waitlist if player limit is set
+                    isPublic: false, // Always private now
                     rsvpDeadline: nil,
                     image: hasImage ? selectedImage : nil,
                     isBanked: bankWithStack

@@ -71,6 +71,7 @@ class HomeGameService: ObservableObject {
                 if let game = try? self.parseHomeGame(data: doc.data(), id: doc.documentID) {
                     // Only include games explicitly marked as ACTIVE
                     if game.status == .active {
+                        // Prefer most recently created active game
                         if latestGame == nil || game.createdAt > latestGame!.createdAt {
                             latestGame = game
                         }
@@ -81,16 +82,16 @@ class HomeGameService: ObservableObject {
             onChange(latestGame)
         }
         
-        // Listener for games the user created
+        // Listener for games the user created - ONLY ACTIVE games to avoid confusion
         let l1 = db.collection("homeGames")
-            .whereField("status", in: [HomeGame.GameStatus.active.rawValue, HomeGame.GameStatus.completed.rawValue])
+            .whereField("status", isEqualTo: HomeGame.GameStatus.active.rawValue)
             .whereField("groupId", isEqualTo: NSNull())
             .whereField("creatorId", isEqualTo: userId)
             .addSnapshotListener { snap, _ in process(snap) }
         
-        // Listener for games the user is a player in
+        // Listener for games the user is a player in - ONLY ACTIVE games to avoid confusion
         let l2 = db.collection("homeGames")
-            .whereField("status", in: [HomeGame.GameStatus.active.rawValue, HomeGame.GameStatus.completed.rawValue])
+            .whereField("status", isEqualTo: HomeGame.GameStatus.active.rawValue)
             .whereField("groupId", isEqualTo: NSNull())
             .whereField("playerIds", arrayContains: userId)
             .addSnapshotListener { snap, _ in process(snap) }
@@ -1442,12 +1443,13 @@ class HomeGameService: ObservableObject {
             throw NSError(domain: "HomeGameService", code: 4, userInfo: [NSLocalizedDescriptionKey: "Cannot invite to completed games"])
         }
         
-        // Get group members
-        let groupDoc = try await db.collection("groups").document(groupId).getDocument()
-        guard let groupData = groupDoc.data(),
-              let memberIds = groupData["memberIds"] as? [String] else {
-            throw NSError(domain: "HomeGameService", code: 5, userInfo: [NSLocalizedDescriptionKey: "Could not fetch group members"])
-        }
+        // Get group members from the members subcollection
+        let membersSnapshot = try await db.collection("groups")
+            .document(groupId)
+            .collection("members")
+            .getDocuments()
+        
+        let memberIds = membersSnapshot.documents.map { $0.documentID }
         
         // Get existing invites to avoid duplicates
         let existingInvites = try await fetchGameInvites(gameId: gameId)

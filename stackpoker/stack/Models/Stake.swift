@@ -42,12 +42,19 @@ struct Stake: Codable, Identifiable {
     //    Positive: Player pays Staker. Negative: Staker pays Player.
     //    This is what the staker receives minus what they paid.
     var amountTransferredAtSettlement: Double {
-        // If stored amount is set (non-zero or explicitly calculated), use it
-        // Otherwise fall back to computed value for backward compatibility
-        if storedAmountTransferredAtSettlement != 0 || (totalPlayerBuyInForSession > 0 && playerCashoutForSession > 0) {
+        // FIXED: Only use stored amount if it's been explicitly calculated (non-zero)
+        // OR if both buy-in and cashout are set AND stored amount is not zero
+        if storedAmountTransferredAtSettlement != 0 {
             return storedAmountTransferredAtSettlement
         }
-        return stakerShareOfCashout - stakerCost
+        
+        // If we have session data but no stored amount, calculate it
+        if totalPlayerBuyInForSession > 0 && playerCashoutForSession >= 0 {
+            return stakerShareOfCashout - stakerCost
+        }
+        
+        // Fallback to 0 for incomplete data
+        return 0
     }
 
     // 5. Staker's overall net profit or loss from this stake.

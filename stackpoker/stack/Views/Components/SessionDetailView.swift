@@ -155,7 +155,11 @@ struct SessionDetailView: View {
             }
             .fullScreenCover(isPresented: $showImageComposer) {
                 if let selectedImage = selectedImageForComposer, #available(iOS 16.0, *) {
-                    ImageCompositionView(session: session, backgroundImage: selectedImage)
+                    ImageCompositionView(session: session, backgroundImage: selectedImage) {
+                        // Called when X button is tapped - dismiss the image composer
+                        showImageComposer = false
+                        selectedImageForComposer = nil
+                    }
                 } else {
                     Text(selectedImageForComposer == nil ? "No image selected." : "Image composition requires iOS 16+")
                         .onAppear {

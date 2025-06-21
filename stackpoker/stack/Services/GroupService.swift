@@ -1102,6 +1102,82 @@ class GroupService: ObservableObject {
             NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
         }
     }
+    
+    // Delete a group (only owner can do this)
+    func deleteGroup(groupId: String) async throws {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw GroupServiceError.notAuthenticated
+        }
+        
+        // Get the group to check if the user is the owner
+        let groupDoc = try await db.collection("groups").document(groupId).getDocument()
+        
+        guard let groupData = groupDoc.data(), groupDoc.exists else {
+            throw GroupServiceError.groupNotFound
+        }
+        
+        let ownerId = groupData["ownerId"] as? String
+        
+        // Only owner can delete the group
+        guard ownerId == userId else {
+            throw GroupServiceError.permissionDenied
+        }
+        
+        // Delete all messages in the group
+        let messagesSnapshot = try await db.collection("groups")
+            .document(groupId)
+            .collection("messages")
+            .getDocuments()
+        
+        // Delete messages in batches
+        let batch = db.batch()
+        for doc in messagesSnapshot.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        try await batch.commit()
+        
+        // Delete all members
+        let membersSnapshot = try await db.collection("groups")
+            .document(groupId)
+            .collection("members")
+            .getDocuments()
+        
+        // Remove group from all members' user collections
+        for memberDoc in membersSnapshot.documents {
+            let memberId = memberDoc.documentID
+            
+            // Remove from user's groups collection
+            try await db.collection("users")
+                .document(memberId)
+                .collection("groups")
+                .document(groupId)
+                .delete()
+            
+            // Delete member document
+            try await memberDoc.reference.delete()
+        }
+        
+        // Delete any pending invites for this group
+        let usersSnapshot = try await db.collection("users").getDocuments()
+        for userDoc in usersSnapshot.documents {
+            let invitesSnapshot = try await userDoc.reference
+                .collection("groupInvites")
+                .whereField("groupId", isEqualTo: groupId)
+                .getDocuments()
+            
+            for inviteDoc in invitesSnapshot.documents {
+                try await inviteDoc.reference.delete()
+            }
+        }
+        
+        // Finally, delete the group document itself
+        try await db.collection("groups").document(groupId).delete()
+        
+        // Update the local groups list
+        await MainActor.run {
+            self.userGroups.removeAll { $0.id == groupId }
+        }
+    }
 }
 
 enum GroupServiceError: Error, CustomStringConvertible {

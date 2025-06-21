@@ -119,8 +119,25 @@ struct StakingEventCalendarView: View {
             }
             
             // Calendar days
-            let calendar = Calendar.current
-            let monthInterval = calendar.dateInterval(of: .month, for: currentMonth)!
+            calendarDaysGrid
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                )
+        )
+    }
+    
+    // Separate computed property for calendar days to handle guards properly
+    @ViewBuilder
+    private var calendarDaysGrid: some View {
+        let calendar = Calendar.current
+        
+        if let monthInterval = calendar.dateInterval(of: .month, for: currentMonth) {
             let firstOfMonth = monthInterval.start
             let daysInMonth = calendar.range(of: .day, in: .month, for: currentMonth)?.count ?? 30
             let firstWeekday = calendar.component(.weekday, from: firstOfMonth) - 1
@@ -132,34 +149,34 @@ struct StakingEventCalendarView: View {
                         .frame(height: 40)
                 }
                 
-                                 // Days of the month
+                // Days of the month
                 ForEach(1...daysInMonth, id: \.self) { day in
-                    let date = calendar.date(byAdding: .day, value: day - 1, to: firstOfMonth)!
-                    let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
-                    let eventCount = getEventCount(for: date)
-                    let isToday = calendar.isDateInToday(date)
-                    
-                    CalendarDayView(
-                        day: day,
-                        isSelected: isSelected,
-                        eventCount: eventCount,
-                        isToday: isToday,
-                        onTap: {
-                            selectedDate = date
-                        }
-                    )
+                    if let date = calendar.date(byAdding: .day, value: day - 1, to: firstOfMonth) {
+                        let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
+                        let eventCount = getEventCount(for: date)
+                        let isToday = calendar.isDateInToday(date)
+                        
+                        CalendarDayView(
+                            day: day,
+                            isSelected: isSelected,
+                            eventCount: eventCount,
+                            isToday: isToday,
+                            onTap: {
+                                selectedDate = date
+                            }
+                        )
+                    } else {
+                        // Skip invalid dates with empty view
+                        EmptyView()
+                    }
                 }
             }
+        } else {
+            // Fallback for invalid month - show error message
+            Text("Invalid calendar month")
+                .foregroundColor(.gray)
+                .padding()
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.white.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
-                )
-        )
     }
     
     // MARK: - Selected Date Events
@@ -448,9 +465,30 @@ struct CompactStakingEventCard: View {
     }
     
     var body: some View {
-        VStack(spacing: 8) {
-            // Main Row - Event name, role, and status
-            HStack(spacing: 12) {
+        // Add defensive guard to prevent rendering with incomplete data
+        guard !invite.eventId.isEmpty,
+              !invite.eventName.isEmpty else {
+            return AnyView(
+                HStack {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.8)
+                    Text("Loading event...")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.white.opacity(0.04))
+                )
+            )
+        }
+        
+        return AnyView(
+            VStack(spacing: 8) {
+                // Main Row - Event name, role, and status
+                HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(invite.eventName)
                         .font(.system(size: 16, weight: .semibold))
@@ -466,7 +504,7 @@ struct CompactStakingEventCard: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.gray)
                         
-                        Text(stakerDisplayName)
+                        Text(safeStagkerDisplayName)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
                             .lineLimit(1)
@@ -482,6 +520,8 @@ struct CompactStakingEventCard: View {
                         .foregroundColor(.gray)
                 }
             }
+                
+                
             
             // Staking Details Row - Compact inline
             HStack(spacing: 12) {
@@ -539,13 +579,14 @@ struct CompactStakingEventCard: View {
             if invite.eventId.hasPrefix("tournament_"), let stakeId = invite.id {
                 onOpenStakeDetail?(stakeId)
             }
-        }
-        .alert("Error", isPresented: $showError) {
-            Button("OK") { }
-        } message: {
-            Text(errorMessage)
-        }
-        // User profiles should already be pre-loaded by fetchEventStakingInvites()
+            }
+            .alert("Error", isPresented: $showError) {
+                Button("OK") { }
+            } message: {
+                Text(errorMessage)
+            }
+            // User profiles should already be pre-loaded by fetchEventStakingInvites()
+        )
     }
     
     // MARK: - Helper Views
@@ -613,15 +654,55 @@ struct CompactStakingEventCard: View {
         }
     }
     
-    private var stakerDisplayName: String {
+    private var safeStagkerDisplayName: String {
+        // Add early defensive checks to prevent crashes
+        guard !invite.eventId.isEmpty,
+              !invite.eventName.isEmpty else {
+            return "Loading..."
+        }
+        
+        // First check if this is a manual staker
         if invite.isManualStaker {
             return invite.manualStakerDisplayName ?? "Manual"
-        } else if let stakerProfile = userService.loadedUsers[invite.stakerUserId] {
+        }
+        
+        // Safety check for empty staker user ID
+        guard !invite.stakerUserId.isEmpty else {
+            print("Calendar: WARNING - Empty stakerUserId in invite")
+            return "Unknown Staker"
+        }
+        
+        // Check if user profile is loaded
+        if let stakerProfile = userService.loadedUsers[invite.stakerUserId] {
+            return stakerProfile.displayName ?? stakerProfile.username
+        } else {
+            // Safe fallback without accessing string operations on potentially invalid data
+            return "Loading..."
+        }
+    }
+    
+    private var stakerDisplayName: String {
+        // First check if this is a manual staker
+        if invite.isManualStaker {
+            return invite.manualStakerDisplayName ?? "Manual"
+        }
+        
+        // Safety check for empty staker user ID
+        guard !invite.stakerUserId.isEmpty else {
+            print("Calendar: WARNING - Empty stakerUserId in invite")
+            return "Unknown Staker"
+        }
+        
+        // Check if user profile is loaded
+        if let stakerProfile = userService.loadedUsers[invite.stakerUserId] {
             return stakerProfile.displayName ?? stakerProfile.username
         } else {
             // This should not happen if pre-loading worked correctly
             print("Calendar: WARNING - User profile not loaded for \(invite.stakerUserId)")
-            return "User \(invite.stakerUserId.prefix(8))..." 
+            // Safe way to get prefix without crashing
+            let safePrefix = invite.stakerUserId.count >= 8 ? 
+                String(invite.stakerUserId.prefix(8)) : invite.stakerUserId
+            return "User \(safePrefix)..."
         }
     }
     

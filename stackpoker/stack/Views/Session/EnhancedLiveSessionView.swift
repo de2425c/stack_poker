@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
+import PhotosUI
 
 struct EnhancedLiveSessionView: View {
     @Environment(\.dismiss) var dismiss
@@ -75,7 +76,6 @@ struct EnhancedLiveSessionView: View {
     @State private var sessionMinimized = false
     
     // New states for share to feed
-    @State private var showingPostEditor = false
     @State private var showingNoProfileAlert = false
     
     // Add new state for edit session sheet
@@ -140,6 +140,21 @@ struct EnhancedLiveSessionView: View {
     
     // State for Post Tab sharing options
     @State private var showingPostShareOptions = false
+    @State private var showingLiveSessionPostEditor = false
+    
+
+    
+    // Consolidated sharing flow state
+    enum SharingFlowState {
+        case none
+        case resultShare
+        case imagePicker
+        case imageComposition
+        case postEditor
+    }
+    @State private var sharingFlowState: SharingFlowState = .none
+    @State private var selectedImageForResult: UIImage? = nil
+    @State private var selectedPhotoForResult: PhotosPickerItem? = nil
     
     // MARK: - Enum Definitions
     enum LiveSessionTab {
@@ -378,6 +393,100 @@ struct EnhancedLiveSessionView: View {
         .sheet(isPresented: $showingHandHistorySheet) { handHistorySheet }
         .sheet(isPresented: $showingRebuySheet) { rebuyView }
         .sheet(isPresented: $showingEditBuyInSheet) { editBuyInView }
+        .fullScreenCover(isPresented: .constant(sharingFlowState != .none)) {
+            Group {
+                switch sharingFlowState {
+                case .none:
+                    EmptyView()
+                case .resultShare:
+                    sessionResultShareView
+                case .imagePicker:
+                    PhotosPicker(selection: $selectedPhotoForResult, matching: .images) {
+                        VStack {
+                            Text("Select Photo")
+                                .font(.title)
+                                .foregroundColor(.white)
+                                .padding()
+                            Button("Cancel") {
+                                sharingFlowState = .resultShare
+                            }
+                            .foregroundColor(.white)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(AppBackgroundView())
+                    }
+                    .onChange(of: selectedPhotoForResult) { newItem in
+                        Task {
+                            if let data = try? await newItem?.loadTransferable(type: Data.self),
+                               let uiImage = UIImage(data: data) {
+                                selectedImageForResult = uiImage
+                                sharingFlowState = .imageComposition
+                            }
+                        }
+                    }
+                case .imageComposition:
+                    if let details = sessionDetails, let backgroundImage = selectedImageForResult {
+                        let sessionData: [String: Any] = [
+                            "id": details.sessionId,
+                            "userId": userId,
+                            "gameName": details.gameName,
+                            "stakes": details.stakes,
+                            "buyIn": details.buyIn,
+                            "cashout": details.cashout,
+                            "profit": details.profit,
+                            "startDate": Timestamp(date: sessionStore.liveSession.startTime),
+                            "endTime": Timestamp(date: Date()),
+                            "hoursPlayed": sessionStore.liveSession.elapsedTime / 3600
+                        ]
+                        let session = Session(id: details.sessionId, data: sessionData)
+                        
+                        if #available(iOS 16.0, *) {
+                            ImageCompositionView(session: session, backgroundImage: backgroundImage) {
+                                // Called when X button is tapped - go back to result share
+                                sharingFlowState = .resultShare
+                            }
+                        } else {
+                            Text("Image composition requires iOS 16.0+")
+                                .onAppear {
+                                    selectedImageForResult = nil
+                                    sharingFlowState = .none
+                                }
+                        }
+                    }
+                case .postEditor:
+                    // Show post editor within the sharing flow
+                    if let details = sessionDetails {
+                        let sessionData: [String: Any] = [
+                            "id": details.sessionId,
+                            "userId": userId,
+                            "gameName": details.gameName,
+                            "stakes": details.stakes,
+                            "buyIn": details.buyIn,
+                            "cashout": details.cashout,
+                            "profit": details.profit,
+                            "startDate": Timestamp(date: sessionStore.liveSession.startTime),
+                            "endTime": Timestamp(date: Date()),
+                            "hoursPlayed": sessionStore.liveSession.elapsedTime / 3600
+                        ]
+                        let completedSession = Session(id: details.sessionId, data: sessionData)
+                        
+                        SessionPostEditorWrapper(
+                            userId: userId,
+                            completedSession: completedSession,
+                            onSuccess: {
+                                sharingFlowState = .resultShare
+                            },
+                            onCancel: {
+                                sharingFlowState = .resultShare
+                            }
+                        )
+                        .environmentObject(postService)
+                        .environmentObject(userService)
+                        .environmentObject(sessionStore)
+                    }
+                }
+            }
+        }
         .alert("Exit Session?", isPresented: $showingExitAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Exit Without Saving", role: .destructive) { dismiss() }
@@ -402,7 +511,7 @@ struct EnhancedLiveSessionView: View {
             Button("Not Now", role: .cancel) { dismiss() }
             Button("Share to Feed") {
                 if let details = sessionDetails, userService.currentUserProfile != nil {
-                    showingPostEditor = true
+                    sharingFlowState = .postEditor
                 } else {
                     dismiss()
                 }
@@ -415,12 +524,7 @@ struct EnhancedLiveSessionView: View {
                 Text("Would you like to share your session result?")
             }
         }
-        .sheet(isPresented: $showingPostEditor, onDismiss: { 
-            // Only dismiss the session view if we're sharing a completed session result
-            if sessionDetails != nil {
-                dismiss()
-            }
-        }) { postEditorSheet }
+
         .alert("Sign In Required", isPresented: $showingNoProfileAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -439,6 +543,9 @@ struct EnhancedLiveSessionView: View {
         // REMOVED: .sheet(isPresented: $showingShareHandSelector) { shareHandSelectorSheet }
         .sheet(isPresented: $showingShareNoteSelector) { shareNoteSelectorSheet }
         .sheet(isPresented: $showingShareChipUpdateSelector) { shareChipUpdateSelectorSheet }
+        .sheet(isPresented: $showingLiveSessionPostEditor, onDismiss: {
+            handlePostEditorDisappear()
+        }) { liveSessionPostEditorSheet }
     }
     
     // New extracted view for the core content of activeSessionView
@@ -2005,7 +2112,7 @@ struct EnhancedLiveSessionView: View {
             note = "Quick subtract: -$\(Int(abs(amount)))"
         }
         
-        // Update the chip stack
+        // Update the chip stack with the new total amount
         sessionStore.updateChipStack(amount: newAmount, note: note)
         
         // Update local data
@@ -2184,8 +2291,8 @@ struct EnhancedLiveSessionView: View {
                 self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
                 
-                // Show share prompt instead of going directly to session detail
-                self.showingShareToFeedPrompt = true
+                // Show session result share view instead of simple prompt
+                self.sharingFlowState = .resultShare
             }
         } catch {
 
@@ -2257,10 +2364,16 @@ struct EnhancedLiveSessionView: View {
                      // UPDATE existing stake with session data
                      print("[EnhancedLiveSessionView] Updating existing stake ID: \(originalStakeId)")
                     do {
+                        // Calculate the settlement amount using the correct formula
+                        let stakerCost = actualSessionBuyInForStaking * (percentageSoldDouble / 100.0) * markupDouble
+                        let stakerShareOfCashout = sessionCashout * (percentageSoldDouble / 100.0)
+                        let settlementAmount = stakerShareOfCashout - stakerCost
+                        
                         let updateData: [String: Any] = [
                             Stake.CodingKeys.sessionId.rawValue: newDocumentId,
                             Stake.CodingKeys.totalPlayerBuyInForSession.rawValue: actualSessionBuyInForStaking,
                             Stake.CodingKeys.playerCashoutForSession.rawValue: sessionCashout,
+                            Stake.CodingKeys.storedAmountTransferredAtSettlement.rawValue: settlementAmount,
                             Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date()),
                             Stake.CodingKeys.status.rawValue: Stake.StakeStatus.awaitingSettlement.rawValue
                         ]
@@ -2326,8 +2439,8 @@ struct EnhancedLiveSessionView: View {
                     print("[EnhancedLiveSessionView] Failed to process stakes")
                 }
                 
-                // Show share prompt instead of going directly to session detail
-                self.showingShareToFeedPrompt = true
+                // Show session result share view instead of simple prompt
+                self.sharingFlowState = .resultShare
             }
         } catch {
             print("[EnhancedLiveSessionView] Failed to save session: \(error)")
@@ -2400,7 +2513,7 @@ struct EnhancedLiveSessionView: View {
         // Show the post editor dialog
         if userService.currentUserProfile != nil {
             // Make sure post editor is properly set up
-            showingPostEditor = true
+            showingLiveSessionPostEditor = true
         } else {
             // If user profile is not available, prompt user to log in
             showingNoProfileAlert = true
@@ -2610,53 +2723,17 @@ struct EnhancedLiveSessionView: View {
         """
     }
     
-    // Update the post editor sheet to use the correct components
-    private var postEditorSheet: some View {
+
+    
+    // Live session post editor sheet for during-session sharing
+    private var liveSessionPostEditorSheet: some View {
         Group {
             // Get session info for badge
             let gameName = sessionStore.liveSession.gameName
             let stakes = sessionStore.liveSession.stakes
             
-            // For session result share after session ends
-            if let details = sessionDetails {
-                // Create a data dictionary for the Session object
-                let sessionData: [String: Any] = [
-                    "userId": userId,
-                    "gameType": sessionStore.liveSession.isTournament ? SessionLogType.tournament.rawValue : SessionLogType.cashGame.rawValue,
-                    "gameName": details.gameName,
-                    "stakes": details.stakes,
-                    "startDate": Timestamp(date: sessionStore.liveSession.startTime),
-                    "startTime": Timestamp(date: sessionStore.liveSession.startTime),
-                    "endTime": Timestamp(date: Date()),
-                    "hoursPlayed": sessionStore.liveSession.elapsedTime / 3600,
-                    "buyIn": details.buyIn,
-                    "cashout": details.cashout,
-                    "profit": details.profit,
-                    "createdAt": Timestamp(date: Date()),
-                    "notes": sessionStore.enhancedLiveSession.notes,
-                    "liveSessionUUID": sessionStore.liveSession.id,
-                    "location": sessionStore.liveSession.isTournament ? sessionStore.liveSession.tournamentName : nil,
-                    "tournamentType": sessionStore.liveSession.tournamentType,
-                    "tournamentGameType": sessionStore.liveSession.tournamentGameType?.rawValue,
-                    "tournamentFormat": sessionStore.liveSession.tournamentFormat?.rawValue,
-                    "pokerVariant": !sessionStore.liveSession.isTournament ? sessionStore.liveSession.pokerVariant : nil,
-                    "casino": sessionStore.liveSession.isTournament ? tournamentCasino : nil
-                ]
-                
-                // Create a Session object from the data dictionary
-                let completedSession = Session(id: details.sessionId, data: sessionData)
-                
-                PostEditorView(
-                    userId: userId,
-                    completedSession: completedSession
-                )
-                .onDisappear {
-                    // When post editor closes for completed session, we need to dismiss the entire view
-                    dismiss()
-                }
-            }
             // For notes or hands during the session, show BADGE (not full card)
-            else if shareToFeedIsNote || shareToFeedIsHand {
+            if shareToFeedIsNote || shareToFeedIsHand {
                 PostEditorView(
                     userId: userId,
                     initialText: shareToFeedContent,
@@ -2668,9 +2745,6 @@ struct EnhancedLiveSessionView: View {
                     sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,  // Pass game name directly
                     sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes  // For tournaments, just show buy-in
                 )
-                .onDisappear {
-                    handlePostEditorDisappear()
-                }
             }
             // For session start posts
             else if shareToFeedIsSessionStart {
@@ -2685,9 +2759,6 @@ struct EnhancedLiveSessionView: View {
                     sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,
                     sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes
                 )
-                .onDisappear {
-                    handlePostEditorDisappear()
-                }
             }
             // For chip updates, show the FULL session card
             else if shareToFeedIsChipUpdate {
@@ -2705,9 +2776,6 @@ struct EnhancedLiveSessionView: View {
                     sessionGameName: effectiveGameName,
                     sessionStakes: effectiveStakes
                 )
-                .onDisappear {
-                    handlePostEditorDisappear()
-                }
             }
             // Default case
             else {
@@ -2722,9 +2790,6 @@ struct EnhancedLiveSessionView: View {
                     sessionGameName: isTournamentSession ? (sessionStore.liveSession.tournamentName ?? gameName) : gameName,
                     sessionStakes: isTournamentSession ? "$\(Int(baseBuyInForTournament)) Buy-in" : stakes
                 )
-                .onDisappear {
-                    handlePostEditorDisappear()
-                }
             }
         }
         .environmentObject(postService)
@@ -4126,7 +4191,7 @@ struct EnhancedLiveSessionView: View {
         
         if quickAddNotes.count == notes.count && !quickAddNotes.isEmpty {
             // All are quick updates - show the sum
-            let changeText = totalChange >= 0 ? "+$\(Int(totalChange))" : "-$\(Int(abs(totalChange)))"
+            let changeText = totalChange >= 0 ? "+$\(Int(totalChange))" : "$\(Int(totalChange))"
             combinedNote = "Quick add: \(changeText)"
         } else if notes.isEmpty {
             let changeText = totalChange >= 0 ? "+$\(Int(totalChange))" : "-$\(Int(abs(totalChange)))"
@@ -4347,6 +4412,56 @@ struct EnhancedLiveSessionView: View {
             }
         } catch {
             print("[EnhancedLiveSessionView] Failed to load event staking invites: \(error)")
+        }
+    }
+    
+    // MARK: - Session Result Share View
+    
+    private var sessionResultShareView: some View {
+        SessionResultShareView(
+            sessionDetails: sessionDetails,
+            isTournament: isTournamentSession,
+            onShareToFeed: {
+                // Switch to post editor state within the sharing flow
+                sharingFlowState = .postEditor
+            },
+            onShareToSocials: {
+                sharingFlowState = .imagePicker
+            },
+            onDone: {
+                sharingFlowState = .none
+                dismiss()
+            }
+        )
+    }
+}
+
+// Wrapper view to handle PostEditor callbacks
+private struct SessionPostEditorWrapper: View {
+    let userId: String
+    let completedSession: Session
+    let onSuccess: () -> Void
+    let onCancel: () -> Void
+    
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var postService: PostService
+    @EnvironmentObject var userService: UserService
+    @EnvironmentObject var sessionStore: SessionStore
+    
+    var body: some View {
+        PostEditorView(
+            userId: userId,
+            completedSession: completedSession
+        )
+        .environmentObject(postService)
+        .environmentObject(userService)
+        .environmentObject(sessionStore)
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PostCreatedSuccessfully"))) { _ in
+            onSuccess()
+        }
+        .onDisappear {
+            // This handles when user taps Cancel in PostEditorView
+            onCancel()
         }
     }
 }

@@ -71,25 +71,26 @@ struct HomePage: View {
                 
                 // Main view structure
                 VStack(spacing: 0) {
-                    // Standalone Home Game Bar (if active)
+                    // Standalone Home Game Bar (if active) - flush with safe area
                     if let hostedGame = activeHostedStandaloneGame {
                         StandaloneHomeGameBar(game: hostedGame, onTap: {
                             self.gameForDetailView = hostedGame
                             self.showGameDetailView = true
                         })
-                        .padding(.top, (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0)
                     }
                     
-                    // Game Invites Bar
+                    // Game Invites Bar - flush with safe area or standalone game bar
                     if !pendingInvites.isEmpty {
                         GameInvitesBar(
                             invites: pendingInvites,
                             onTap: { invite in
+                                print("🎯 Invite tapped: \(invite.gameTitle)")
                                 selectedInvite = invite
                                 showingInviteAcceptSheet = true
-                            }
+                                print("🎯 State set - selectedInvite: \(selectedInvite?.gameTitle ?? "nil"), showingInviteAcceptSheet: \(showingInviteAcceptSheet)")
+                            },
+                            isFirstBar: activeHostedStandaloneGame == nil
                         )
-                        .padding(.top, activeHostedStandaloneGame == nil ? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0 : 0)
                     }
                     
                     // Live session bar (if active)
@@ -100,14 +101,13 @@ struct HomePage: View {
                             isExpanded: $liveSessionBarExpanded,
                             onTap: { 
                                 // Make sure the session is shown when tapped
-
                                 showingLiveSession = true 
-                            }
+                            },
+                            isFirstBar: activeHostedStandaloneGame == nil && pendingInvites.isEmpty
                         )
                         .onTapGesture {
                             // Additional tap gesture to ensure it works
                             if !liveSessionBarExpanded {
-
                                 showingLiveSession = true
                             }
                         }
@@ -125,7 +125,12 @@ struct HomePage: View {
                                 // Remove extra spacing that could create a black bar
                                 
                                 // FeedView with transparent background
-                                FeedView(userId: userId).edgesIgnoringSafeArea(.top)
+                                FeedView(
+                                    userId: userId,
+                                    hasStandaloneGameBar: activeHostedStandaloneGame != nil,
+                                    hasInviteBar: !pendingInvites.isEmpty,
+                                    hasLiveSessionBar: sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive)
+                                ).edgesIgnoringSafeArea(.top)
                             }
                         }
                         .tag(Tab.feed)
@@ -171,6 +176,7 @@ struct HomePage: View {
                     .background(Color.clear)
                     .toolbar(.hidden, for: .tabBar)
                 }
+                .ignoresSafeArea(edges: .top)
 
                 // Show custom tab bar only when it should be visible
                 if tabBarVisibility.isVisible {
@@ -227,64 +233,8 @@ struct HomePage: View {
             }
             .ignoresSafeArea(edges: .bottom)
             .ignoresSafeArea(.keyboard)
-            // REMOVED: Hand replay functionality
-            /*
-            .fullScreenCover(isPresented: $showingReplay) {
-                if let hand = replayHand {
-                    HandReplayView(hand: hand, userId: userId)
-                }
-            }
-            */
-            .sheet(isPresented: $showingSessionForm) {
-                SessionFormView(userId: userId)
-            }
-            // REMOVED: Hand entry sheet
-            /*
-            .sheet(isPresented: $showNewHandEntryViewSheet) {
-                NewHandEntryView()
-            }
-            */
-            .sheet(isPresented: $showingOpenHomeGameFlow, onDismiss: {
-                // If showing game detail, the sheet dismissal should let the navigation link activate
-                if self.gameForDetailView != nil {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        self.showGameDetailView = true
-                    }
-                }
-                
-                // Force refresh active game bar on dismissal (whether from cancel or create)
-
-                loadActiveHostedStandaloneGame()
-            }) {
-                HomeGameView(groupId: nil, onGameCreated: { newGame in
-                    self.gameForDetailView = newGame
-                    self.showingOpenHomeGameFlow = false // Dismiss HomeGameView sheet
-                    
-                    // Set active hosted game for the banner immediately
-                    if newGame.status == .active && newGame.creatorId == self.userId {
-
-                        self.activeHostedStandaloneGame = newGame
-                    }
-                })
-                .environmentObject(userService)
-            }
-            .fullScreenCover(isPresented: $showingLiveSession) {
-                EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
-            }
-            .sheet(isPresented: $showingInviteAcceptSheet) {
-                if let invite = selectedInvite {
-                    InviteAcceptanceSheet(
-                        invite: invite,
-                        onComplete: { accepted, buyInAmount in
-                            showingInviteAcceptSheet = false
-                            // Don't navigate to game detail - the home game bar will show automatically
-                            // when the user becomes a player in the game
-                            selectedInvite = nil
-                        }
-                    )
-                    .environmentObject(sessionStore)
-                }
-            }
+            
+            // Lifecycle modifiers MUST be attached to the main view, not to the following conditional content.
             .onAppear {
                 pageLevelHomeGameService.startListeningForActiveStandaloneGame(userId: self.userId) { game in
                     DispatchQueue.main.async {
@@ -301,7 +251,7 @@ struct HomePage: View {
                     }
                 }
                 
-                // Add observer for standalone game bar refresh
+                // Observer for standalone game bar refresh
                 NotificationCenter.default.addObserver(
                     forName: NSNotification.Name("RefreshStandaloneHomeGame"),
                     object: nil,
@@ -311,33 +261,99 @@ struct HomePage: View {
                 }
             }
             .onDisappear {
-                // Remove observer when view disappears
+                // Clean-up observers & listeners
                 NotificationCenter.default.removeObserver(self)
                 pageLevelHomeGameService.stopListeningForActiveStandaloneGame()
-                inviteListener?.remove()
-                inviteListener = nil
+                inviteListener?.remove(); inviteListener = nil
             }
             .environmentObject(tabBarVisibility)
         }
-        .accentColor(.white) // Set navigation bar buttons to white
         .navigationViewStyle(StackNavigationViewStyle()) // Use StackNavigationViewStyle for consistent presentation
+        .accentColor(.white) // Set navigation bar buttons to white
+        // NEW: Floating invite popup overlay (moved outside NavigationView for better positioning)
+        .overlay(
+            Group {
+                if showingInviteAcceptSheet, let invite = selectedInvite {
+                    FloatingInvitePopup(
+                        invite: invite,
+                        onAccept: { amount in
+                            handleInviteAccept(invite: invite, amount: amount)
+                        },
+                        onDecline: {
+                            handleInviteDecline(invite: invite)
+                        },
+                        onDismiss: {
+                            showingInviteAcceptSheet = false
+                            selectedInvite = nil
+                        }
+                    )
+                }
+            }
+        )
+        // Move all sheet modifiers OUTSIDE NavigationView to prevent white screen issues
+        .sheet(isPresented: $showingSessionForm) {
+            SessionFormView(userId: userId)
+        }
+        .sheet(isPresented: $showingOpenHomeGameFlow, onDismiss: {
+            // If showing game detail, the sheet dismissal should let the navigation link activate
+            if self.gameForDetailView != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.showGameDetailView = true
+                }
+            }
+            
+            // Force refresh active game bar on dismissal (whether from cancel or create)
+            loadActiveHostedStandaloneGame()
+        }) {
+            HomeGameView(groupId: nil, onGameCreated: { newGame in
+                self.gameForDetailView = newGame
+                self.showingOpenHomeGameFlow = false // Dismiss HomeGameView sheet
+                
+                // Set active hosted game for the banner immediately
+                if newGame.status == .active && newGame.creatorId == self.userId {
+                    self.activeHostedStandaloneGame = newGame
+                }
+            })
+            .environmentObject(userService)
+        }
+        .fullScreenCover(isPresented: $showingLiveSession) {
+            EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
+        }
+        // REMOVED: Old sheet presentation that was causing white screen issues
+        // The floating popup is now handled as an overlay above
     }
     
     private func loadActiveHostedStandaloneGame() {
-
         Task {
             do {
                 let hosted = try await pageLevelHomeGameService.fetchActiveGames(createdBy: self.userId)
                 let playing = try await pageLevelHomeGameService.fetchActiveStandaloneGames(for: self.userId)
 
-                let all = (hosted + playing).filter { $0.groupId == nil && $0.status == .active }
+                // Only include active standalone games, sorted by creation date (most recent first)
+                let all = (hosted + playing)
+                    .filter { $0.groupId == nil && $0.status == .active }
                     .sorted { $0.createdAt > $1.createdAt }
                 
                 await MainActor.run {
+                    let previousGame = self.activeHostedStandaloneGame
                     self.activeHostedStandaloneGame = all.first
+                    
+                    // Debug logging to help track game banner updates
+                    if let newGame = self.activeHostedStandaloneGame {
+                        print("🎮 Updated active game banner to: \(newGame.title) (ID: \(newGame.id), Status: \(newGame.status.rawValue), Created: \(newGame.createdAt))")
+                        if let prev = previousGame, prev.id != newGame.id {
+                            print("🔄 Changed from previous game: \(prev.title) (ID: \(prev.id))")
+                        }
+                    } else {
+                        print("🎮 No active standalone games found")
+                        if previousGame != nil {
+                            print("🔄 Removed previous game from banner")
+                        }
+                    }
                 }
             } catch {
                 await MainActor.run {
+                    print("❌ Error loading active standalone game: \(error)")
                     self.activeHostedStandaloneGame = nil
                 }
             }
@@ -347,6 +363,56 @@ struct HomePage: View {
     private func signOut() {
         // Use the AuthViewModel's signOut method for proper cleanup
         authViewModel.signOut()
+    }
+    
+    // MARK: - Invite Handling Methods
+    
+    private func handleInviteAccept(invite: HomeGame.GameInvite, amount: Double) {
+        Task {
+            do {
+                // Accept the invite
+                _ = try await pageLevelHomeGameService.acceptGameInvite(inviteId: invite.id)
+                
+                // Request buy-in with the specified amount
+                try await pageLevelHomeGameService.requestBuyIn(gameId: invite.gameId, amount: amount)
+                
+                await MainActor.run {
+                    showingInviteAcceptSheet = false
+                    selectedInvite = nil
+                    
+                    // Refresh the home game bar to show the new game the user joined
+                    loadActiveHostedStandaloneGame()
+                }
+            } catch {
+                await MainActor.run {
+                    // Handle error - could show an alert here
+                    print("Error accepting invite: \(error)")
+                    showingInviteAcceptSheet = false
+                    selectedInvite = nil
+                }
+            }
+        }
+    }
+    
+    private func handleInviteDecline(invite: HomeGame.GameInvite) {
+        Task {
+            do {
+                // Decline the invite
+                try await pageLevelHomeGameService.declineGameInvite(inviteId: invite.id)
+                
+                await MainActor.run {
+                    showingInviteAcceptSheet = false
+                    selectedInvite = nil
+                }
+            } catch {
+                await MainActor.run {
+                    // Handle error - could show an alert here
+                    print("Error declining invite: \(error)")
+                    showingInviteAcceptSheet = false
+                    selectedInvite = nil
+                }
+            }
+        }
     }
 }
 
@@ -1083,20 +1149,6 @@ struct MenuRow: View {
     }
 }
 
-// Add Color hex extension if it doesn't exist
-extension Color {
-    init(hex: String) {
-        let scanner = Scanner(string: hex)
-        var rgbValue: UInt64 = 0
-        scanner.scanHexInt64(&rgbValue)
-        
-        let r = Double((rgbValue & 0xFF0000) >> 16) / 255.0
-        let g = Double((rgbValue & 0x00FF00) >> 8) / 255.0
-        let b = Double(rgbValue & 0x0000FF) / 255.0
-        
-        self.init(red: r, green: g, blue: b)
-    }
-}
 
 // Sleek, modern HandInputView
 struct HandInputViewSleek: View {
@@ -1212,6 +1264,7 @@ struct HandInputView: View {
 struct GameInvitesBar: View {
     let invites: [HomeGame.GameInvite]
     let onTap: (HomeGame.GameInvite) -> Void
+    let isFirstBar: Bool // Whether this is the first bar (no other bars above it)
     
     private var firstInvite: HomeGame.GameInvite? {
         invites.first
@@ -1220,6 +1273,7 @@ struct GameInvitesBar: View {
     var body: some View {
         if let invite = firstInvite {
             Button(action: {
+                print("🔥 GameInvitesBar button tapped!")
                 onTap(invite)
             }) {
                 HStack(spacing: 16) {
@@ -1265,10 +1319,11 @@ struct GameInvitesBar: View {
                         .foregroundColor(.gray)
                 }
                 .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+                .padding(.vertical, 12)
+                .padding(.top, isFirstBar ? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0 : 0)
                 .background(
-                    RoundedRectangle(cornerRadius: 0)
-                        .fill(Color(UIColor(red: 28/255, green: 30/255, blue: 34/255, alpha: 0.95)))
+                    Color(UIColor(red: 28/255, green: 30/255, blue: 34/255, alpha: 0.95))
+                        .ignoresSafeArea(edges: isFirstBar ? .top : [])
                         .overlay(
                             Rectangle()
                                 .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
@@ -1278,250 +1333,200 @@ struct GameInvitesBar: View {
                 )
             }
             .buttonStyle(PlainButtonStyle())
+            .onTapGesture {
+                print("🔥 FALLBACK: GameInvitesBar tapped via onTapGesture!")
+                onTap(invite)
+            }
         }
     }
 }
 
-struct InviteAcceptanceSheet: View {
-    @Environment(\.presentationMode) var presentationMode
-    @EnvironmentObject var sessionStore: SessionStore
-    @StateObject private var homeGameService = HomeGameService()
-    
+// MARK: - New Floating Invite Popup (Replaces the problematic sheet)
+
+struct FloatingInvitePopup: View {
     let invite: HomeGame.GameInvite
-    let onComplete: (Bool, Double?) -> Void
+    let onAccept: (Double) -> Void
+    let onDecline: () -> Void
+    let onDismiss: () -> Void
     
-    @State private var buyInAmount: String = ""
+    @State private var buyInAmount = ""
     @State private var isProcessing = false
-    @State private var error: String?
+    @State private var errorMessage = ""
     @State private var showError = false
+    @State private var showPopup = false
     
     var body: some View {
         ZStack {
-            AppBackgroundView()
-                .ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                // Custom navigation header
-                HStack {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
+            // Background overlay
+            Color.black.opacity(0.7)
+                .edgesIgnoringSafeArea(.all)
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showPopup = false
                     }
-                    .disabled(isProcessing)
-                    .foregroundColor(.white)
-                    
-                    Spacer()
-                    
-                    Text("Game Invitation")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    Spacer()
-                    
-                    // Invisible spacer for balance
-                    Rectangle()
-                        .fill(Color.clear)
-                        .frame(width: 44, height: 44)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        onDismiss()
+                    }
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
-                
-                VStack(spacing: 24) {
-                    // Header
-                    VStack(spacing: 16) {
-                        Circle()
-                            .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
-                            .frame(width: 80, height: 80)
-                            .overlay(
-                                Image(systemName: "person.badge.plus")
-                                    .font(.system(size: 32, weight: .medium))
-                                    .foregroundColor(.black)
-                            )
-                        
-                        VStack(spacing: 8) {
-                            Text("You've been invited to join")
-                                .font(.system(size: 16))
-                                .foregroundColor(.white.opacity(0.8))
-                        }
-                    }
+            
+            // Popup content
+            VStack(spacing: 0) {
+                // Header with game info
+                VStack(spacing: 16) {
+                    Image(systemName: "gamecontroller.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(Color(red: 123/255, green: 255/255, blue: 99/255))
                     
-                    // Game details card
-                    VStack(spacing: 16) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Game")
-                                    .font(.caption)
-                                    .foregroundColor(.white.opacity(0.7))
-                                Text(invite.gameTitle)
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.white)
-                            }
-                            
-                            Spacer()
-                            
-                            VStack(alignment: .trailing, spacing: 4) {
-                                Text("Host")
-                                    .font(.caption)
-                                    .foregroundColor(.white.opacity(0.7))
-                                Text(invite.hostName)
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white)
-                            }
-                        }
-                        
-                        if let message = invite.message, !message.isEmpty {
-                            Divider()
-                                .background(Color.white.opacity(0.2))
-                            
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Message")
-                                    .font(.caption)
-                                    .foregroundColor(.white.opacity(0.7))
-                                Text(message)
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
-                    .padding(20)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                            )
-                    )
-                    
-                    // Buy-in amount
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Buy-in Amount")
-                            .font(.system(size: 16, weight: .medium))
+                    VStack(spacing: 8) {
+                        Text("Game Invite")
+                            .font(.system(size: 20, weight: .bold))
                             .foregroundColor(.white)
                         
-                        HStack {
-                            Text("$")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.white)
-                            
-                            TextField("0", text: $buyInAmount)
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.white)
-                                .keyboardType(.numberPad)
+                        Text(invite.gameTitle)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                        
+                        Text("from \(invite.hostName)")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                        
+                        if let message = invite.message, !message.isEmpty {
+                            Text("\"\(message)\"")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                                .italic()
+                                .multilineTextAlignment(.center)
+                                .padding(.top, 4)
                         }
-                        .padding(16)
+                    }
+                }
+                .padding(.top, 24)
+                .padding(.horizontal, 24)
+                
+                // Buy-in input section
+                VStack(spacing: 16) {
+                    Text("Enter your buy-in amount")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                    
+                    HStack(spacing: 12) {
+                        Text("$")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        TextField("100", text: $buyInAmount)
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(.white)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.center)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .padding(.vertical, 16)
+                            .padding(.horizontal, 20)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(UIColor(red: 45/255, green: 47/255, blue: 52/255, alpha: 1.0)))
+                            )
+                    }
+                    .frame(maxWidth: 200)
+                }
+                .padding(.top, 32)
+                .padding(.horizontal, 24)
+                
+                // Action buttons
+                VStack(spacing: 12) {
+                    // Accept button
+                    Button(action: handleAccept) {
+                        HStack(spacing: 8) {
+                            if isProcessing {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                    .scaleEffect(0.8)
+                            }
+                            Text(isProcessing ? "Joining..." : "Accept & Join")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.black)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
                         .background(
                             RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(UIColor(red: 35/255, green: 37/255, blue: 42/255, alpha: 1.0)))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                )
+                                .fill(buyInAmount.isEmpty || isProcessing ? 
+                                      Color.gray.opacity(0.5) : 
+                                      Color(red: 123/255, green: 255/255, blue: 99/255))
                         )
                     }
+                    .disabled(buyInAmount.isEmpty || isProcessing)
                     
-                    Spacer()
-                    
-                    // Action buttons
-                    VStack(spacing: 12) {
-                        Button(action: acceptInvite) {
-                            HStack {
-                                if isProcessing {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .black))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 16, weight: .semibold))
-                                }
-                                
-                                Text(isProcessing ? "Joining..." : "Accept & Join Game")
-                                    .font(.system(size: 18, weight: .bold))
-                            }
+                    // Decline button
+                    Button(action: handleDecline) {
+                        Text("Decline")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.gray)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .foregroundColor(.black)
+                            .padding(.vertical, 16)
                             .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color(red: 123/255, green: 255/255, blue: 99/255))
-                                    .opacity(isValidBuyIn && !isProcessing ? 1.0 : 0.5)
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.gray.opacity(0.5), lineWidth: 1)
                             )
-                        }
-                        .disabled(!isValidBuyIn || isProcessing)
-                        
-                        Button(action: declineInvite) {
-                            Text("Decline")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                        }
-                        .disabled(isProcessing)
                     }
-                    .padding(.bottom, 20)
+                    .disabled(isProcessing)
                 }
-                .padding(.horizontal, 20)
+                .padding(.top, 32)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
-        }
-        .alert(isPresented: $showError) {
-            Alert(
-                title: Text("Error"),
-                message: Text(error ?? "An unknown error occurred"),
-                dismissButton: .default(Text("OK"))
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color(UIColor(red: 30/255, green: 32/255, blue: 36/255, alpha: 0.98)))
             )
+            .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
+            .padding(.horizontal, 32)
+            .scaleEffect(showPopup ? 1.0 : 0.7)
+            .opacity(showPopup ? 1.0 : 0.0)
+        }
+        .onAppear {
+            print("🚀 FloatingInvitePopup appeared for invite: \(invite.gameTitle)")
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                showPopup = true
+            }
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
         }
     }
     
-    private var isValidBuyIn: Bool {
-        guard let amount = Double(buyInAmount), amount > 0 else { return false }
-        return true
-    }
-    
-    private func acceptInvite() {
-        guard let amount = Double(buyInAmount), amount > 0 else { return }
+    private func handleAccept() {
+        guard let amount = Double(buyInAmount), amount > 0 else {
+            errorMessage = "Please enter a valid amount"
+            showError = true
+            return
+        }
         
         isProcessing = true
         
-        Task {
-            do {
-                // Accept the invite
-                try await homeGameService.acceptGameInvite(inviteId: invite.id)
-                
-                // Request buy-in for the game
-                try await homeGameService.requestBuyIn(gameId: invite.gameId, amount: amount)
-                
-                await MainActor.run {
-                    isProcessing = false
-                    onComplete(true, amount)
-                }
-            } catch {
-                await MainActor.run {
-                    isProcessing = false
-                    self.error = error.localizedDescription
-                    showError = true
-                }
-            }
+        // Animate out and call completion
+        withAnimation(.easeInOut(duration: 0.3)) {
+            showPopup = false
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            onAccept(amount)
         }
     }
     
-    private func declineInvite() {
+    private func handleDecline() {
         isProcessing = true
         
-        Task {
-            do {
-                try await homeGameService.declineGameInvite(inviteId: invite.id)
-                
-                await MainActor.run {
-                    isProcessing = false
-                    onComplete(false, nil)
-                }
-            } catch {
-                await MainActor.run {
-                    isProcessing = false
-                    self.error = error.localizedDescription
-                    showError = true
-                }
-            }
+        // Animate out and call completion
+        withAnimation(.easeInOut(duration: 0.3)) {
+            showPopup = false
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            onDecline()
         }
     }
 } 

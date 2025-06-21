@@ -241,8 +241,8 @@ struct GroupChatView: View {
         VStack(spacing: 0) {
             Divider().background(Color.gray.opacity(0.3))
             
-            HStack(alignment: .bottom, spacing: 12) {
-                // + Button with menu
+            HStack(alignment: .center, spacing: 12) {
+                // + Button with menu - centered with text input
                 Menu {
                     Button(action: {
                         imagePickerItem = nil
@@ -270,34 +270,35 @@ struct GroupChatView: View {
                         .font(.system(size: 24))
                         .foregroundColor(.white)
                 }
+                .frame(height: textInputHeight) // Match the text input height for proper centering
                 
                 // Text input field with dynamic height
                 HStack(spacing: 8) {
-                    ZStack(alignment: .topLeading) {
+                    ZStack(alignment: .leading) {
                         // Background
                         RoundedRectangle(cornerRadius: 20)
                             .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
                             .frame(height: textInputHeight)
                         
-                        // Placeholder text
+                        // Placeholder text - centered vertically
                         if messageText.isEmpty {
                             Text("Message")
                                 .font(.system(size: 16))
                                 .foregroundColor(.gray)
-                                .padding(.top, 12)
-                                .padding(.leading, 16)
+                                .padding(.leading, 24)
+                                .frame(height: textInputHeight)
                                 .allowsHitTesting(false)
                         }
                         
-                        // TextEditor for multi-line input - leave space for send button
+                        // TextEditor for multi-line input
                         TextEditor(text: $messageText)
                             .focused($isTextFieldFocused)
                             .font(.system(size: 16))
                             .foregroundColor(.white)
                             .background(Color.clear)
                             .scrollContentBackground(.hidden)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
                             .frame(height: textInputHeight)
                             .onSubmit {
                                 if !messageText.isEmpty {
@@ -310,7 +311,7 @@ struct GroupChatView: View {
                     }
                 }
                 
-                // Send button - separate from text input
+                // Send button - centered with text input
                 if !messageText.isEmpty {
                     Button(action: sendTextMessage) {
                         Image(systemName: isSendingMessage ? "circle" : "arrow.up.circle.fill")
@@ -326,19 +327,18 @@ struct GroupChatView: View {
                             )
                     }
                     .frame(width: 24, height: 24)
+                    .frame(height: textInputHeight) // Match the text input height for proper centering
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
-            .padding(.bottom, 0) // No bottom padding to be flush with keyboard
+            .padding(.bottom, 8) // Small bottom padding for better visual spacing
         }
         .background(Color(UIColor(red: 25/255, green: 25/255, blue: 30/255, alpha: 0.95)))
-        // Move up with keyboard using proper animation - flush with keyboard, no extra padding
-        .offset(y: -keyboardHeight)
+        // Move up with keyboard using proper animation
+        .offset(y: -keyboardHeight + (isKeyboardVisible ? 32 : 0))
         .animation(.easeOut(duration: keyboardAnimationDuration), value: keyboardHeight)
         .animation(.easeOut(duration: 0.2), value: textInputHeight) // Smooth height animation
-        // Fixed: Remove bottom padding to make input bar flush with bottom of screen
-        .padding(.bottom, 0)
     }
     
     // MARK: - Message List Content
@@ -1079,11 +1079,11 @@ struct GroupChatView: View {
         label.text = text.isEmpty ? "A" : text // Use "A" as minimum height reference
         
         // Calculate width available for text (total width minus padding and send button space)
-        let availableWidth = UIScreen.main.bounds.width - 32 - 24 - 32 - 16 // padding + plus button + send button + margins
+        let availableWidth = UIScreen.main.bounds.width - 32 - 24 - 32 - 32 // padding + plus button + send button + text padding
         let constraintSize = CGSize(width: availableWidth, height: .greatestFiniteMagnitude)
         
         let textSize = label.sizeThatFits(constraintSize)
-        let newHeight = max(minInputHeight, min(maxInputHeight, textSize.height + 24)) // Add padding
+        let newHeight = max(minInputHeight, min(maxInputHeight, textSize.height + 24)) // Add padding for top/bottom
         
         withAnimation(.easeOut(duration: 0.2)) {
             textInputHeight = newHeight

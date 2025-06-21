@@ -17,7 +17,11 @@ class ManualStakerService: ObservableObject {
             profileToSave.id = manualStakersCollectionRef.document().documentID
         }
         
-        try manualStakersCollectionRef.document(profileToSave.id!).setData(from: profileToSave)
+        guard let profileId = profileToSave.id else {
+            throw NSError(domain: "ManualStakerService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Profile ID is missing"])
+        }
+        
+        try manualStakersCollectionRef.document(profileId).setData(from: profileToSave)
         
         // Update local array
         await MainActor.run {
@@ -30,7 +34,7 @@ class ManualStakerService: ObservableObject {
             }
         }
         
-        return profileToSave.id!
+        return profileId
     }
     
     // MARK: - Read
