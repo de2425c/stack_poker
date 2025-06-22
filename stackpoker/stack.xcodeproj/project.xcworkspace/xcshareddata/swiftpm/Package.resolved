@@ -1,5 +1,5 @@
 {
-  "originHash" : "20e1c1421f15e72f86ede7035569e7cd5d6e560491b9d8547597c045a744dfa2",
+  "originHash" : "1a4c2ceb2c77fc5b9e2f80bedd405a762c728fec9417bc868b6e4b96c33698b6",
   "pins" : [
     {
       "identity" : "abseil-cpp-binary",
@@ -20,30 +20,21 @@
       }
     },
     {
-      "identity" : "appauth-ios",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/openid/AppAuth-iOS.git",
-      "state" : {
-        "revision" : "2781038865a80e2c425a1da12cc1327bcd56501f",
-        "version" : "1.7.6"
-      }
-    },
-    {
-      "identity" : "draganddropkit?tab=readme-ov-file",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/insub4067/DragAndDropKit?tab=readme-ov-file",
-      "state" : {
-        "revision" : "df02247a2070e8b4ea20a6171c22ed4615419c8b",
-        "version" : "1.0.1"
-      }
-    },
-    {
       "identity" : "firebase-ios-sdk",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/firebase/firebase-ios-sdk",
+      "location" : "https://github.com/firebase/firebase-ios-sdk.git",
       "state" : {
-        "revision" : "fbd463894af94d90eb4d6a4e54080459a8179519",
-        "version" : "11.12.0"
+        "revision" : "45d327fcbe7793747295346c2209ad419bdead74",
+        "version" : "11.14.0"
+      }
+    },
+    {
+      "identity" : "google-ads-on-device-conversion-ios-sdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/googleads/google-ads-on-device-conversion-ios-sdk",
+      "state" : {
+        "revision" : "428d8bb138e00f9a3f4f61cc6cd8863607524f65",
+        "version" : "2.1.0"
       }
     },
     {
@@ -51,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/google/GoogleAppMeasurement.git",
       "state" : {
-        "revision" : "f7460ea630bddf172115c28493ae8b3798d95ce3",
-        "version" : "11.12.0"
+        "revision" : "406f72d0d5e9445fd1cf782db3e9e338cee2bed4",
+        "version" : "11.14.0"
       }
     },
     {
@@ -65,21 +56,12 @@
       }
     },
     {
-      "identity" : "googlesignin-ios",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/google/GoogleSignIn-iOS",
-      "state" : {
-        "revision" : "65fb3f1aa6ffbfdc79c4e22178a55cd91561f5e9",
-        "version" : "8.0.0"
-      }
-    },
-    {
       "identity" : "googleutilities",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/google/GoogleUtilities.git",
       "state" : {
-        "revision" : "53156c7ec267db846e6b64c9f4c4e31ba4cf75eb",
-        "version" : "8.0.2"
+        "revision" : "60da361632d0de02786f709bdc0c4df340f7613e",
+        "version" : "8.1.0"
       }
     },
     {
@@ -96,17 +78,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/google/gtm-session-fetcher.git",
       "state" : {
-        "revision" : "a2ab612cb980066ee56d90d60d8462992c07f24b",
-        "version" : "3.5.0"
-      }
-    },
-    {
-      "identity" : "gtmappauth",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/google/GTMAppAuth.git",
-      "state" : {
-        "revision" : "5d7d66f647400952b1758b230e019b07c0b4b22a",
-        "version" : "4.1.1"
+        "revision" : "c756a29784521063b6a1202907e2cc47f41b667c",
+        "version" : "4.5.0"
       }
     },
     {
@@ -123,8 +96,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/onevcat/Kingfisher.git",
       "state" : {
-        "revision" : "7deda23bbdca612076c5c315003d8638a08ed0f1",
-        "version" : "8.3.2"
+        "revision" : "010a06c4387cea2d13606222b6c08e0454e6dd2d",
+        "version" : "8.3.3"
       }
     },
     {
@@ -139,7 +112,7 @@
     {
       "identity" : "lottie-ios",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/airbnb/lottie-ios",
+      "location" : "https://github.com/airbnb/lottie-ios.git",
       "state" : {
         "revision" : "a004050748dc197c56256a14dca49a035d74726c",
         "version" : "4.5.2"
@@ -164,21 +137,12 @@
       }
     },
     {
-      "identity" : "reorderable",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/visfitness/reorderable",
-      "state" : {
-        "revision" : "25319647c88b1872b17f9cedc1424f0626c11f77",
-        "version" : "1.3.1"
-      }
-    },
-    {
       "identity" : "swift-protobuf",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-protobuf.git",
       "state" : {
-        "revision" : "d72aed98f8253ec1aa9ea1141e28150f408cf17f",
-        "version" : "1.29.0"
+        "revision" : "102a647b573f60f73afdce5613a51d71349fe507",
+        "version" : "1.30.0"
       }
     },
     {

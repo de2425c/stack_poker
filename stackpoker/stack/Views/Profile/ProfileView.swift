@@ -69,6 +69,11 @@ struct ProfileView: View {
     @State private var selectedStats: [PerformanceStat] = []
     @State private var isDraggingAny = false
     
+    // Customizable Graphs
+    @State private var isCustomizingGraphs = false
+    @State private var selectedGraphs: [GraphType] = GraphType.defaultSelection
+    @State private var draggedGraph: GraphType?
+    
     // Chart interaction states
     @State private var selectedDataPoint: (date: Date, profit: Double)? = nil
     @State private var touchLocation: CGPoint = .zero
@@ -82,6 +87,9 @@ struct ProfileView: View {
     private var filteredSessions: [Session] {
         sessionStore.sessions.filter { sessionMatchesFilter($0) }
     }
+    
+    // In ProfileView, add state for the selected day-of-week stats period:
+    @State private var dayOfWeekStatsPeriod: DayOfWeekStatsPeriod = .month
     
     init(userId: String) {
         self.userId = userId
@@ -103,7 +111,7 @@ struct ProfileView: View {
         // let selectedTabGreen = Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
         // let deselectedTabGray = Color.white.opacity(0.7)
         // let clearColor = Color.clear
-
+        
         ZStack {
             AppBackgroundView()
                 .ignoresSafeArea()
@@ -132,7 +140,7 @@ struct ProfileView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 0)
                     .padding(.bottom, 8)
-
+                    
                     // Profile Card
                     ProfileCardView(
                         userId: userId,
@@ -142,21 +150,21 @@ struct ProfileView: View {
                     )
                     .padding(.horizontal, 16)
                     .padding(.bottom, 20)
-
+                    
                     // Invisible NavigationLink for programmatic post navigation
                     if let postToNavigate = selectedPostForNavigation {
                         NavigationLink(
                             destination: PostDetailView(post: postToNavigate, userId: userId),
                             isActive: Binding<Bool>(
-                               get: { selectedPostForNavigation?.id == postToNavigate.id },
-                               set: { if !$0 { selectedPostForNavigation = nil } }
+                                get: { selectedPostForNavigation?.id == postToNavigate.id },
+                                set: { if !$0 { selectedPostForNavigation = nil } }
                             ),
                             label: { EmptyView() }
                         )
                         .hidden()
                         .frame(width: 0, height: 0)
                     }
-
+                    
                     // Navigation cards / buttons
                     VStack(spacing: 16) {
                         // Recent Activity Card and Analytics Card side-by-side
@@ -164,66 +172,66 @@ struct ProfileView: View {
                             compactNavigationCard(
                                 title: "Activity",
                                 iconName: "list.bullet.below.rectangle",
-                                baseColor: Color.blue, 
+                                baseColor: Color.blue,
                                 action: { showActivityDetailView = true }
                             ) {
                                 Text("See your latest posts")
                             }
-
+                            
                             compactNavigationCard(
                                 title: "Analytics",
                                 iconName: "chart.bar.xaxis",
-                                baseColor: Color.green, 
+                                baseColor: Color.green,
                                 action: { showAnalyticsDetailView = true }
                             ) {
                                 Text("Analyze your results")
                             }
                         }
-
+                        
                         // REMOVED: Hands Card
                         /*
-                        navigationCard(
-                            title: "Hands (\(handStore.savedHands.count))",
-                            iconName: "suit.spade.fill",
-                            baseColor: Color.purple, 
-                            action: { showHandsDetailView = true }
-                        ) {
-                            if let recentHand = handStore.mostRecentHand {
-                                HStack(alignment: .top, spacing: 8) {
-                                    Capsule()
-                                        .fill(Color.purple.opacity(0.7))
-                                        .frame(width: 3)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        HStack(spacing: 6) {
-                                            Text(recentHand.heroPnL >= 0 ? "Won $\(Int(recentHand.heroPnL))" : "Lost $\(Int(abs(recentHand.heroPnL)))")
-                                                .font(.plusJakarta(.callout, weight: .semibold))
-                                                .foregroundColor(recentHand.heroPnL >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
-                                            Text("•")
-                                                .font(.plusJakarta(.caption2, weight: .light))
-                                                .foregroundColor(.gray)
-                                            Text(relativeDateFormatter(from: recentHand.timestamp))
-                                                .font(.plusJakarta(.caption2, weight: .medium))
-                                                .foregroundColor(.gray)
-                                        }
-                                        Text(recentHand.handSummary)
-                                            .font(.plusJakarta(.footnote))
-                                            .foregroundColor(.white.opacity(0.8))
-                                            .lineLimit(1)
-                                    }
-                                }
-                            } else {
-                                Text("Review your logged poker hands.")
-                                    .font(.plusJakarta(.subheadline))
-                                    .foregroundColor(.white.opacity(0.85))
-                            }
-                        }
-                        */
+                         navigationCard(
+                         title: "Hands (\(handStore.savedHands.count))",
+                         iconName: "suit.spade.fill",
+                         baseColor: Color.purple,
+                         action: { showHandsDetailView = true }
+                         ) {
+                         if let recentHand = handStore.mostRecentHand {
+                         HStack(alignment: .top, spacing: 8) {
+                         Capsule()
+                         .fill(Color.purple.opacity(0.7))
+                         .frame(width: 3)
+                         VStack(alignment: .leading, spacing: 3) {
+                         HStack(spacing: 6) {
+                         Text(recentHand.heroPnL >= 0 ? "Won $\(Int(recentHand.heroPnL))" : "Lost $\(Int(abs(recentHand.heroPnL)))")
+                         .font(.plusJakarta(.callout, weight: .semibold))
+                         .foregroundColor(recentHand.heroPnL >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
+                         Text("•")
+                         .font(.plusJakarta(.caption2, weight: .light))
+                         .foregroundColor(.gray)
+                         Text(relativeDateFormatter(from: recentHand.timestamp))
+                         .font(.plusJakarta(.caption2, weight: .medium))
+                         .foregroundColor(.gray)
+                         }
+                         Text(recentHand.handSummary)
+                         .font(.plusJakarta(.footnote))
+                         .foregroundColor(.white.opacity(0.8))
+                         .lineLimit(1)
+                         }
+                         }
+                         } else {
+                         Text("Review your logged poker hands.")
+                         .font(.plusJakarta(.subheadline))
+                         .foregroundColor(.white.opacity(0.85))
+                         }
+                         }
+                         */
                         
                         // Sessions Card
                         navigationCard(
                             title: "Sessions (\(totalSessions))",
                             iconName: "list.star",
-                            baseColor: Color.orange, 
+                            baseColor: Color.orange,
                             action: { showSessionsDetailView = true }
                         ) {
                             if let recentSession = sessionStore.mostRecentSession {
@@ -264,7 +272,7 @@ struct ProfileView: View {
                                     .foregroundColor(.white.opacity(0.85))
                             }
                         }
-
+                        
                         // Staking Dashboard Card (New)
                         navigationCard(
                             title: "Staking Dashboard",
@@ -276,7 +284,7 @@ struct ProfileView: View {
                                 .font(.plusJakarta(.subheadline))
                                 .foregroundColor(.white.opacity(0.85))
                         }
-
+                        
                         // Challenges Dashboard Card (New)
                         navigationCard(
                             title: "Challenges (\(challengeService.activeChallenges.count))",
@@ -315,7 +323,7 @@ struct ProfileView: View {
                                     .foregroundColor(.white.opacity(0.85))
                             }
                         }
-
+                        
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 120) // Extra space so last buttons clear the tab bar
@@ -328,8 +336,8 @@ struct ProfileView: View {
         .sheet(isPresented: $showEdit) {
             if let profile = userService.currentUserProfile {
                 ProfileEditView(profile: profile) { updatedProfile in
-                    Task { 
-                        try? await userService.fetchUserProfile() 
+                    Task {
+                        try? await userService.fetchUserProfile()
                     }
                 }
             }
@@ -413,32 +421,32 @@ struct ProfileView: View {
         }
         // REMOVED: .fullScreenCover(isPresented: $showHandsDetailView)
         /*
-        .fullScreenCover(isPresented: $showHandsDetailView) {
-            NavigationView {
-                ZStack {
-                    AppBackgroundView().ignoresSafeArea()
-                    HandsTab(handStore: handStore)
-                        .padding(.top, -35)
-                }
-                .navigationTitle("Hands")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(action: { showHandsDetailView = false }) {
-                            Image(systemName: "chevron.backward")
-                                .foregroundColor(.white)
-                        }
-                    }
-                }
-            }
-            .toolbarBackground(Color.clear, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .background(AppBackgroundView().ignoresSafeArea(.all))
-            .accentColor(.white)
-            .environmentObject(handStore)
-            .environmentObject(userService)
-        }
-        */
+         .fullScreenCover(isPresented: $showHandsDetailView) {
+         NavigationView {
+         ZStack {
+         AppBackgroundView().ignoresSafeArea()
+         HandsTab(handStore: handStore)
+         .padding(.top, -35)
+         }
+         .navigationTitle("Hands")
+         .navigationBarTitleDisplayMode(.inline)
+         .toolbar {
+         ToolbarItem(placement: .navigationBarLeading) {
+         Button(action: { showHandsDetailView = false }) {
+         Image(systemName: "chevron.backward")
+         .foregroundColor(.white)
+         }
+         }
+         }
+         }
+         .toolbarBackground(Color.clear, for: .navigationBar)
+         .toolbarBackground(.visible, for: .navigationBar)
+         .background(AppBackgroundView().ignoresSafeArea(.all))
+         .accentColor(.white)
+         .environmentObject(handStore)
+         .environmentObject(userService)
+         }
+         */
         .fullScreenCover(isPresented: $showSessionsDetailView) {
             NavigationView {
                 ZStack {
@@ -484,13 +492,13 @@ struct ProfileView: View {
                 Color.clear, // Use a clear color to make it transparent
                 for: .navigationBar
             )
-            .toolbarBackground(.visible, for: .navigationBar) 
+            .toolbarBackground(.visible, for: .navigationBar)
             // This background on the NavigationView should then show through the transparent toolbar area
             .background(AppBackgroundView().ignoresSafeArea(.all))
-            .accentColor(.white) 
-            .environmentObject(userService) 
+            .accentColor(.white)
+            .environmentObject(userService)
             .environmentObject(StakeService())
-            .environmentObject(ManualStakerService()) 
+            .environmentObject(ManualStakerService())
         }
         .fullScreenCover(isPresented: $showChallengesDetailView) {
             NavigationView {
@@ -527,45 +535,51 @@ struct ProfileView: View {
             // Load saved selected stats
             loadSelectedStats()
             
+            // Load saved selected graphs
+            loadSelectedGraphs()
+            
             if userService.currentUserProfile == nil {
                 Task { try? await userService.fetchUserProfile() }
             }
             // Fetch posts for Activity
             Task {
-
+                
                 // Fetch if posts are for a different user or empty
                 if postService.posts.isEmpty || postService.posts.first?.userId != userId {
-
+                    
                     try await postService.fetchPosts(forUserId: userId)
-
+                    
                 } else {
-
+                    
                 }
             }
             // Fetch sessions for Analytics & Sessions cards/views
             if sessionStore.sessions.isEmpty {
-
+                
                 sessionStore.fetchSessions()
-
+                
             } else {
-
+                
             }
         }
         .onChange(of: selectedStats) { _ in
             saveSelectedStats()
         }
+        .onChange(of: selectedGraphs) { _ in
+            saveSelectedGraphs()
+        }
     }
-
+    
     // State variables for ProfileCardView, if not already present
     @State private var showingFollowersSheet: Bool = false
     @State private var showingFollowingSheet: Bool = false
-
+    
     // Helper for creating styled navigation cards
     @ViewBuilder
     private func navigationCard<PreviewContent: View>(
         title: String,
         iconName: String,
-        baseColor: Color, 
+        baseColor: Color,
         action: @escaping () -> Void,
         @ViewBuilder previewContent: () -> PreviewContent
     ) -> some View {
@@ -575,12 +589,12 @@ struct ProfileView: View {
                     .font(.system(size: 22, weight: .medium))
                     .foregroundColor(baseColor.opacity(0.9))
                     .frame(width: 30)
-
+                
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
                         .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(.white) 
-                        .lineLimit(1) 
+                        .foregroundColor(.white)
+                        .lineLimit(1)
                     
                     previewContent()
                         .font(.plusJakarta(.subheadline))
@@ -599,14 +613,14 @@ struct ProfileView: View {
             .padding(EdgeInsets(top: 14, leading: 20, bottom: 12, trailing: 20))
             .background(
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(Color.clear) 
+                    .fill(Color.clear)
                     .overlay(
                         RoundedRectangle(cornerRadius: 20)
                             .stroke(baseColor.opacity(0.25), lineWidth: 1)
                     )
             )
             .contentShape(RoundedRectangle(cornerRadius: 20))
-            .shadow(color: baseColor.opacity(0.15), radius: 4, x: 0, y: 2) 
+            .shadow(color: baseColor.opacity(0.15), radius: 4, x: 0, y: 2)
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -616,7 +630,7 @@ struct ProfileView: View {
     private func compactNavigationCard<PreviewContent: View>(
         title: String,
         iconName: String,
-        baseColor: Color, 
+        baseColor: Color,
         action: @escaping () -> Void,
         @ViewBuilder previewContent: () -> PreviewContent
     ) -> some View {
@@ -626,7 +640,7 @@ struct ProfileView: View {
                     .font(.system(size: 20, weight: .medium))
                     .foregroundColor(baseColor.opacity(0.9))
                     .frame(width: 25)
-
+                
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 16, weight: .bold))
@@ -651,7 +665,7 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .background(
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.clear) 
+                    .fill(Color.clear)
                     .overlay(
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(baseColor.opacity(0.25), lineWidth: 1)
@@ -731,7 +745,7 @@ struct ProfileView: View {
     private var totalHoursPlayed: Double {
         filteredSessions.reduce(0) { $0 + $1.hoursPlayed }
     }
-
+    
     private var averageSessionLength: Double {
         if totalSessions == 0 { return 0 }
         return totalHoursPlayed / Double(totalSessions)
@@ -745,8 +759,8 @@ struct ProfileView: View {
     
     private var bbPerHour: Double {
         // Calculate BB/hour properly: total BB won / total hours
-        let cashGameSessions = filteredSessions.filter { 
-            $0.gameType.lowercased().contains("cash") 
+        let cashGameSessions = filteredSessions.filter {
+            $0.gameType.lowercased().contains("cash")
         }
         
         guard !cashGameSessions.isEmpty else { return 0 }
@@ -794,7 +808,7 @@ struct ProfileView: View {
             return String(format: "%.1f BB/hr", bbPerHour)
         }
     }
-
+    
     private var highestCashoutToBuyInRatio: (ratio: Double, session: Session)? {
         guard !filteredSessions.isEmpty else { return nil }
         
@@ -816,14 +830,14 @@ struct ProfileView: View {
         }
         return nil
     }
-
+    
     enum TimeOfDayCategory: String, CaseIterable {
         case morning = "Morning Pro" // 5 AM - 12 PM
         case afternoon = "Afternoon Grinder" // 12 PM - 5 PM
         case evening = "Evening Shark" // 5 PM - 9 PM
         case night = "Night Owl" // 9 PM - 5 AM
         case unknown = "Versatile Player"
-
+        
         var icon: String {
             switch self {
             case .morning: return "sun.max.fill"
@@ -834,17 +848,17 @@ struct ProfileView: View {
             }
         }
     }
-
+    
     private var pokerPersona: (category: TimeOfDayCategory, dominantHours: String) {
         guard !filteredSessions.isEmpty else {
             return (.unknown, "N/A")
         }
-
+        
         var morningSessions = 0 // 5 AM - 11:59 AM
         var afternoonSessions = 0 // 12 PM - 4:59 PM
         var eveningSessions = 0   // 5 PM - 8:59 PM
         var nightSessions = 0     // 9 PM - 4:59 AM
-
+        
         let calendar = Calendar.current
         for session in filteredSessions {
             let hour = calendar.component(.hour, from: session.startTime)
@@ -856,7 +870,7 @@ struct ProfileView: View {
             default: break
             }
         }
-
+        
         let counts = [
             "Morning": morningSessions,
             "Afternoon": afternoonSessions,
@@ -866,11 +880,11 @@ struct ProfileView: View {
         
         let totalPlaySessions = Double(morningSessions + afternoonSessions + eveningSessions + nightSessions)
         if totalPlaySessions == 0 { return (.unknown, "N/A")}
-
+        
         var persona: TimeOfDayCategory = .unknown
         var maxCount = 0
         var dominantPeriodName = "N/A"
-
+        
         if morningSessions > maxCount { maxCount = morningSessions; persona = .morning; dominantPeriodName = "Morning" }
         if afternoonSessions > maxCount { maxCount = afternoonSessions; persona = .afternoon; dominantPeriodName = "Afternoon"}
         if eveningSessions > maxCount { maxCount = eveningSessions; persona = .evening; dominantPeriodName = "Evening" }
@@ -884,7 +898,7 @@ struct ProfileView: View {
     
     private var topLocation: (location: String, count: Int)? {
         guard !filteredSessions.isEmpty else { return nil }
-
+        
         let locationStrings = filteredSessions.map { displayLocation(for: $0) }
         let locationCounts = locationStrings.reduce(into: [String: Int]()) { counts, loc in
             counts[loc, default: 0] += 1
@@ -895,7 +909,7 @@ struct ProfileView: View {
     
     private var carouselHighlights: [CarouselHighlight] {
         var items: [CarouselHighlight] = []
-
+        
         // Top Location (Hot Spot) - FIRST
         if let locData = topLocation {
             items.append(CarouselHighlight(
@@ -907,7 +921,7 @@ struct ProfileView: View {
                 tertiaryText: nil
             ))
         }
-
+        
         // Best Multiplier
         if let ratioData = highestCashoutToBuyInRatio {
             items.append(CarouselHighlight(
@@ -919,7 +933,7 @@ struct ProfileView: View {
                 tertiaryText: "Cash-out: $\(Int(ratioData.session.cashout).formattedWithCommas)"
             ))
         }
-
+        
         // Poker Persona
         items.append(CarouselHighlight(
             type: .persona,
@@ -929,7 +943,7 @@ struct ProfileView: View {
             secondaryText: pokerPersona.dominantHours,
             tertiaryText: nil
         ))
-
+        
         return items.filter { !$0.primaryText.isEmpty || $0.type == .persona }
     }
     
@@ -950,12 +964,12 @@ struct ProfileView: View {
                     HStack(alignment: .bottom, spacing: 12) {
                         Text(selectedDataPoint != nil ?
                              "$\(Int(selectedDataPoint!.profit).formattedWithCommas)" :
-                             (selectedGraphTab == 0 ? "$\(Int(totalBankroll).formattedWithCommas)" : 
-                              (selectedGraphTab == 1 ? "$\(Int(filteredSessions.reduce(0){$0+$1.profit}).formattedWithCommas)" : 
-                               "$\(Int(monthlyProfitCurrent()).formattedWithCommas)")))
-                            .font(.system(size: selectedDataPoint != nil ? 40 : 36, weight: .bold))
-                            .foregroundColor(.white)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedDataPoint?.profit)
+                                (selectedGraphTab == 0 ? "$\(Int(totalBankroll).formattedWithCommas)" :
+                                    (selectedGraphTab == 1 ? "$\(Int(filteredSessions.reduce(0){$0+$1.profit}).formattedWithCommas)" :
+                                        "$\(Int(monthlyProfitCurrent()).formattedWithCommas)")))
+                        .font(.system(size: selectedDataPoint != nil ? 40 : 36, weight: .bold))
+                        .foregroundColor(.white)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedDataPoint?.profit)
                         
                         // Edit button only for bankroll view
                         if selectedGraphTab == 0 {
@@ -988,21 +1002,21 @@ struct ProfileView: View {
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-        
+                    
                     HStack(spacing: 4) {
                         if let selectedData = selectedDataPoint {
                             // Show selected date indicator
                             Image(systemName: selectedData.profit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
                                 .font(.system(size: 10))
-                                .foregroundColor(selectedData.profit >= 0 ? 
-                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                                .foregroundColor(selectedData.profit >= 0 ?
+                                                 Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
+                                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
                             
                             Text("at \(formatTooltipDate(selectedData.date))")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(selectedData.profit >= 0 ? 
-                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                                .foregroundColor(selectedData.profit >= 0 ?
+                                                 Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
+                                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
                         } else {
                             // Show time range indicator (original)
                             let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
@@ -1010,15 +1024,15 @@ struct ProfileView: View {
                             
                             Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
                                 .font(.system(size: 10))
-                                .foregroundColor(timeRangeProfit >= 0 ? 
-                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                                .foregroundColor(timeRangeProfit >= 0 ?
+                                                 Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
+                                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
                             
                             Text("$\(abs(Int(timeRangeProfit)).formattedWithCommas)")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(timeRangeProfit >= 0 ? 
-                                    Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                                .foregroundColor(timeRangeProfit >= 0 ?
+                                                 Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
+                                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
                             
                             Text(getTimeRangeLabel(for: selectedTimeRange))
                                 .font(.system(size: 14))
@@ -1040,204 +1054,45 @@ struct ProfileView: View {
                             .frame(height: 220)
                             .frame(maxWidth: .infinity) // Ensure it centers if no data
                     } else {
-                        // Swipeable Graph Carousel
-                        SwipeableGraphCarousel(
-                            sessions: filteredSessions,
-                            bankrollTransactions: bankrollStore.transactions,
-                            selectedTimeRange: $selectedTimeRange,
-                            timeRanges: timeRanges,
-                            selectedGraphIndex: $selectedGraphTab,
-                            onChartTouch: { location, geometry in
-                                // Handle touch for tooltip
-                                if selectedGraphTab < 2 {
-                                    let touchX = location.x
-                                    let normalizedX = touchX / geometry.size.width
-                                    
-                                    if !filteredSessions.isEmpty {
-                                        let index = Int(normalizedX * CGFloat(filteredSessions.count - 1))
-                                        let clampedIndex = max(0, min(index, filteredSessions.count - 1))
-                                        let session = filteredSessions.sorted { $0.startDate < $1.startDate }[clampedIndex]
-                                        
-                                        var cumulativeProfit = 0.0
-                                        for i in 0...clampedIndex {
-                                            cumulativeProfit += filteredSessions.sorted { $0.startDate < $1.startDate }[i].profit
-                                        }
-                                        
-                                        selectedDataPoint = (date: session.startDate, profit: cumulativeProfit)
-                                        touchLocation = location
-                                        showTooltip = true
-                                    }
-                                }
-                            },
-                            onTouchEnd: {
-                                showTooltip = false
-                                selectedDataPoint = nil
-                            },
-                            showTooltip: showTooltip,
-                            touchLocation: touchLocation,
-                            selectedDataPoint: selectedDataPoint
+                        // Analytics Header
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Analytics Overview")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.white)
+                            
+                            Text("Customize your graphs below to see detailed insights")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(.systemGray6).opacity(0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
                         )
-                        .frame(height: 280)
+                        .padding(.horizontal, 20)
                     }
                 }
-                // Graph now full width
                 
                 // Spacer for consistent layout
                 Spacer()
                     .frame(height: 16)
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                
-                // Premium Highlights Carousel Section
-                Text("HIGHLIGHTS")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.85))
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
-                    .padding(.top, 12) // Slightly reduced spacing
-
-                // HStack containing Carousel and Win Rate Wheel
-                VStack(spacing: 8) {
-                    // STEP 1: Calculate proper height based on screen width
-                    // Formula: ~50pt padding + (6/3)y + y = screen_width = ~50pt + 3y
-                    // Solving: y = (screen_width - 50) / 3
-                    let screenWidth = UIScreen.main.bounds.width
-                    let squareSize: CGFloat = (screenWidth - 50) / 3
-                    
-                    // STEP 2: Carousel width is 6/3 (=2) times the square size for 60% screen
-                    let carouselWidth: CGFloat = 2.0 * squareSize
-                    
-                    // STEP 3: Carousel content height matches square size (excluding page indicators)
-                    let carouselContentHeight: CGFloat = squareSize
-                    
-                    // Main content row - carousel and win rate with same height
-                    HStack(spacing: 20) {
-                        // Carousel content only (no page indicators)
-                        TabView(selection: $selectedCarouselIndex) {
-                            ForEach(carouselHighlights.indices, id: \.self) { index in
-                                let highlight = carouselHighlights[index]
-                                
-                                VStack(alignment: .leading, spacing: 12) {
-                                    // Header
-                                    HStack(spacing: 10) {
-                                        Image(systemName: highlight.iconName)
-                                            .font(.system(size: 20, weight: .semibold))
-                                            .foregroundColor(highlight.type == .multiplier ? .orange : (highlight.type == .persona ? .cyan : .pink))
-                                            .frame(width: 28, height: 28)
-                                        
-                                        Text(highlight.title)
-                                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                                            .foregroundColor(.white.opacity(0.9))
-                                    
-                                        Spacer()
-                                    }
-                                    
-                                    // Primary content
-                                    Text(highlight.primaryText)
-                                        .font(.system(size: highlight.type == .multiplier ? 38 : 26, weight: .bold, design: .rounded))
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.7)
-                                    
-                                    // Secondary and tertiary content - for multiplier, show buy-in and cashout adjacent
-                                    if highlight.type == .multiplier {
-                                        if let secondaryText = highlight.secondaryText, let tertiaryText = highlight.tertiaryText {
-                                            HStack(spacing: 12) {
-                                                Text(secondaryText)
-                                                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                                                    .foregroundColor(.white.opacity(0.75))
-                                                Text(tertiaryText)
-                                                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                                                    .foregroundColor(.white.opacity(0.75))
-                                            }
-                                        }
-                                    } else {
-                                        // For other types, show normally
-                                        if let secondaryText = highlight.secondaryText {
-                                            Text(secondaryText)
-                                                .font(.system(size: 14, weight: .medium, design: .rounded))
-                                                .foregroundColor(.white.opacity(0.75))
-                                        }
-                                        
-                                        if let tertiaryText = highlight.tertiaryText {
-                                            Text(tertiaryText)
-                                                .font(.system(size: 13, weight: .regular, design: .rounded))
-                                                .foregroundColor(.white.opacity(0.65))
-                                        }
-                                    }
-                                    
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                                .background(
-                        ZStack {
-                                        RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
-                                            .fill(Material.ultraThinMaterial)
-                                            .opacity(0.08) 
-                                        
-                                        RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
-                                            .fill(Color.white.opacity(0.02))
-                                        
-                                        RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
-                                            .stroke(
-                                                LinearGradient(
-                                                    gradient: Gradient(colors: [
-                                                        Color.white.opacity(0.15),
-                                                        Color.white.opacity(0.05),
-                                                        Color.clear
-                                                    ]),
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                ),
-                                                lineWidth: 0.7
-                                            )
-                                    }
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
-                                .tag(index)
-                            }
-                        }
-                        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                        .frame(width: carouselWidth, height: carouselContentHeight)
-                        .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
-                        
-                        // Win-rate square (height = width = carousel height)
-                        WinRateCard(winRate: winRate)
-                            .frame(width: squareSize, height: squareSize)
-                    }
-                    
-                    // Page indicators below the main content
-                    if carouselHighlights.count > 1 {
-                        HStack {
-                            // Spacer to center indicators under carousel
-                            HStack(spacing: 7) {
-                                ForEach(carouselHighlights.indices, id: \.self) { index in
-                                    Capsule()
-                                        .fill(selectedCarouselIndex == index ? Color.white.opacity(0.85) : Color.white.opacity(0.3))
-                                        .frame(width: selectedCarouselIndex == index ? 20 : 7, height: 7)
-                                        .animation(.spring(response: 0.35, dampingFraction: 0.65), value: selectedCarouselIndex)
-                                }
-                            }
-                            .frame(width: carouselWidth)
-                            
-                            Spacer()
-                        }
-                    }
-                }
-                .frame(height: (UIScreen.main.bounds.width - 50) / 3 + 20) // Dynamic height + small buffer
-                .padding(.horizontal, 20)
-                .padding(.bottom, 0)
-
-                // Performance Stats with Customization
+                    .padding(.top, 16)
+                
+                // Customize Graphs Button
                 HStack {
-                    Text("PERFORMANCE STATS")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.gray.opacity(0.8))
+                    Text("GRAPHS")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.85))
                     
-                    if !isCustomizingStats {
-                        Text("\(selectedStats.count)/\(PerformanceStat.allCases.count)")
+                    if !isCustomizingGraphs {
+                        Text("\(selectedGraphs.count)/\(GraphType.allCases.count)")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.gray.opacity(0.6))
                     }
@@ -1246,10 +1101,10 @@ struct ProfileView: View {
                     
                     Button(action: {
                         withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                            isCustomizingStats.toggle()
+                            isCustomizingGraphs.toggle()
                         }
                     }) {
-                        Text(isCustomizingStats ? "Done" : "Customize Stats")
+                        Text(isCustomizingGraphs ? "Done" : "Customize Graphs")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
                     }
@@ -1257,50 +1112,411 @@ struct ProfileView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
                 
-                if isCustomizingStats {
+                if isCustomizingGraphs {
                     // Customization Interface
-                    CustomizeStatsView(selectedStats: $selectedStats, isDraggingAny: $isDraggingAny)
+                    CustomizeGraphsView(selectedGraphs: $selectedGraphs, isDraggingAny: $isDraggingAny)
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 } else {
-                    // Regular Stats Display as Beautiful Boxes
-                    if selectedStats.isEmpty {
-                        Text("No stats selected. Tap 'Customize Stats' to add some.")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.vertical, 20)
-                            .padding(.horizontal, 20)
-                    } else {
-                        LazyVGrid(columns: [
-                            GridItem(.flexible()),
-                            GridItem(.flexible())
-                        ], spacing: 16) {
-                            ForEach(selectedStats, id: \.id) { stat in
-                                StatDisplayCard(
-                                    stat: stat,
-                                    value: getStatValue(for: stat)
-                                )
-                                .onAppear {
-                                    print("📊 Displaying stat card for: \(stat.title)")
-                                }
+                    // Display selected graphs
+                    ForEach(selectedGraphs, id: \.id) { graphType in
+                        switch graphType {
+                        case .bankroll:
+                            // Placeholder for bankroll graph
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Bankroll")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 16)
+                                
+                                Text("Bankroll graph coming soon...")
+                                    .foregroundColor(.gray)
+                                    .frame(height: 200)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 20)
                             }
-                        }
-                        .id(selectedStats.map(\.id).joined(separator: ",")) // Force refresh when stats change
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                        .onAppear {
-                            print("📈 Stats grid appeared with \(selectedStats.count) stats: \(selectedStats.map(\.title))")
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.systemGray6).opacity(0.1))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            )
+                            .padding(.horizontal, 20)
+                            .padding(.top, 8)
+                        case .dollarPerHour:
+                            DollarPerHourGraph(sessions: filteredSessions)
+                                .padding(.top, 8)
+                        case .profit:
+                            // Placeholder for profit graph
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Profit")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 16)
+                                
+                                Text("Profit graph coming soon...")
+                                    .foregroundColor(.gray)
+                                    .frame(height: 200)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 20)
+                            }
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.systemGray6).opacity(0.1))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            )
+                            .padding(.horizontal, 20)
+                            .padding(.top, 8)
+                        case .monthly:
+                            // Placeholder for monthly graph
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Monthly Profit")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 16)
+                                
+                                Text("Monthly profit graph coming soon...")
+                                    .foregroundColor(.gray)
+                                    .frame(height: 200)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 20)
+                            }
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.systemGray6).opacity(0.1))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            )
+                            .padding(.horizontal, 20)
+                            .padding(.top, 8)
+                        case .daily:
+                            DailyTimeMoneyBarGraph(sessions: filteredSessions)
+                                .padding(.top, 8)
                         }
                     }
                 }
             }
             .padding(.bottom, 24) // Slightly reduced bottom padding
+            
+            // Navigation buttons for deep dives
+            VStack(spacing: 16) {
+                Text("DETAILED ANALYTICS")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                
+                HStack(spacing: 12) {
+                    NavigationLink(destination: CashAnalyticsView()) {
+                        HStack {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .font(.system(size: 18))
+                            Text("Cash")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.blue.opacity(0.2))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                    }
+                    
+                    NavigationLink(destination: TournamentAnalyticsView()) {
+                        HStack {
+                            Image(systemName: "trophy.fill")
+                                .font(.system(size: 18))
+                            Text("Tournament")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.orange.opacity(0.2))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                    }
+                    
+                    NavigationLink(destination: StakingAnalyticsView()) {
+                        HStack {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .font(.system(size: 18))
+                            Text("Staking")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.green.opacity(0.2))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            
+            // Add more spacing between graphs and performance stats
+            Spacer()
+                .frame(height: 32)
+            
+            // Performance Stats with Customization
+            HStack {
+                Text("PERFORMANCE STATS")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.gray.opacity(0.8))
+                
+                if !isCustomizingStats {
+                    Text("\(selectedStats.count)/\(PerformanceStat.allCases.count)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray.opacity(0.6))
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                        isCustomizingStats.toggle()
+                    }
+                }) {
+                    Text(isCustomizingStats ? "Done" : "Customize Stats")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8) // Reduced from 24 to 8 since we added spacer above
+            
+            if isCustomizingStats {
+                // Customization Interface
+                CustomizeStatsView(selectedStats: $selectedStats, isDraggingAny: $isDraggingAny)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else {
+                // Regular Stats Display as Beautiful Boxes
+                if selectedStats.isEmpty {
+                    Text("No stats selected. Tap 'Customize Stats' to add some.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 20)
+                        .padding(.horizontal, 20)
+                } else {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible())
+                    ], spacing: 16) {
+                        ForEach(selectedStats, id: \.id) { stat in
+                            StatDisplayCard(
+                                stat: stat,
+                                value: getStatValue(for: stat)
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                }
+            }
         }
         .background(AppBackgroundView().ignoresSafeArea())
+        
+        // Premium Highlights Carousel Section
+        Text("HIGHLIGHTS")
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundColor(.white.opacity(0.85))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+        
+        // HStack containing Carousel and Win Rate Wheel
+        VStack(spacing: 8) {
+            // STEP 1: Calculate proper height based on screen width
+            // Formula: ~50pt padding + (6/3)y + y = screen_width = ~50pt + 3y
+            // Solving: y = (screen_width - 50) / 3
+            let screenWidth = UIScreen.main.bounds.width
+            let squareSize: CGFloat = (screenWidth - 50) / 3
+            
+            // STEP 2: Carousel width is 6/3 (=2) times the square size for 60% screen
+            let carouselWidth: CGFloat = 2.0 * squareSize
+            
+            // STEP 3: Carousel content height matches square size (excluding page indicators)
+            let carouselContentHeight: CGFloat = squareSize
+            
+            // Main content row - carousel and win rate with same height
+            HStack(spacing: 20) {
+                // Carousel content only (no page indicators)
+                TabView(selection: $selectedCarouselIndex) {
+                    ForEach(carouselHighlights.indices, id: \.self) { index in
+                        let highlight = carouselHighlights[index]
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            // Header
+                            HStack(spacing: 10) {
+                                Image(systemName: highlight.iconName)
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(highlight.type == .multiplier ? .orange : (highlight.type == .persona ? .cyan : .pink))
+                                    .frame(width: 28, height: 28)
+                                
+                                Text(highlight.title)
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.9))
+                                
+                                Spacer()
+                            }
+                            
+                            // Primary content
+                            Text(highlight.primaryText)
+                                .font(.system(size: highlight.type == .multiplier ? 38 : 26, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                            
+                            // Secondary and tertiary content - for multiplier, show buy-in and cashout adjacent
+                            if highlight.type == .multiplier {
+                                if let secondaryText = highlight.secondaryText, let tertiaryText = highlight.tertiaryText {
+                                    HStack(spacing: 12) {
+                                        Text(secondaryText)
+                                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                                            .foregroundColor(.white.opacity(0.75))
+                                        Text(tertiaryText)
+                                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                                            .foregroundColor(.white.opacity(0.75))
+                                    }
+                                }
+                            } else {
+                                // For other types, show normally
+                                if let secondaryText = highlight.secondaryText {
+                                    Text(secondaryText)
+                                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                                        .foregroundColor(.white.opacity(0.75))
+                                }
+                                
+                                if let tertiaryText = highlight.tertiaryText {
+                                    Text(tertiaryText)
+                                        .font(.system(size: 13, weight: .regular, design: .rounded))
+                                        .foregroundColor(.white.opacity(0.65))
+                                }
+                            }
+                            
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .background(
+                            ZStack {
+                                RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
+                                    .fill(Material.ultraThinMaterial)
+                                    .opacity(0.08)
+                                
+                                RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
+                                    .fill(Color.white.opacity(0.02))
+                                
+                                RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
+                                    .stroke(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color.white.opacity(0.15),
+                                                Color.white.opacity(0.05),
+                                                Color.clear
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 0.7
+                                    )
+                            }
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
+                        .tag(index)
+                    }
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .frame(width: carouselWidth, height: carouselContentHeight)
+                .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
+                
+                // Win-rate square (height = width = carousel height)
+                WinRateCard(winRate: winRate)
+                    .frame(width: squareSize, height: squareSize)
+            }
+            
+            // Page indicators below the main content
+            if carouselHighlights.count > 1 {
+                HStack {
+                    // Spacer to center indicators under carousel
+                    HStack(spacing: 7) {
+                        ForEach(carouselHighlights.indices, id: \.self) { index in
+                            Capsule()
+                                .fill(selectedCarouselIndex == index ? Color.white.opacity(0.85) : Color.white.opacity(0.3))
+                                .frame(width: selectedCarouselIndex == index ? 20 : 7, height: 7)
+                                .animation(.spring(response: 0.35, dampingFraction: 0.65), value: selectedCarouselIndex)
+                        }
+                    }
+                    .frame(width: carouselWidth)
+                    
+                    Spacer()
+                }
+            }
+        }
+        .frame(height: (UIScreen.main.bounds.width - 50) / 3 + 20) // Dynamic height + small buffer
+        .padding(.horizontal, 20)
+        .padding(.bottom, 0)
+        
+        // Day of Week Stats Bar Chart
+        DayOfWeekStatsBarChart(sessions: filteredSessions, period: dayOfWeekStatsPeriod)
+            .padding(.top, 18)
+            .padding(.horizontal, 8)
+        
+        // Segmented control for period selection
+        HStack(spacing: 12) {
+            ForEach(DayOfWeekStatsPeriod.allCases) { period in
+                Button(action: {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        dayOfWeekStatsPeriod = period
+                    }
+                }) {
+                    Text(period.rawValue)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(dayOfWeekStatsPeriod == period ? .white : .gray.opacity(0.7))
+                        .padding(.vertical, 7)
+                        .padding(.horizontal, 18)
+                        .background(dayOfWeekStatsPeriod == period ? Color.accentColor.opacity(0.85) : Color.clear)
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 18)
+        .scrollDisabled(isDraggingAny)
     }
+        
 
     // MARK: - Adaptive Stat Card
     @ViewBuilder
@@ -1672,7 +1888,7 @@ struct ProfileView: View {
         
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             selectedDataPoint = dataPoint
-            touchLocation = CGPoint(x: actualX, y: actualY)
+            touchLocation = location
             showTooltip = true
         }
         
@@ -1894,7 +2110,7 @@ struct ProfileView: View {
         // Attempt to parse big blind value from the stakes string (e.g., "$1/$2")
         let digits = session.stakes.replacingOccurrences(of: " $", with: "")
         let comps = digits.replacingOccurrences(of: "$", with: "").split(separator: "/")
-        guard comps.count == 2, let bb = Double(comps[1]) else {
+        guard comps.count == 2, let bb = Double(comps[1]), bb > 0 else {
             return .all
         }
         switch bb {
@@ -1974,6 +2190,26 @@ struct ProfileView: View {
                 .fill(color.opacity(0.15))
         )
     }
+    
+    private func saveSelectedGraphs() {
+        let graphStrings = selectedGraphs.map { $0.rawValue }
+        UserDefaults.standard.set(graphStrings, forKey: "selectedGraphs_\(userId)")
+    }
+    
+    private func loadSelectedGraphs() {
+        if let savedGraphStrings = UserDefaults.standard.object(forKey: "selectedGraphs_\(userId)") as? [String] {
+            let savedGraphs = savedGraphStrings.compactMap { GraphType(rawValue: $0) }
+            if !savedGraphs.isEmpty {
+                selectedGraphs = savedGraphs
+            } else {
+                // Use default if nothing saved or invalid data
+                selectedGraphs = GraphType.defaultSelection
+            }
+        } else {
+            // Use default for first time users
+            selectedGraphs = GraphType.defaultSelection
+        }
+    }
 }
 
 // Wrapper for ActivityContentView to manage its own dismissal and title
@@ -2047,6 +2283,38 @@ enum PerformanceStat: String, CaseIterable, Identifiable, Equatable {
         case .dollarPerHour: return .mint
         case .bbPerHour: return .teal
         }
+    }
+}
+
+// MARK: - Graph Type Enum
+enum GraphType: String, CaseIterable, Identifiable, Equatable {
+    case bankroll = "bankroll"
+    case dollarPerHour = "dollarPerHour"
+    case profit = "profit"
+    case monthly = "monthly"
+    case daily = "daily"
+    
+    var id: String { rawValue }
+    
+    var title: String {
+        switch self {
+        case .bankroll: return "Bankroll"
+        case .dollarPerHour: return "$/Hour"
+        case .profit: return "Profit"
+        case .monthly: return "Monthly"
+        case .daily: return "Daily Activity"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .bankroll, .profit, .dollarPerHour: return "chart.line.uptrend.xyaxis"
+        case .monthly, .daily: return "chart.bar.fill"
+        }
+    }
+    
+    static var defaultSelection: [GraphType] {
+        [.bankroll, .dollarPerHour, .profit, .monthly, .daily]
     }
 }
 
@@ -3131,649 +3399,6 @@ struct ScalePressButtonStyle: ButtonStyle {
     }
 }
 
-// Helper struct for clarity, though often not strictly necessary for just transparency.
-// struct ClearBackground: View { // This helper is no longer used with the new structure
-//     var body: some View {
-//         Color.clear
-//     }
-// }
-
-// MARK: - Swipeable Graph Carousel
-struct SwipeableGraphCarousel: View {
-    let sessions: [Session]
-    let bankrollTransactions: [BankrollTransaction]
-    @Binding var selectedTimeRange: Int
-    let timeRanges: [String]
-    @Binding var selectedGraphIndex: Int
-    let onChartTouch: (CGPoint, GeometryProxy) -> Void
-    let onTouchEnd: () -> Void
-    let showTooltip: Bool
-    let touchLocation: CGPoint
-    let selectedDataPoint: (date: Date, profit: Double)?
-    
-    @State private var dragOffset: CGFloat = 0
-    
-    private let graphTypes = ["Bankroll", "Profit", "Monthly"]
-    
-    var body: some View {
-        VStack(spacing: 0) {
-            // Swipeable graph container
-            TabView(selection: $selectedGraphIndex) {
-                // Bankroll Graph (sessions + bankroll adjustments)
-                BankrollGraphView(
-                    sessions: sessions,
-                    bankrollTransactions: bankrollTransactions,
-                    selectedTimeRange: selectedTimeRange,
-                    timeRanges: timeRanges,
-                    onChartTouch: onChartTouch,
-                    onTouchEnd: onTouchEnd,
-                    showTooltip: showTooltip,
-                    touchLocation: touchLocation,
-                    selectedDataPoint: selectedDataPoint
-                )
-                .tag(0)
-                
-                // Profit Graph (sessions only)
-                ProfitGraphView(
-                    sessions: sessions,
-                    selectedTimeRange: selectedTimeRange,
-                    timeRanges: timeRanges,
-                    onChartTouch: onChartTouch,
-                    onTouchEnd: onTouchEnd,
-                    showTooltip: showTooltip,
-                    touchLocation: touchLocation,
-                    selectedDataPoint: selectedDataPoint
-                )
-                .tag(1)
-                
-                // Monthly Profit Bar Chart
-                MonthlyProfitBarChart(
-                    sessions: sessions,
-                    bankrollTransactions: bankrollTransactions,
-                    onBarTouch: { monthData in
-                        // Handle bar touch to show monthly profit
-                        // Could potentially update selectedDataPoint here if needed
-                    }
-                )
-                .tag(2)
-            }
-            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-            .frame(height: 280)
-            
-            // Time period selector (only for bankroll and profit graphs)
-            if selectedGraphIndex < 2 {
-                HStack {
-                    ForEach(Array(timeRanges.enumerated()), id: \.element) { index, rangeString in
-                        Button(action: {
-                            selectedTimeRange = index
-                        }) {
-                            Text(rangeString)
-                                .font(.system(size: 13, weight: selectedTimeRange == index ? .medium : .regular))
-                                .foregroundColor(selectedTimeRange == index ? .white : .gray)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(selectedTimeRange == index ? Color.gray.opacity(0.3) : Color.clear)
-                                .cornerRadius(8)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                }
-                .padding(.top, 16)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-            
-            // Graph type indicators (moved to bottom, after time selectors)
-            HStack(spacing: 16) {
-                ForEach(Array(graphTypes.enumerated()), id: \.offset) { index, type in
-                    Button(action: {
-                        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                            selectedGraphIndex = index
-                        }
-                    }) {
-                        Text(type)
-                            .font(.system(size: 13, weight: selectedGraphIndex == index ? .semibold : .regular))
-                            .foregroundColor(selectedGraphIndex == index ? .white : .gray)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(selectedGraphIndex == index ? Color.gray.opacity(0.3) : Color.clear)
-                            .cornerRadius(8)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-            }
-            .padding(.top, selectedGraphIndex < 2 ? 12 : 16)
-        }
-        .animation(.easeInOut(duration: 0.3), value: selectedGraphIndex)
-    }
-}
-
-// MARK: - Bankroll Graph View
-struct BankrollGraphView: View {
-    let sessions: [Session]
-    let bankrollTransactions: [BankrollTransaction]
-    let selectedTimeRange: Int
-    let timeRanges: [String]
-    let onChartTouch: (CGPoint, GeometryProxy) -> Void
-    let onTouchEnd: () -> Void
-    let showTooltip: Bool
-    let touchLocation: CGPoint
-    let selectedDataPoint: (date: Date, profit: Double)?
-    
-    private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
-        let now = Date()
-        let calendar = Calendar.current
-        
-        switch timeRangeIndex {
-        case 0: // 24H
-            let oneDayAgo = calendar.date(byAdding: .day, value: -1, to: now) ?? now
-            return sessions.filter { $0.startDate >= oneDayAgo }
-        case 1: // 1W
-            let oneWeekAgo = calendar.date(byAdding: .weekOfYear, value: -1, to: now) ?? now
-            return sessions.filter { $0.startDate >= oneWeekAgo }
-        case 2: // 1M
-            let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: now) ?? now
-            return sessions.filter { $0.startDate >= oneMonthAgo }
-        case 3: // 6M
-            let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: now) ?? now
-            return sessions.filter { $0.startDate >= sixMonthsAgo }
-        case 4: // 1Y
-            let oneYearAgo = calendar.date(byAdding: .year, value: -1, to: now) ?? now
-            return sessions.filter { $0.startDate >= oneYearAgo }
-        default: // All
-            return sessions
-        }
-    }
-    
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Y-axis grid lines
-                VStack(spacing: 0) {
-                    ForEach(0..<5) { _ in
-                        Spacer()
-                        Divider()
-                            .background(Color.gray.opacity(0.1))
-                    }
-                }
-                
-                // Background gradient
-                LinearGradient(
-                    gradient: Gradient(stops: [
-                        .init(color: Color.clear, location: 0),
-                        .init(color: Color.white.opacity(0.02), location: 0.3),
-                        .init(color: Color.white.opacity(0.03), location: 0.7),
-                        .init(color: Color.clear, location: 1)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .blendMode(.overlay)
-                
-                // Combined bankroll chart (sessions + transactions)
-                let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
-                let filteredTransactions = bankrollTransactions // Include all bankroll transactions
-                
-                // Combine and sort data points
-                let combinedData = (filteredSessions.map { (date: $0.startDate, amount: $0.profit, type: "session") } +
-                                  filteredTransactions.map { (date: $0.timestamp, amount: $0.amount, type: "transaction") })
-                    .sorted { $0.date < $1.date }
-                
-                if !combinedData.isEmpty {
-                    let cumulativeData = combinedData.reduce(into: [(Date, Double)]()) { result, item in
-                        let previousTotal = result.last?.1 ?? 0
-                        result.append((item.date, previousTotal + item.amount))
-                    }
-                    
-                    let totalProfit = cumulativeData.last?.1 ?? 0
-                    let chartColor = totalProfit >= 0 ? 
-                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
-                    
-                    // Draw chart path
-                    ChartPath(
-                        dataPoints: cumulativeData,
-                        geometry: geometry,
-                        color: chartColor,
-                        showFill: true
-                    )
-                }
-                
-                // Interactive overlay
-                Rectangle()
-                    .fill(Color.clear)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                onChartTouch(value.location, geometry)
-                            }
-                            .onEnded { _ in
-                                onTouchEnd()
-                            }
-                    )
-                
-                // Touch indicator
-                if showTooltip {
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(stops: [
-                                    .init(color: Color.clear, location: 0),
-                                    .init(color: Color.white.opacity(0.6), location: 0.1),
-                                    .init(color: Color.white.opacity(0.8), location: 0.5),
-                                    .init(color: Color.white.opacity(0.6), location: 0.9),
-                                    .init(color: Color.clear, location: 1)
-                                ]),
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 1)
-                        .position(x: touchLocation.x, y: geometry.size.height / 2)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Profit Graph View
-struct ProfitGraphView: View {
-    let sessions: [Session]
-    let selectedTimeRange: Int
-    let timeRanges: [String]
-    let onChartTouch: (CGPoint, GeometryProxy) -> Void
-    let onTouchEnd: () -> Void
-    let showTooltip: Bool
-    let touchLocation: CGPoint
-    let selectedDataPoint: (date: Date, profit: Double)?
-    
-    private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
-        let now = Date()
-        let calendar = Calendar.current
-        
-        switch timeRangeIndex {
-        case 0: // 24H
-            let oneDayAgo = calendar.date(byAdding: .day, value: -1, to: now) ?? now
-            return sessions.filter { $0.startDate >= oneDayAgo }
-        case 1: // 1W
-            let oneWeekAgo = calendar.date(byAdding: .weekOfYear, value: -1, to: now) ?? now
-            return sessions.filter { $0.startDate >= oneWeekAgo }
-        case 2: // 1M
-            let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: now) ?? now
-            return sessions.filter { $0.startDate >= oneMonthAgo }
-        case 3: // 6M
-            let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: now) ?? now
-            return sessions.filter { $0.startDate >= sixMonthsAgo }
-        case 4: // 1Y
-            let oneYearAgo = calendar.date(byAdding: .year, value: -1, to: now) ?? now
-            return sessions.filter { $0.startDate >= oneYearAgo }
-        default: // All
-            return sessions
-        }
-    }
-    
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Y-axis grid lines
-                VStack(spacing: 0) {
-                    ForEach(0..<5) { _ in
-                        Spacer()
-                        Divider()
-                            .background(Color.gray.opacity(0.1))
-                    }
-                }
-                
-                // Background gradient
-                LinearGradient(
-                    gradient: Gradient(stops: [
-                        .init(color: Color.clear, location: 0),
-                        .init(color: Color.white.opacity(0.02), location: 0.3),
-                        .init(color: Color.white.opacity(0.03), location: 0.7),
-                        .init(color: Color.clear, location: 1)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .blendMode(.overlay)
-                
-                // Profit-only chart (sessions only)
-                let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
-                
-                if !filteredSessions.isEmpty {
-                    let sortedSessions = filteredSessions.sorted { $0.startDate < $1.startDate }
-                    let cumulativeData = sortedSessions.reduce(into: [(Date, Double)]()) { result, session in
-                        let previousTotal = result.last?.1 ?? 0
-                        result.append((session.startDate, previousTotal + session.profit))
-                    }
-                    
-                    let totalProfit = cumulativeData.last?.1 ?? 0
-                    let chartColor = totalProfit >= 0 ? 
-                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
-                    
-                    // Draw chart path
-                    ChartPath(
-                        dataPoints: cumulativeData,
-                        geometry: geometry,
-                        color: chartColor,
-                        showFill: true
-                    )
-                }
-                
-                // Interactive overlay
-                Rectangle()
-                    .fill(Color.clear)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                onChartTouch(value.location, geometry)
-                            }
-                            .onEnded { _ in
-                                onTouchEnd()
-                            }
-                    )
-                
-                // Touch indicator
-                if showTooltip {
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(stops: [
-                                    .init(color: Color.clear, location: 0),
-                                    .init(color: Color.white.opacity(0.6), location: 0.1),
-                                    .init(color: Color.white.opacity(0.8), location: 0.5),
-                                    .init(color: Color.white.opacity(0.6), location: 0.9),
-                                    .init(color: Color.clear, location: 1)
-                                ]),
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 1)
-                        .position(x: touchLocation.x, y: geometry.size.height / 2)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Monthly Profit Bar Chart
-struct MonthlyProfitBarChart: View {
-    let sessions: [Session]
-    let bankrollTransactions: [BankrollTransaction]
-    let onBarTouch: (String) -> Void
-    
-    @State private var selectedBarIndex: Int? = nil
-    
-    private func barHeight(for profit: Double, isPositive: Bool, positiveMax: Double, negativeMin: Double, maxAbsValue: Double, zeroLineY: CGFloat, geometryHeight: CGFloat) -> CGFloat {
-        guard maxAbsValue > 0 else { return 0 }
-        
-        if isPositive {
-            return (profit / positiveMax) * (zeroLineY - 30)
-        } else {
-            return (abs(profit) / abs(negativeMin)) * (geometryHeight - 30 - zeroLineY)
-        }
-    }
-    
-    private func barColor(isPositive: Bool) -> Color {
-        return isPositive ? 
-            Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-            Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
-    }
-    
-    private var monthlyData: [(String, Double)] {
-        let calendar = Calendar.current
-        let now = Date()
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM yy"
-        
-        // Get last 12 months
-        var months: [Date] = []
-        for i in 0..<12 {
-            if let date = calendar.date(byAdding: .month, value: -i, to: now) {
-                months.append(date)
-            }
-        }
-        months.reverse()
-        
-        return months.map { month in
-            let monthProfit = sessions.filter { session in
-                calendar.isDate(session.startDate, equalTo: month, toGranularity: .month)
-            }.reduce(0) { $0 + $1.profit }
-            
-            let bankrollProfit = bankrollTransactions.filter { transaction in
-                calendar.isDate(transaction.timestamp, equalTo: month, toGranularity: .month)
-            }.reduce(0) { $0 + $1.amount }
-            
-            return (formatter.string(from: month), monthProfit + bankrollProfit)
-        }
-    }
-    
-    var body: some View {
-        GeometryReader { geometry in
-            let data = monthlyData
-            let maxValue = data.map { abs($0.1) }.max() ?? 1
-            let centerY = geometry.size.height / 2
-            let availableHeight = centerY - 25 // Leave space for labels
-            let barWidth: CGFloat = 24 // Fixed width for consistency
-            let totalBarsWidth = CGFloat(data.count) * barWidth
-            let totalSpacing = geometry.size.width - totalBarsWidth - 32 // 16 padding on each side
-            let spacing = totalSpacing / CGFloat(max(1, data.count - 1))
-            
-            ZStack {
-                // Grid lines for reference
-                VStack(spacing: 0) {
-                    ForEach(0..<3) { i in
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.1))
-                            .frame(height: 0.5)
-                        if i < 2 { Spacer() }
-                    }
-                }
-                .padding(.vertical, 15)
-                
-                // Central zero line (emphasized)
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.clear,
-                                Color.gray.opacity(0.6),
-                                Color.gray.opacity(0.8),
-                                Color.gray.opacity(0.6),
-                                Color.clear
-                            ]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(height: 2)
-                    .position(x: geometry.size.width / 2, y: centerY)
-                    .shadow(color: Color.gray.opacity(0.3), radius: 1, y: 0)
-                
-                // Bars with perfect alignment
-                HStack(spacing: 0) {
-                    ForEach(Array(data.enumerated()), id: \.offset) { index, item in
-                        let (month, profit) = item
-                        let isPositive = profit >= 0
-                        let barHeight = maxValue > 0 ? min(abs(profit) / maxValue * availableHeight, availableHeight) : 0
-                        let barColor = barColor(isPositive: isPositive)
-                        
-                        VStack(spacing: 0) {
-                            // Top section (positive values)
-                            ZStack(alignment: .bottom) {
-                                // Spacer to maintain layout
-                                Color.clear
-                                    .frame(height: availableHeight)
-                                
-                                // Positive bar
-                                if isPositive && barHeight > 0 {
-                                    Rectangle()
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(stops: [
-                                                    .init(color: barColor.opacity(0.3), location: 0),
-                                                    .init(color: barColor.opacity(0.7), location: 0.3),
-                                                    .init(color: barColor, location: 0.7),
-                                                    .init(color: barColor.opacity(0.9), location: 1)
-                                                ]),
-                                                startPoint: .bottom,
-                                                endPoint: .top
-                                            )
-                                        )
-                                        .frame(width: barWidth, height: barHeight)
-                                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 6, topTrailingRadius: 6))
-                                        .shadow(color: barColor.opacity(0.4), radius: 3, x: 0, y: -2)
-                                        .overlay(
-                                            // Highlight effect
-                                            Rectangle()
-                                                .fill(
-                                                    LinearGradient(
-                                                        gradient: Gradient(colors: [
-                                                            Color.white.opacity(0.3),
-                                                            Color.clear
-                                                        ]),
-                                                        startPoint: .top,
-                                                        endPoint: .bottom
-                                                    )
-                                                )
-                                                .frame(width: barWidth * 0.7, height: barHeight * 0.4)
-                                                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 4, topTrailingRadius: 4))
-                                                .offset(y: -barHeight * 0.3)
-                                        )
-                                        .scaleEffect(selectedBarIndex == index ? 1.05 : 1.0)
-                                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedBarIndex)
-                                }
-                            }
-                            
-                            // Center divider (zero line space)
-                            Rectangle()
-                                .fill(Color.clear)
-                                .frame(height: 4)
-                            
-                            // Bottom section (negative values)
-                            ZStack(alignment: .top) {
-                                // Spacer to maintain layout
-                                Color.clear
-                                    .frame(height: availableHeight)
-                                
-                                // Negative bar
-                                if !isPositive && barHeight > 0 {
-                                    Rectangle()
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(stops: [
-                                                    .init(color: barColor.opacity(0.9), location: 0),
-                                                    .init(color: barColor, location: 0.3),
-                                                    .init(color: barColor.opacity(0.7), location: 0.7),
-                                                    .init(color: barColor.opacity(0.3), location: 1)
-                                                ]),
-                                                startPoint: .top,
-                                                endPoint: .bottom
-                                            )
-                                        )
-                                        .frame(width: barWidth, height: barHeight)
-                                        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 6, bottomTrailingRadius: 6))
-                                        .shadow(color: barColor.opacity(0.4), radius: 3, x: 0, y: 2)
-                                        .overlay(
-                                            // Highlight effect
-                                            Rectangle()
-                                                .fill(
-                                                    LinearGradient(
-                                                        gradient: Gradient(colors: [
-                                                            Color.clear,
-                                                            Color.white.opacity(0.2)
-                                                        ]),
-                                                        startPoint: .top,
-                                                        endPoint: .bottom
-                                                    )
-                                                )
-                                                .frame(width: barWidth * 0.7, height: barHeight * 0.4)
-                                                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 4, bottomTrailingRadius: 4))
-                                                .offset(y: barHeight * 0.3)
-                                        )
-                                        .scaleEffect(selectedBarIndex == index ? 1.05 : 1.0)
-                                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedBarIndex)
-                                }
-                            }
-                        }
-                        .frame(width: barWidth)
-                        .onTapGesture {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                selectedBarIndex = selectedBarIndex == index ? nil : index
-                            }
-                            onBarTouch(month)
-                        }
-                        
-                        // Add spacing except after last item
-                        if index < data.count - 1 {
-                            Spacer()
-                                .frame(width: spacing)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                
-                // Month labels with better positioning
-                VStack {
-                    Spacer()
-                    HStack(spacing: 0) {
-                        ForEach(Array(data.enumerated()), id: \.offset) { index, item in
-                            Text(item.0.split(separator: " ").first ?? "")
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                                .foregroundColor(.gray.opacity(0.8))
-                                .frame(width: barWidth)
-                                .multilineTextAlignment(.center)
-                            
-                            // Add spacing except after last item
-                            if index < data.count - 1 {
-                                Spacer()
-                                    .frame(width: spacing)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                }
-                
-                // Value labels on hover/selection
-                if let selectedIndex = selectedBarIndex {
-                    let selectedData = data[selectedIndex]
-                    VStack(spacing: 4) {
-                        Text(selectedData.0)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white)
-                        Text("$\(Int(selectedData.1).formattedWithCommas)")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundColor(selectedData.1 >= 0 ? 
-                                          Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
-                                          Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Material.ultraThinMaterial)
-                                .opacity(0.9)
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                        }
-                    )
-                    .position(x: geometry.size.width / 2, y: 30)
-                    .transition(.scale.combined(with: .opacity))
-                }
-            }
-        }
-    }
-}
-
-
-
 // MARK: - Chart Path Helper
 struct ChartPath: View {
     let dataPoints: [(Date, Double)]
@@ -3882,8 +3507,234 @@ struct ChartPath: View {
     }
 }
 
+// MARK: - Customize Graphs View
+struct CustomizeGraphsView: View {
+    @Binding var selectedGraphs: [GraphType]
+    @Binding var isDraggingAny: Bool
+    
+    @State private var allowReordering = true
+    @State private var combinedItems: [GraphItem] = []
+    @State private var isUpdatingFromDrag = false
+    
+    private var availableGraphs: [GraphType] {
+        GraphType.allCases.filter { !selectedGraphs.contains($0) }
+    }
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            // Selected Graphs Section Header
+            HStack {
+                Text("Selected Graphs")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                
+                Text("\(selectedGraphs.count)/\(GraphType.allCases.count)")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray)
+                
+                Spacer()
+            }
+            
+            // Combined Reorderable List with Visual Sections
+            VStack(spacing: 8) {
+                ReorderableForEach($combinedItems, allowReordering: $allowReordering) { item, isDragged in
+                    Group {
+                        if item.isHeader {
+                            // Section header
+                            HStack {
+                                Text(item.headerTitle ?? "")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, item.headerTitle == "Available Graphs" ? 16 : 0)
+                        } else if let graph = item.graph {
+                            // Graph card
+                            ReorderableGraphCard(
+                                graph: graph,
+                                isSelected: item.isSelected,
+                                isDragged: isDragged,
+                                onTap: {
+                                    withAnimation(.spring()) {
+                                        if item.isSelected {
+                                            selectedGraphs.removeAll { $0 == graph }
+                                        } else {
+                                            selectedGraphs.append(graph)
+                                        }
+                                        updateCombinedItems()
+                                    }
+                                }
+                            )
+                        } else {
+                            // Empty state
+                            Text(item.emptyMessage ?? "")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 20)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
+                                )
+                                .padding(.horizontal, 16)
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            updateCombinedItems()
+        }
+        .onChange(of: selectedGraphs) { newGraphs in
+            guard !isUpdatingFromDrag else { return }
+            isDraggingAny = false
+            updateCombinedItems()
+        }
+        .onChange(of: combinedItems) { newItems in
+            // When items are reordered via drag, update selectedGraphs
+            let newSelectedGraphs = newItems.compactMap { item -> GraphType? in
+                if let graph = item.graph {
+                    // Check if this graph is in the "selected" section (before "Available Graphs" header)
+                    if let availableHeaderIndex = newItems.firstIndex(where: { $0.headerTitle == "Available Graphs" }),
+                       let graphIndex = newItems.firstIndex(where: { $0.graph?.id == graph.id }),
+                       graphIndex < availableHeaderIndex {
+                        return graph
+                    }
+                }
+                return nil
+            }
+            
+            // Only update if different to avoid infinite loop
+            if newSelectedGraphs.map(\.id) != selectedGraphs.map(\.id) {
+                isUpdatingFromDrag = true
+                selectedGraphs = newSelectedGraphs
+                
+                // Reset flag after a brief delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isUpdatingFromDrag = false
+                }
+            }
+        }
+    }
+    
+    private func updateCombinedItems() {
+        var newItems: [GraphItem] = []
+        
+        // Selected Graphs Section
+        if selectedGraphs.isEmpty {
+            newItems.append(GraphItem(emptyMessage: "Drag graphs here to display them"))
+        } else {
+            for graph in selectedGraphs {
+                newItems.append(GraphItem(graph: graph, isSelected: true))
+            }
+        }
+        
+        // Available Graphs Section Header
+        newItems.append(GraphItem(headerTitle: "Available Graphs"))
+        
+        // Available Graphs
+        if availableGraphs.isEmpty {
+            newItems.append(GraphItem(emptyMessage: "All graphs are currently selected"))
+        } else {
+            for graph in availableGraphs {
+                newItems.append(GraphItem(graph: graph, isSelected: false))
+            }
+        }
+        
+        combinedItems = newItems
+    }
+}
 
+// MARK: - GraphItem for Combined List
+struct GraphItem: Identifiable, Hashable {
+    let id = UUID()
+    let graph: GraphType?
+    let isSelected: Bool
+    let isHeader: Bool
+    let headerTitle: String?
+    let emptyMessage: String?
+    
+    init(graph: GraphType?, isSelected: Bool) {
+        self.graph = graph
+        self.isSelected = isSelected
+        self.isHeader = false
+        self.headerTitle = nil
+        self.emptyMessage = nil
+    }
+    
+    init(headerTitle: String) {
+        self.graph = nil
+        self.isSelected = false
+        self.isHeader = true
+        self.headerTitle = headerTitle
+        self.emptyMessage = nil
+    }
+    
+    init(emptyMessage: String) {
+        self.graph = nil
+        self.isSelected = false
+        self.isHeader = false
+        self.headerTitle = nil
+        self.emptyMessage = emptyMessage
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    
+    static func == (lhs: GraphItem, rhs: GraphItem) -> Bool {
+        lhs.id == rhs.id
+    }
+}
 
+// MARK: - Reorderable Graph Card
+struct ReorderableGraphCard: View {
+    let graph: GraphType
+    let isSelected: Bool
+    let isDragged: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                // Icon
+                Image(systemName: graph.icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(isSelected ? .white : .gray)
+                    .frame(width: 24)
+                
+                // Title
+                Text(graph.title)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(isSelected ? .white : .gray)
+                
+                Spacer()
+                
+                // Selection indicator
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.green)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.green.opacity(0.2) : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isSelected ? Color.green.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+            )
+            .scaleEffect(isDragged ? 1.05 : 1.0)
+            .shadow(color: isDragged ? Color.black.opacity(0.2) : Color.clear, radius: 4, x: 0, y: 2)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isDragged)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(.horizontal, 16)
+    }
+}
 
-
-
+                
