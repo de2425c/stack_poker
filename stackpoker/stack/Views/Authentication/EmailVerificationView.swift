@@ -101,9 +101,22 @@ struct EmailVerificationView: View {
         }
         .onChange(of: authViewModel.appFlow) { newState in
             if case .main(let uid) = newState {
-
+                print("EmailVerificationView: App flow changed to main, preparing to present HomePage")
                 self.uidToShow = uid
-                presentFeed = true
+                
+                // If ProfileSetupView is currently being shown, dismiss it first
+                if showingProfileSetup {
+                    print("EmailVerificationView: Dismissing ProfileSetupView before presenting HomePage")
+                    showingProfileSetup = false
+                    // Small delay to ensure ProfileSetupView is fully dismissed before presenting HomePage
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        print("EmailVerificationView: Now presenting HomePage")
+                        presentFeed = true
+                    }
+                } else {
+                    print("EmailVerificationView: Directly presenting HomePage")
+                    presentFeed = true
+                }
             }
         }
         .onDisappear {

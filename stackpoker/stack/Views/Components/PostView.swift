@@ -52,7 +52,6 @@ struct PostView: View {
                     post: post,
                     onLike: onLike,
                     onComment: onComment,
-                    onDelete: {},
                     isCurrentUser: post.userId == userId,
                     userId: userId
                 )

@@ -116,6 +116,7 @@ struct PhoneSignUpView: View {
                             .padding(.top, 12)
                         }
                         .padding(.horizontal, 24)
+                        .padding(.bottom, 80) // HARDCODED: Ensure buttons are never blocked by bottom padding
                     }
                     
                     // Close button

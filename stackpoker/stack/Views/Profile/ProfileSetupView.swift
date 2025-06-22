@@ -104,12 +104,15 @@ struct ProfileSetupView: View {
                                 }) {
                                     Text("Next")
                                         .font(.custom("PlusJakartaSans-SemiBold", size: 18))
+                                        .foregroundColor(.black)
+                                        .frame(maxWidth: .infinity, minHeight: 56)
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 56)
-                                .background(step1ButtonBackgroundColor)
-                                .foregroundColor(.black)
-                                .cornerRadius(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(step1ButtonBackgroundColor)
+                                )
                                 .disabled(isStep1ButtonDisabled)
+                                .contentShape(Rectangle())
                                 .padding(.top, 24)
                             }
                         } else {
@@ -215,13 +218,16 @@ struct ProfileSetupView: View {
                                         } else {
                                             Text("Complete Setup")
                                                 .font(.custom("PlusJakartaSans-SemiBold", size: 18))
+                                                .foregroundColor(.black)
                                         }
                                     }
                                     .frame(maxWidth: .infinity, minHeight: 56)
-                                    .background(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                    .foregroundColor(.black)
-                                    .cornerRadius(12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                    )
                                     .disabled(isLoading)
+                                    .contentShape(Rectangle())
                                 }
                                 .padding(.top, 24)
                             }
@@ -272,6 +278,13 @@ struct ProfileSetupView: View {
         } message: {
             Text(errorMessage)
                 .font(.custom("PlusJakartaSans-Medium", size: 16))
+        }
+        .onChange(of: authViewModel.appFlow) { newFlow in
+            // Auto-dismiss when the app flow changes to main (profile setup complete)
+            if case .main = newFlow {
+                print("ProfileSetupView: App flow changed to main, dismissing ProfileSetupView")
+                dismiss()
+            }
         }
 
     }
@@ -472,9 +485,17 @@ struct ProfileSetupView: View {
                 
                 print("ProfileSetupView: Profile created successfully, forcing main flow")
                 
-                // Force the app flow to main since profile is now created
-                // ProfileSetupView is shown directly in NavigationStack, not as modal, so we need to force the flow change
-                authViewModel.forceAppFlow(.main(userId: currentUser.uid))
+                // If this ProfileSetupView is presented as a sheet (from EmailVerificationView),
+                // dismiss it first before forcing the flow change to prevent sheet conflicts
+                if isNewUser {
+                    // Small delay to ensure the profile creation is fully processed
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        authViewModel.forceAppFlow(.main(userId: currentUser.uid))
+                    }
+                } else {
+                    // For ProfileSetupView shown directly in MainCoordinator, force the flow immediately
+                    authViewModel.forceAppFlow(.main(userId: currentUser.uid))
+                }
             }
         }
     }

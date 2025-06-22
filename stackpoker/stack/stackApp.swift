@@ -243,10 +243,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     // Configure Firebase Auth settings for phone verification
     private func configureFirebaseAuth() {
-        #if DEBUG
-        Auth.auth().settings?.isAppVerificationDisabledForTesting = true
-        print("AppDelegate: Testing mode enabled - use fictional phone numbers")
-        #endif
+        
+        Auth.auth().settings?.isAppVerificationDisabledForTesting = false
+        
         
         // Set language code for better compatibility
         Auth.auth().languageCode = "en"

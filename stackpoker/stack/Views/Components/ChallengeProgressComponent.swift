@@ -447,37 +447,64 @@ struct ChallengeProgressComponent: View {
 // Preview
 struct ChallengeProgressComponent_Previews: PreviewProvider {
     static var previews: some View {
-        VStack(spacing: 20) {
-            ChallengeProgressComponent(
-                challenge: Challenge(
-                    userId: "preview",
-                    type: .bankroll,
-                    title: "Reach $20k Bankroll",
-                    description: "Build bankroll to $20,000",
-                    targetValue: 20000,
-                    currentValue: 12500,
-                    startingBankroll: 10000
-                )
-            )
-            
-            ChallengeProgressComponent(
-                challenge: Challenge(
-                    userId: "preview",
-                    type: .session,
-                    title: "Play 10 Long Sessions",
-                    description: "Complete 10 sessions of at least 4 hours each",
-                    targetValue: 10,
-                    currentValue: 0,
-                    targetSessionCount: 10,
-                    minHoursPerSession: 4.0,
-                    currentSessionCount: 6,
-                    totalHoursPlayed: 28.5,
-                    validSessionsCount: 6
-                ),
-                isCompact: true
-            )
+        AnimatedPreviewWrapper()
+            .padding()
+            .background(Color.black)
+    }
+}
+
+struct AnimatedPreviewWrapper: View {
+    @State private var currentHours: Double = 4.0
+    @State private var timer: Timer?
+    
+    var body: some View {
+        ChallengeProgressComponent(
+            challenge: Challenge(
+                userId: "preview",
+                type: .session,
+                title: "100 Hour Challenge",
+                description: "Reach 100 hours of poker play",
+                targetValue: 100,
+                currentValue: currentHours,
+                targetHours: 100.0,
+                targetSessionCount: nil, // Makes it a hours challenge, not session count
+                minHoursPerSession: nil,
+                currentSessionCount: 0,
+                totalHoursPlayed: currentHours,
+                validSessionsCount: 0
+            ),
+            isCompact: false
+        )
+        .onAppear {
+            startAnimation()
         }
-        .padding()
-        .background(Color.black)
+        .onDisappear {
+            timer?.invalidate()
+        }
+    }
+    
+    private func startAnimation() {
+        // Wait a moment before starting the animation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            // Super smooth spring animation from 4 to 10 hours
+            withAnimation(.spring(response: 2.5, dampingFraction: 0.8, blendDuration: 0.3)) {
+                currentHours = 10.0
+            }
+            
+            // Reset and repeat the animation
+            timer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { _ in
+                // Quick reset to 4 hours
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.9, blendDuration: 0.1)) {
+                    currentHours = 4.0
+                }
+                
+                // Wait a moment then animate smoothly to 10 hours again
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    withAnimation(.spring(response: 2.5, dampingFraction: 0.8, blendDuration: 0.3)) {
+                        currentHours = 10.0
+                    }
+                }
+            }
+        }
     }
 } 

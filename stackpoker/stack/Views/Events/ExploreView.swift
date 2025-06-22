@@ -632,6 +632,7 @@ struct ExploreView: View {
     @StateObject private var viewModel = ExploreViewModel()
     @StateObject private var userEventService = UserEventService()
     @StateObject private var userService = UserService()
+    @EnvironmentObject var sessionStore: SessionStore
     @State private var selectedSimpleDate: SimpleDate? = nil
     @State private var selectedTab: EventsTab = .events
     @State private var showingCreateEvent = false
@@ -1007,6 +1008,7 @@ struct ExploreView: View {
                 EventDetailView(event: selectedEvent)
                     .environmentObject(userEventService)
                     .environmentObject(userService)
+                    .environmentObject(sessionStore)
             }
         }
         .sheet(item: $selectedUserEvent) { userEvent in

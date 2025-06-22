@@ -16,6 +16,7 @@ struct EnhancedLiveSessionView: View {
     @StateObject private var manualStakerService = ManualStakerService() // Add ManualStakerService
     @StateObject private var challengeService = ChallengeService(userId: Auth.auth().currentUser?.uid ?? "") // Add ChallengeService
     @StateObject private var eventStakingService = EventStakingService() // Add EventStakingService
+    @StateObject private var sessionNotificationService = SessionNotificationService() // Add SessionNotificationService
     @State private var handEntryMinimized = false
     
     // Callback for when a session ends, passing the new session ID
@@ -141,6 +142,12 @@ struct EnhancedLiveSessionView: View {
     // State for Post Tab sharing options
     @State private var showingPostShareOptions = false
     @State private var showingLiveSessionPostEditor = false
+    
+    // Progress to Next Day states
+    @State private var showingProgressToNextDay = false
+    @State private var nextDayDate = Date()
+    @State private var isProgressingToNextDay = false
+    @State private var tournamentDayNumber = 2 // Start with Day 2 as default
     
 
     
@@ -393,6 +400,7 @@ struct EnhancedLiveSessionView: View {
         .sheet(isPresented: $showingHandHistorySheet) { handHistorySheet }
         .sheet(isPresented: $showingRebuySheet) { rebuyView }
         .sheet(isPresented: $showingEditBuyInSheet) { editBuyInView }
+        .sheet(isPresented: $showingProgressToNextDay) { progressToNextDaySheet }
         .fullScreenCover(isPresented: .constant(sharingFlowState != .none)) {
             Group {
                 switch sharingFlowState {
@@ -490,7 +498,10 @@ struct EnhancedLiveSessionView: View {
         .alert("Exit Session?", isPresented: $showingExitAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Exit Without Saving", role: .destructive) { dismiss() }
-            Button("End & Cashout") { showingCashoutPrompt = true }
+            Button("End & Cashout") { 
+                cashoutAmount = String(Int(sessionStore.enhancedLiveSession.currentChipAmount))
+                showingCashoutPrompt = true 
+            }
         } message: {
             Text("What would you like to do with your active session?")
         }
@@ -946,22 +957,14 @@ struct EnhancedLiveSessionView: View {
                             .padding(.bottom, 2)
                             
                             if cashGameService.cashGames.isEmpty {
-                                HStack {
-                                    Text("No games added. Tap to add a new game.")
+                                VStack {
+                                    Text("No games added. Use the + button above to add a new game.")
                                         .font(.plusJakarta(.caption, weight: .medium))
                                         .foregroundColor(.gray)
-                                    
-                                    Spacer()
-                                    
-                                    Button(action: { showingAddGame = true }) {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 18))
-                                            .foregroundColor(.white)
-                                            .padding(10)
-                                            .background(Circle().fill(Color.gray.opacity(0.3)))
-                                    }
+                                        .multilineTextAlignment(.center)
                                 }
                                 .padding(.vertical, 20)
+                                .frame(maxWidth: .infinity)
                             } else {
                                 // Game selection horizontal scroll
                                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1327,6 +1330,7 @@ struct EnhancedLiveSessionView: View {
                     
                     self.showingEventSelector = false
                 }, isSheetPresentation: true)
+                .environmentObject(sessionStore)
                 .navigationTitle("Select Event")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -1559,6 +1563,22 @@ struct EnhancedLiveSessionView: View {
                 pokerVariant: game.gameType.rawValue // Pass the poker variant for cash games
             )
             isTournamentSession = false
+            
+            // Send session start notification for cash games - DISABLED
+            // Task {
+            //     do {
+            //         try await sessionNotificationService.notifyCurrentUserSessionStart(
+            //             sessionId: sessionStore.liveSession.id,
+            //             gameName: game.name,
+            //             stakes: game.stakes,
+            //             buyIn: buyInAmount,
+            //             startTime: sessionStore.liveSession.startTime,
+            //             isTournament: false
+            //         )
+            //     } catch {
+            //         print("[EnhancedLiveSessionView] Failed to send session start notification: \(error)")
+            //     }
+            // }
         } else {
             guard !tournamentName.isEmpty, let baseAmount = Double(baseBuyInTournament), baseAmount > 0 else { return }
             let tournamentStakesString: String // Explicitly declared as String
@@ -1579,6 +1599,24 @@ struct EnhancedLiveSessionView: View {
             )
             isTournamentSession = true
             baseBuyInForTournament = baseAmount
+            
+            // Send session start notification for tournaments - DISABLED
+            // Task {
+            //     do {
+            //         try await sessionNotificationService.notifyCurrentUserSessionStart(
+            //             sessionId: sessionStore.liveSession.id,
+            //             gameName: tournamentName,
+            //             stakes: tournamentStakesString,
+            //             buyIn: baseAmount,
+            //             startTime: sessionStore.liveSession.startTime,
+            //             isTournament: true,
+            //             tournamentName: tournamentName,
+            //             casino: tournamentCasino.isEmpty ? nil : tournamentCasino
+            //         )
+            //     } catch {
+            //         print("[EnhancedLiveSessionView] Failed to send tournament session start notification: \(error)")
+            //     }
+            // }
         }
         // Reset rebuy count
         tournamentRebuyCount = 0
@@ -1634,6 +1672,42 @@ struct EnhancedLiveSessionView: View {
                         .frame(width: 50) // Give it a defined width to balance with the rebuy button
                     }
                     .padding(.horizontal)
+                    
+                    // Progress to Next Day Button
+                    Button(action: {
+                        // Calculate next day date as tomorrow by default
+                        nextDayDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                        showingProgressToNextDay = true
+                    }) {
+                        HStack(spacing: 8) {
+                            if isProgressingToNextDay {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .frame(width: 20, height: 20)
+                            } else {
+                                Image(systemName: "arrow.forward.circle")
+                                Text("Progress to Day \(tournamentDayNumber)")
+                            }
+                        }
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color(red: 255/255, green: 149/255, blue: 0/255),
+                                    Color(red: 255/255, green: 179/255, blue: 64/255)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .cornerRadius(16)
+                    }
+                    .disabled(isProgressingToNextDay)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
                 } else {
                     chipStackSection
                         .padding(.horizontal)
@@ -1944,7 +2018,10 @@ struct EnhancedLiveSessionView: View {
                     .glassyBackground(cornerRadius: 12)
                 }
 
-                Button(action: { showingCashoutPrompt = true }) {
+                Button(action: { 
+                    cashoutAmount = String(Int(sessionStore.enhancedLiveSession.currentChipAmount))
+                    showingCashoutPrompt = true 
+                }) {
                     HStack(spacing: 8) {
                         Image(systemName: "stop.fill")
                         Text("End")
@@ -1991,19 +2068,21 @@ struct EnhancedLiveSessionView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
-                // First row: reds on left, greens on right
-                HStack(spacing: 10) {
-                    QuickUpdateButton(amount: 5, isPositive: false, action: { quickUpdateChipStack(amount: -5) })
-                    QuickUpdateButton(amount: 25, isPositive: false, action: { quickUpdateChipStack(amount: -25) })
-                    QuickUpdateButton(amount: 5, isPositive: true, action: { quickUpdateChipStack(amount: 5) })
-                    QuickUpdateButton(amount: 25, isPositive: true, action: { quickUpdateChipStack(amount: 25) })
-                }
-                
-                // Second row: reds on left, greens on right
-                HStack(spacing: 10) {
-                    QuickUpdateButton(amount: 100, isPositive: false, action: { quickUpdateChipStack(amount: -100) })
-                    QuickUpdateButton(amount: 100, isPositive: true, action: { quickUpdateChipStack(amount: 100) })
-                }
+                            // First row: reds on left, greens on right
+            HStack(spacing: 10) {
+                QuickUpdateButton(amount: 5, isPositive: false, action: { quickUpdateChipStack(amount: -5) })
+                QuickUpdateButton(amount: 25, isPositive: false, action: { quickUpdateChipStack(amount: -25) })
+                QuickUpdateButton(amount: 5, isPositive: true, action: { quickUpdateChipStack(amount: 5) })
+                QuickUpdateButton(amount: 25, isPositive: true, action: { quickUpdateChipStack(amount: 25) })
+            }
+            
+            // Second row: reds on left, greens on right
+            HStack(spacing: 10) {
+                QuickUpdateButton(amount: 100, isPositive: false, action: { quickUpdateChipStack(amount: -100) })
+                QuickUpdateButton(amount: 1000, isPositive: false, action: { quickUpdateChipStack(amount: -1000) })
+                QuickUpdateButton(amount: 100, isPositive: true, action: { quickUpdateChipStack(amount: 100) })
+                QuickUpdateButton(amount: 1000, isPositive: true, action: { quickUpdateChipStack(amount: 1000) })
+            }
             }
             
             // Section Title
@@ -2122,8 +2201,26 @@ struct EnhancedLiveSessionView: View {
     // MARK: - Tournament Helpers
     private func addTournamentRebuy() {
         guard baseBuyInForTournament > 0 else { return }
+        let oldBuyIn = sessionStore.liveSession.buyIn
         sessionStore.updateLiveSessionBuyIn(amount: baseBuyInForTournament)
         tournamentRebuyCount += 1
+        
+        // Send rebuy notification
+        Task {
+            do {
+                try await sessionNotificationService.notifyCurrentUserRebuy(
+                    sessionId: sessionStore.liveSession.id,
+                    gameName: sessionStore.liveSession.tournamentName ?? tournamentName,
+                    stakes: sessionStore.liveSession.stakes,
+                    rebuyAmount: baseBuyInForTournament,
+                    newTotalBuyIn: sessionStore.liveSession.buyIn,
+                    isTournament: true,
+                    tournamentName: sessionStore.liveSession.tournamentName ?? tournamentName
+                )
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to send tournament rebuy notification: \(error)")
+            }
+        }
     }
     
     // MARK: - Helper Functions
@@ -3011,6 +3108,22 @@ struct EnhancedLiveSessionView: View {
         // Add a chip update with a rebuy note - fixed method call
         let currentAmount = sessionStore.enhancedLiveSession.currentChipAmount + amount
         sessionStore.updateChipStack(amount: currentAmount, note: "Rebuy: +$\(Int(amount))")
+        
+        // Send rebuy notification for cash games
+        Task {
+            do {
+                try await sessionNotificationService.notifyCurrentUserRebuy(
+                    sessionId: sessionStore.liveSession.id,
+                    gameName: sessionStore.liveSession.gameName,
+                    stakes: sessionStore.liveSession.stakes,
+                    rebuyAmount: amount,
+                    newTotalBuyIn: sessionStore.liveSession.buyIn,
+                    isTournament: false
+                )
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to send cash game rebuy notification: \(error)")
+            }
+        }
         
         // Update local data
         updateLocalDataFromStore()
@@ -3950,6 +4063,337 @@ struct EnhancedLiveSessionView: View {
         }
     }
     
+    // MARK: - Progress to Next Day Sheet
+    
+    private var progressToNextDaySheet: some View {
+        NavigationView {
+            GeometryReader { geometry in
+                ZStack {
+                    AppBackgroundView()
+                        .ignoresSafeArea()
+                    
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Header
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Progress to Day \(tournamentDayNumber)")
+                                    .font(.plusJakarta(.title2, weight: .bold))
+                                    .foregroundColor(.white)
+                                
+                                Text("Select the date for the next tournament day. Your session will be paused and a continuation event will be created.")
+                                    .font(.plusJakarta(.subheadline))
+                                    .foregroundColor(.gray)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            
+                            // Current Session Info
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Current Session")
+                                    .font(.plusJakarta(.headline, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 6)
+                                
+                                VStack(spacing: 12) {
+                                    InfoRow(title: "Tournament", value: sessionStore.liveSession.tournamentName ?? tournamentName)
+                                    InfoRow(title: "Casino", value: sessionStore.liveSession.casino ?? tournamentCasino)
+                                    InfoRow(title: "Total Buy-in", value: "$\(Int(sessionStore.liveSession.buyIn))")
+                                    InfoRow(title: "Current Stack", value: "$\(Int(sessionStore.enhancedLiveSession.currentChipAmount))")
+                                    InfoRow(title: "Session Time", value: String(format: "%02d:%02d:%02d", 
+                                                                               formattedElapsedTime.hours,
+                                                                               formattedElapsedTime.minutes,
+                                                                               formattedElapsedTime.seconds))
+                                }
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Material.ultraThinMaterial)
+                                        .opacity(0.2)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                            .padding(.horizontal)
+                            
+                            // Date Selection
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Next Tournament Day")
+                                    .font(.plusJakarta(.headline, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 6)
+                                
+                                DatePicker(
+                                    "Date for Day \(tournamentDayNumber)",
+                                    selection: $nextDayDate,
+                                    in: Date()...,
+                                    displayedComponents: [.date]
+                                )
+                                .datePickerStyle(.compact)
+                                .colorScheme(.dark)
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Material.ultraThinMaterial)
+                                        .opacity(0.2)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                            .padding(.horizontal)
+                            
+                            // What Will Happen Section
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("What Will Happen")
+                                    .font(.plusJakarta(.headline, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 6)
+                                
+                                VStack(spacing: 8) {
+                                    ProgressStepRow(
+                                        step: "1",
+                                        title: "Session Paused",
+                                        description: "Your current session will be paused (not ended)"
+                                    )
+                                    ProgressStepRow(
+                                        step: "2",
+                                        title: "Event Created",
+                                        description: "A private continuation event will be added to \"My Events\""
+                                    )
+                                    ProgressStepRow(
+                                        step: "3",
+                                        title: "Session Data Preserved",
+                                        description: "All buy-ins, staking, notes, and session state will be saved"
+                                    )
+                                    ProgressStepRow(
+                                        step: "4",
+                                        title: "Continue Playing",
+                                        description: "Click \"Continue Live Session\" on the new event to resume"
+                                    )
+                                }
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Color.blue.opacity(0.1))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                                )
+                            }
+                            .padding(.horizontal)
+                            
+                            // Action Buttons
+                            VStack(spacing: 16) {
+                                Button(action: progressToNextDay) {
+                                    HStack(spacing: 8) {
+                                        if isProgressingToNextDay {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                .frame(width: 20, height: 20)
+                                        } else {
+                                            Image(systemName: "arrow.forward.circle.fill")
+                                        }
+                                        Text("Create Day \(tournamentDayNumber) Event")
+                                    }
+                                    .font(.plusJakarta(.body, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 16)
+                                    .background(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color(red: 255/255, green: 149/255, blue: 0/255),
+                                                Color(red: 255/255, green: 179/255, blue: 64/255)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .cornerRadius(20)
+                                }
+                                .disabled(isProgressingToNextDay)
+                                
+                                Button(action: {
+                                    showingProgressToNextDay = false
+                                }) {
+                                    Text("Cancel")
+                                        .font(.plusJakarta(.body, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 16)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 20)
+                                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                                .background(Color.clear)
+                                        )
+                                }
+                                .disabled(isProgressingToNextDay)
+                            }
+                            .padding(.horizontal)
+                            .padding(.bottom, 20)
+                        }
+                        .padding(.top, 20)
+                    }
+                }
+            }
+            .navigationTitle("Progress Tournament")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        showingProgressToNextDay = false
+                    }
+                    .foregroundColor(.white)
+                    .disabled(isProgressingToNextDay)
+                }
+            }
+        }
+    }
+    
+    // Helper Views for Progress Sheet
+    private struct InfoRow: View {
+        let title: String
+        let value: String
+        
+        var body: some View {
+            HStack {
+                Text(title)
+                    .font(.plusJakarta(.subheadline))
+                    .foregroundColor(.gray)
+                Spacer()
+                Text(value)
+                    .font(.plusJakarta(.subheadline, weight: .medium))
+                    .foregroundColor(.white)
+            }
+        }
+    }
+    
+    private struct ProgressStepRow: View {
+        let step: String
+        let title: String
+        let description: String
+        
+        var body: some View {
+            HStack(alignment: .top, spacing: 12) {
+                Text(step)
+                    .font(.plusJakarta(.caption, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.blue))
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.plusJakarta(.subheadline, weight: .medium))
+                        .foregroundColor(.white)
+                    Text(description)
+                        .font(.plusJakarta(.caption))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+            }
+        }
+    }
+    
+    // MARK: - Progress to Next Day Logic
+    
+    private func progressToNextDay() {
+        isProgressingToNextDay = true
+        
+        Task {
+            do {
+                // 1. Pause the current session (don't end it)
+                sessionStore.liveSession.isActive = false
+                sessionStore.liveSession.lastPausedAt = Date()
+                
+                // 2. Create serialized session state for continuation
+                let sessionState = SessionContinuationState(
+                    originalSessionId: sessionStore.liveSession.id,
+                    tournamentName: sessionStore.liveSession.tournamentName ?? tournamentName,
+                    casino: sessionStore.liveSession.casino ?? tournamentCasino,
+                    tournamentGameType: sessionStore.liveSession.tournamentGameType ?? selectedTournamentGameType,
+                    tournamentFormat: sessionStore.liveSession.tournamentFormat ?? selectedTournamentFormat,
+                    baseBuyIn: baseBuyInForTournament,
+                    totalBuyIn: sessionStore.liveSession.buyIn,
+                    currentStack: sessionStore.enhancedLiveSession.currentChipAmount,
+                    elapsedTime: sessionStore.liveSession.elapsedTime,
+                    originalStartTime: sessionStore.liveSession.startTime,
+                    chipUpdates: sessionStore.enhancedLiveSession.chipUpdates,
+                    notes: sessionStore.enhancedLiveSession.notes,
+                    stakerConfigs: validStakerConfigs,
+                    existingStakes: existingStakes,
+                    dayNumber: tournamentDayNumber
+                )
+                
+                // 3. Create the continuation UserEvent
+                try await createContinuationEvent(sessionState: sessionState)
+                
+                // 4. Save current session state
+                sessionStore.saveLiveSessionState()
+                
+                await MainActor.run {
+                    // 5. Update UI state for next time
+                    tournamentDayNumber += 1
+                    
+                    // 6. Close the sheet
+                    showingProgressToNextDay = false
+                    isProgressingToNextDay = false
+                    
+                    // 7. Show success message (you could add a toast here)
+                    print("Day \(tournamentDayNumber - 1) event created successfully!")
+                }
+                
+            } catch {
+                await MainActor.run {
+                    isProgressingToNextDay = false
+                    print("Error creating continuation event: \(error)")
+                    // Here you could show an error alert
+                }
+            }
+        }
+    }
+    
+    private func createContinuationEvent(sessionState: SessionContinuationState) async throws {
+        // Create a UserEvent for the next tournament day
+        let eventTitle = "\(sessionState.tournamentName) - Day \(sessionState.dayNumber)"
+        let eventDescription = "Continuation of tournament session with $\(Int(sessionState.currentStack)) stack"
+        
+        let userEvent = UserEvent(
+            id: UUID().uuidString,
+            title: eventTitle,
+            description: eventDescription,
+            eventType: .tournament,
+            creatorId: userId,
+            creatorName: userService.loadedUsers[userId]?.username ?? "You",
+            startDate: nextDayDate,
+            endDate: nil,
+            timezone: TimeZone.current.identifier,
+            location: sessionState.casino,
+            maxParticipants: 1, // Private event
+            waitlistEnabled: false,
+            groupId: nil,
+            isPublic: false, // Private event
+            rsvpDeadline: nil,
+            reminderSettings: UserEvent.ReminderSettings.defaultReminders
+        )
+        
+        // Store the event with session continuation data
+        let db = Firestore.firestore()
+        var eventData = userEvent.toDictionary()
+        
+        // Add the session continuation state as custom data
+        eventData["sessionContinuationState"] = try sessionState.toDictionary()
+        eventData["isContinuationEvent"] = true
+        
+        try await db.collection("userEvents").document(userEvent.id).setData(eventData)
+    }
+    
     // MARK: - Save Session Changes
     
     private func saveSessionChanges() {
@@ -4177,9 +4621,6 @@ struct EnhancedLiveSessionView: View {
         // Use the final amount from the last update
         let amount = lastUpdate.amount
         
-        // Calculate the total change from first to last
-        let totalChange = lastUpdate.amount - firstUpdate.amount
-        
         // Combine notes meaningfully, focusing on showing the sum
         let notes = group.compactMap { $0.note }.filter { !$0.isEmpty }
         let combinedNote: String?
@@ -4190,10 +4631,28 @@ struct EnhancedLiveSessionView: View {
         }
         
         if quickAddNotes.count == notes.count && !quickAddNotes.isEmpty {
-            // All are quick updates - show the sum
+            // All are quick updates - calculate the sum of all individual changes
+            var totalChange: Double = 0
+            for note in quickAddNotes {
+                // Extract the amount from notes like "Quick add: +$5" or "Quick subtract: -$25"
+                let components = note.components(separatedBy: "$")
+                if components.count > 1 {
+                    let amountString = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let changeAmount = Double(amountString) {
+                        if note.lowercased().contains("subtract") {
+                            totalChange -= changeAmount
+                        } else {
+                            totalChange += changeAmount
+                        }
+                    }
+                }
+            }
+            
             let changeText = totalChange >= 0 ? "+$\(Int(totalChange))" : "$\(Int(totalChange))"
             combinedNote = "Quick add: \(changeText)"
         } else if notes.isEmpty {
+            // Calculate net change from first to last for non-quick updates
+            let totalChange = lastUpdate.amount - firstUpdate.amount
             let changeText = totalChange >= 0 ? "+$\(Int(totalChange))" : "-$\(Int(abs(totalChange)))"
             combinedNote = "Combined \(group.count) updates (\(changeText))"
         } else if notes.count == 1 {
@@ -4204,6 +4663,7 @@ struct EnhancedLiveSessionView: View {
             if uniqueNotes.count == 1 {
                 combinedNote = uniqueNotes.first
             } else {
+                let totalChange = lastUpdate.amount - firstUpdate.amount
                 let changeText = totalChange >= 0 ? "+$\(Int(totalChange))" : "-$\(Int(abs(totalChange)))"
                 combinedNote = "Combined \(group.count) updates (\(changeText)): \(uniqueNotes.joined(separator: "; "))"
             }
@@ -4451,17 +4911,14 @@ private struct SessionPostEditorWrapper: View {
     var body: some View {
         PostEditorView(
             userId: userId,
-            completedSession: completedSession
+            completedSession: completedSession,
+            onCancel: onCancel
         )
         .environmentObject(postService)
         .environmentObject(userService)
         .environmentObject(sessionStore)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PostCreatedSuccessfully"))) { _ in
             onSuccess()
-        }
-        .onDisappear {
-            // This handles when user taps Cancel in PostEditorView
-            onCancel()
         }
     }
 }

@@ -7,6 +7,7 @@ struct EventDetailView: View {
     let event: Event
     @EnvironmentObject var userEventService: UserEventService
     @EnvironmentObject var userService: UserService
+    @EnvironmentObject var sessionStore: SessionStore
     @Environment(\.presentationMode) var presentationMode
     
     @State private var isAddedToSchedule = false
@@ -107,7 +108,7 @@ struct EventDetailView: View {
         .sheet(isPresented: $showingLiveSession) {
             EnhancedLiveSessionView(
                 userId: Auth.auth().currentUser?.uid ?? "",
-                sessionStore: SessionStore(userId: Auth.auth().currentUser?.uid ?? ""),
+                sessionStore: sessionStore,
                 preselectedEvent: event
             )
         }

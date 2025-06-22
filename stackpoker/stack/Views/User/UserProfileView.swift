@@ -22,6 +22,9 @@ struct UserProfileView: View {
     
     // Active challenges for the user
     @State private var activeChallenges: [Challenge] = []
+    
+    // State for edit profile
+    @State private var showingEditProfile = false
 
     private var loggedInUserId: String? {
         Auth.auth().currentUser?.uid
@@ -99,8 +102,10 @@ struct UserProfileView: View {
                                     .cornerRadius(20)
                             }
                         } else {
-                            // Placeholder for "Edit Profile" button for current user
-                            Button(action: { /* TODO: Implement Edit Profile Navigation */ }) {
+                            // Edit Profile button for current user
+                            Button(action: { 
+                                showingEditProfile = true 
+                            }) {
                                 Text("Edit Profile")
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(.white)
@@ -194,6 +199,23 @@ struct UserProfileView: View {
         } message: {
             if let user = userService.loadedUsers[userId] {
                 Text("\(user.displayName ?? user.username) has been blocked. You will no longer see their posts in your feed.")
+            }
+        }
+        .sheet(isPresented: $showingEditProfile) {
+            if let user = userService.loadedUsers[userId] {
+                ProfileEditView(
+                    profile: user,
+                    onSave: { updatedProfile in
+                        // Update the userService with the new profile data
+                        userService.loadedUsers[userId] = updatedProfile
+                        
+                        // Also update current user profile if this is the current user
+                        if isCurrentUserProfile {
+                            userService.currentUserProfile = updatedProfile
+                        }
+                    }
+                )
+                .environmentObject(userService)
             }
         }
         .onAppear {

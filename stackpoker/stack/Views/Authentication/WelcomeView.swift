@@ -29,72 +29,80 @@ struct WelcomeView: View {
             ZStack {
                 AppBackgroundView()
                 
-                // Bottom section background overlay - from bottom up covering bottom 10% of image
+                // Bottom section background overlay - always covers bottom area completely
                 VStack {
                     Spacer()
                     
-                    // Rich dark blue background - solid color, no transparency
+                    // Rich dark blue background - extends to very bottom with no gaps
                     Rectangle()
                         .fill(Color(red: 20/255, green: 30/255, blue: 50/255))
-                    .frame(height: geometry.size.height * 0.45) // From bottom up covering image area
-                    .opacity(buttonsOpacity)
+                        .frame(height: geometry.size.height * 0.45) // Cover bottom 45% of screen
+                        .edgesIgnoringSafeArea(.bottom) // Ensure it goes to absolute bottom
+                        .opacity(buttonsOpacity)
                 }
+                .edgesIgnoringSafeArea(.bottom) // Make sure VStack extends to bottom
                 
-                VStack(spacing: 0) {
-                    // Logo at very top of screen
-                    Image("promo_logo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 260, height: 195)
-                        .scaleEffect(logoScale)
-                        .opacity(logoOpacity)
-                        .offset(y: -35) // Move logo up a bit more
-                    
-                    // Feature carousel - bigger and closer
-                    VStack(spacing: 12) {
-                        // Feature image - much bigger
-                        Image(features[currentFeatureIndex].image)
+                VStack(spacing: 10) {
+                    // Top content area - constrained to never overlap buttons
+                    VStack(spacing: 5) {
+                        // Stack logo at very top
+                        Image("promo_logo")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: max(geometry.size.width - 20, 200), height: 420)
-                            .clipped()
-                            .opacity(carouselOpacity)
-                            .id(currentFeatureIndex)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
+                            .frame(width: min(geometry.size.width * 0.8, 280), height: min(geometry.size.width * 0.6, 210))
+                            .scaleEffect(logoScale)
+                            .opacity(logoOpacity)
+                            .padding(.top, max(10, geometry.safeAreaInsets.top + 5)) // Much higher
                         
-                        // Feature description
-                        Text(features[currentFeatureIndex].description)
-                            .font(.custom("PlusJakartaSans-Medium", size: 18))
-                            .foregroundColor(.white.opacity(0.9))
-                            .multilineTextAlignment(.center)
-                            .opacity(carouselOpacity)
-                            .id("desc-\(currentFeatureIndex)")
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
-                            .padding(.horizontal, 30)
-                        
-                        // Carousel dots
-                        HStack(spacing: 8) {
-                            ForEach(0..<features.count, id: \.self) { index in
-                                Circle()
-                                    .fill(index == currentFeatureIndex ? Color.white : Color.white.opacity(0.3))
-                                    .frame(width: index == currentFeatureIndex ? 10 : 8, 
-                                           height: index == currentFeatureIndex ? 10 : 8)
-                                    .animation(.spring(response: 0.3), value: currentFeatureIndex)
+                        // Feature carousel - bigger image, moved UP away from buttons
+                        VStack(spacing: 5) {
+                            // Feature image - bigger and moved up
+                            Image(features[currentFeatureIndex].image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(
+                                    width: geometry.size.width - 15, // Even wider
+                                    height: min(geometry.size.height * 0.48, 420) // Even bigger - 48% of screen height
+                                )
+                                .opacity(carouselOpacity)
+                                .id(currentFeatureIndex)
+                                .transition(.asymmetric(
+                                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .move(edge: .leading).combined(with: .opacity)
+                                ))
+                            
+                            // Feature description
+                            Text(features[currentFeatureIndex].description)
+                                .font(.custom("PlusJakartaSans-Medium", size: 18))
+                                .foregroundColor(.white.opacity(0.9))
+                                .multilineTextAlignment(.center)
+                                .opacity(carouselOpacity)
+                                .padding(.horizontal, 30)
+                                .lineLimit(2)
+                            
+                            // Carousel dots
+                            HStack(spacing: 8) {
+                                ForEach(0..<features.count, id: \.self) { index in
+                                    Circle()
+                                        .fill(index == currentFeatureIndex ? Color.white : Color.white.opacity(0.3))
+                                        .frame(width: index == currentFeatureIndex ? 10 : 8, 
+                                               height: index == currentFeatureIndex ? 10 : 8)
+                                        .animation(.spring(response: 0.3), value: currentFeatureIndex)
+                                }
                             }
+                            .opacity(carouselOpacity)
                         }
-                        .opacity(carouselOpacity)
+                        .padding(.bottom, 40) // Add padding between carousel and buttons
                     }
-                    .padding(.top, -60) // Reduce space between logo and carousel
+                    .frame(maxHeight: geometry.size.height * 0.65) // Content area
                     
+                    Spacer(minLength: 180) // Much more spacing to push image UP away from buttons
+                }
+                
+                // Fixed buttons at bottom
+                VStack {
                     Spacer()
                     
-                    // Action buttons - with proper spacing
                     VStack(spacing: 16) {
                         // Email Sign Up Button
                         Button(action: { showingSignUp = true }) {
@@ -137,8 +145,7 @@ struct WelcomeView: View {
                         .padding(.top, 8)
                     }
                     .padding(.horizontal, 24)
-                    .padding(.top, 20) // Reduced space between carousel and buttons
-                    .padding(.bottom, max(60, geometry.safeAreaInsets.bottom + 40)) // Move buttons up significantly
+                    .padding(.bottom, max(5, geometry.safeAreaInsets.bottom - 55)) // Much closer to bottom
                     .opacity(buttonsOpacity)
                 }
             }
