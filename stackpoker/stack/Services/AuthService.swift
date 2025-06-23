@@ -81,16 +81,10 @@ class AuthService: ObservableObject {
             // Ensure we're on the main actor for Firebase Auth operations
             await MainActor.run {
                 // Configure Firebase Auth settings
-                #if DEBUG
-                if Auth.auth().settings == nil {
-                    print("AuthService: Firebase Auth settings are nil, creating new settings")
-                }
-                Auth.auth().settings?.isAppVerificationDisabledForTesting = true
-                print("AuthService: Testing mode enabled - use fictional phone numbers like +1 650 555 3434")
-                #endif
+                Auth.auth().settings?.isAppVerificationDisabledForTesting = false
                 
                 Auth.auth().languageCode = "en"
-                print("AuthService: Firebase Auth configured")
+                print("AuthService: Firebase Auth configured for production")
             }
             
             // Small delay to ensure settings are applied

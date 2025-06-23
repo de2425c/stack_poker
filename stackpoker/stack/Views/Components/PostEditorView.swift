@@ -32,6 +32,9 @@ struct PostEditorView: View {
     var sessionGameName: String // Direct game name for badge
     var sessionStakes: String // Direct stakes for badge
     @State private var currentSessionLocation: String? // Added for location propagation
+    
+    // Callback for when user cancels (taps Cancel button)
+    var onCancel: (() -> Void)?
 
     // View state
     @State private var postText = "" // This will now ONLY store user's custom comment
@@ -68,7 +71,8 @@ struct PostEditorView: View {
          sessionGameName: String = "",
          sessionStakes: String = "",
          sessionLocation: String? = nil, // Added sessionLocation parameter
-         completedSession: Session? = nil) {
+         completedSession: Session? = nil,
+         onCancel: (() -> Void)? = nil) {
         self.userId = userId
         self.initialText = initialText
         self.prefilledContent = prefilledContent
@@ -85,6 +89,7 @@ struct PostEditorView: View {
         _selectedCompletedSession = State(initialValue: completedSession) // Initialize selectedCompletedSession
         // Initialize with empty title - user should provide their own title
         _completedSessionTitle = State(initialValue: "")
+        self.onCancel = onCancel
     }
 
     // Determines if this is a hand post
@@ -204,7 +209,16 @@ struct PostEditorView: View {
                 let screenSize = geometry.size
                 ZStack {
                     // Background
-                    AppBackgroundView().ignoresSafeArea()
+                    Color.clear
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            isTextEditorFocused = false
+                            hideKeyboard()
+                        }
+                    
+                    AppBackgroundView()
+                        .ignoresSafeArea()
 
                     VStack(spacing: 0) {
                         // Header with user profile
@@ -341,7 +355,11 @@ struct PostEditorView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarLeading) {
                     Button("Cancel") {
-                        dismiss()
+                        if let onCancel = onCancel {
+                            onCancel()
+                        } else {
+                            dismiss()
+                        }
                     }
                     .foregroundColor(.white)
                 }
@@ -1161,6 +1179,10 @@ struct PostEditorView: View {
             return "\(Int(value))"
         // Add other cases if new challenge types are introduced
         }
+    }
+    
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 

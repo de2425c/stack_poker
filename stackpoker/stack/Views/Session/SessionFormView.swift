@@ -568,6 +568,7 @@ struct StakerConfig: Identifiable {
 
 struct SessionFormView: View {
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var sessionStore: SessionStore
     let userId: String
     private let db = Firestore.firestore() // Define db instance here
     
@@ -944,6 +945,7 @@ struct SessionFormView: View {
                     self.selectedLogType = .tournament // Switch to tournament tab
                     self.showingEventSelector = false // Dismiss the sheet
                 }, isSheetPresentation: true)
+                .environmentObject(sessionStore)
                 .navigationTitle("Select Event")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {

@@ -220,6 +220,57 @@ class UserService: ObservableObject {
         try await fetchUserProfile() // Refresh the local profile
     }
 
+    // MARK: - Login Count Tracking for CSV Import Prompt
+    
+    /// Increments the user's login count and returns whether they should see the CSV import prompt
+    func incrementLoginCount() async throws -> Bool {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw UserServiceError.notAuthenticated
+        }
+        
+        let userDoc = db.collection("users").document(userId)
+        
+        do {
+            // Get current login count
+            let document = try await userDoc.getDocument()
+            let currentCount = document.data()?["loginCount"] as? Int ?? 0
+            let newCount = currentCount + 1
+            
+            // Update login count
+            try await userDoc.updateData(["loginCount": newCount])
+            
+            // Return true if this is one of the first 3 logins and user hasn't dismissed the prompt
+            let hasShownCSVPrompt = document.data()?["hasShownCSVPrompt"] as? Bool ?? false
+            return newCount <= 3 && !hasShownCSVPrompt
+        } catch {
+            throw error
+        }
+    }
+    
+    /// Marks that the user has seen the CSV import prompt
+    func markCSVPromptShown() async throws {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw UserServiceError.notAuthenticated
+        }
+        
+        try await db.collection("users").document(userId).updateData([
+            "hasShownCSVPrompt": true
+        ])
+    }
+    
+    /// Checks if the user should see the CSV import prompt
+    func shouldShowCSVImportPrompt() async throws -> Bool {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw UserServiceError.notAuthenticated
+        }
+        
+        let document = try await db.collection("users").document(userId).getDocument()
+        let loginCount = document.data()?["loginCount"] as? Int ?? 0
+        let hasShownCSVPrompt = document.data()?["hasShownCSVPrompt"] as? Bool ?? false
+        
+        return loginCount <= 3 && !hasShownCSVPrompt
+    }
+
     // Function to update or set the FCM token for a user
     func updateFCMToken(userId: String, token: String) async throws {
 

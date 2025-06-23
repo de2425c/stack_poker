@@ -40,6 +40,10 @@ struct HomePage: View {
     @State private var selectedInvite: HomeGame.GameInvite?
     // REMOVED: @State private var showNewHandEntryViewSheet = false
     
+    // CSV Import Prompt
+    @State private var showingCSVImportPrompt = false
+    @State private var showingCSVImportFlow = false
+    
     init(userId: String) {
         self.userId = userId
         _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId))
@@ -129,13 +133,17 @@ struct HomePage: View {
                                     userId: userId,
                                     hasStandaloneGameBar: activeHostedStandaloneGame != nil,
                                     hasInviteBar: !pendingInvites.isEmpty,
-                                    hasLiveSessionBar: sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive)
+                                    hasLiveSessionBar: sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive),
+                                    onNavigateToExplore: {
+                                        selectedTab = .explore
+                                    }
                                 ).edgesIgnoringSafeArea(.top)
                             }
                         }
                         .tag(Tab.feed)
                         
                         ExploreView()
+                            .environmentObject(sessionStore)
                             .tag(Tab.explore)
                         
                         Color.clear // Placeholder for Add tab
@@ -156,7 +164,11 @@ struct HomePage: View {
                                 }
                             )
                         
-                        GroupsView()
+                        GroupsView(
+                            hasStandaloneGameBar: activeHostedStandaloneGame != nil,
+                            hasInviteBar: !pendingInvites.isEmpty,
+                            hasLiveSessionBar: sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive)
+                        )
                             .environmentObject(userService)
                             // REMOVED: .environmentObject(handStore)
                             .environmentObject(sessionStore)
@@ -259,6 +271,9 @@ struct HomePage: View {
                 ) { [self] _ in
                     loadActiveHostedStandaloneGame()
                 }
+                
+                // Check if we should show CSV import prompt
+                checkForCSVImportPrompt()
             }
             .onDisappear {
                 // Clean-up observers & listeners
@@ -319,6 +334,30 @@ struct HomePage: View {
         .fullScreenCover(isPresented: $showingLiveSession) {
             EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
         }
+        .fullScreenCover(isPresented: $showingCSVImportFlow) {
+            CSVImportFlow(userId: userId)
+        }
+        // CSV Import Prompt Overlay
+        .overlay(
+            Group {
+                if showingCSVImportPrompt {
+                    CSVImportPrompt(
+                        onImportSelected: {
+                            showingCSVImportPrompt = false
+                            showingCSVImportFlow = true
+                        },
+                        onDismiss: {
+                            showingCSVImportPrompt = false
+                            // Mark that the user has seen the prompt
+                            Task {
+                                try? await userService.markCSVPromptShown()
+                            }
+                        }
+                    )
+                    .zIndex(999)
+                }
+            }
+        )
         // REMOVED: Old sheet presentation that was causing white screen issues
         // The floating popup is now handled as an overlay above
     }
@@ -1529,4 +1568,27 @@ struct FloatingInvitePopup: View {
             onDecline()
         }
     }
-} 
+}
+
+// MARK: - CSV Import Prompt Logic Extension
+extension HomePage {
+    private func checkForCSVImportPrompt() {
+        Task {
+            do {
+                // Increment login count and check if we should show the prompt
+                let shouldShow = try await userService.incrementLoginCount()
+                
+                await MainActor.run {
+                    if shouldShow {
+                        // Delay the prompt slightly to allow the UI to settle
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            self.showingCSVImportPrompt = true
+                        }
+                    }
+                }
+            } catch {
+                print("Error checking CSV import prompt: \(error)")
+            }
+        }
+    }
+}

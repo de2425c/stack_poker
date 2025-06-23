@@ -29,6 +29,7 @@ struct FeedView: View {
     // New state for action buttons
     @State private var showNewHandEntryViewSheet = false
     @State private var showingLiveSession = false
+    @State private var showingOpenHomeGameFlow = false
     
     // State for suggested users
     @State private var suggestedUsers: [UserProfile] = []
@@ -41,6 +42,9 @@ struct FeedView: View {
     let hasInviteBar: Bool
     let hasLiveSessionBar: Bool
     
+    // Optional callback for navigating to explore tab
+    let onNavigateToExplore: (() -> Void)?
+    
     // Add computed property for dynamic top padding based on bar visibility
     private var dynamicTopPadding: CGFloat {
         // When any top bars are visible, use minimal padding since they provide spacing
@@ -52,11 +56,12 @@ struct FeedView: View {
         }
     }
     
-    init(userId: String = Auth.auth().currentUser?.uid ?? "", hasStandaloneGameBar: Bool = false, hasInviteBar: Bool = false, hasLiveSessionBar: Bool = false) {
+    init(userId: String = Auth.auth().currentUser?.uid ?? "", hasStandaloneGameBar: Bool = false, hasInviteBar: Bool = false, hasLiveSessionBar: Bool = false, onNavigateToExplore: (() -> Void)? = nil) {
         self.userId = userId
         self.hasStandaloneGameBar = hasStandaloneGameBar
         self.hasInviteBar = hasInviteBar
         self.hasLiveSessionBar = hasLiveSessionBar
+        self.onNavigateToExplore = onNavigateToExplore
         _handStore = StateObject(wrappedValue: HandStore(userId: userId)) // Initialize HandStore
         
         // Create bankrollStore first, then pass it to sessionStore
@@ -153,6 +158,12 @@ struct FeedView: View {
         .fullScreenCover(isPresented: $showingLiveSession) {
             EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
         }
+        .sheet(isPresented: $showingOpenHomeGameFlow) {
+            HomeGameView(groupId: nil, onGameCreated: { _ in
+                showingOpenHomeGameFlow = false
+            })
+            .environmentObject(userService)
+        }
         .onAppear {
             // Load posts when the view appears - but only if we don't have recent data
             if postService.posts.isEmpty || shouldRefreshFeed() {
@@ -242,8 +253,13 @@ struct FeedView: View {
                             
                             // Record Activity Post Card
                             RecordActivityPostCard(
-                                onAddHandTapped: { showNewHandEntryViewSheet = true },
-                                onLiveSessionTapped: { showingLiveSession = true }
+                                onLiveSessionTapped: { showingLiveSession = true },
+                                onHostHomeGameTapped: { 
+                                    showingOpenHomeGameFlow = true
+                                },
+                                onExploreEventsTapped: { 
+                                    onNavigateToExplore?() 
+                                }
                             )
                             
                             // Divider between cards
@@ -376,8 +392,33 @@ struct FeedView: View {
                     // Top spacer removed
                     feedHeader() // Header is now the first item in LazyVStack
 
-                    // Add top padding for the first post *below the header*
-                    // Spacer().frame(height: 10) // This might not be needed if header has padding
+                    // Quick Actions Card at the top of feed
+                    VStack(spacing: 0) {
+                        RecordActivityPostCard(
+                            onLiveSessionTapped: { showingLiveSession = true },
+                            onHostHomeGameTapped: { 
+                                showingOpenHomeGameFlow = true
+                            },
+                            onExploreEventsTapped: { 
+                                onNavigateToExplore?() 
+                            }
+                        )
+                        .background(
+                            // Subtle highlight background
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.white.opacity(0.02),
+                                    Color.white.opacity(0.01)
+                                ]),
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        
+                        Divider()
+                            .frame(height: 0.5)
+                            .background(Color.white.opacity(0.1))
+                    }
                     
                     ForEach(0..<postService.posts.count, id: \.self) { index in
                         let post = postService.posts[index]
@@ -395,8 +436,13 @@ struct FeedView: View {
                                     if cardPosition % 2 == 0 {
                                         // Even positions (0, 2, 4...) show Record Activity
                                         RecordActivityPostCard(
-                                            onAddHandTapped: { showNewHandEntryViewSheet = true },
-                                            onLiveSessionTapped: { showingLiveSession = true }
+                                            onLiveSessionTapped: { showingLiveSession = true },
+                                            onHostHomeGameTapped: { 
+                                                showingOpenHomeGameFlow = true
+                                            },
+                                            onExploreEventsTapped: { 
+                                                onNavigateToExplore?() 
+                                            }
                                         )
                                     } else {
                                         // Odd positions (1, 3, 5...) show Suggested Users
@@ -423,8 +469,13 @@ struct FeedView: View {
                                         } else {
                                             // Fallback to Record Activity if no suggested users
                                             RecordActivityPostCard(
-                                                onAddHandTapped: { showNewHandEntryViewSheet = true },
-                                                onLiveSessionTapped: { showingLiveSession = true }
+                                                onLiveSessionTapped: { showingLiveSession = true },
+                                                onHostHomeGameTapped: { 
+                                                    showingOpenHomeGameFlow = true
+                                                },
+                                                onExploreEventsTapped: { 
+                                                    onNavigateToExplore?() 
+                                                }
                                             )
                                         }
                                     }
@@ -463,9 +514,6 @@ struct FeedView: View {
                                 onComment: {
                                     selectedPost = post
                                     showingComments = true
-                                },
-                                onDelete: {
-                                    deletePost(post)
                                 },
                                 isCurrentUser: post.userId == userId,
                                 userId: userId
@@ -572,9 +620,9 @@ struct FeedView: View {
     
     // Helper function to determine when to show suggested content
     private func shouldShowSuggestedContent(at index: Int) -> Bool {
-        // Show after every 5 posts starting from index 4 (5th post)
-        // This creates pattern: posts 0-4, then suggestion, posts 5-9, then suggestion, etc.
-        let shouldShow = (index > 0) && ((index % 5) == 0)
+        // Show every 7 posts starting from index 6 (7th post)
+        // This creates pattern: posts 0-6, then suggestion, posts 7-13, then suggestion, etc.
+        let shouldShow = (index > 0) && ((index % 7) == 0)
         print("DEBUG: Index \(index), shouldShow: \(shouldShow)")
         return shouldShow
     }
@@ -1030,20 +1078,17 @@ struct PostCardView: View {
     let post: Post
     let onLike: () -> Void
     let onComment: () -> Void
-    let onDelete: () -> Void
     let isCurrentUser: Bool
     let userId: String
     @State private var showingReplay = false
     @State private var isLiked: Bool
     @State private var animateLike = false
-    @State private var showDeleteConfirm = false
     @EnvironmentObject private var userService: UserService // Added env object for navigation
     
-    init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, onDelete: @escaping () -> Void, isCurrentUser: Bool, userId: String) {
+    init(post: Post, onLike: @escaping () -> Void, onComment: @escaping () -> Void, isCurrentUser: Bool, userId: String) {
         self.post = post
         self.onLike = onLike
         self.onComment = onComment
-        self.onDelete = onDelete
         self.isCurrentUser = isCurrentUser
         self.userId = userId
         _isLiked = State(initialValue: post.isLiked)
@@ -1220,28 +1265,6 @@ struct PostCardView: View {
                 }
                 
                 Spacer()
-                
-                // Delete option (only for user's own posts, moved to top right)
-                if isCurrentUser {
-                    Button(action: { showDeleteConfirm = true }) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 15))
-                            .foregroundColor(.gray.opacity(0.7))
-                            .padding(6) // Add some padding for easier tapping
-                    }
-                    .confirmationDialog(
-                        "Delete this post?",
-                        isPresented: $showDeleteConfirm,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Delete", role: .destructive) {
-                            onDelete()
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("This action cannot be undone.")
-                    }
-                }
             }
             .padding(.horizontal, 16)
             // Adjust top padding based on tag presence
@@ -1430,8 +1453,6 @@ struct PostCardView: View {
                         .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8)))
                     }
                 }
-                
-                // Delete option REMOVED from here
                 
                 Spacer()
             }
@@ -3049,74 +3070,113 @@ extension String: Identifiable {
 
 // MARK: - Record Activity Post Card (Strava-style)
 struct RecordActivityPostCard: View {
-    let onAddHandTapped: () -> Void
     let onLiveSessionTapped: () -> Void
+    let onHostHomeGameTapped: () -> Void
+    let onExploreEventsTapped: () -> Void
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Content
-            Text("Record an Activity")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white.opacity(0.95))
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 4)
-            
-            Text("You can also record activity with the + button")
-                .font(.system(size: 14))
-                .foregroundColor(.gray.opacity(0.8))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-            
-            // Action buttons in horizontal layout
-            HStack(spacing: 12) {
-                // Add Hand Button
-                Button(action: onAddHandTapped) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 14))
-                            .foregroundColor(.black)
-                        
-                        Text("Add Hand")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.black)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(
-                        Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
-                    )
-                    .cornerRadius(20)
-                }
-                .buttonStyle(PlainButtonStyle())
+        VStack(alignment: .center, spacing: 0) {
+            // Content - centered
+            VStack(spacing: 4) {
+                Text("Quick Actions")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.95))
                 
-                // Live Session Button
-                Button(action: onLiveSessionTapped) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white)
-                        
-                        Text("Live Session")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(
-                        Color.clear
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                Spacer()
+                Text("Start playing or discover new games")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray.opacity(0.8))
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 14)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity)
+            
+            // Action buttons in vertical layout for better spacing
+            VStack(spacing: 10) {
+                // Start Live Session Button (primary action)
+                Button(action: onLiveSessionTapped) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "clock.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.black)
+                        
+                        Text("Start Live Session")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.black)
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.6))
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(red: 64/255, green: 156/255, blue: 255/255),
+                                Color(red: 100/255, green: 180/255, blue: 255/255)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                // Secondary actions row - perfectly centered
+                HStack(spacing: 10) {
+                    // Host Home Game Button
+                    Button(action: onHostHomeGameTapped) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "house.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.white)
+                            
+                            Text("Host Home Game")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .background(Color.clear)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Explore Events Button
+                    Button(action: onExploreEventsTapped) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 14))
+                                .foregroundColor(.white)
+                            
+                            Text("Explore Events")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .background(Color.clear)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
         }
         .background(Color.clear)
     }

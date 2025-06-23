@@ -18,6 +18,29 @@ struct GroupsView: View {
     @State private var showError = false
     @State private var isRefreshing = false
     
+    // Parameters to track whether bars are showing (matching FeedView)
+    let hasStandaloneGameBar: Bool
+    let hasInviteBar: Bool
+    let hasLiveSessionBar: Bool
+    
+    // Add computed property for dynamic top padding based on bar visibility
+    private var dynamicTopPadding: CGFloat {
+        // When any top bars are visible, use minimal padding since they provide spacing
+        if hasLiveSessionBar || hasStandaloneGameBar || hasInviteBar {
+            return 8 // Minimal padding when bars are present
+        } else {
+            // When no bars, need padding to account for safe area
+            return 8 // Consistent with FeedView approach
+        }
+    }
+    
+    // Add initializer to accept bar visibility parameters
+    init(hasStandaloneGameBar: Bool = false, hasInviteBar: Bool = false, hasLiveSessionBar: Bool = false) {
+        self.hasStandaloneGameBar = hasStandaloneGameBar
+        self.hasInviteBar = hasInviteBar
+        self.hasLiveSessionBar = hasLiveSessionBar
+    }
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -60,7 +83,7 @@ struct GroupsView: View {
                         }
                     }
                     .padding(.horizontal, 20)
-                    .padding(.top, 8)
+                    .padding(.top, dynamicTopPadding)
                     .padding(.bottom, 16)
 
                     ScrollView(showsIndicators: false) {

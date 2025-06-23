@@ -737,7 +737,7 @@ struct StakeCompactCard: View {
                     } else {
                         Text(formatCurrency(abs(stake.amountTransferredAtSettlement)))
                             .font(.plusJakarta(.callout, weight: .bold))
-                            .foregroundColor(stake.amountTransferredAtSettlement < 0 ? .green : .red)
+                            .foregroundColor(stake.amountTransferredAtSettlement < 0 ? .red : .green)
                     }
                     
                     if stake.status == .settled {

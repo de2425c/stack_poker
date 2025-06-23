@@ -39,6 +39,7 @@ struct SessionDetailView: View {
     
     // StakeService for fetching stakes related to this session
     @StateObject private var stakeService = StakeService()
+    @StateObject private var manualStakerService = ManualStakerService()
     @EnvironmentObject var userService: UserService // Add UserService for stake user lookups
     
     // State for fetched hands, notes, and stakes
@@ -185,6 +186,7 @@ struct SessionDetailView: View {
                         sessionStore: sessionStore, 
                         sessionStakes: sessionStakes, 
                         stakeService: stakeService,
+                        manualStakerService: manualStakerService,
                         onStakeUpdated: {
                             fetchSessionDetails()
                         }
