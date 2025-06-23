@@ -58,6 +58,11 @@ struct ProfileView: View {
     @State private var showStakingDashboardView = false // New state for Staking Dashboard
     @State private var showChallengesDetailView = false // New state for Challenges Dashboard
     
+    // Main graph carousel collapse state
+    @State private var isMainGraphsCollapsed = false
+    
+
+    
     // Analytics specific state (remains for analyticsDetailContent)
     @State private var selectedTimeRange = 1 // Default to 1W (index 1) for Analytics
     @State private var selectedCarouselIndex = 0 // For carousel page selection
@@ -1000,6 +1005,20 @@ struct ProfileView: View {
                         }
                         
                         Spacer()
+                        
+                        // Collapse/Expand button for main graphs
+                        Button(action: {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                isMainGraphsCollapsed.toggle()
+                            }
+                        }) {
+                            Image(systemName: isMainGraphsCollapsed ? "chevron.down.circle" : "chevron.up.circle")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                                .scaleEffect(isMainGraphsCollapsed ? 0.9 : 1.0)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isMainGraphsCollapsed)
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     
@@ -1047,83 +1066,304 @@ struct ProfileView: View {
                 .padding(.horizontal, 20)
                 
                 // Chart display with time selectors at bottom
-                VStack(spacing: 8) { // Reduced spacing
-                    if filteredSessions.isEmpty {
-                        Text("No sessions recorded")
-                            .foregroundColor(.gray)
-                            .frame(height: 220)
-                            .frame(maxWidth: .infinity) // Ensure it centers if no data
-                    } else {
-                        // Analytics Header
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Analytics Overview")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                            
-                            Text("Customize your graphs below to see detailed insights")
-                                .font(.system(size: 14, weight: .medium))
+                if !isMainGraphsCollapsed {
+                    VStack(spacing: 8) { // Reduced spacing
+                        if filteredSessions.isEmpty {
+                            Text("No sessions recorded")
                                 .foregroundColor(.gray)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color(.systemGray6).opacity(0.1))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                .frame(height: 220)
+                                .frame(maxWidth: .infinity) // Ensure it centers if no data
+                        } else {
+                                // Swipeable Graph Carousel (Restored)
+                                SwipeableGraphCarousel(
+                                    sessions: filteredSessions,
+                                    bankrollTransactions: bankrollStore.transactions,
+                                    selectedTimeRange: $selectedTimeRange,
+                                    timeRanges: timeRanges,
+                                    selectedGraphIndex: $selectedGraphTab,
+                                    onChartTouch: { location, geometry in
+                                        // Handle touch for tooltip
+                                        if selectedGraphTab < 2 {
+                                            let touchX = location.x
+                                            let normalizedX = touchX / geometry.size.width
+                                            
+                                            if !filteredSessions.isEmpty {
+                                                let index = Int(normalizedX * CGFloat(filteredSessions.count - 1))
+                                                let clampedIndex = max(0, min(index, filteredSessions.count - 1))
+                                                let session = filteredSessions.sorted { $0.startDate < $1.startDate }[clampedIndex]
+                                                
+                                                var cumulativeProfit = 0.0
+                                                for i in 0...clampedIndex {
+                                                    cumulativeProfit += filteredSessions.sorted { $0.startDate < $1.startDate }[i].profit
+                                                }
+                                                
+                                                selectedDataPoint = (date: session.startDate, profit: cumulativeProfit)
+                                                touchLocation = location
+                                                showTooltip = true
+                                            }
+                                        }
+                                    },
+                                    onTouchEnd: {
+                                        showTooltip = false
+                                        selectedDataPoint = nil
+                                    },
+                                    showTooltip: showTooltip,
+                                    touchLocation: touchLocation,
+                                    selectedDataPoint: selectedDataPoint
                                 )
-                        )
-                        .padding(.horizontal, 20)
-                    }
+                                .frame(height: 280)
+                            }
+                        }
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .top).combined(with: .opacity),
+                        removal: .move(edge: .top).combined(with: .opacity)
+                    ))
                 }
                 
+                // Spacer before detailed analytics to prevent overlap
+                Spacer()
+                    .frame(height: 20)
+                
+                // Beautiful Whoop-style Detailed Analytics Tabs
+                VStack(spacing: 16) {
+                    Text("DETAILED ANALYTICS")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.85))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 24)
+                    
+                    VStack(spacing: 12) {
+                        // Cash Analytics Tab
+                        NavigationLink(destination: CashAnalyticsView()) {
+                            HStack(spacing: 16) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(stops: [
+                                                    .init(color: Color.green.opacity(0.8), location: 0),
+                                                    .init(color: Color.green.opacity(0.6), location: 0.5),
+                                                    .init(color: Color.green.opacity(0.4), location: 1)
+                                                ]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 50, height: 50)
+                                    
+                                Image(systemName: "dollarsign.circle.fill")
+                                        .font(.system(size: 24, weight: .semibold))
+                                        .foregroundColor(.white)
+                            }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Cash Game Analytics")
+                                        .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.white)
+                                    
+                                    Text("Deep dive into cash game performance")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.gray)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .background(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Material.ultraThinMaterial)
+                                        .opacity(0.1)
+                                    
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [
+                                                    Color.green.opacity(0.3),
+                                                    Color.white.opacity(0.1),
+                                                    Color.clear
+                                                ]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            ),
+                                            lineWidth: 1
+                                        )
+                                }
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        // Tournament Analytics Tab
+                        NavigationLink(destination: TournamentAnalyticsView()) {
+                            HStack(spacing: 16) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(stops: [
+                                                    .init(color: Color.orange.opacity(0.8), location: 0),
+                                                    .init(color: Color.orange.opacity(0.6), location: 0.5),
+                                                    .init(color: Color.orange.opacity(0.4), location: 1)
+                                                ]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 50, height: 50)
+                                    
+                                Image(systemName: "trophy.fill")
+                                        .font(.system(size: 24, weight: .semibold))
+                                        .foregroundColor(.white)
+                            }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Tournament Analytics")
+                                        .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.white)
+                                    
+                                    Text("Analyze your tournament performance")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.gray)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .background(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Material.ultraThinMaterial)
+                                        .opacity(0.1)
+                                    
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [
+                                                    Color.orange.opacity(0.3),
+                                                    Color.white.opacity(0.1),
+                                                    Color.clear
+                                                ]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            ),
+                                            lineWidth: 1
+                                        )
+                                }
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        // Graphs Dashboard Tab
+                        NavigationLink(destination: GraphsDashboardView(userId: userId, sessionStore: sessionStore, bankrollStore: bankrollStore, selectedGraphs: $selectedGraphs)) {
+                            HStack(spacing: 16) {
+                                ZStack {
+                                RoundedRectangle(cornerRadius: 12)
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(stops: [
+                                                    .init(color: Color.purple.opacity(0.8), location: 0),
+                                                    .init(color: Color.purple.opacity(0.6), location: 0.5),
+                                                    .init(color: Color.purple.opacity(0.4), location: 1)
+                                                ]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 50, height: 50)
+                                    
+                                    Image(systemName: "chart.bar.xaxis")
+                                        .font(.system(size: 24, weight: .semibold))
+                                        .foregroundColor(.white)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Graphs Dashboard")
+                                        .font(.system(size: 17, weight: .bold))
+                                        .foregroundColor(.white)
+                                    
+                                    Text("View all graphs & customise home page")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.gray)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .background(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Material.ultraThinMaterial)
+                                        .opacity(0.1)
+                                    
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [
+                                                    Color.purple.opacity(0.3),
+                                                    Color.white.opacity(0.1),
+                                                    Color.clear
+                                                ]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            ),
+                                            lineWidth: 1
+                                        )
+                                }
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.horizontal, 20)
+                }
+
                 // Spacer for consistent layout
                 Spacer()
                     .frame(height: 16)
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
                 
-                // Customize Graphs Button
+                // Selected Graphs Section Header
                 HStack {
-                    Text("GRAPHS")
+                    Text("SELECTED GRAPHS")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundColor(.white.opacity(0.85))
                     
-                    if !isCustomizingGraphs {
-                        Text("\(selectedGraphs.count)/\(GraphType.allCases.count)")
+                    Text("\(selectedGraphs.count)/2")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.gray.opacity(0.6))
-                    }
                     
                     Spacer()
-                    
-                    Button(action: {
-                        withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                            isCustomizingGraphs.toggle()
-                        }
-                    }) {
-                        Text(isCustomizingGraphs ? "Done" : "Customize Graphs")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
                 
-                if isCustomizingGraphs {
-                    // Customization Interface
-                    CustomizeGraphsView(selectedGraphs: $selectedGraphs, isDraggingAny: $isDraggingAny)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                } else {
-                    // Display selected graphs
-                    ForEach(selectedGraphs, id: \.id) { graphType in
+                // Display selected graphs (limited to 2)
+                ForEach(selectedGraphs.prefix(2), id: \.id) { graphType in
                         switch graphType {
+                    case .dollarPerHour:
+                        DollarPerHourGraph(sessions: filteredSessions)
+                            .padding(.top, 8)
+                    case .profit:
+                        ProfitGraph(sessionStore: sessionStore)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 8)
                         case .bankroll:
-                            // Placeholder for bankroll graph
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Bankroll")
                                     .font(.system(size: 16, weight: .bold))
@@ -1147,23 +1387,37 @@ struct ProfileView: View {
                             )
                             .padding(.horizontal, 20)
                             .padding(.top, 8)
-                        case .dollarPerHour:
-                            DollarPerHourGraph(sessions: filteredSessions)
-                                .padding(.top, 8)
-                        case .profit:
-                            // Placeholder for profit graph
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Profit")
+                    case .monthly:
+                        MonthlyProfitBarChart(
+                            sessions: filteredSessions,
+                            bankrollTransactions: bankrollStore.transactions,
+                            onBarTouch: { _ in }
+                            )
+                            .padding(.horizontal, 20)
+                            .padding(.top, 8)
+                    case .daily:
+                        DailyTimeMoneyBarGraph(sessions: filteredSessions)
+                            .padding(.top, 8)
+                    case .dayOfWeek:
+                        DayOfWeekStatsBarChart(sessions: filteredSessions, period: dayOfWeekStatsPeriod)
+                            .padding(.top, 8)
+                            .padding(.horizontal, 8)
+                    case .winRate:
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Win Rate")
                                     .font(.system(size: 16, weight: .bold))
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 20)
                                     .padding(.top, 16)
                                 
-                                Text("Profit graph coming soon...")
-                                    .foregroundColor(.gray)
-                                    .frame(height: 200)
-                                    .frame(maxWidth: .infinity)
+                            HStack {
+                                Spacer()
+                                WinRateCard(winRate: winRate)
+                                    .frame(width: 200, height: 200)
+                                Spacer()
+                            }
                                     .padding(.horizontal, 20)
+                            .padding(.bottom, 16)
                             }
                             .background(
                                 RoundedRectangle(cornerRadius: 16)
@@ -1174,113 +1428,11 @@ struct ProfileView: View {
                                     )
                             )
                             .padding(.horizontal, 20)
-                            .padding(.top, 8)
-                        case .monthly:
-                            // Placeholder for monthly graph
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Monthly Profit")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 20)
-                                    .padding(.top, 16)
-                                
-                                Text("Monthly profit graph coming soon...")
-                                    .foregroundColor(.gray)
-                                    .frame(height: 200)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.horizontal, 20)
-                            }
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color(.systemGray6).opacity(0.1))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                    )
-                            )
-                            .padding(.horizontal, 20)
-                            .padding(.top, 8)
-                        case .daily:
-                            DailyTimeMoneyBarGraph(sessions: filteredSessions)
                                 .padding(.top, 8)
-                        }
                     }
                 }
             }
             .padding(.bottom, 24) // Slightly reduced bottom padding
-            
-            // Navigation buttons for deep dives
-            VStack(spacing: 16) {
-                Text("DETAILED ANALYTICS")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.85))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 24)
-                
-                HStack(spacing: 12) {
-                    NavigationLink(destination: CashAnalyticsView()) {
-                        HStack {
-                            Image(systemName: "dollarsign.circle.fill")
-                                .font(.system(size: 18))
-                            Text("Cash")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.blue.opacity(0.2))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-                                )
-                        )
-                    }
-                    
-                    NavigationLink(destination: TournamentAnalyticsView()) {
-                        HStack {
-                            Image(systemName: "trophy.fill")
-                                .font(.system(size: 18))
-                            Text("Tournament")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.orange.opacity(0.2))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
-                                )
-                        )
-                    }
-                    
-                    NavigationLink(destination: StakingAnalyticsView()) {
-                        HStack {
-                            Image(systemName: "chart.line.uptrend.xyaxis")
-                                .font(.system(size: 18))
-                            Text("Staking")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.green.opacity(0.2))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
-                                )
-                        )
-                    }
-                }
-                .padding(.horizontal, 20)
-            }
             
             // Add more spacing between graphs and performance stats
             Spacer()
@@ -1289,8 +1441,8 @@ struct ProfileView: View {
             // Performance Stats with Customization
             HStack {
                 Text("PERFORMANCE STATS")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.gray.opacity(0.8))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
                 
                 if !isCustomizingStats {
                     Text("\(selectedStats.count)/\(PerformanceStat.allCases.count)")
@@ -2293,6 +2445,8 @@ enum GraphType: String, CaseIterable, Identifiable, Equatable {
     case profit = "profit"
     case monthly = "monthly"
     case daily = "daily"
+    case dayOfWeek = "dayOfWeek"
+    case winRate = "winRate"
     
     var id: String { rawValue }
     
@@ -2301,20 +2455,51 @@ enum GraphType: String, CaseIterable, Identifiable, Equatable {
         case .bankroll: return "Bankroll"
         case .dollarPerHour: return "$/Hour"
         case .profit: return "Profit"
-        case .monthly: return "Monthly"
+        case .monthly: return "Monthly Profit"
         case .daily: return "Daily Activity"
+        case .dayOfWeek: return "Day of Week Stats"
+        case .winRate: return "Win Rate"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .bankroll: return "Track your total bankroll over time"
+        case .dollarPerHour: return "Monitor your hourly earnings"
+        case .profit: return "View cumulative session profits"
+        case .monthly: return "Monthly profit breakdown"
+        case .daily: return "Daily hours and profit patterns"
+        case .dayOfWeek: return "Performance by day of the week"
+        case .winRate: return "Win rate and session statistics"
         }
     }
     
     var icon: String {
         switch self {
-        case .bankroll, .profit, .dollarPerHour: return "chart.line.uptrend.xyaxis"
-        case .monthly, .daily: return "chart.bar.fill"
+        case .bankroll: return "chart.line.uptrend.xyaxis"
+        case .dollarPerHour: return "clock.arrow.circlepath"
+        case .profit: return "chart.line.uptrend.xyaxis"
+        case .monthly: return "calendar"
+        case .daily: return "chart.bar.fill"
+        case .dayOfWeek: return "calendar.badge.clock"
+        case .winRate: return "chart.pie.fill"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .bankroll: return .green
+        case .dollarPerHour: return .mint
+        case .profit: return .blue
+        case .monthly: return .orange
+        case .daily: return .purple
+        case .dayOfWeek: return .cyan
+        case .winRate: return .pink
         }
     }
     
     static var defaultSelection: [GraphType] {
-        [.bankroll, .dollarPerHour, .profit, .monthly, .daily]
+        [.dollarPerHour, .profit]
     }
 }
 
@@ -3294,83 +3479,634 @@ enum ImportType: Hashable {
     }
 }
 
-// MARK: - Import Options Sheet
-struct ImportOptionsSheet: View {
-    let onImportSelected: (ImportType) -> Void
-    @Environment(\.dismiss) private var dismiss
+// MARK: - Swipeable Graph Carousel
+struct SwipeableGraphCarousel: View {
+    let sessions: [Session]
+    let bankrollTransactions: [BankrollTransaction]
+    @Binding var selectedTimeRange: Int
+    let timeRanges: [String]
+    @Binding var selectedGraphIndex: Int
+    let onChartTouch: (CGPoint, GeometryProxy) -> Void
+    let onTouchEnd: () -> Void
+    let showTooltip: Bool
+    let touchLocation: CGPoint
+    let selectedDataPoint: (date: Date, profit: Double)?
+    
+    @State private var dragOffset: CGFloat = 0
+    
+    private let graphTypes = ["Bankroll", "Profit", "Monthly"]
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                AppBackgroundView()
-                    .ignoresSafeArea()
+        VStack(spacing: 0) {
+            // Swipeable graph container
+            TabView(selection: $selectedGraphIndex) {
+                // Bankroll Graph (sessions + bankroll adjustments)
+                BankrollGraphView(
+                    sessions: sessions,
+                    bankrollTransactions: bankrollTransactions,
+                    selectedTimeRange: selectedTimeRange,
+                    timeRanges: timeRanges,
+                    onChartTouch: onChartTouch,
+                    onTouchEnd: onTouchEnd,
+                    showTooltip: showTooltip,
+                    touchLocation: touchLocation,
+                    selectedDataPoint: selectedDataPoint
+                )
+                .tag(0)
                 
-                VStack(spacing: 20) {
-                    Text("Select Import Format")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.top, 20)
-                    
-                    Text("Choose the app you want to import your poker session data from:")
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                    
-                    VStack(spacing: 16) {
-                        ForEach([ImportType.pokerbase, .pokerAnalytics, .pbt, .regroup], id: \.self) { importType in
-                            Button(action: {
-                                onImportSelected(importType)
-                                dismiss()
-                            }) {
-                                HStack(spacing: 16) {
-                                    Image(systemName: "tray.and.arrow.down")
-                                        .font(.system(size: 20, weight: .medium))
-                                        .foregroundColor(importType.color)
-                                        .frame(width: 30)
-                                    
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(importType.title)
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundColor(.white)
-                                        Text("Import \(importType.fileType) files")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.gray)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.gray)
-                                }
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(importType.color.opacity(0.3), lineWidth: 1)
-                                        )
-                                )
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
+                // Profit Graph (sessions only)
+                ProfitGraphView(
+                    sessions: sessions,
+                    selectedTimeRange: selectedTimeRange,
+                    timeRanges: timeRanges,
+                    onChartTouch: onChartTouch,
+                    onTouchEnd: onTouchEnd,
+                    showTooltip: showTooltip,
+                    touchLocation: touchLocation,
+                    selectedDataPoint: selectedDataPoint
+                )
+                .tag(1)
+                
+                // Monthly Profit Bar Chart
+                MonthlyProfitBarChart(
+                    sessions: sessions,
+                    bankrollTransactions: bankrollTransactions,
+                    onBarTouch: { monthData in
+                        // Handle bar touch to show monthly profit
+                        // Could potentially update selectedDataPoint here if needed
                     }
-                    .padding(.horizontal, 20)
-                    
-                    Spacer()
+                )
+                .tag(2)
+            }
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            .frame(height: 280)
+            
+            // Time period selector (only for bankroll and profit graphs)
+            if selectedGraphIndex < 2 {
+                HStack {
+                    ForEach(Array(timeRanges.enumerated()), id: \.element) { index, rangeString in
+                            Button(action: {
+                            selectedTimeRange = index
+                        }) {
+                            Text(rangeString)
+                                .font(.system(size: 13, weight: selectedTimeRange == index ? .medium : .regular))
+                                .foregroundColor(selectedTimeRange == index ? .white : .gray)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(selectedTimeRange == index ? Color.gray.opacity(0.3) : Color.clear)
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding(.top, 16)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            
+            // Graph type indicators (moved to bottom, after time selectors)
+                                HStack(spacing: 16) {
+                ForEach(Array(graphTypes.enumerated()), id: \.offset) { index, type in
+                    Button(action: {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                            selectedGraphIndex = index
+                        }
+                    }) {
+                        Text(type)
+                            .font(.system(size: 13, weight: selectedGraphIndex == index ? .semibold : .regular))
+                            .foregroundColor(selectedGraphIndex == index ? .white : .gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(selectedGraphIndex == index ? Color.gray.opacity(0.3) : Color.clear)
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
-            .navigationTitle("Import CSV")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
+            .padding(.top, selectedGraphIndex < 2 ? 12 : 16)
+        }
+        .animation(.easeInOut(duration: 0.3), value: selectedGraphIndex)
+    }
+}
+
+// MARK: - Bankroll Graph View
+struct BankrollGraphView: View {
+    let sessions: [Session]
+    let bankrollTransactions: [BankrollTransaction]
+    let selectedTimeRange: Int
+    let timeRanges: [String]
+    let onChartTouch: (CGPoint, GeometryProxy) -> Void
+    let onTouchEnd: () -> Void
+    let showTooltip: Bool
+    let touchLocation: CGPoint
+    let selectedDataPoint: (date: Date, profit: Double)?
+    
+    private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
+        let now = Date()
+        let calendar = Calendar.current
+        
+        switch timeRangeIndex {
+        case 0: // 24H
+            let oneDayAgo = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneDayAgo }
+        case 1: // 1W
+            let oneWeekAgo = calendar.date(byAdding: .weekOfYear, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneWeekAgo }
+        case 2: // 1M
+            let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneMonthAgo }
+        case 3: // 6M
+            let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: now) ?? now
+            return sessions.filter { $0.startDate >= sixMonthsAgo }
+        case 4: // 1Y
+            let oneYearAgo = calendar.date(byAdding: .year, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneYearAgo }
+        default: // All
+            return sessions
+        }
+    }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Y-axis grid lines
+                VStack(spacing: 0) {
+                    ForEach(0..<5) { _ in
+                                    Spacer()
+                        Divider()
+                            .background(Color.gray.opacity(0.1))
                     }
-                    .foregroundColor(.white)
+                }
+                
+                // Background gradient
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: Color.clear, location: 0),
+                        .init(color: Color.white.opacity(0.02), location: 0.3),
+                        .init(color: Color.white.opacity(0.03), location: 0.7),
+                        .init(color: Color.clear, location: 1)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .blendMode(.overlay)
+                
+                // Combined bankroll chart (sessions + transactions)
+                let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                let filteredTransactions = bankrollTransactions // Include all bankroll transactions
+                
+                // Combine and sort data points
+                let combinedData = (filteredSessions.map { (date: $0.startDate, amount: $0.profit, type: "session") } +
+                                  filteredTransactions.map { (date: $0.timestamp, amount: $0.amount, type: "transaction") })
+                    .sorted { $0.date < $1.date }
+                
+                if !combinedData.isEmpty {
+                    let cumulativeData = combinedData.reduce(into: [(Date, Double)]()) { result, item in
+                        let previousTotal = result.last?.1 ?? 0
+                        result.append((item.date, previousTotal + item.amount))
+                    }
+                    
+                    let totalProfit = cumulativeData.last?.1 ?? 0
+                    let chartColor = totalProfit >= 0 ? 
+                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
+                    
+                    // Draw chart path
+                    ChartPath(
+                        dataPoints: cumulativeData,
+                        geometry: geometry,
+                        color: chartColor,
+                        showFill: true
+                    )
+                }
+                
+                // Interactive overlay
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                onChartTouch(value.location, geometry)
+                            }
+                            .onEnded { _ in
+                                onTouchEnd()
+                            }
+                    )
+                
+                // Touch indicator
+                if showTooltip {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(stops: [
+                                    .init(color: Color.clear, location: 0),
+                                    .init(color: Color.white.opacity(0.6), location: 0.1),
+                                    .init(color: Color.white.opacity(0.8), location: 0.5),
+                                    .init(color: Color.white.opacity(0.6), location: 0.9),
+                                    .init(color: Color.clear, location: 1)
+                                ]),
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 1)
+                        .position(x: touchLocation.x, y: geometry.size.height / 2)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Profit Graph View
+struct ProfitGraphView: View {
+    let sessions: [Session]
+    let selectedTimeRange: Int
+    let timeRanges: [String]
+    let onChartTouch: (CGPoint, GeometryProxy) -> Void
+    let onTouchEnd: () -> Void
+    let showTooltip: Bool
+    let touchLocation: CGPoint
+    let selectedDataPoint: (date: Date, profit: Double)?
+    
+    private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
+        let now = Date()
+        let calendar = Calendar.current
+        
+        switch timeRangeIndex {
+        case 0: // 24H
+            let oneDayAgo = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneDayAgo }
+        case 1: // 1W
+            let oneWeekAgo = calendar.date(byAdding: .weekOfYear, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneWeekAgo }
+        case 2: // 1M
+            let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneMonthAgo }
+        case 3: // 6M
+            let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: now) ?? now
+            return sessions.filter { $0.startDate >= sixMonthsAgo }
+        case 4: // 1Y
+            let oneYearAgo = calendar.date(byAdding: .year, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneYearAgo }
+        default: // All
+            return sessions
+        }
+    }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Y-axis grid lines
+                VStack(spacing: 0) {
+                    ForEach(0..<5) { _ in
+                    Spacer()
+                        Divider()
+                            .background(Color.gray.opacity(0.1))
+                    }
+                }
+                
+                // Background gradient
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: Color.clear, location: 0),
+                        .init(color: Color.white.opacity(0.02), location: 0.3),
+                        .init(color: Color.white.opacity(0.03), location: 0.7),
+                        .init(color: Color.clear, location: 1)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .blendMode(.overlay)
+                
+                // Profit-only chart (sessions only)
+                let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                
+                if !filteredSessions.isEmpty {
+                    let sortedSessions = filteredSessions.sorted { $0.startDate < $1.startDate }
+                    let cumulativeData = sortedSessions.reduce(into: [(Date, Double)]()) { result, session in
+                        let previousTotal = result.last?.1 ?? 0
+                        result.append((session.startDate, previousTotal + session.profit))
+                    }
+                    
+                    let totalProfit = cumulativeData.last?.1 ?? 0
+                    let chartColor = totalProfit >= 0 ? 
+                        Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                        Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
+                    
+                    // Draw chart path
+                    ChartPath(
+                        dataPoints: cumulativeData,
+                        geometry: geometry,
+                        color: chartColor,
+                        showFill: true
+                    )
+                }
+                
+                // Interactive overlay
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                onChartTouch(value.location, geometry)
+                            }
+                            .onEnded { _ in
+                                onTouchEnd()
+                            }
+                    )
+                
+                // Touch indicator
+                if showTooltip {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(stops: [
+                                    .init(color: Color.clear, location: 0),
+                                    .init(color: Color.white.opacity(0.6), location: 0.1),
+                                    .init(color: Color.white.opacity(0.8), location: 0.5),
+                                    .init(color: Color.white.opacity(0.6), location: 0.9),
+                                    .init(color: Color.clear, location: 1)
+                                ]),
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 1)
+                        .position(x: touchLocation.x, y: geometry.size.height / 2)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Monthly Profit Bar Chart
+struct MonthlyProfitBarChart: View {
+    let sessions: [Session]
+    let bankrollTransactions: [BankrollTransaction]
+    let onBarTouch: (String) -> Void
+    
+    @State private var selectedBarIndex: Int? = nil
+    
+    private func barHeight(for profit: Double, isPositive: Bool, positiveMax: Double, negativeMin: Double, maxAbsValue: Double, zeroLineY: CGFloat, geometryHeight: CGFloat) -> CGFloat {
+        guard maxAbsValue > 0 else { return 0 }
+        
+        if isPositive {
+            return (profit / positiveMax) * (zeroLineY - 30)
+        } else {
+            return (abs(profit) / abs(negativeMin)) * (geometryHeight - 30 - zeroLineY)
+        }
+    }
+    
+    private func barColor(isPositive: Bool) -> Color {
+        return isPositive ? 
+            Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+            Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
+    }
+    
+    private var monthlyData: [(String, Double)] {
+        let calendar = Calendar.current
+        let now = Date()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM yy"
+        
+        // Get last 12 months
+        var months: [Date] = []
+        for i in 0..<12 {
+            if let date = calendar.date(byAdding: .month, value: -i, to: now) {
+                months.append(date)
+            }
+        }
+        months.reverse()
+        
+        return months.map { month in
+            let monthProfit = sessions.filter { session in
+                calendar.isDate(session.startDate, equalTo: month, toGranularity: .month)
+            }.reduce(0) { $0 + $1.profit }
+            
+            let bankrollProfit = bankrollTransactions.filter { transaction in
+                calendar.isDate(transaction.timestamp, equalTo: month, toGranularity: .month)
+            }.reduce(0) { $0 + $1.amount }
+            
+            return (formatter.string(from: month), monthProfit + bankrollProfit)
+        }
+    }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            let data = monthlyData
+            let maxValue = data.map { abs($0.1) }.max() ?? 1
+            let centerY = geometry.size.height / 2
+            let availableHeight = centerY - 25 // Leave space for labels
+            let barWidth: CGFloat = 24 // Fixed width for consistency
+            let totalBarsWidth = CGFloat(data.count) * barWidth
+            let totalSpacing = geometry.size.width - totalBarsWidth - 32 // 16 padding on each side
+            let spacing = totalSpacing / CGFloat(max(1, data.count - 1))
+            
+            ZStack {
+                // Grid lines for reference
+                VStack(spacing: 0) {
+                    ForEach(0..<3) { i in
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.1))
+                            .frame(height: 0.5)
+                        if i < 2 { Spacer() }
+                    }
+                }
+                .padding(.vertical, 15)
+                
+                // Central zero line (emphasized)
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.clear,
+                                Color.gray.opacity(0.6),
+                                Color.gray.opacity(0.8),
+                                Color.gray.opacity(0.6),
+                                Color.clear
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 2)
+                    .position(x: geometry.size.width / 2, y: centerY)
+                    .shadow(color: Color.gray.opacity(0.3), radius: 1, y: 0)
+                
+                // Bars with perfect alignment
+                HStack(spacing: 0) {
+                    ForEach(Array(data.enumerated()), id: \.offset) { index, item in
+                        let (month, profit) = item
+                        let isPositive = profit >= 0
+                        let barHeight = maxValue > 0 ? min(abs(profit) / maxValue * availableHeight, availableHeight) : 0
+                        let barColor = barColor(isPositive: isPositive)
+                        
+                        VStack(spacing: 0) {
+                            // Top section (positive values)
+                            ZStack(alignment: .bottom) {
+                                // Spacer to maintain layout
+                                Color.clear
+                                    .frame(height: availableHeight)
+                                
+                                // Positive bar
+                                if isPositive && barHeight > 0 {
+                                    Rectangle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(stops: [
+                                                    .init(color: barColor.opacity(0.3), location: 0),
+                                                    .init(color: barColor.opacity(0.7), location: 0.3),
+                                                    .init(color: barColor, location: 0.7),
+                                                    .init(color: barColor.opacity(0.9), location: 1)
+                                                ]),
+                                                startPoint: .bottom,
+                                                endPoint: .top
+                                            )
+                                        )
+                                        .frame(width: barWidth, height: barHeight)
+                                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 6, topTrailingRadius: 6))
+                                        .shadow(color: barColor.opacity(0.4), radius: 3, x: 0, y: -2)
+                                        .overlay(
+                                            // Highlight effect
+                                            Rectangle()
+                                                .fill(
+                                                    LinearGradient(
+                                                        gradient: Gradient(colors: [
+                                                            Color.white.opacity(0.3),
+                                                            Color.clear
+                                                        ]),
+                                                        startPoint: .top,
+                                                        endPoint: .bottom
+                                                    )
+                                                )
+                                                .frame(width: barWidth * 0.7, height: barHeight * 0.4)
+                                                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 4, topTrailingRadius: 4))
+                                                .offset(y: -barHeight * 0.3)
+                                        )
+                                        .scaleEffect(selectedBarIndex == index ? 1.05 : 1.0)
+                                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedBarIndex)
+                                }
+                            }
+                            
+                            // Center divider (zero line space)
+                            Rectangle()
+                                .fill(Color.clear)
+                                .frame(height: 4)
+                            
+                            // Bottom section (negative values)
+                            ZStack(alignment: .top) {
+                                // Spacer to maintain layout
+                                Color.clear
+                                    .frame(height: availableHeight)
+                                
+                                // Negative bar
+                                if !isPositive && barHeight > 0 {
+                                    Rectangle()
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(stops: [
+                                                    .init(color: barColor.opacity(0.9), location: 0),
+                                                    .init(color: barColor, location: 0.3),
+                                                    .init(color: barColor.opacity(0.7), location: 0.7),
+                                                    .init(color: barColor.opacity(0.3), location: 1)
+                                                ]),
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            )
+                                        )
+                                        .frame(width: barWidth, height: barHeight)
+                                        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 6, bottomTrailingRadius: 6))
+                                        .shadow(color: barColor.opacity(0.4), radius: 3, x: 0, y: 2)
+                                        .overlay(
+                                            // Highlight effect
+                                            Rectangle()
+                                                .fill(
+                                                    LinearGradient(
+                                                        gradient: Gradient(colors: [
+                                                            Color.clear,
+                                                            Color.white.opacity(0.2)
+                                                        ]),
+                                                        startPoint: .top,
+                                                        endPoint: .bottom
+                                                    )
+                                                )
+                                                .frame(width: barWidth * 0.7, height: barHeight * 0.4)
+                                                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 4, bottomTrailingRadius: 4))
+                                                .offset(y: barHeight * 0.3)
+                                        )
+                                        .scaleEffect(selectedBarIndex == index ? 1.05 : 1.0)
+                                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedBarIndex)
+                                }
+                            }
+                        }
+                        .frame(width: barWidth)
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                selectedBarIndex = selectedBarIndex == index ? nil : index
+                            }
+                            onBarTouch(month)
+                        }
+                        
+                        // Add spacing except after last item
+                        if index < data.count - 1 {
+                            Spacer()
+                                .frame(width: spacing)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                
+                // Month labels with better positioning
+                VStack {
+                    Spacer()
+                    HStack(spacing: 0) {
+                        ForEach(Array(data.enumerated()), id: \.offset) { index, item in
+                            Text(item.0.split(separator: " ").first ?? "")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundColor(.gray.opacity(0.8))
+                                .frame(width: barWidth)
+                                .multilineTextAlignment(.center)
+                            
+                            // Add spacing except after last item
+                            if index < data.count - 1 {
+                                Spacer()
+                                    .frame(width: spacing)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                }
+                
+                // Value labels on hover/selection
+                if let selectedIndex = selectedBarIndex {
+                    let selectedData = data[selectedIndex]
+                    VStack(spacing: 4) {
+                        Text(selectedData.0)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                        Text("$\(Int(selectedData.1).formattedWithCommas)")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(selectedData.1 >= 0 ? 
+                                          Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) : 
+                                          Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Material.ultraThinMaterial)
+                                .opacity(0.9)
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        }
+                    )
+                    .position(x: geometry.size.width / 2, y: 30)
+                    .transition(.scale.combined(with: .opacity))
                 }
             }
         }
@@ -3379,25 +4115,7 @@ struct ImportOptionsSheet: View {
 
 
 
-// Add at the bottom of the file, outside any struct
-extension Int {
-    var formattedWithCommas: String {
-        let numberFormatter = NumberFormatter()
-        numberFormatter.numberStyle = .decimal
-        return numberFormatter.string(from: NSNumber(value: self)) ?? "\(self)"
-    }
-}
 
-// MARK: - Button Styles
-struct ScalePressButtonStyle: ButtonStyle {
-    let scaleAmount: CGFloat = 0.95
-    
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? scaleAmount : 1)
-            .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
-    }
-}
 
 // MARK: - Chart Path Helper
 struct ChartPath: View {
@@ -3506,6 +4224,307 @@ struct ChartPath: View {
         }
     }
 }
+
+// MARK: - Graph Customization View
+struct GraphCustomizationView: View {
+    let userId: String
+    @ObservedObject var sessionStore: SessionStore
+    @Binding var selectedGraphs: [GraphType]
+    @Environment(\.dismiss) private var dismiss
+    
+    private let maxSelectedGraphs = 2
+    
+    var body: some View {
+        ZStack {
+            AppBackgroundView()
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Customize Your Home Page")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Text("Select up to 2 graphs to display on your profile home page")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    // Selected count
+                    Text("\(selectedGraphs.count)/\(maxSelectedGraphs) selected")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(selectedGraphs.count == maxSelectedGraphs ? .green : .orange)
+                        .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 24)
+                
+                // Graph Selection Grid
+                ScrollView {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 16),
+                        GridItem(.flexible(), spacing: 16)
+                    ], spacing: 16) {
+                        ForEach(GraphType.allCases, id: \.id) { graphType in
+                            GraphSelectionCard(
+                                graphType: graphType,
+                                isSelected: selectedGraphs.contains(graphType),
+                                canSelect: selectedGraphs.count < maxSelectedGraphs || selectedGraphs.contains(graphType),
+                                onTap: {
+                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                        if selectedGraphs.contains(graphType) {
+                                            selectedGraphs.removeAll { $0 == graphType }
+                                        } else if selectedGraphs.count < maxSelectedGraphs {
+                                            selectedGraphs.append(graphType)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 100) // Space for bottom button
+                }
+                
+                Spacer()
+            }
+            
+            // Floating Save Button
+            VStack {
+                Spacer()
+                
+                Button(action: {
+                    dismiss()
+                }) {
+                    HStack {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Save Changes")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                            .shadow(color: Color.green.opacity(0.3), radius: 8, y: 4)
+                    )
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 34)
+            }
+        }
+        .navigationTitle("Graphs")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .foregroundColor(.white)
+            }
+        }
+    }
+}
+
+// MARK: - Graph Selection Card
+struct GraphSelectionCard: View {
+    let graphType: GraphType
+    let isSelected: Bool
+    let canSelect: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: {
+            if canSelect {
+                onTap()
+            }
+        }) {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header with icon and selection indicator
+                HStack {
+                    ZStack {
+                        Circle()
+                            .fill(graphType.color.opacity(isSelected ? 0.8 : 0.3))
+                            .frame(width: 40, height: 40)
+                        
+                        Image(systemName: graphType.icon)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    
+                    Spacer()
+                    
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.green)
+                    } else if !canSelect {
+                        Image(systemName: "lock.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.gray)
+                    }
+                }
+                
+                // Title and description
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(graphType.title)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(isSelected ? .white : (canSelect ? .white : .gray))
+                        .lineLimit(1)
+                    
+                    Text(graphType.description)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(isSelected ? .white.opacity(0.8) : (canSelect ? .gray : .gray.opacity(0.6)))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                
+                Spacer()
+            }
+            .padding(16)
+            .frame(height: 140)
+            .background(
+                ZStack {
+                                    RoundedRectangle(cornerRadius: 16)
+                    .fill(
+                        isSelected 
+                        ? Color.white.opacity(0.15)
+                        : (canSelect ? Color.white.opacity(0.05) : Color.clear)
+                    )
+                    
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(
+                            isSelected 
+                            ? graphType.color.opacity(0.8)
+                            : (canSelect ? Color.white.opacity(0.2) : Color.gray.opacity(0.3)),
+                            lineWidth: isSelected ? 2 : 1
+                        )
+                }
+            )
+            .scaleEffect(isSelected ? 1.02 : 1.0)
+            .shadow(
+                color: isSelected ? graphType.color.opacity(0.3) : Color.clear,
+                radius: isSelected ? 8 : 0,
+                y: isSelected ? 4 : 0
+            )
+            .opacity(canSelect ? 1.0 : 0.6)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(!canSelect)
+    }
+}
+
+// MARK: - Import Options Sheet
+struct ImportOptionsSheet: View {
+    let onImportSelected: (ImportType) -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 20) {
+                    Text("Select Import Format")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.top, 20)
+                    
+                    Text("Choose the app you want to import your poker session data from:")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 16) {
+                        ForEach([ImportType.pokerbase, .pokerAnalytics, .pbt, .regroup], id: \.self) { importType in
+                            Button(action: {
+                                onImportSelected(importType)
+                                dismiss()
+                            }) {
+                                HStack(spacing: 16) {
+                                    Image(systemName: "tray.and.arrow.down")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundColor(importType.color)
+                                        .frame(width: 30)
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(importType.title)
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(.white)
+                                        Text("Import \(importType.fileType) files")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.gray)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(importType.color.opacity(0.3), lineWidth: 1)
+                                        )
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    Spacer()
+                }
+            }
+            .navigationTitle("Import CSV")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+    }
+}
+
+
+
+// Add at the bottom of the file, outside any struct
+extension Int {
+    var formattedWithCommas: String {
+        let numberFormatter = NumberFormatter()
+        numberFormatter.numberStyle = .decimal
+        return numberFormatter.string(from: NSNumber(value: self)) ?? "\(self)"
+    }
+}
+
+// MARK: - Button Styles
+struct ScalePressButtonStyle: ButtonStyle {
+    let scaleAmount: CGFloat = 0.95
+    
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scaleAmount : 1)
+            .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
+    }
+}
+
+
+
 
 // MARK: - Customize Graphs View
 struct CustomizeGraphsView: View {

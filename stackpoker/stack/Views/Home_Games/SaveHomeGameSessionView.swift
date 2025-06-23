@@ -11,7 +11,6 @@ struct SaveHomeGameSessionView: View {
     @Environment(\.presentationMode) var presentationMode
     @EnvironmentObject var sessionStore: SessionStore
 
-    let pnl: Double
     let buyIn: Double
     let cashOut: Double
     let duration: TimeInterval
@@ -150,13 +149,6 @@ struct SaveHomeGameSessionView: View {
             // Quick stats
             HStack(spacing: 24) {
                 quickStatView(
-                    icon: pnl >= 0 ? "arrow.up.circle.fill" : "arrow.down.circle.fill",
-                    value: formatMoney(pnl),
-                    label: "P&L",
-                    color: pnl >= 0 ? Color(red: 123/255, green: 255/255, blue: 99/255) : .red
-                )
-                
-                quickStatView(
                     icon: "clock.fill",
                     value: formatDuration(duration),
                     label: "Duration",
@@ -168,6 +160,13 @@ struct SaveHomeGameSessionView: View {
                     value: formatMoney(buyIn),
                     label: "Buy-in",
                     color: .orange
+                )
+                
+                quickStatView(
+                    icon: "arrow.up.right.circle.fill",
+                    value: formatMoney(cashOut),
+                    label: "Cash Out",
+                    color: Color(red: 123/255, green: 255/255, blue: 99/255)
                 )
             }
         }
@@ -240,13 +239,6 @@ struct SaveHomeGameSessionView: View {
                     label: "Cash Out",
                     value: formatMoney(cashOut),
                     color: .blue
-                )
-                
-                detailRow(
-                    icon: pnl >= 0 ? "plus.circle.fill" : "minus.circle.fill",
-                    label: "Net Result",
-                    value: formatMoney(pnl),
-                    color: pnl >= 0 ? Color(red: 123/255, green: 255/255, blue: 99/255) : .red
                 )
                 
                 detailRow(
@@ -477,7 +469,7 @@ struct SaveHomeGameSessionView: View {
             "hoursPlayed": duration / 3600,
             "buyIn": buyIn,
             "cashout": cashOut,
-            "profit": pnl,
+            "profit": cashOut - buyIn,
             "createdAt": FieldValue.serverTimestamp()
         ]
         

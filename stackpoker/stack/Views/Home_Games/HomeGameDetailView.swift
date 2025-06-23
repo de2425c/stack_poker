@@ -393,21 +393,17 @@ struct HomeGameDetailView: View {
                  showingSaveSessionAlert = false
              }
         } message: { player in
-             let pnl = player.currentStack - player.totalBuyIn
              let duration = player.cashedOutAt?.timeIntervalSince(player.joinedAt) ?? 0
-             let formattedPNL = formatMoney(pnl)
              let formattedDuration = formatDuration(duration)
              
-             Text("You cashed out!\nDuration: \(formattedDuration)\nProfit/Loss: \(formattedPNL)\n\nWould you like to save this session?")
+             Text("You cashed out!\nDuration: \(formattedDuration)\n\nWould you like to save this session?")
         }
         .sheet(isPresented: $showingSaveSessionSheet) {
             if let player = justCashedOutPlayer,
                let cashoutTime = player.cashedOutAt {
-                let pnl = player.currentStack - player.totalBuyIn
                 let duration = cashoutTime.timeIntervalSince(player.joinedAt)
                 
                 SaveHomeGameSessionView(
-                    pnl: pnl,
                     buyIn: player.totalBuyIn,
                     cashOut: player.currentStack,
                     duration: duration,
@@ -794,18 +790,15 @@ struct HomeGameDetailView: View {
                                     .foregroundColor(.gray)
                             }
                             
-                            VStack(spacing: 8) {
-                                let profit = currentPlayer.currentStack - currentPlayer.totalBuyIn
-                                Text("\(profit >= 0 ? "+" : "")\(formatMoney(profit))")
-                                    .font(.system(size: 28, weight: .bold))
-                                    .foregroundColor(profit >= 0 ?
-                                                     Color(red: 123/255, green: 255/255, blue: 99/255) :
-                                                        Color.red)
-                                
-                                Text("Profit/Loss")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.gray)
-                            }
+                                        VStack(spacing: 8) {
+                Text("$\(Int(currentPlayer.currentStack))")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.white)
+                
+                Text("Current Stack")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+            }
                         }
                         
                         // Action buttons (if active player)
@@ -1352,7 +1345,7 @@ struct HomeGameDetailView: View {
             let totalCashOuts = getTotalCashOuts()
             let houseDifference = totalBuyIns - totalCashOuts
             
-            // Calculate net profit/loss for each player
+            // Calculate net balance for each player
             var playerBalances: [PlayerBalance] = []
             
             for player in game.players {
@@ -1380,7 +1373,7 @@ struct HomeGameDetailView: View {
             var adjustedBalances = balances
             
             if houseDifference > 1.0 {
-                // House kept money - reduce winners' profits proportionally
+                // House kept money - reduce winners' balances proportionally
                 let winners = adjustedBalances.filter { $0.balance > 1.0 }
                 let totalWinnings = winners.reduce(0) { $0 + $1.balance }
                 
@@ -1393,7 +1386,7 @@ struct HomeGameDetailView: View {
                     }
                 }
             } else if houseDifference < -1.0 {
-                // House paid out more - increase winners' profits proportionally
+                // House paid out more - increase winners' balances proportionally
                 let winners = adjustedBalances.filter { $0.balance > 1.0 }
                 let totalWinnings = winners.reduce(0) { $0 + $1.balance }
                 
@@ -2313,16 +2306,13 @@ struct HomeGameDetailView: View {
                     
                     Spacer()
                     
-                    // Profit/Loss display
+                    // Current Stack display
                     VStack(alignment: .trailing, spacing: 4) {
-                        let profit = player.currentStack - player.totalBuyIn
-                        Text("\(profit >= 0 ? "+" : "")\(formatMoney(profit))")
+                        Text("$\(Int(player.currentStack))")
                             .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(profit >= 0 ?
-                                             Color(red: 123/255, green: 255/255, blue: 99/255) :
-                                                Color.red)
+                            .foregroundColor(.white)
                         
-                        Text("P&L")
+                        Text("Stack")
                             .font(.system(size: 12))
                             .foregroundColor(.gray)
                     }

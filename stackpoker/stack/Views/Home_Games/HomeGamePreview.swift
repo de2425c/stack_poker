@@ -298,12 +298,9 @@ struct PlayerRow: View {
             Spacer()
             
             VStack(alignment: .trailing, spacing: 4) {
-                let profit = player.currentStack - player.totalBuyIn
-                Text("\(profit >= 0 ? "+" : "")\(Int(profit))")
+                Text("$\(Int(player.currentStack))")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(profit >= 0 ?
-                                     Color(red: 123/255, green: 255/255, blue: 99/255) :
-                                        Color.red)
+                    .foregroundColor(.white)
                 
                 Text("Buy-in: $\(Int(player.totalBuyIn))")
                     .font(.system(size: 14))
@@ -631,9 +628,7 @@ struct GameEventRow: View {
             }
         }
         
-        private var netProfitLoss: Double {
-            return player.currentStack - player.totalBuyIn
-        }
+
         
         var body: some View {
             HStack {
@@ -666,13 +661,11 @@ struct GameEventRow: View {
                                       Color(red: 123/255, green: 255/255, blue: 99/255) : .red) : .gray)
                     .frame(width: 80, alignment: .trailing)
                 
-                // Net profit/loss
+                // Final stack
                 Text(player.status == .cashedOut ? 
-                     "\(netProfitLoss >= 0 ? "+" : "")\(Int(netProfitLoss))" : "—")
+                     "$\(Int(player.currentStack))" : "—")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(player.status == .cashedOut ?
-                                     (netProfitLoss >= 0 ?
-                                      Color(red: 123/255, green: 255/255, blue: 99/255) : .red) : .gray)
+                    .foregroundColor(player.status == .cashedOut ? .white : .gray)
                     .frame(width: 80, alignment: .trailing)
             }
             .padding(.vertical, 8)

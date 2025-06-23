@@ -642,6 +642,7 @@ private struct PostContextTagView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(isChallenge ? .yellow : Color.gray.opacity(0.9))
                 .lineLimit(1)
+                .minimumScaleFactor(0.5)
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(isChallenge ? .yellow.opacity(0.8) : Color.gray.opacity(0.8))
@@ -733,12 +734,12 @@ struct BasicPostCardView: View {
             let (completedOpt, _) = parseCompletedSessionInfo(from: post.content)
             if let completed = completedOpt {
 
-                if !completed.gameName.isEmpty {
+                if !completed.gameName.isEmpty && completed.gameName != "N/A" {
                     tempTitle = "Playing \(completed.gameName)"
-                    if !completed.stakes.isEmpty {
+                    if !completed.stakes.isEmpty && completed.stakes != "N/A" {
                         tempTitle! += " (\(completed.stakes))"
                     }
-                } else if !completed.stakes.isEmpty {
+                } else if !completed.stakes.isEmpty && completed.stakes != "N/A" {
                     tempTitle = "Playing \(completed.stakes)"
                 }
             } else {
@@ -1146,12 +1147,12 @@ struct PostCardView: View {
             let (completedOpt, _) = parseCompletedSessionInfo(from: post.content)
             if let completed = completedOpt {
 
-                if !completed.gameName.isEmpty {
+                if !completed.gameName.isEmpty && completed.gameName != "N/A" {
                     tempTitle = "Playing \(completed.gameName)"
-                    if !completed.stakes.isEmpty {
+                    if !completed.stakes.isEmpty && completed.stakes != "N/A" {
                         tempTitle! += " (\(completed.stakes))"
                     }
-                } else if !completed.stakes.isEmpty {
+                } else if !completed.stakes.isEmpty && completed.stakes != "N/A" {
                     tempTitle = "Playing \(completed.stakes)"
                 }
             } else {
@@ -2900,15 +2901,20 @@ private struct FeedStatDisplayView: View {
     var body: some View {
         VStack(alignment: isWide ? .leading : .center, spacing: 2) { // Center align normal stats, left align wide ones
             Text(value)
-                .font(.system(size: isWide ? 18 : 20, weight: .bold)) // Slightly smaller for wide, larger for normal metrics
+                .font(.system(size: dynamicFontSize, weight: .bold))
                 .foregroundColor(valueColor)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.4) // More aggressive scaling to prevent cutoff
             Text(label) // Label below value, as in Strava
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.gray)
         }
         .frame(maxWidth: isWide ? .infinity : nil, alignment: isWide ? .leading : .center)
+    }
+    
+    // Use consistent font size for all metrics in a row
+    private var dynamicFontSize: CGFloat {
+        return isWide ? 18 : 20 // Consistent size within each category
     }
 }
 

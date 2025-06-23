@@ -252,6 +252,8 @@ struct PostEditorView: View {
                                 TextField("Session Title", text: $completedSessionTitle)
                                     .font(.system(size: 28, weight: .bold))
                                     .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
                                     .padding(.bottom, 2)
 
                                 // Caption TextEditor - Directly below title  
@@ -284,11 +286,11 @@ struct PostEditorView: View {
                                     }
                                     HStack(spacing: 16) {
                                         SessionStatMetricView(label: "Duration", value: String(format: "%.1f hr", completedSession.hoursPlayed))
-                                        SessionStatMetricView(label: "Buy-in", value: String(format: "$%.0f", completedSession.buyIn))
+                                        SessionStatMetricView(label: "Buy-in", value: formatCurrency(completedSession.buyIn))
                                     }
                                     HStack(spacing: 16) {
-                                        SessionStatMetricView(label: "Cashout", value: String(format: "$%.0f", completedSession.cashout))
-                                        SessionStatMetricView(label: "Profit", value: String(format: "$%.2f", completedSession.profit), 
+                                        SessionStatMetricView(label: "Cashout", value: formatCurrency(completedSession.cashout))
+                                        SessionStatMetricView(label: "Profit", value: formatProfit(completedSession.profit), 
                                                             valueColor: completedSession.profit >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
                                     }
                                 }
@@ -632,7 +634,7 @@ struct PostEditorView: View {
 
         if let session = selectedCompletedSession {
             let titleToUse = completedSessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Session Report" : completedSessionTitle
-            let sessionDetails = "COMPLETED_SESSION_INFO: Title: \(titleToUse), Game: \(session.gameName), Stakes: \(session.stakes), Duration: \(String(format: "%.1f", session.hoursPlayed))hrs, Buy-in: $\(Int(session.buyIn)), Cashout: $\(Int(session.cashout)), Profit: $\(String(format: "%.2f", session.profit))\n"
+            let sessionDetails = "COMPLETED_SESSION_INFO: Title: \(titleToUse), Game: \(session.gameName), Stakes: \(session.stakes), Duration: \(String(format: "%.1f", session.hoursPlayed))hrs, Buy-in: \(formatCurrency(session.buyIn)), Cashout: \(formatCurrency(session.cashout)), Profit: \(formatProfit(session.profit))\n"
             finalContent = sessionDetails + userComment
         } else if let displayModel = challengeDisplayModel {
             // Use the display model to generate consistent content
@@ -1184,6 +1186,31 @@ struct PostEditorView: View {
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+    
+    // Formatting functions for completed session sharing
+    private func formatCurrency(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        
+        let absAmount = abs(amount)
+        if let formatted = formatter.string(from: NSNumber(value: absAmount)) {
+            return "$\(formatted)"
+        }
+        return "$\(Int(absAmount))"
+    }
+    
+    private func formatProfit(_ profit: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        
+        let absProfit = abs(profit)
+        if let formatted = formatter.string(from: NSNumber(value: absProfit)) {
+            return "$\(formatted)"
+        }
+        return "$\(String(format: "%.2f", absProfit))"
+    }
 }
 
 // Define SessionStatMetricView helper view here
@@ -1196,14 +1223,19 @@ private struct SessionStatMetricView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: 26, weight: .bold)) // Prominent value
+                .font(.system(size: dynamicFontSize, weight: .bold))
                 .foregroundColor(valueColor)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.4) // More aggressive scaling to prevent cutoff
             Text(label.uppercased())
-                .font(.system(size: 12, weight: .medium)) // Smaller label
+                .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.gray)
         }
         .frame(maxWidth: isWide ? .infinity : nil, alignment: isWide ? .leading : .center)
+    }
+    
+    // Use consistent font size for all metrics in a row
+    private var dynamicFontSize: CGFloat {
+        return 22 // Consistent size that works well for all values
     }
 }
