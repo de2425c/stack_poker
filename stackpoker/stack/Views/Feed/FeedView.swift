@@ -667,6 +667,7 @@ struct BasicPostCardView: View {
     var openPostDetail: (() -> Void)?
     var onReplay: (() -> Void)?
     @State private var isLiked: Bool
+    @State private var likeCount: Int
     @State private var animateLike = false
     @EnvironmentObject private var userService: UserService // Added to pass along to destination view
 
@@ -680,6 +681,7 @@ struct BasicPostCardView: View {
         self.openPostDetail = openPostDetail
         self.onReplay = onReplay
         _isLiked = State(initialValue: post.isLiked)
+        _likeCount = State(initialValue: post.likes)
     }
 
     // Computed property for context tag information
@@ -997,15 +999,18 @@ struct BasicPostCardView: View {
                 HStack(spacing: 36) {
                     // Like Button (Moved to be first)
                     Button(action: {
+                        // Optimistic update
+                        likeCount += !isLiked ? 1 : -1
+                        
+                        // Animate and call side effect
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            animateLike = true
                             isLiked.toggle()
-                            onLike()
-                            
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                animateLike = false
-                            }
+                            animateLike = true
                         }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            animateLike = false
+                        }
+                        onLike()
                     }) {
                         HStack(spacing: 8) {
                             Image(systemName: isLiked ? "heart.fill" : "heart")
@@ -1013,7 +1018,7 @@ struct BasicPostCardView: View {
                                 .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
                                 .scaleEffect(animateLike ? 1.3 : 1.0)
                             
-                            Text("\(post.likes)")
+                            Text("\(likeCount)")
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(.gray.opacity(0.7))
                         }
@@ -1071,6 +1076,12 @@ struct BasicPostCardView: View {
                 .buttonStyle(PlainButtonStyle())
             }
         }
+        .onChange(of: post.isLiked) { newValue in
+            isLiked = newValue
+        }
+        .onChange(of: post.likes) { newValue in
+            likeCount = newValue
+        }
     }
 }
 
@@ -1083,6 +1094,7 @@ struct PostCardView: View {
     let userId: String
     @State private var showingReplay = false
     @State private var isLiked: Bool
+    @State private var likeCount: Int
     @State private var animateLike = false
     @EnvironmentObject private var userService: UserService // Added env object for navigation
     
@@ -1093,6 +1105,7 @@ struct PostCardView: View {
         self.isCurrentUser = isCurrentUser
         self.userId = userId
         _isLiked = State(initialValue: post.isLiked)
+        _likeCount = State(initialValue: post.likes)
     }
     
     // Computed property for context tag information
@@ -1408,15 +1421,18 @@ struct PostCardView: View {
             HStack(spacing: 36) {
                 // Like Button (Moved to be first)
                 Button(action: {
+                    // Optimistic update
+                    likeCount += !isLiked ? 1 : -1
+
+                    // Animate and call side effect
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        animateLike = true
                         isLiked.toggle()
-                        onLike()
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            animateLike = false
-                        }
+                        animateLike = true
                     }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        animateLike = false
+                    }
+                    onLike()
                 }) {
                     HStack(spacing: 8) {
                         Image(systemName: isLiked ? "heart.fill" : "heart")
@@ -1424,7 +1440,7 @@ struct PostCardView: View {
                             .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
                             .scaleEffect(animateLike ? 1.3 : 1.0)
                         
-                        Text("\(post.likes)")
+                        Text("\(likeCount)")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.gray.opacity(0.7))
                     }
@@ -1465,6 +1481,12 @@ struct PostCardView: View {
             if let hand = post.handHistory {
                 HandReplayView(hand: hand, userId: userId)
             }
+        }
+        .onChange(of: post.isLiked) { newValue in
+            isLiked = newValue
+        }
+        .onChange(of: post.likes) { newValue in
+            likeCount = newValue
         }
     }
 
@@ -1589,6 +1611,7 @@ struct PostDetailView: View {
     @EnvironmentObject var userService: UserService
     @State private var showingReplay = false
     @State private var isLiked: Bool
+    @State private var likeCount: Int
     @State private var animateLike = false
     
     // Comment-related state
@@ -1612,6 +1635,7 @@ struct PostDetailView: View {
         self.post = post
         self.userId = userId
         _isLiked = State(initialValue: post.isLiked)
+        _likeCount = State(initialValue: post.likes)
     }
     
     var body: some View {
@@ -1719,6 +1743,12 @@ struct PostDetailView: View {
             NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
             NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
         }
+        .onChange(of: post.isLiked) { newValue in
+            isLiked = newValue
+        }
+        .onChange(of: post.likes) { newValue in
+            likeCount = newValue
+        }
     }
     
     // Extracted ViewBuilder for Post Header and Body
@@ -1785,15 +1815,18 @@ struct PostDetailView: View {
         // Actions with enhanced styling - but no replay button
         HStack(spacing: 32) {
             Button(action: {
+                // Optimistic update
+                likeCount += !isLiked ? 1 : -1
+
+                // Animate and call side effect
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    animateLike = true
                     isLiked.toggle()
-                    likePost()
-                    
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        animateLike = false
-                    }
+                    animateLike = true
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    animateLike = false
+                }
+                likePost()
             }) {
                 HStack(spacing: 10) {
                     Image(systemName: isLiked ? "heart.fill" : "heart")
@@ -1801,7 +1834,7 @@ struct PostDetailView: View {
                         .foregroundColor(isLiked ? .red : .gray.opacity(0.7))
                         .scaleEffect(animateLike ? 1.3 : 1.0)
                     
-                    Text("\(post.likes)")
+                    Text("\(likeCount)")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.gray.opacity(0.9))
                 }
@@ -1881,10 +1914,12 @@ struct PostDetailView: View {
                         .cornerRadius(20)
                         .foregroundColor(.white)
                         .focused($isCommentFieldFocused)
-                        // .ignoresSafeArea(.keyboard, edges: .bottom) // REMOVE
-                    
+                        
                     if !newCommentText.isEmpty {
-                        Button(action: addComment) {
+                        Button(action: {
+                            addComment()
+                            // No animation needed for simple send
+                        }) {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 26))
                                 .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
@@ -2103,10 +2138,12 @@ struct PostDetailView: View {
             do {
                 if let postId = post.id {
                     try await postService.toggleLike(postId: postId, userId: userId)
-                    // Optionally update local post like count if needed, or rely on PostService to publish update
+                    // The view will now rely on `onChange` to sync with the updated `post` from `postService`
                 }
             } catch {
-
+                // If the like fails, we should ideally revert the optimistic update.
+                // This would require more robust state management or a callback from the service.
+                // For now, the UI will correct itself on the next data refresh.
             }
         }
     }

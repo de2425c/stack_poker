@@ -79,10 +79,7 @@ struct ProfileView: View {
     @State private var selectedGraphs: [GraphType] = GraphType.defaultSelection
     @State private var draggedGraph: GraphType?
     
-    // Chart interaction states
-    @State private var selectedDataPoint: (date: Date, profit: Double)? = nil
-    @State private var touchLocation: CGPoint = .zero
-    @State private var showTooltip: Bool = false
+
     
     // MARK: - Analytics filtering
     @State private var showFilterSheet = false
@@ -962,16 +959,13 @@ struct ProfileView: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.gray)
                     
-                    // Show selected data point profit or aggregated value with edit button for bankroll
+                    // Show aggregated value with edit button for bankroll
                     HStack(alignment: .bottom, spacing: 12) {
-                        Text(selectedDataPoint != nil ?
-                             "$\(Int(selectedDataPoint!.profit).formattedWithCommas)" :
-                                (selectedGraphTab == 0 ? "$\(Int(totalBankroll).formattedWithCommas)" :
-                                    (selectedGraphTab == 1 ? "$\(Int(filteredSessions.reduce(0){$0+$1.profit}).formattedWithCommas)" :
-                                        "$\(Int(monthlyProfitCurrent()).formattedWithCommas)")))
-                        .font(.system(size: selectedDataPoint != nil ? 40 : 36, weight: .bold))
+                        Text(selectedGraphTab == 0 ? "$\(Int(totalBankroll).formattedWithCommas)" :
+                                (selectedGraphTab == 1 ? "$\(Int(filteredSessions.reduce(0){$0+$1.profit}).formattedWithCommas)" :
+                                    "$\(Int(monthlyProfitCurrent()).formattedWithCommas)"))
+                        .font(.system(size: 36, weight: .bold))
                         .foregroundColor(.white)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedDataPoint?.profit)
                         
                         // Edit button only for bankroll view
                         if selectedGraphTab == 0 {
@@ -1020,45 +1014,29 @@ struct ProfileView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     
                     HStack(spacing: 4) {
-                        if let selectedData = selectedDataPoint {
-                            // Show selected date indicator
-                            Image(systemName: selectedData.profit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(selectedData.profit >= 0 ?
-                                                 Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
-                                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
-                            
-                            Text("at \(formatTooltipDate(selectedData.date))")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(selectedData.profit >= 0 ?
-                                                 Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
-                                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
-                        } else {
-                            // Show time range indicator (original)
-                            let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
-                            let timeRangeProfit = filteredSessions.reduce(0) { $0 + $1.profit }
-                            
-                            Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(timeRangeProfit >= 0 ?
-                                                 Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
-                                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
-                            
-                            Text("$\(abs(Int(timeRangeProfit)).formattedWithCommas)")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(timeRangeProfit >= 0 ?
-                                                 Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
-                                                    Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
-                            
-                            Text(getTimeRangeLabel(for: selectedTimeRange))
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                        }
+                        // Show time range indicator
+                        let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                        let timeRangeProfit = filteredSessions.reduce(0) { $0 + $1.profit }
+                        
+                        Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(timeRangeProfit >= 0 ?
+                                             Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
+                                                Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                        
+                        Text("$\(abs(Int(timeRangeProfit)).formattedWithCommas)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(timeRangeProfit >= 0 ?
+                                             Color(UIColor(red: 140/255, green: 255/255, blue: 38/255, alpha: 1.0)) :
+                                                Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0)))
+                        
+                        Text(getTimeRangeLabel(for: selectedTimeRange))
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
                         
                         Spacer()
                     }
                     .padding(.top, 2)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedDataPoint != nil)
                 }
                 .padding(.horizontal, 20)
                 
@@ -1071,42 +1049,13 @@ struct ProfileView: View {
                                 .frame(height: 220)
                                 .frame(maxWidth: .infinity) // Ensure it centers if no data
                         } else {
-                                // Swipeable Graph Carousel (Restored)
+                                // Swipeable Graph Carousel
                                 SwipeableGraphCarousel(
                                     sessions: filteredSessions,
                                     bankrollTransactions: bankrollStore.transactions,
                                     selectedTimeRange: $selectedTimeRange,
                                     timeRanges: timeRanges,
-                                    selectedGraphIndex: $selectedGraphTab,
-                                    onChartTouch: { location, geometry in
-                                        // Handle touch for tooltip
-                                        if selectedGraphTab < 2 {
-                                            let touchX = location.x
-                                            let normalizedX = touchX / geometry.size.width
-                                            
-                                            if !filteredSessions.isEmpty {
-                                                let index = Int(normalizedX * CGFloat(filteredSessions.count - 1))
-                                                let clampedIndex = max(0, min(index, filteredSessions.count - 1))
-                                                let session = filteredSessions.sorted { $0.startDate < $1.startDate }[clampedIndex]
-                                                
-                                                var cumulativeProfit = 0.0
-                                                for i in 0...clampedIndex {
-                                                    cumulativeProfit += filteredSessions.sorted { $0.startDate < $1.startDate }[i].profit
-                                                }
-                                                
-                                                selectedDataPoint = (date: session.startDate, profit: cumulativeProfit)
-                                                touchLocation = location
-                                                showTooltip = true
-                                            }
-                                        }
-                                    },
-                                    onTouchEnd: {
-                                        showTooltip = false
-                                        selectedDataPoint = nil
-                                    },
-                                    showTooltip: showTooltip,
-                                    touchLocation: touchLocation,
-                                    selectedDataPoint: selectedDataPoint
+                                    selectedGraphIndex: $selectedGraphTab
                                 )
                                 .frame(height: 280)
                             }
@@ -1769,75 +1718,7 @@ struct ProfileView: View {
         return formatter.localizedString(for: date, relativeTo: Date())
     }
     
-    // Chart interaction helper functions
-    private func handleChartTouch(at location: CGPoint, in geometry: GeometryProxy) {
-        let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange).sorted(by: { $0.startDate < $1.startDate })
-        
-        guard !filteredSessions.isEmpty else { return }
-        
-        // Get ALL sessions that respect the active filter, sorted by date
-        let allSessionsSorted = filteredSessions.sorted(by: { $0.startDate < $1.startDate })
-        
-        // Calculate cumulative data for filtered sessions but with true bankroll totals
-        var cumulativeData: [(date: Date, profit: Double)] = []
-        
-        for session in filteredSessions {
-            // Find this session's position in all sessions to calculate true cumulative
-            let sessionsUpToThisPoint = allSessionsSorted.filter { $0.startDate <= session.startDate }
-            let trueAccumulated = sessionsUpToThisPoint.reduce(0) { $0 + $1.profit }
-            cumulativeData.append((date: session.startDate, profit: trueAccumulated))
-        }
-        
-        // Find the closest data point to touch location
-        let touchX = location.x
-        let stepX = cumulativeData.count > 1 ? geometry.size.width / CGFloat(cumulativeData.count - 1) : geometry.size.width
-        
-        // Calculate which data point index is closest
-        let index = Int(round(touchX / stepX))
-        let clampedIndex = max(0, min(index, cumulativeData.count - 1))
-        
-        let dataPoint = cumulativeData[clampedIndex]
-        let actualX = CGFloat(clampedIndex) * stepX
-        
-        // Calculate Y position using the SAME logic as the chart line
-        let cumulativeProfits = cumulativeData.map { $0.profit }
-        let minProfit = cumulativeProfits.min() ?? 0
-        let maxProfit = max(cumulativeProfits.max() ?? 1, 1)
-        let range = max(maxProfit - minProfit, 1)
-        
-        // Use exact same Y calculation as the chart path
-        let normalized = range == 0 ? 0.5 : (dataPoint.profit - minProfit) / range
-        let actualY = geometry.size.height * (1 - CGFloat(normalized))
-        
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
-            selectedDataPoint = dataPoint
-            touchLocation = location
-            showTooltip = true
-        }
-        
-        // Haptic feedback
-        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-        impactFeedback.impactOccurred()
-    }
-    
-    private func formatTooltipDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        
-        switch selectedTimeRange {
-        case 0: // 24H
-            formatter.dateFormat = "MMM d, HH:mm"
-        case 1: // 1W
-            formatter.dateFormat = "MMM d"
-        case 2: // 1M
-            formatter.dateFormat = "MMM d"
-        case 3, 4: // 6M, 1Y
-            formatter.dateFormat = "MMM d, yyyy"
-        default: // All
-            formatter.dateFormat = "MMM d, yyyy"
-        }
-        
-        return formatter.string(from: date)
-    }
+
 
     // MARK: - Existing helpers/components
 
@@ -3254,11 +3135,6 @@ struct SwipeableGraphCarousel: View {
     @Binding var selectedTimeRange: Int
     let timeRanges: [String]
     @Binding var selectedGraphIndex: Int
-    let onChartTouch: (CGPoint, GeometryProxy) -> Void
-    let onTouchEnd: () -> Void
-    let showTooltip: Bool
-    let touchLocation: CGPoint
-    let selectedDataPoint: (date: Date, profit: Double)?
     
     @State private var dragOffset: CGFloat = 0
     
@@ -3273,12 +3149,7 @@ struct SwipeableGraphCarousel: View {
                     sessions: sessions,
                     bankrollTransactions: bankrollTransactions,
                     selectedTimeRange: selectedTimeRange,
-                    timeRanges: timeRanges,
-                    onChartTouch: onChartTouch,
-                    onTouchEnd: onTouchEnd,
-                    showTooltip: showTooltip,
-                    touchLocation: touchLocation,
-                    selectedDataPoint: selectedDataPoint
+                    timeRanges: timeRanges
                 )
                 .tag(0)
                 
@@ -3286,12 +3157,7 @@ struct SwipeableGraphCarousel: View {
                 ProfitGraphView(
                     sessions: sessions,
                     selectedTimeRange: selectedTimeRange,
-                    timeRanges: timeRanges,
-                    onChartTouch: onChartTouch,
-                    onTouchEnd: onTouchEnd,
-                    showTooltip: showTooltip,
-                    touchLocation: touchLocation,
-                    selectedDataPoint: selectedDataPoint
+                    timeRanges: timeRanges
                 )
                 .tag(1)
                 
@@ -3362,11 +3228,6 @@ struct BankrollGraphView: View {
     let bankrollTransactions: [BankrollTransaction]
     let selectedTimeRange: Int
     let timeRanges: [String]
-    let onChartTouch: (CGPoint, GeometryProxy) -> Void
-    let onTouchEnd: () -> Void
-    let showTooltip: Bool
-    let touchLocation: CGPoint
-    let selectedDataPoint: (date: Date, profit: Double)?
     
     private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
         let now = Date()
@@ -3446,41 +3307,6 @@ struct BankrollGraphView: View {
                         showFill: true
                     )
                 }
-                
-                // Interactive overlay
-                Rectangle()
-                    .fill(Color.clear)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                onChartTouch(value.location, geometry)
-                            }
-                            .onEnded { _ in
-                                onTouchEnd()
-                            }
-                    )
-                
-                // Touch indicator
-                if showTooltip {
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(stops: [
-                                    .init(color: Color.clear, location: 0),
-                                    .init(color: Color.white.opacity(0.6), location: 0.1),
-                                    .init(color: Color.white.opacity(0.8), location: 0.5),
-                                    .init(color: Color.white.opacity(0.6), location: 0.9),
-                                    .init(color: Color.clear, location: 1)
-                                ]),
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 1)
-                        .position(x: touchLocation.x, y: geometry.size.height / 2)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                }
             }
         }
     }
@@ -3491,11 +3317,6 @@ struct ProfitGraphView: View {
     let sessions: [Session]
     let selectedTimeRange: Int
     let timeRanges: [String]
-    let onChartTouch: (CGPoint, GeometryProxy) -> Void
-    let onTouchEnd: () -> Void
-    let showTooltip: Bool
-    let touchLocation: CGPoint
-    let selectedDataPoint: (date: Date, profit: Double)?
     
     private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
         let now = Date()
@@ -3569,41 +3390,6 @@ struct ProfitGraphView: View {
                         color: chartColor,
                         showFill: true
                     )
-                }
-                
-                // Interactive overlay
-                Rectangle()
-                    .fill(Color.clear)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                onChartTouch(value.location, geometry)
-                            }
-                            .onEnded { _ in
-                                onTouchEnd()
-                            }
-                    )
-                
-                // Touch indicator
-                if showTooltip {
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(stops: [
-                                    .init(color: Color.clear, location: 0),
-                                    .init(color: Color.white.opacity(0.6), location: 0.1),
-                                    .init(color: Color.white.opacity(0.8), location: 0.5),
-                                    .init(color: Color.white.opacity(0.6), location: 0.9),
-                                    .init(color: Color.clear, location: 1)
-                                ]),
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 1)
-                        .position(x: touchLocation.x, y: geometry.size.height / 2)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 }
             }
         }

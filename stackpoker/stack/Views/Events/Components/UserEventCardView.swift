@@ -66,55 +66,28 @@ struct UserEventCardView: View {
                 print("[UserEventCardView] Resume sequence completed")
             }
         }) {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header with play icon
-                HStack {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundColor(.green)
+            HStack(spacing: 16) {
+                // Play icon
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundColor(.green)
+                
+                // Event details
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(event.title)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
                     
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(event.title)
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        
-                        if let description = event.description {
-                            Text(description)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.gray)
-                                .lineLimit(2)
-                        }
+                    if let description = event.description {
+                        Text(description)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray)
+                            .lineLimit(2)
                     }
-                    
-                    Spacer()
                 }
                 
-                // Resume button
-                HStack {
-                    Spacer()
-                    
-                    HStack(spacing: 8) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 14, weight: .bold))
-                        Text("Resume")
-                            .font(.system(size: 16, weight: .bold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.green,
-                                Color.green.opacity(0.8)
-                            ]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .cornerRadius(20)
-                }
+                Spacer()
             }
             .padding(20)
             .background(

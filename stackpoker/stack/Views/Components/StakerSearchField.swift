@@ -16,6 +16,13 @@ struct StakerSearchField: View {
     @State private var showingCreateManualStaker = false
     @FocusState private var isSearchFocused: Bool
     
+    // Local state for search query and results
+    @State private var localSearchQuery: String = ""
+    @State private var localSearchResults: [UserProfile] = []
+    
+    // Manual staker loading state
+    @State private var isLoadingManualStakers = false
+    
     var body: some View {
         VStack(spacing: 8) {
             // Toggle for manual entry
@@ -35,21 +42,21 @@ struct StakerSearchField: View {
         .animation(.easeInOut(duration: 0.2), value: showingSearchResults)
         .animation(.easeInOut(duration: 0.2), value: config.isManualEntry)
         .onAppear {
-            // Load manual stakers when view appears
-            print("Debug: StakerSearchField onAppear - userId: \(userId)")
-            Task {
-                try? await manualStakerService.fetchManualStakers(forUser: userId)
+            // Only fetch if we don't already have manual stakers
+            if manualStakerService.manualStakers.isEmpty {
+                Task {
+                    isLoadingManualStakers = true
+                    try? await manualStakerService.fetchManualStakers(forUser: userId)
+                    isLoadingManualStakers = false
+                }
             }
         }
         .onChange(of: config.isManualEntry) { isManual in
-            if isManual {
-                // Refresh manual stakers when switching to manual mode
-                print("Debug: Switching to manual mode, fetching stakers for user: \(userId)")
+            if isManual && manualStakerService.manualStakers.isEmpty {
                 Task {
+                    isLoadingManualStakers = true
                     try? await manualStakerService.fetchManualStakers(forUser: userId)
-                    await MainActor.run {
-                        print("Debug: After manual mode fetch, manualStakers count: \(manualStakerService.manualStakers.count)")
-                    }
+                    isLoadingManualStakers = false
                 }
             }
         }
@@ -63,13 +70,10 @@ struct StakerSearchField: View {
                 glassOpacity: glassOpacity,
                 materialOpacity: materialOpacity
             ) { newProfile in
-                // Select the newly created profile
-                print("StakerSearchField: Received new profile: \(newProfile.name), ID: \(newProfile.id ?? "nil")")
                 config.selectedManualStaker = newProfile
                 config.searchQuery = ""
                 config.manualStakerSearchResults = []
                 showingSearchResults = false
-                print("StakerSearchField: Set selectedManualStaker to: \(config.selectedManualStaker?.name ?? "nil"), ID: \(config.selectedManualStaker?.id ?? "nil")")
             }
         }
     }
@@ -80,22 +84,16 @@ struct StakerSearchField: View {
         if let selectedManualStaker = config.selectedManualStaker {
             selectedManualStakerView(selectedManualStaker)
         } else {
-            manualStakerSearchView
+            manualStakerListView
                 .onAppear {
-                    // Force fetch when manual staker search view appears
-                    print("Debug: Manual staker search view appeared, forcing fetch for user: \(userId)")
-                    Task {
-                        try? await manualStakerService.fetchManualStakers(forUser: userId)
-                        await MainActor.run {
-                            print("Debug: Manual staker search view fetch complete, count: \(manualStakerService.manualStakers.count)")
+                    if manualStakerService.manualStakers.isEmpty {
+                        Task {
+                            isLoadingManualStakers = true
+                            try? await manualStakerService.fetchManualStakers(forUser: userId)
+                            isLoadingManualStakers = false
                         }
                     }
                 }
-            
-            // Manual staker search results
-            if showingSearchResults && !config.manualStakerSearchResults.isEmpty {
-                manualStakerResultsView
-            }
         }
     }
     
@@ -155,145 +153,145 @@ struct StakerSearchField: View {
     }
     
     @ViewBuilder
-    private var manualStakerSearchView: some View {
-        GlassyInputField(
-            icon: "magnifyingglass",
-            title: "Search Manual Stakers",
-            glassOpacity: glassOpacity,
-            labelColor: secondaryTextColor,
-            materialOpacity: materialOpacity
-        ) {
-            HStack(spacing: 8) {
-                TextField("Search existing manual stakers...", text: $config.searchQuery)
-                    .font(.plusJakarta(.body, weight: .regular))
-                    .foregroundColor(primaryTextColor)
-                    .focused($isSearchFocused)
-                    .onChange(of: config.searchQuery) { newValue in
-                        handleManualStakerSearch(newValue)
-                    }
-                    .onTapGesture {
-                        isSearchFocused = true
-                        // Ensure manual stakers are loaded when tapping the search field
-                        Task {
-                            try? await manualStakerService.fetchManualStakers(forUser: userId)
-                            await MainActor.run {
-                                // Show all manual stakers when tapping the search field
-                                if config.searchQuery.isEmpty {
-                                    config.manualStakerSearchResults = manualStakerService.manualStakers.filter { $0.createdByUserId == userId }
-                                    print("Debug: Manual stakers for user \(userId): \(config.manualStakerSearchResults.count) found")
-                                    print("Debug: All manual stakers: \(manualStakerService.manualStakers.count)")
-                                    showingSearchResults = !config.manualStakerSearchResults.isEmpty
-                                } else {
-                                    handleManualStakerSearch(config.searchQuery)
-                                }
-                            }
-                        }
-                    }
+    private var manualStakerListView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            GlassyInputField(
+                icon: "person.2.fill",
+                title: "Select Manual Staker",
+                glassOpacity: glassOpacity,
+                labelColor: secondaryTextColor,
+                materialOpacity: materialOpacity
+            ) {
+                EmptyView()
+            }
+            
+            // Loading state
+            if isLoadingManualStakers {
+                HStack {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: primaryTextColor))
+                        .scaleEffect(0.8)
+                    Text("Loading manual stakers...")
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(secondaryTextColor)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.05))
+                )
+            } else {
+                // Manual stakers list
+                let userManualStakers = manualStakerService.manualStakers.filter { $0.createdByUserId == userId }
                 
-                if !config.searchQuery.isEmpty {
-                    Button(action: {
-                        config.searchQuery = ""
-                        config.manualStakerSearchResults = []
-                        showingSearchResults = false
-                        isSearchFocused = false
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
+                if userManualStakers.isEmpty {
+                    VStack(spacing: 8) {
+                        Text("No manual stakers yet")
+                            .font(.plusJakarta(.subheadline, weight: .medium))
+                            .foregroundColor(secondaryTextColor)
+                        Text("Create your first manual staker below")
+                            .font(.plusJakarta(.caption, weight: .regular))
                             .foregroundColor(secondaryTextColor.opacity(0.7))
                     }
-                }
-            }
-            .padding(.vertical, 4)
-        }
-        
-        // Create new manual staker button
-        Button(action: {
-            showingCreateManualStaker = true
-        }) {
-            HStack {
-                Image(systemName: "plus.circle.fill")
-                Text("Create New Manual Staker")
-            }
-            .font(.plusJakarta(.caption, weight: .semibold))
-            .foregroundColor(primaryTextColor.opacity(0.9))
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.white.opacity(0.1))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.white.opacity(0.05))
                     )
-            )
-        }
-        .padding(.top, 4)
-    }
-    
-    @ViewBuilder
-    private var manualStakerResultsView: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(config.manualStakerSearchResults.enumerated()), id: \.element.id) { index, profile in
-                Button(action: {
-                    selectManualStaker(profile)
-                }) {
-                    HStack(spacing: 12) {
-                        // Avatar placeholder
-                        Circle()
-                            .fill(primaryTextColor.opacity(0.15))
-                            .frame(width: 28, height: 28)
-                            .overlay(
-                                Text(String(profile.name.first ?? "?").uppercased())
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(primaryTextColor.opacity(0.8))
-                            )
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(profile.name)
-                                .font(.plusJakarta(.subheadline, weight: .semibold))
-                                .foregroundColor(primaryTextColor)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    // List of manual stakers
+                    VStack(spacing: 0) {
+                        ForEach(Array(userManualStakers.enumerated()), id: \.element.id) { index, profile in
+                            Button(action: {
+                                selectManualStaker(profile)
+                            }) {
+                                HStack(spacing: 12) {
+                                    // Avatar placeholder
+                                    Circle()
+                                        .fill(primaryTextColor.opacity(0.15))
+                                        .frame(width: 28, height: 28)
+                                        .overlay(
+                                            Text(String(profile.name.first ?? "?").uppercased())
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundColor(primaryTextColor.opacity(0.8))
+                                        )
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(profile.name)
+                                            .font(.plusJakarta(.subheadline, weight: .semibold))
+                                            .foregroundColor(primaryTextColor)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        
+                                        if let contactInfo = profile.contactInfo, !contactInfo.isEmpty {
+                                            Text(contactInfo)
+                                                .font(.plusJakarta(.caption, weight: .regular))
+                                                .foregroundColor(secondaryTextColor)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(secondaryTextColor.opacity(0.5))
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(
+                                    Color.white.opacity(index % 2 == 0 ? 0.02 : 0.05)
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
                             
-                            if let contactInfo = profile.contactInfo, !contactInfo.isEmpty {
-                                Text(contactInfo)
-                                    .font(.plusJakarta(.caption, weight: .regular))
-                                    .foregroundColor(secondaryTextColor)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            if index < userManualStakers.count - 1 {
+                                Divider()
+                                    .background(secondaryTextColor.opacity(0.1))
                             }
                         }
-                        
-                        Spacer()
-                        
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(secondaryTextColor.opacity(0.5))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
                     .background(
-                        Color.white.opacity(index % 2 == 0 ? 0.02 : 0.05)
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Material.ultraThinMaterial)
+                            .opacity(materialOpacity * 1.5)
                     )
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                if index < config.manualStakerSearchResults.count - 1 {
-                    Divider()
-                        .background(secondaryTextColor.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(secondaryTextColor.opacity(0.2), lineWidth: 0.5)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
                 }
             }
+            
+            // Create new manual staker button
+            Button(action: {
+                showingCreateManualStaker = true
+            }) {
+                HStack {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Create New Manual Staker")
+                }
+                .font(.plusJakarta(.caption, weight: .semibold))
+                .foregroundColor(primaryTextColor.opacity(0.9))
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                )
+            }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Material.ultraThinMaterial)
-                .opacity(materialOpacity * 1.5)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(secondaryTextColor.opacity(0.2), lineWidth: 0.5)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
     }
+    
+
     
     // MARK: - App User Section
     @ViewBuilder
@@ -304,8 +302,24 @@ struct StakerSearchField: View {
             appUserSearchView
             
             // App user search results
-            if showingSearchResults && !config.searchResults.isEmpty {
+            if showingSearchResults && !localSearchResults.isEmpty {
                 appUserResultsView
+            } else if config.isSearching && !localSearchQuery.isEmpty {
+                // Show searching indicator
+                HStack {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: primaryTextColor))
+                        .scaleEffect(0.8)
+                    Text("Searching...")
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(secondaryTextColor)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.05))
+                )
             }
         }
     }
@@ -347,7 +361,9 @@ struct StakerSearchField: View {
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         config.selectedStaker = nil
+                        localSearchQuery = ""
                         config.searchQuery = ""
+                        localSearchResults = []
                         config.searchResults = []
                         showingSearchResults = false
                     }
@@ -371,11 +387,12 @@ struct StakerSearchField: View {
             materialOpacity: materialOpacity
         ) {
             HStack(spacing: 8) {
-                TextField("Search by username or name...", text: $config.searchQuery)
+                TextField("Search by username or name...", text: $localSearchQuery)
                     .font(.plusJakarta(.body, weight: .regular))
                     .foregroundColor(primaryTextColor)
                     .focused($isSearchFocused)
-                    .onChange(of: config.searchQuery) { newValue in
+                    .onChange(of: localSearchQuery) { newValue in
+                        config.searchQuery = newValue
                         handleAppUserSearch(newValue)
                     }
                     .onTapGesture {
@@ -389,9 +406,11 @@ struct StakerSearchField: View {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: primaryTextColor))
                         .scaleEffect(0.7)
-                } else if !config.searchQuery.isEmpty {
+                } else if !localSearchQuery.isEmpty {
                     Button(action: {
+                        localSearchQuery = ""
                         config.searchQuery = ""
+                        localSearchResults = []
                         config.searchResults = []
                         showingSearchResults = false
                         isSearchFocused = false
@@ -409,7 +428,7 @@ struct StakerSearchField: View {
     @ViewBuilder
     private var appUserResultsView: some View {
         VStack(spacing: 0) {
-            ForEach(Array(config.searchResults.enumerated()), id: \.element.id) { index, userProfile in
+            ForEach(Array(localSearchResults.enumerated()), id: \.element.id) { index, userProfile in
                 Button(action: {
                     selectAppUser(userProfile)
                 }) {
@@ -452,7 +471,7 @@ struct StakerSearchField: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 
-                if index < config.searchResults.count - 1 {
+                if index < localSearchResults.count - 1 {
                     Divider()
                         .background(secondaryTextColor.opacity(0.1))
                 }
@@ -473,30 +492,13 @@ struct StakerSearchField: View {
     
     // MARK: - Helper Methods
     
-    private func handleManualStakerSearch(_ query: String) {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        if trimmedQuery.isEmpty {
-            // Show all manual stakers when search is empty but field is focused
-            if isSearchFocused {
-                config.manualStakerSearchResults = manualStakerService.manualStakers.filter { $0.createdByUserId == userId }
-                showingSearchResults = !config.manualStakerSearchResults.isEmpty
-            } else {
-                config.manualStakerSearchResults = []
-                showingSearchResults = false
-            }
-            return
-        }
-        
-        config.manualStakerSearchResults = manualStakerService.searchManualStakers(query: trimmedQuery, userId: userId)
-        print("Debug: Search for '\(trimmedQuery)' returned \(config.manualStakerSearchResults.count) results")
-        showingSearchResults = !config.manualStakerSearchResults.isEmpty
-    }
+
     
     private func handleAppUserSearch(_ newValue: String) {
         searchDebounceTimer?.invalidate()
         
         if newValue.isEmpty {
+            localSearchResults = []
             config.searchResults = []
             config.isSearching = false
             showingSearchResults = false
@@ -505,19 +507,22 @@ struct StakerSearchField: View {
         
         // Clear previous results immediately for better UX
         if newValue.count == 1 {
+            localSearchResults = []
             config.searchResults = []
         }
         
         config.isSearching = true
         showingSearchResults = true
         
-        searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+        // Optimized debounce time for faster response
+        searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
             performAppUserSearch(currentQuery: newValue)
         }
     }
     
     private func performAppUserSearch(currentQuery: String) {
         let query = currentQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        
         guard !query.isEmpty else {
             config.searchResults = []
             config.isSearching = false
@@ -527,9 +532,16 @@ struct StakerSearchField: View {
         
         Task {
             do {
-                let users = try await userService.searchUsers(query: query, limit: 5)
+                // Optimized search with smaller limit for faster response
+                let users = try await userService.searchUsers(query: query, limit: 8)
+                
                 await MainActor.run {
-                    if config.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().contains(query.lowercased()) {
+                    let currentSearchQuery = localSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let searchQuery = query.lowercased()
+                    
+                    // Only update results if the search query hasn't changed since we started this search
+                    if currentSearchQuery == searchQuery {
+                        localSearchResults = users
                         config.searchResults = users
                         showingSearchResults = !users.isEmpty
                     }
@@ -537,6 +549,7 @@ struct StakerSearchField: View {
                 }
             } catch {
                 await MainActor.run {
+                    localSearchResults = []
                     config.searchResults = []
                     config.isSearching = false
                     showingSearchResults = false
@@ -548,20 +561,15 @@ struct StakerSearchField: View {
     private func selectManualStaker(_ profile: ManualStakerProfile) {
         withAnimation(.easeInOut(duration: 0.3)) {
             config.selectedManualStaker = profile
-            config.searchQuery = ""
-            config.manualStakerSearchResults = []
-            showingSearchResults = false
-            isSearchFocused = false
         }
-        
-        // Dismiss keyboard
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     private func selectAppUser(_ userProfile: UserProfile) {
         withAnimation(.easeInOut(duration: 0.3)) {
             config.selectedStaker = userProfile
+            localSearchQuery = ""
             config.searchQuery = ""
+            localSearchResults = []
             config.searchResults = []
             showingSearchResults = false
             isSearchFocused = false

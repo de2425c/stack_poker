@@ -354,10 +354,20 @@ struct StakingDashboardView: View {
     private var stakingCalendarView: some View {
         VStack {
             if isLoading {
-                ProgressView("Loading...")
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    .foregroundColor(.white)
-                    .padding()
+                // Maintain the same layout structure during loading
+                VStack {
+                    Spacer()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(1.2)
+                        Text("Loading...")
+                            .font(.plusJakarta(.subheadline, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 StakingEventCalendarView(
                     currentUserId: currentUserId ?? "",
@@ -373,34 +383,57 @@ struct StakingDashboardView: View {
                 )
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     // MARK: - Dashboard Content (existing content)
     private var stakingDashboardContent: some View {
         VStack {
             if isLoading {
-                ProgressView("Loading Stakes...")
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    .foregroundColor(.white)
-                    .padding()
-            } else if let errorMessage = errorMessage {
-                Text("Error: \(errorMessage)")
-                    .foregroundColor(.red)
-                    .padding()
-            } else if stakes.isEmpty && manualStakers.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "person.2.badge.plus")
-                        .font(.system(size: 48))
-                        .foregroundColor(.gray)
-                    Text("No staking activity found.")
-                        .font(.plusJakarta(.title3, weight: .medium))
-                        .foregroundColor(.gray)
-                    Text("Create your first stake or check for event invites")
-                        .font(.plusJakarta(.caption, weight: .regular))
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
+                // Maintain the same layout structure during loading
+                VStack {
+                    Spacer()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(1.2)
+                        Text("Loading Stakes...")
+                            .font(.plusJakarta(.subheadline, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    Spacer()
                 }
-                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let errorMessage = errorMessage {
+                VStack {
+                    Spacer()
+                    Text("Error: \(errorMessage)")
+                        .font(.plusJakarta(.subheadline, weight: .medium))
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if stakes.isEmpty && manualStakers.isEmpty {
+                VStack {
+                    Spacer()
+                    VStack(spacing: 16) {
+                        Image(systemName: "person.2.badge.plus")
+                            .font(.system(size: 48))
+                            .foregroundColor(.gray)
+                        Text("No staking activity found.")
+                            .font(.plusJakarta(.title3, weight: .medium))
+                            .foregroundColor(.gray)
+                        Text("Create your first stake or check for event invites")
+                            .font(.plusJakarta(.caption, weight: .regular))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(spacing: 20) {
@@ -453,6 +486,7 @@ struct StakingDashboardView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.top, 10)
     }
     

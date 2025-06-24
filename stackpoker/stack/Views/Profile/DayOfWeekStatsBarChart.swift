@@ -49,6 +49,15 @@ struct DayOfWeekStatsBarChart: View {
         }
     }
 
+    private func formatAxisProfit(_ value: Double) -> String {
+        let num = Int(value / 1000)
+        return "\(num)k"
+    }
+    
+    private func formatAxisHours(_ value: Double) -> String {
+        return "\(Int(value))"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header with title and stats
@@ -94,105 +103,79 @@ struct DayOfWeekStatsBarChart: View {
             
             // Chart
             GeometryReader { geometry in
-                let maxHours = statsByDay.map { $0.hours }.max() ?? 1
-                let maxProfitAbs = statsByDay.map { abs($0.profit) }.max() ?? 1
-                let availableHeight = geometry.size.height - 40 // Space for labels
-                let dayWidth = geometry.size.width / 7.0
-                let barWidth: CGFloat = 12 // Individual bar width
-                let barSpacing: CGFloat = 3 // Space between hours and profit bars
-                
-                VStack(spacing: 0) {
-                    // Chart area
-                    HStack(spacing: 0) {
-                        ForEach(0..<7, id: \.self) { dayIndex in
-                            let stats = statsByDay[dayIndex]
-                            
-                            VStack(spacing: 0) {
-                                // Chart bars area
-                                HStack(alignment: .bottom, spacing: barSpacing) {
-                                    // Hours bar (blue)
-                                    VStack(spacing: 2) {
-                                        if stats.hours > 0 {
-                                            Text("\(String(format: "%.0f", stats.hours))h")
-                                                .font(.plusJakarta(.caption2, weight: .medium))
-                                                .foregroundColor(.white.opacity(0.8))
-                                                .lineLimit(1)
-                                                .minimumScaleFactor(0.7)
-                                        }
-                                        
-                                        Rectangle()
-                                            .fill(
-                                                LinearGradient(
-                                                    gradient: Gradient(stops: [
-                                                        .init(color: hoursColor.opacity(0.3), location: 0),
-                                                        .init(color: hoursColor.opacity(0.7), location: 0.3),
-                                                        .init(color: hoursColor, location: 0.8),
-                                                        .init(color: hoursColor.opacity(0.9), location: 1)
-                                                    ]),
-                                                    startPoint: .bottom,
-                                                    endPoint: .top
-                                                )
-                                            )
-                                            .frame(
-                                                width: barWidth,
-                                                height: stats.hours > 0 ? max(4, (stats.hours / maxHours) * availableHeight * 0.8) : 4
-                                            )
-                                            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 3, topTrailingRadius: 3))
-                                            .opacity(stats.hours > 0 ? 1.0 : 0.15)
-                                            .shadow(color: hoursColor.opacity(0.3), radius: 2, x: 0, y: -1)
-                                    }
-                                    
-                                    // Profit bar (green/red)
-                                    VStack(spacing: 2) {
-                                        if stats.profit != 0 {
-                                            Text("$\(Int(stats.profit))")
-                                                .font(.plusJakarta(.caption2, weight: .medium))
-                                                .foregroundColor(.white.opacity(0.8))
-                                                .lineLimit(1)
-                                                .minimumScaleFactor(0.7)
-                                        }
-                                        
-                                        Rectangle()
-                                            .fill(
-                                                LinearGradient(
-                                                    gradient: Gradient(stops: [
-                                                        .init(color: (stats.profit >= 0 ? profitColor : negativeColor).opacity(0.3), location: 0),
-                                                        .init(color: (stats.profit >= 0 ? profitColor : negativeColor).opacity(0.7), location: 0.3),
-                                                        .init(color: stats.profit >= 0 ? profitColor : negativeColor, location: 0.8),
-                                                        .init(color: (stats.profit >= 0 ? profitColor : negativeColor).opacity(0.9), location: 1)
-                                                    ]),
-                                                    startPoint: .bottom,
-                                                    endPoint: .top
-                                                )
-                                            )
-                                            .frame(
-                                                width: barWidth,
-                                                height: abs(stats.profit) > 0 ? max(4, (abs(stats.profit) / maxProfitAbs) * availableHeight * 0.8) : 4
-                                            )
-                                            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 3, topTrailingRadius: 3))
-                                            .opacity(stats.profit != 0 ? 1.0 : 0.15)
-                                            .shadow(color: (stats.profit >= 0 ? profitColor : negativeColor).opacity(0.3), radius: 2, x: 0, y: -1)
-                                    }
+                let maxHours = max(1, statsByDay.map { $0.hours }.max() ?? 1)
+                let maxProfitAbs = max(1, statsByDay.map { abs($0.profit) }.max() ?? 1)
+
+                let yAxisWidth: CGFloat = 40
+                let chartContentWidth = geometry.size.width - (yAxisWidth * 2)
+                let availableHeight = geometry.size.height - 30 // For x-axis labels
+
+                HStack(spacing: 0) {
+                    // Left Y-Axis (Profit)
+                    VStack {
+                        Text(formatAxisProfit(maxProfitAbs))
+                        Spacer()
+                        Text(formatAxisProfit(maxProfitAbs / 2))
+                        Spacer()
+                        Text("$0")
+                    }
+                    .frame(width: yAxisWidth, height: availableHeight)
+                    .font(.plusJakarta(.caption2, weight: .medium))
+                    .foregroundColor(.gray)
+
+                    // Chart Bars
+                    VStack(spacing: 0) {
+                        HStack(alignment: .bottom, spacing: 4) {
+                            ForEach(0..<7, id: \.self) { dayIndex in
+                                let stats = statsByDay[dayIndex]
+                                let dayGroupWidth = (chartContentWidth - (6 * 4)) / 7
+                                let barWidth = (dayGroupWidth / 2) - 2
+
+                                HStack(alignment: .bottom, spacing: 2) {
+                                    // Hours Bar
+                                    Rectangle()
+                                        .fill(hoursColor)
+                                        .frame(width: barWidth, height: (stats.hours / maxHours) * availableHeight)
+                                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 3, topTrailingRadius: 3))
+
+                                    // Profit Bar
+                                    Rectangle()
+                                        .fill(stats.profit >= 0 ? profitColor : negativeColor)
+                                        .frame(width: barWidth, height: (abs(stats.profit) / maxProfitAbs) * availableHeight)
+                                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 3, topTrailingRadius: 3))
                                 }
-                                .frame(width: dayWidth, height: availableHeight, alignment: .bottom)
+                                .frame(width: dayGroupWidth)
                             }
                         }
-                    }
-                    
-                    // Day labels
-                    HStack(spacing: 0) {
-                        ForEach(0..<7, id: \.self) { i in
-                            Text(dayLabels[i])
-                                .font(.plusJakarta(.caption2, weight: .medium))
-                                .foregroundColor(.gray.opacity(0.8))
-                                .frame(width: dayWidth)
+                        .frame(height: availableHeight)
+
+                        // Day labels (X-Axis)
+                        HStack(spacing: 4) {
+                            ForEach(dayLabels, id: \.self) { label in
+                                Text(label)
+                                    .font(.plusJakarta(.caption, weight: .medium))
+                                    .foregroundColor(.gray)
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
+                        .padding(.top, 6)
                     }
-                    .padding(.top, 8)
+
+                    // Right Y-Axis (Hours)
+                    VStack {
+                        Text(formatAxisHours(maxHours))
+                        Spacer()
+                        Text(formatAxisHours(maxHours / 2))
+                        Spacer()
+                        Text("0")
+                    }
+                    .frame(width: yAxisWidth, height: availableHeight)
+                    .font(.plusJakarta(.caption2, weight: .medium))
+                    .foregroundColor(.gray)
                 }
             }
-            .frame(height: 140)
-            .padding(.horizontal, 16)
+            .frame(height: 180)
+            .padding(.horizontal)
             
             // Legend
             HStack(spacing: 20) {

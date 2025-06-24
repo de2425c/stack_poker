@@ -7,6 +7,7 @@ struct CSVImportPrompt: View {
     
     @State private var showingPulse = false
     @State private var offset: CGFloat = 0
+    @State private var isLoading = false
     
     var body: some View {
         ZStack {
@@ -14,7 +15,9 @@ struct CSVImportPrompt: View {
             Color.black.opacity(0.7)
                 .ignoresSafeArea()
                 .onTapGesture {
-                    onDismiss()
+                    if !isLoading {
+                        onDismiss()
+                    }
                 }
             
             // Compact popup
@@ -56,29 +59,43 @@ struct CSVImportPrompt: View {
                 
                 // Action buttons
                 VStack(spacing: 10) {
-                    Button(action: onImportSelected) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "square.and.arrow.down")
-                                .font(.system(size: 16, weight: .semibold))
-                            
-                            Text("Import CSV File")
-                                .font(.system(size: 16, weight: .semibold))
+                    Button(action: {
+                        isLoading = true
+                        // Small delay to allow UI to update before navigation
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            onImportSelected()
                         }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color(red: 64/255, green: 156/255, blue: 255/255),
-                                    Color(red: 100/255, green: 180/255, blue: 255/255)
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .cornerRadius(10)
+                    }) {
+                        if isLoading {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                        } else {
+                            HStack(spacing: 10) {
+                                Image(systemName: "square.and.arrow.down")
+                                    .font(.system(size: 16, weight: .semibold))
+                                
+                                Text("Import CSV File")
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                        }
                     }
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(red: 64/255, green: 156/255, blue: 255/255),
+                                Color(red: 100/255, green: 180/255, blue: 255/255)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .cornerRadius(10)
+                    .disabled(isLoading)
                     .buttonStyle(PlainButtonStyle())
                     
                     Button(action: onDismiss) {
@@ -88,6 +105,7 @@ struct CSVImportPrompt: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                     }
+                    .disabled(isLoading)
                     .buttonStyle(PlainButtonStyle())
                 }
             }

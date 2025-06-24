@@ -504,7 +504,7 @@ struct CompactStakingEventCard: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.gray)
                         
-                        Text(safeStagkerDisplayName)
+                        Text(partnerDisplayName)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
                             .lineLimit(1)
@@ -523,12 +523,29 @@ struct CompactStakingEventCard: View {
                 
                 
             
-            // Staking Details Row - Compact inline
+            // Staking Details Row - Single line format
             HStack(spacing: 12) {
-                stakingDetailInline(label: "Stake", value: "\(String(format: "%.0f", invite.percentageBought))%")
-                stakingDetailInline(label: "Amount", value: formatCurrency(invite.amountBought))
-                stakingDetailInline(label: "Markup", value: "\(String(format: "%.1f", invite.markup))x")
-                stakingDetailInline(label: "Bullets", value: "\(invite.maxBullets)")
+(
+                    Text("STAKE ")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.gray) +
+                    Text("\(String(format: "%.0f", invite.percentageBought))% @ \(String(format: "%.1f", invite.markup))x, ")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.gray) +
+                    Text("AMOUNT ")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.gray) +
+                    Text("\(formatCurrency(invite.amountBought)) ")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.gray) +
+                    Text("BULLETS ")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.gray) +
+                    Text("\(invite.maxBullets)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.gray)
+                )
+                .lineLimit(1)
                 
                 Spacer()
                 
@@ -654,6 +671,44 @@ struct CompactStakingEventCard: View {
         }
     }
     
+    private var partnerDisplayName: String {
+        // Add early defensive checks to prevent crashes
+        guard !invite.eventId.isEmpty,
+              !invite.eventName.isEmpty else {
+            return "Loading..."
+        }
+        
+        if isUserThePlayer {
+            // User is the player, so show the staker's name
+            if invite.isManualStaker {
+                return invite.manualStakerDisplayName ?? "Manual"
+            }
+            
+            guard !invite.stakerUserId.isEmpty else {
+                print("Calendar: WARNING - Empty stakerUserId in invite")
+                return "Unknown Staker"
+            }
+            
+            if let stakerProfile = userService.loadedUsers[invite.stakerUserId] {
+                return stakerProfile.displayName ?? stakerProfile.username
+            } else {
+                return "Loading..."
+            }
+        } else {
+            // User is the staker, so show the player's name
+            guard !invite.stakedPlayerUserId.isEmpty else {
+                print("Calendar: WARNING - Empty stakedPlayerUserId in invite")
+                return "Unknown Player"
+            }
+            
+            if let playerProfile = userService.loadedUsers[invite.stakedPlayerUserId] {
+                return playerProfile.displayName ?? playerProfile.username
+            } else {
+                return "Loading..."
+            }
+        }
+    }
+
     private var safeStagkerDisplayName: String {
         // Add early defensive checks to prevent crashes
         guard !invite.eventId.isEmpty,

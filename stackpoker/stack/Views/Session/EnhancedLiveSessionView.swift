@@ -3101,100 +3101,96 @@ struct EnhancedLiveSessionView: View {
     
     private var nextDayConfirmationSheet: some View {
         NavigationView {
-            GeometryReader { geometry in
-                ZStack {
-                    AppBackgroundView()
-                        .ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 24) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 50))
+                            .foregroundColor(.blue)
+                            .padding(.bottom, 4)
+                        
+                        Text("Progress to Day \(sessionStore.liveSession.currentDay + 1)")
+                            .font(.plusJakarta(.title2, weight: .bold))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                        
+                        Text("This will pause your current session and create a reminder for the next day. All your session data will be preserved.")
+                            .font(.plusJakarta(.callout, weight: .regular))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                    }
+                    .padding(.top, 20)
                     
-                    VStack(spacing: 32) {
-                        VStack(spacing: 16) {
-                            Image(systemName: "calendar.badge.clock")
-                                .font(.system(size: 60))
-                                .foregroundColor(.blue)
-                                .padding(.bottom, 8)
-                            
-                            Text("Progress to Day \(sessionStore.liveSession.currentDay + 1)")
-                                .font(.plusJakarta(.title2, weight: .bold))
-                                .foregroundColor(.white)
-                                .multilineTextAlignment(.center)
-                            
-                            Text("This will pause your current session and create a reminder for the next day. All your session data will be preserved.")
-                                .font(.plusJakarta(.body, weight: .regular))
-                                .foregroundColor(.gray)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 20)
-                        }
+                    VStack(spacing: 12) {
+                        Text("Select Date for Day \(sessionStore.liveSession.currentDay + 1)")
+                            .font(.plusJakarta(.headline, weight: .medium))
+                            .foregroundColor(.white)
                         
-                        VStack(spacing: 16) {
-                            Text("Select Date for Day \(sessionStore.liveSession.currentDay + 1)")
-                                .font(.plusJakarta(.headline, weight: .medium))
-                                .foregroundColor(.white)
-                            
-                            DatePicker(
-                                "Next Day Date",
-                                selection: $nextDayDate,
-                                in: Date()...,
-                                displayedComponents: [.date]
-                            )
-                            .datePickerStyle(.graphical)
-                            .colorScheme(.dark)
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Material.ultraThinMaterial)
-                                    .opacity(0.2)
-                            )
-                        }
-                        
-                        Spacer()
-                        
-                        VStack(spacing: 12) {
-                            Button(action: {
-                                print("🔥🔥🔥 [NextDay Button] Confirm & Progress button tapped!")
-                                Task {
-                                    print("🔥🔥🔥 [NextDay Button] Task started")
-                                    // Save current stakes to Firestore BEFORE pausing
-                                    await saveStakesForPause()
-                                    
-                                    // Create the resume event
-                                    let success = await sessionStore.createResumeEvent(for: nextDayDate)
-                                    
-                                    await MainActor.run {
-                                        if success {
-                                            // Pause the session for next day (stakes are now saved in Firestore)
-                                            sessionStore.pauseForNextDay(nextDayDate: nextDayDate)
-                                            showingNextDayConfirmation = false
-                                            
-                                            // Auto-dismiss the session view after pausing
-                                            dismiss()
-                                        }
+                        DatePicker(
+                            "Next Day Date",
+                            selection: $nextDayDate,
+                            in: Date()...,
+                            displayedComponents: [.date]
+                        )
+                        .datePickerStyle(.graphical)
+                        .colorScheme(.dark)
+                        .frame(minHeight: 300) // Give the calendar enough space
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Material.ultraThinMaterial)
+                                .opacity(0.2)
+                        )
+                        .padding(.horizontal, 20)
+                    }
+                    
+                    VStack(spacing: 12) {
+                        Button(action: {
+                            print("🔥🔥🔥 [NextDay Button] Confirm & Progress button tapped!")
+                            Task {
+                                print("🔥🔥🔥 [NextDay Button] Task started")
+                                // Save current stakes to Firestore BEFORE pausing
+                                await saveStakesForPause()
+                                
+                                // Create the resume event
+                                let success = await sessionStore.createResumeEvent(for: nextDayDate)
+                                
+                                await MainActor.run {
+                                    if success {
+                                        // Pause the session for next day (stakes are now saved in Firestore)
+                                        sessionStore.pauseForNextDay(nextDayDate: nextDayDate)
+                                        showingNextDayConfirmation = false
+                                        
+                                        // Auto-dismiss the session view after pausing
+                                        dismiss()
                                     }
                                 }
-                            }) {
-                                Text("Confirm & Progress")
-                                    .font(.plusJakarta(.body, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 16)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .fill(Color.blue)
-                                    )
                             }
-                            
-                            Button(action: {
-                                showingNextDayConfirmation = false
-                            }) {
-                                Text("Cancel")
-                                    .font(.plusJakarta(.body, weight: .medium))
-                                    .foregroundColor(.gray)
-                            }
+                        }) {
+                            Text("Confirm & Progress")
+                                .font(.plusJakarta(.body, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .fill(Color.blue)
+                                )
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 20)
+                        
+                        Button(action: {
+                            showingNextDayConfirmation = false
+                        }) {
+                            Text("Cancel")
+                                .font(.plusJakarta(.body, weight: .medium))
+                                .foregroundColor(.gray)
+                        }
                     }
-                    .padding(.top, 40)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
                 }
             }
+            .background(AppBackgroundView().ignoresSafeArea())
             .navigationTitle("Progress Session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
@@ -3558,8 +3554,24 @@ struct EnhancedLiveSessionView: View {
         Task {
             do {
                 print("🔥🔥🔥 [loadExistingStakes] Calling fetchStakesForLiveSession with ID: \(sessionStore.liveSession.id)")
-                let stakes = try await stakeService.fetchStakesForLiveSession(sessionStore.liveSession.id)
-                print("🔥🔥🔥 [loadExistingStakes] Received \(stakes.count) stakes from service")
+                var stakes = try await stakeService.fetchStakesForLiveSession(sessionStore.liveSession.id)
+                print("🔥🔥🔥 [loadExistingStakes] Received \(stakes.count) stakes from liveSession query")
+                
+                // If no stakes found for live session, also check for event-based stakes
+                // This handles the case where stakes were created from an event before starting the live session
+                if stakes.isEmpty, let preselectedEvent = preselectedEvent {
+                    print("🔥🔥🔥 [loadExistingStakes] No stakes found for liveSession, checking for event stakes")
+                    let allUserStakes = try await stakeService.fetchStakes(forUser: userId)
+                    let eventStakes = allUserStakes.filter { stake in
+                        stake.sessionGameName == preselectedEvent.event_name &&
+                        stake.stakedPlayerUserId == userId &&
+                        stake.status == .active &&
+                        stake.totalPlayerBuyInForSession == 0 &&
+                        stake.playerCashoutForSession == 0
+                    }
+                    stakes = eventStakes
+                    print("🔥🔥🔥 [loadExistingStakes] Found \(eventStakes.count) event-based stakes for '\(preselectedEvent.event_name)'")
+                }
                 
                 await MainActor.run {
                     print("🔥🔥🔥 [loadExistingStakes] MainActor run - setting existingStakes to \(stakes.count) stakes")
@@ -3678,6 +3690,11 @@ struct EnhancedLiveSessionView: View {
         
         print("[EnhancedLiveSessionView] Saving \(validConfigs.count) valid staking configs")
         
+        // Debug: Log each config's originalStakeId
+        for (index, config) in validConfigs.enumerated() {
+            print("[EnhancedLiveSessionView] Config \(index): originalStakeId = '\(config.originalStakeId ?? "nil")', isManualEntry = \(config.isManualEntry)")
+        }
+        
         // Use the existing logic from saveSessionDataAndIndividualStakes but just save stakes
         for config in validConfigs {
             guard let percentageSoldDouble = Double(config.percentageSold),
@@ -3729,8 +3746,8 @@ struct EnhancedLiveSessionView: View {
             
             do {
                 if let originalStakeId = config.originalStakeId, !originalStakeId.isEmpty {
-                    // Update existing stake
-                    try await Firestore.firestore().collection("stakes").document(originalStakeId).setData(stakeData)
+                    // Update existing stake with merge to preserve existing fields
+                    try await Firestore.firestore().collection("stakes").document(originalStakeId).setData(stakeData, merge: true)
                     print("[EnhancedLiveSessionView] Updated existing stake: \(originalStakeId)")
                 } else {
                     // Create new stake

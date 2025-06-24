@@ -627,6 +627,29 @@ class ExploreViewModel: ObservableObject {
     }
 }
 
+// MARK: - Combined Event Item for Mixed Schedule
+struct CombinedEventItem: Identifiable {
+    let id = UUID()
+    let date: Date
+    let isUserEvent: Bool
+    let userEvent: UserEvent?
+    let publicEvent: Event?
+    
+    init(userEvent: UserEvent) {
+        self.date = userEvent.startDate
+        self.isUserEvent = true
+        self.userEvent = userEvent
+        self.publicEvent = nil
+    }
+    
+    init(publicEvent: Event, rsvpDate: Date) {
+        self.date = rsvpDate
+        self.isUserEvent = false
+        self.userEvent = nil
+        self.publicEvent = publicEvent
+    }
+}
+
 struct ExploreView: View {
     @State private var placeholderSearchText = "" 
     @StateObject private var viewModel = ExploreViewModel()
@@ -643,6 +666,8 @@ struct ExploreView: View {
     @State private var selectedUserEvent: UserEvent? = nil // For UserEvent detail sheet
     @State private var showingSeriesView = true // New: Controls whether to show series cards or events
     @State private var selectedSeriesName: String? = nil // New: Currently selected series for detailed view
+    @State private var calendarSelectedDate = Date()
+    @State private var isLoadingMyEvents = false // Track loading state for My Events tab
     var onEventSelected: ((Event) -> Void)? // Callback for when an event is selected
     var isSheetPresentation: Bool = false // New parameter to control top padding
     @Environment(\.dismiss) var dismiss // To dismiss the view if used as a sheet
@@ -943,12 +968,20 @@ struct ExploreView: View {
             
             if selectedTab == .events {
                 // Public events tab - no additional user event fetching needed
+                isLoadingMyEvents = false
             } else {
+                // Set loading state immediately for My Events tab
+                isLoadingMyEvents = true
                 Task {
                     try? await userEventService.fetchUserEvents()
                     try? await userEventService.fetchPendingEventInvites()
                     try? await userEventService.fetchPublicEventRSVPs()
                     await userEventService.startMyEventsListeners()
+                    
+                    // Clear loading state after all data is loaded
+                    await MainActor.run {
+                        isLoadingMyEvents = false
+                    }
                 }
             }
         }
@@ -957,7 +990,11 @@ struct ExploreView: View {
                 // Ensure public events are loaded
                 viewModel.fetchEvents()
                 userEventService.stopMyEventsListeners()
+                isLoadingMyEvents = false
             } else {
+                // Set loading state immediately to prevent flash
+                isLoadingMyEvents = true
+                
                 // Also ensure public events are loaded for RSVP lookup
                 viewModel.fetchEvents()
                 Task {
@@ -965,6 +1002,11 @@ struct ExploreView: View {
                     try? await userEventService.fetchPendingEventInvites()
                     try? await userEventService.fetchPublicEventRSVPs()
                     await userEventService.startMyEventsListeners()
+                    
+                    // Clear loading state after all data is loaded
+                    await MainActor.run {
+                        isLoadingMyEvents = false
+                    }
                 }
             }
         }
@@ -1530,7 +1572,7 @@ struct ExploreView: View {
             .padding(.bottom, 16)
             
             // --- Content ---
-            if userEventService.isLoading {
+            if userEventService.isLoading || isLoadingMyEvents {
                 Spacer()
                 VStack(spacing: 16) {
                     // Progress Circle
@@ -1671,55 +1713,74 @@ struct ExploreView: View {
     private var combinedScheduleView: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(combinedGroupedEventsByDate.keys.sorted(), id: \.self) { date in
-                    if let eventsForDate = combinedGroupedEventsByDate[date] {
-                        // Date Section Header
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(formatDateHeader(date))
-                                    .font(.system(size: 18, weight: .bold, design: .default))
-                                    .foregroundColor(.white)
-                                
-                                Text(relativeDateString(date))
-                                    .font(.system(size: 13, weight: .medium, design: .default))
-                                    .foregroundColor(.gray)
-                            }
-                            
-                            Spacer()
-                            
-                            // Event count badge
-                            Text("\(eventsForDate.count)")
-                                .font(.system(size: 12, weight: .bold))
+                MyEventsCalendarView(
+                    events: allCombinedEventItems,
+                    selectedDate: $calendarSelectedDate
+                )
+                .padding(.bottom, 12)
+
+                let eventsForDate = eventsForSelectedCalendarDate
+                
+                // Date Section Header
+                if !eventsForDate.isEmpty {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(formatDateHeader(calendarSelectedDate))
+                                .font(.system(size: 18, weight: .bold, design: .default))
                                 .foregroundColor(.white)
-                                .frame(width: 24, height: 24)
-                                .background(Color(red: 64/255, green: 156/255, blue: 255/255))
-                                .clipShape(Circle())
+                            
+                            Text(relativeDateString(calendarSelectedDate))
+                                .font(.system(size: 13, weight: .medium, design: .default))
+                                .foregroundColor(.gray)
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.top, date == combinedGroupedEventsByDate.keys.sorted().first ? 8 : 24)
-                        .padding(.bottom, 12)
                         
-                        // Events for this date
-                        ForEach(eventsForDate.sorted { $0.date < $1.date }) { eventItem in
-                            if eventItem.isUserEvent, let userEvent = eventItem.userEvent {
-                                UserEventCardView(event: userEvent, onSelect: {
-                                    selectedUserEvent = userEvent
-                                })
-                                    .environmentObject(userEventService)
-                                    .environmentObject(userService)
-                                    .environmentObject(sessionStore)
-                                    .padding(.horizontal, 20)
-                                    .padding(.bottom, 14)
-                            } else if let publicEvent = eventItem.publicEvent {
-                                EventCardView(event: publicEvent, onSelect: {
-                                    selectedEvent = publicEvent
-                                    showingEventDetail = true
-                                })
+                        Spacer()
+                        
+                        // Event count badge
+                        Text("\(eventsForDate.count)")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color(red: 64/255, green: 156/255, blue: 255/255))
+                            .clipShape(Circle())
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    
+                    // Events for this date
+                    ForEach(eventsForDate.sorted { $0.date < $1.date }) { eventItem in
+                        if eventItem.isUserEvent, let userEvent = eventItem.userEvent {
+                            UserEventCardView(event: userEvent, onSelect: {
+                                selectedUserEvent = userEvent
+                            })
+                                .environmentObject(userEventService)
+                                .environmentObject(userService)
+                                .environmentObject(sessionStore)
                                 .padding(.horizontal, 20)
                                 .padding(.bottom, 14)
-                            }
+                        } else if let publicEvent = eventItem.publicEvent {
+                            EventCardView(event: publicEvent, onSelect: {
+                                selectedEvent = publicEvent
+                                showingEventDetail = true
+                            })
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 14)
                         }
                     }
+                } else {
+                     VStack {
+                        Spacer(minLength: 20)
+                        Image(systemName: "calendar.badge.exclamationmark")
+                                .font(.system(size: 40))
+                                .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                            .padding(.bottom, 10)
+                        Text("No Events Scheduled")
+                                .font(.system(size: 16, weight: .medium, design: .default))
+                                .foregroundColor(.gray)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 
                 // Bottom padding
@@ -1737,31 +1798,7 @@ struct ExploreView: View {
     }
     
     // MARK: - Combined Event Item for Mixed Schedule
-    private struct CombinedEventItem: Identifiable {
-        let id = UUID()
-        let date: Date
-        let isUserEvent: Bool
-        let userEvent: UserEvent?
-        let publicEvent: Event?
-        
-        init(userEvent: UserEvent) {
-            self.date = userEvent.startDate
-            self.isUserEvent = true
-            self.userEvent = userEvent
-            self.publicEvent = nil
-        }
-        
-        init(publicEvent: Event, rsvpDate: Date) {
-            self.date = rsvpDate
-            self.isUserEvent = false
-            self.userEvent = nil
-            self.publicEvent = publicEvent
-        }
-    }
-    
-    // MARK: - Combined Grouped Events (UserEvents + Public Event RSVPs)
-    private var combinedGroupedEventsByDate: [Date: [CombinedEventItem]] {
-        let calendar = Calendar.current
+    private var allCombinedEventItems: [CombinedEventItem] {
         var combinedItems: [CombinedEventItem] = []
         
         // Add UserEvents
@@ -1772,7 +1809,7 @@ struct ExploreView: View {
         // Add Public Event RSVPs (only active ones)
         for rsvp in userEventService.publicEventRSVPs {
             // Calculate if this public event is completed (12 hours after start)
-            let completionTime = calendar.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
+            let completionTime = Calendar.current.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
             let now = Date()
             
             // Only include if not completed
@@ -1786,9 +1823,9 @@ struct ExploreView: View {
                         id: rsvp.publicEventId,
                         buyin_string: "TBD",
                         simpleDate: SimpleDate(
-                            year: calendar.component(.year, from: rsvp.eventDate),
-                            month: calendar.component(.month, from: rsvp.eventDate),
-                            day: calendar.component(.day, from: rsvp.eventDate)
+                            year: Calendar.current.component(.year, from: rsvp.eventDate),
+                            month: Calendar.current.component(.month, from: rsvp.eventDate),
+                            day: Calendar.current.component(.day, from: rsvp.eventDate)
                         ),
                         event_name: rsvp.eventName,
                         series_name: nil,
@@ -1803,9 +1840,22 @@ struct ExploreView: View {
             }
         }
         
-        return Dictionary(grouping: combinedItems) { item in
+        return combinedItems
+    }
+    
+    // MARK: - Combined Grouped Events (UserEvents + Public Event RSVPs)
+    private var combinedGroupedEventsByDate: [Date: [CombinedEventItem]] {
+        let calendar = Calendar.current
+        return Dictionary(grouping: allCombinedEventItems) { item in
             calendar.startOfDay(for: item.date)
         }
+    }
+    
+    // Filter events for the selected date in the new calendar
+    private var eventsForSelectedCalendarDate: [CombinedEventItem] {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: calendarSelectedDate)
+        return combinedGroupedEventsByDate[startOfDay] ?? []
     }
     
     // MARK: - Completed Public Event RSVPs
