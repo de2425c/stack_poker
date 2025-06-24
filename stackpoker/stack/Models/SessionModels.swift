@@ -121,6 +121,11 @@ struct LiveSessionData: Codable {
     
     // MARK: - Cash Game Specific Data
     var pokerVariant: String? = nil // Poker variant for cash games (e.g., "No Limit Hold'em", "Pot Limit Omaha")
+    
+    // MARK: - Multi-Day Session Support
+    var currentDay: Int = 1 // Current day of multi-day session (1, 2, 3, etc.)
+    var pausedForNextDay: Bool = false // Special pause flag for multi-day sessions
+    var pausedForNextDayDate: Date? = nil // Date when the session was paused for next day
 }
 
 // Extended LiveSessionData to include updates and hand histories

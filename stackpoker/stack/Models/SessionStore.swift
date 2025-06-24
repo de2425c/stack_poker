@@ -2,6 +2,7 @@ import Foundation
 import FirebaseFirestore
 import SwiftUI
 import FirebaseStorage
+import FirebaseAuth
 
 // Helper extension for string checks
 extension String? {
@@ -501,6 +502,162 @@ class SessionStore: ObservableObject {
         saveLiveSessionState()
     }
     
+    // MARK: - Multi-Day Session Management
+    
+    func pauseForNextDay(nextDayDate: Date) {
+        print("[SessionStore] Pausing session for next day: \(nextDayDate)")
+        
+        var session = liveSession
+        session.isActive = false
+        session.pausedForNextDay = true
+        session.pausedForNextDayDate = nextDayDate
+        session.lastPausedAt = Date()
+        if let lastActive = session.lastActiveAt {
+            session.elapsedTime += Date().timeIntervalSince(lastActive)
+        }
+        session.lastActiveAt = nil
+        
+        liveSession = session
+        stopLiveSessionTimer()
+        saveLiveSessionState()
+        showLiveSessionBar = false // Hide the live session bar when paused for next day
+        
+        print("[SessionStore] Session paused for Day \(liveSession.currentDay + 1)")
+    }
+    
+    func resumeFromNextDay() {
+        print("[SessionStore] Resuming from next day - currentDay: \(liveSession.currentDay) -> \(liveSession.currentDay + 1)")
+        
+        var session = liveSession
+        session.isActive = true
+        session.pausedForNextDay = false
+        session.pausedForNextDayDate = nil
+        session.currentDay += 1
+        session.lastActiveAt = Date()
+        
+        liveSession = session
+        startLiveSessionTimer()
+        saveLiveSessionState()
+        showLiveSessionBar = true // Show the live session bar when resumed
+        
+        print("[SessionStore] Session resumed to Day \(liveSession.currentDay)")
+    }
+    
+
+    
+    // Create a "Resume Day X" event
+    func createResumeEvent(for nextDayDate: Date) async -> Bool {
+        guard let currentUser = Auth.auth().currentUser else {
+            print("Cannot create resume event: No authenticated user")
+            return false
+        }
+        
+        do {
+            // Get user's display name
+            let userDoc = try await db.collection("users").document(currentUser.uid).getDocument()
+            let userData = userDoc.data()
+            let displayName = userData?["displayName"] as? String ?? userData?["username"] as? String ?? "Unknown"
+            
+            // Create the resume event
+            let eventRef = db.collection("userEvents").document()
+            let eventId = eventRef.documentID
+            
+            let title = "Continue Day \(liveSession.currentDay + 1)"
+            let originalSessionTitle = liveSession.isTournament ? 
+                (liveSession.tournamentName ?? liveSession.gameName) : 
+                "\(liveSession.stakes) @ \(liveSession.gameName)"
+            
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            let subtitle = "\(originalSessionTitle) • \(formatter.string(from: nextDayDate))"
+            
+            let resumeEvent = [
+                "id": eventId,
+                "title": title,
+                "description": subtitle,
+                "eventType": "resumeSession",
+                "creatorId": currentUser.uid,
+                "creatorName": displayName,
+                "startDate": Timestamp(date: nextDayDate),
+                "endDate": nil as Timestamp?,
+                "timezone": TimeZone.current.identifier,
+                "location": nil as String?,
+                "maxParticipants": nil as Int?,
+                "currentParticipants": 1,
+                "waitlistEnabled": false,
+                "status": "upcoming",
+                "groupId": nil as String?,
+                "isPublic": false,
+                "isBanked": false,
+                "rsvpDeadline": nil as Timestamp?,
+                "reminderSettings": [
+                    "enabled": false,
+                    "reminderTimes": [] as [Int]
+                ],
+                "linkedGameId": nil as String?,
+                "imageURL": nil as String?,
+                "associatedLiveSessionId": liveSession.id,
+                "createdAt": Timestamp(date: Date()),
+                "updatedAt": Timestamp(date: Date())
+            ] as [String : Any]
+            
+            try await eventRef.setData(resumeEvent)
+            
+            // Auto-RSVP creator as GOING
+            let rsvpId = "\(eventId)_\(currentUser.uid)"
+            let rsvpData = [
+                "eventId": eventId,
+                "userId": currentUser.uid,
+                "userDisplayName": displayName,
+                "status": "going",
+                "rsvpDate": Timestamp(date: Date()),
+                "notes": nil as String?,
+                "waitlistPosition": nil as Int?
+            ] as [String : Any]
+            
+            try await db.collection("eventRSVPs").document(rsvpId).setData(rsvpData)
+            
+            print("✅ Created resume event: \(title)")
+            return true
+        } catch {
+            print("❌ Failed to create resume event: \(error)")
+            return false
+        }
+    }
+    
+    // Remove resume event (when resuming or ending session)
+    func removeResumeEvent() async {
+        guard !liveSession.id.isEmpty else { return }
+        
+        do {
+            // Find the resume event for this session
+            let eventQuery = try await db.collection("userEvents")
+                .whereField("associatedLiveSessionId", isEqualTo: liveSession.id)
+                .whereField("eventType", isEqualTo: "resumeSession")
+                .getDocuments()
+            
+            for eventDoc in eventQuery.documents {
+                let eventId = eventDoc.documentID
+                
+                // Delete the event
+                try await db.collection("userEvents").document(eventId).delete()
+                
+                // Delete any RSVPs for this event
+                let rsvpQuery = try await db.collection("eventRSVPs")
+                    .whereField("eventId", isEqualTo: eventId)
+                    .getDocuments()
+                
+                for rsvpDoc in rsvpQuery.documents {
+                    try await rsvpDoc.reference.delete()
+                }
+                
+                print("✅ Removed resume event: \(eventId)")
+            }
+        } catch {
+            print("❌ Failed to remove resume event: \(error)")
+        }
+    }
+    
     // Modify endLiveSessionAsync to return the new session ID or nil
     func endLiveSessionAndGetId(cashout: Double) async -> String? {
         stopLiveSessionTimer()
@@ -552,6 +709,11 @@ class SessionStore: ObservableObject {
     // Mark session as ended and then clear it
     func endAndClearLiveSession() {
         stopLiveSessionTimer()
+        
+        // Clean up any resume events before ending the session
+        Task {
+            await removeResumeEvent()
+        }
         
         // SCORCHED EARTH: Mark session as ended before clearing
         liveSession.isEnded = true
@@ -661,16 +823,17 @@ class SessionStore: ObservableObject {
             return false
         }
         
-        // Check for impossible states
-        if liveSession.isActive && liveSession.buyIn == 0 {
+        // Check for impossible states (but allow sessions paused for next day)
+        if liveSession.isActive && liveSession.buyIn == 0 && !liveSession.pausedForNextDay {
             print("⚠️ VALIDATION: Found active session with no buy-in - clearing")
             scorachedEarthSessionClear()
             return false
         }
         
         // Check for stale sessions that have exceeded the maximum allowed duration
+        // But don't clear sessions that are paused for next day
         let maxDurationAgo = Date().addingTimeInterval(-maximumSessionDuration)
-        if liveSession.startTime < maxDurationAgo && !liveSession.isEnded {
+        if liveSession.startTime < maxDurationAgo && !liveSession.isEnded && !liveSession.pausedForNextDay {
             print("⚠️ VALIDATION: Found stale session - clearing")
             scorachedEarthSessionClear()
             return false
@@ -758,7 +921,7 @@ class SessionStore: ObservableObject {
                 return
             }
 
-            let isPotentiallyRestorable = loadedSession.isActive || loadedSession.lastPausedAt != nil
+            let isPotentiallyRestorable = loadedSession.isActive || loadedSession.lastPausedAt != nil || loadedSession.pausedForNextDay
             let hasValidBuyIn = loadedSession.buyIn > 0
 
             // SCORCHED EARTH: Enhanced staleness check
@@ -807,7 +970,8 @@ class SessionStore: ObservableObject {
                 if self.liveSession.isActive {
                     startLiveSessionTimer()
                 }
-                self.showLiveSessionBar = true
+                // Only show live session bar if not paused for next day
+                self.showLiveSessionBar = !self.liveSession.pausedForNextDay
                 loadEnhancedLiveSessionState() // Also load its associated enhanced data
                 
                 // SCORCHED EARTH: Validate the restored session

@@ -532,8 +532,8 @@ struct TournamentBuyInSection: View {
 // MARK: - SessionFormView Helper Structs/Views
 
 // New struct for individual staker configuration
-struct StakerConfig: Identifiable {
-    let id = UUID()
+struct StakerConfig: Identifiable, Codable, Equatable {
+    let id: UUID
     var searchQuery: String = ""
     var searchResults: [UserProfile] = []
     var selectedStaker: UserProfile? = nil
@@ -560,6 +560,83 @@ struct StakerConfig: Identifiable {
     
     // Track original stake ID for updating existing stakes instead of creating new ones
     var originalStakeId: String? = nil
+    
+    // MARK: - Codable Implementation
+    enum CodingKeys: String, CodingKey {
+        case id, markup, percentageSold, isManualEntry, manualStakerName
+        case originalStakeUserId, originalStakeId
+        case selectedStaker, selectedManualStaker
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(markup, forKey: .markup)
+        try container.encode(percentageSold, forKey: .percentageSold)
+        try container.encode(isManualEntry, forKey: .isManualEntry)
+        try container.encode(manualStakerName, forKey: .manualStakerName)
+        try container.encodeIfPresent(originalStakeUserId, forKey: .originalStakeUserId)
+        try container.encodeIfPresent(originalStakeId, forKey: .originalStakeId)
+        try container.encodeIfPresent(selectedStaker, forKey: .selectedStaker)
+        try container.encodeIfPresent(selectedManualStaker, forKey: .selectedManualStaker)
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.markup = try container.decode(String.self, forKey: .markup)
+        self.percentageSold = try container.decode(String.self, forKey: .percentageSold)
+        self.isManualEntry = try container.decode(Bool.self, forKey: .isManualEntry)
+        self.manualStakerName = try container.decode(String.self, forKey: .manualStakerName)
+        self.originalStakeUserId = try container.decodeIfPresent(String.self, forKey: .originalStakeUserId)
+        self.originalStakeId = try container.decodeIfPresent(String.self, forKey: .originalStakeId)
+        self.selectedStaker = try container.decodeIfPresent(UserProfile.self, forKey: .selectedStaker)
+        self.selectedManualStaker = try container.decodeIfPresent(ManualStakerProfile.self, forKey: .selectedManualStaker)
+        
+        // Initialize transient properties that shouldn't be persisted
+        self.searchQuery = ""
+        self.searchResults = []
+        self.isSearching = false
+        self.manualStakerSearchResults = []
+        self.isCreatingNewManualStaker = false
+        self.newManualStakerName = ""
+        self.newManualStakerContact = ""
+        self.newManualStakerNotes = ""
+    }
+    
+    // Default initializer for new configs
+    init() {
+        self.id = UUID()
+        self.searchQuery = ""
+        self.searchResults = []
+        self.selectedStaker = nil
+        self.isSearching = false
+        self.markup = "1.0"
+        self.percentageSold = ""
+        self.isManualEntry = false
+        self.selectedManualStaker = nil
+        self.manualStakerSearchResults = []
+        self.isCreatingNewManualStaker = false
+        self.newManualStakerName = ""
+        self.newManualStakerContact = ""
+        self.newManualStakerNotes = ""
+        self.manualStakerName = ""
+        self.originalStakeUserId = nil
+        self.originalStakeId = nil
+    }
+
+    static func == (lhs: StakerConfig, rhs: StakerConfig) -> Bool {
+        // Compare core fields that represent a change worth persisting.
+        return lhs.id == rhs.id &&
+               lhs.markup == rhs.markup &&
+               lhs.percentageSold == rhs.percentageSold &&
+               lhs.isManualEntry == rhs.isManualEntry &&
+               lhs.manualStakerName == rhs.manualStakerName &&
+               lhs.originalStakeId == rhs.originalStakeId &&
+               lhs.originalStakeUserId == rhs.originalStakeUserId &&
+               lhs.selectedStaker?.id == rhs.selectedStaker?.id &&
+               lhs.selectedManualStaker?.id == rhs.selectedManualStaker?.id
+    }
 }
 
 // New View for individual staker inputs

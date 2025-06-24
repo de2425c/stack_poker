@@ -17,7 +17,6 @@ enum PokerVariant: String, Codable, CaseIterable {
 enum TournamentGameType: String, Codable, CaseIterable {
     case nlh = "NLH"
     case plo = "PLO"
-    case other = "Other"
     
     var displayName: String {
         return self.rawValue

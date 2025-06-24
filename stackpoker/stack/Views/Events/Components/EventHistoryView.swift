@@ -6,6 +6,7 @@ struct EventHistoryView: View {
     let completedPublicEventRSVPs: [PublicEventRSVP]
     @EnvironmentObject var userEventService: UserEventService
     @EnvironmentObject var userService: UserService
+    @EnvironmentObject var sessionStore: SessionStore
     @Environment(\.dismiss) var dismiss
     @State private var selectedUserEvent: UserEvent? = nil
     
@@ -103,6 +104,7 @@ struct EventHistoryView: View {
                                     })
                                         .environmentObject(userEventService)
                                         .environmentObject(userService)
+                                        .environmentObject(sessionStore)
                                 } else if let publicRSVP = historyItem.publicEventRSVP {
                                     // Create a fake Event for display
                                     let calendar = Calendar.current
@@ -145,4 +147,5 @@ struct EventHistoryView: View {
     EventHistoryView(completedEvents: [], completedPublicEventRSVPs: [])
         .environmentObject(UserEventService())
         .environmentObject(UserService())
+        .environmentObject(SessionStore(userId: "preview"))
 } 

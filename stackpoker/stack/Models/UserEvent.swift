@@ -25,6 +25,7 @@ struct UserEvent: Identifiable, Codable {
     let reminderSettings: ReminderSettings?
     var linkedGameId: String? // If converted to actual game
     let imageURL: String? // Optional event image
+    let associatedLiveSessionId: String? // For resume session events - links to live session
     let createdAt: Date
     let updatedAt: Date
     
@@ -32,12 +33,14 @@ struct UserEvent: Identifiable, Codable {
         case homeGame = "homeGame"
         case tournament = "tournament"
         case other = "other"
+        case resumeSession = "resumeSession"
         
         var displayName: String {
             switch self {
             case .homeGame: return "Home Game"
             case .tournament: return "Tournament"
             case .other: return "Other"
+            case .resumeSession: return "Resume Session"
             }
         }
         
@@ -46,6 +49,7 @@ struct UserEvent: Identifiable, Codable {
             case .homeGame: return "house.fill"
             case .tournament: return "trophy.fill"
             case .other: return "calendar"
+            case .resumeSession: return "play.circle.fill"
             }
         }
     }
@@ -95,6 +99,7 @@ struct UserEvent: Identifiable, Codable {
         self.reminderSettings = reminderSettings
         self.imageURL = imageURL
         self.linkedGameId = nil
+        self.associatedLiveSessionId = nil
         self.createdAt = Date()
         self.updatedAt = Date()
     }
@@ -137,6 +142,7 @@ struct UserEvent: Identifiable, Codable {
         self.rsvpDeadline = (dictionary["rsvpDeadline"] as? Timestamp)?.dateValue()
         self.linkedGameId = dictionary["linkedGameId"] as? String
         self.imageURL = dictionary["imageURL"] as? String
+        self.associatedLiveSessionId = dictionary["associatedLiveSessionId"] as? String
         self.createdAt = createdAtTimestamp.dateValue()
         self.updatedAt = updatedAtTimestamp.dateValue()
         
@@ -175,6 +181,7 @@ struct UserEvent: Identifiable, Codable {
         if let rsvpDeadline = rsvpDeadline { dict["rsvpDeadline"] = Timestamp(date: rsvpDeadline) }
         if let linkedGameId = linkedGameId { dict["linkedGameId"] = linkedGameId }
         if let imageURL = imageURL { dict["imageURL"] = imageURL }
+        if let associatedLiveSessionId = associatedLiveSessionId { dict["associatedLiveSessionId"] = associatedLiveSessionId }
         
         if let reminderSettings = reminderSettings {
             dict["reminderSettings"] = [

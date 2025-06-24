@@ -344,8 +344,8 @@ struct FeedView: View {
                 // Centered Stack Logo
                 Image("stack_logo") 
                     .resizable()
-                    .renderingMode(.template) // Assuming you want to color it
-                    .foregroundColor(.white)   // Color set to white
+                    .renderingMode(.original) // Render the original image to preserve details
+                    .colorInvert() // Make the logo white, assuming the source is black
                     .scaledToFit()
                     .frame(height: 35)      // User updated height
 

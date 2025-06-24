@@ -1001,6 +1001,7 @@ struct ExploreView: View {
             )
             .environmentObject(userEventService)
             .environmentObject(userService)
+            .environmentObject(sessionStore)
         }
 
         .sheet(isPresented: $showingEventDetail) {
@@ -1653,6 +1654,7 @@ struct ExploreView: View {
                             })
                                 .environmentObject(userEventService)
                                 .environmentObject(userService)
+                                .environmentObject(sessionStore)
                                 .padding(.horizontal, 20)
                                 .padding(.bottom, 14)
                         }
@@ -1705,6 +1707,7 @@ struct ExploreView: View {
                                 })
                                     .environmentObject(userEventService)
                                     .environmentObject(userService)
+                                    .environmentObject(sessionStore)
                                     .padding(.horizontal, 20)
                                     .padding(.bottom, 14)
                             } else if let publicEvent = eventItem.publicEvent {

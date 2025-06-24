@@ -51,7 +51,7 @@ struct HomeGameDetailView: View {
     @State private var justCashedOutPlayer: HomeGame.Player?
     @State private var showingSaveSessionAlert = false
     @State private var showingSaveSessionSheet = false
-    @State private var showingManagePlayerSheet = false
+
     @State private var playerToManage: HomeGame.Player?
     
     // Add this property to store the activity items
@@ -407,24 +407,24 @@ struct HomeGameDetailView: View {
                     buyIn: player.totalBuyIn,
                     cashOut: player.currentStack,
                     duration: duration,
-                    date: cashoutTime
+                    date: cashoutTime,
+                    gameName: game.title,
+                    gameStakes: game.stakesDisplay
                 )
                 .environmentObject(sessionStore)
             } else {
                 Text("Error: Missing session data to save.")
             }
         }
-        .sheet(isPresented: $showingManagePlayerSheet) {
-            if let player = playerToManage {
-                ManagePlayerSheet(
-                    player: player,
-                    gameId: (liveGame ?? game).id,
-                    onComplete: {
-                        // Refresh the game data after managing player
-                        onGameUpdated?()
-                    }
-                )
-            }
+        .sheet(item: $playerToManage) { player in
+            ManagePlayerSheet(
+                player: player,
+                gameId: (liveGame ?? game).id,
+                onComplete: {
+                    playerToManage = nil
+                    onGameUpdated?()
+                }
+            )
         }
         .sheet(isPresented: $showingInviteSheet) {
             InvitePlayersSheet(
@@ -703,7 +703,6 @@ struct HomeGameDetailView: View {
                         ForEach(game.players.filter { $0.status == .active }) { player in
                             OwnerPlayerRow(player: player, onManage: {
                                 playerToManage = player
-                                showingManagePlayerSheet = true
                             })
                         }
                     }
@@ -2306,13 +2305,13 @@ struct HomeGameDetailView: View {
                     
                     Spacer()
                     
-                    // Current Stack display
+                    // Total Buy-in display
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text("$\(Int(player.currentStack))")
+                        Text("$\(Int(player.totalBuyIn))")
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(.white)
                         
-                        Text("Stack")
+                        Text("Buy-in")
                             .font(.system(size: 12))
                             .foregroundColor(.gray)
                     }

@@ -282,10 +282,8 @@ struct HomeGameView: View {
                                     title: "GAME TITLE",
                                     labelColor: .white.opacity(0.8)
                                 ) {
-                                    TextField("", text: $gameTitle)
-                                        .placeholders(when: gameTitle.isEmpty) {
-                                            Text("Enter game title").foregroundColor(.gray.opacity(0.7))
-                                        }
+                                    TextField("Enter game title", text: $gameTitle)
+                                        .foregroundColor(.white)
                                         .font(.system(size: 17))
                                         .padding(.vertical, 10)
                                         .foregroundColor(.white)
@@ -299,10 +297,7 @@ struct HomeGameView: View {
                                         title: "SMALL BLIND",
                                         labelColor: .white.opacity(0.8)
                                     ) {
-                                        TextField("", text: $smallBlind)
-                                            .placeholders(when: smallBlind.isEmpty) {
-                                                Text("$1").foregroundColor(.gray.opacity(0.7))
-                                            }
+                                        TextField("$1", text: $smallBlind)
                                             .font(.system(size: 16))
                                             .keyboardType(.decimalPad)
                                             .foregroundColor(.white)
@@ -315,10 +310,7 @@ struct HomeGameView: View {
                                         title: "BIG BLIND",
                                         labelColor: .white.opacity(0.8)
                                     ) {
-                                        TextField("", text: $bigBlind)
-                                            .placeholders(when: bigBlind.isEmpty) {
-                                                Text("$2").foregroundColor(.gray.opacity(0.7))
-                                            }
+                                        TextField("$2", text: $bigBlind)
                                             .font(.system(size: 16))
                                             .keyboardType(.decimalPad)
                                             .foregroundColor(.white)

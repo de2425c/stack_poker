@@ -11,9 +11,6 @@ struct GraphsDashboardView: View {
     // Pass in the same binding used elsewhere so the customisation sheet edits the same source of truth.
     @Binding var selectedGraphs: [GraphType]
 
-    // Local state just for graphs that need it
-    @State private var dayOfWeekStatsPeriod: DayOfWeekStatsPeriod = .month
-
     // Convenience helpers --------------------------------------------------
     private var allSessions: [Session] { sessionStore.sessions }
     private var allBankrollTxns: [BankrollTransaction] { bankrollStore.transactions }
@@ -81,7 +78,7 @@ struct GraphsDashboardView: View {
                 .padding(.horizontal, 20)
                 
         case .dayOfWeek:
-            DayOfWeekStatsBarChart(sessions: allSessions, period: dayOfWeekStatsPeriod)
+            DayOfWeekStatsBarChart(sessions: allSessions)
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
                 

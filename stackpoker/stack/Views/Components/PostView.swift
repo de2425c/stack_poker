@@ -129,16 +129,16 @@ struct PostView: View {
             challengeType: challengeType,
             currentValue: current,
             targetValue: target,
-            progressPercentage: target > 0 ? (current / target) * 100 : 0,
-            isCompact: false,
+            progressPercentage: (target > 0 ? (current / target) * 100 : 0),
+            isCompact: true,
             deadline: deadline
         )
     }
     
     private func parseChallengeProgressPost(_ content: String) -> ChallengePostInfo? {
-        // Extract challenge title from "🎯 Challenge Update: [Title]" format
-        var challengeTitle = "Challenge Progress"
-        if let titleRange = content.range(of: "🎯 Challenge Update: ") {
+        var challengeTitle = "Challenge Update" // Default title
+        // Extract challenge title - might be on a line after "Challenge Update:"
+        if let titleRange = content.range(of: "🎯 Challenge Update:") {
             let remainingContent = String(content[titleRange.upperBound...])
             if let titleEnd = remainingContent.range(of: "\n") {
                 challengeTitle = String(remainingContent[..<titleEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -171,7 +171,7 @@ struct PostView: View {
             challengeType: challengeType,
             currentValue: current,
             targetValue: target,
-            progressPercentage: (current / target) * 100,
+            progressPercentage: (target > 0 ? (current / target) * 100 : 0),
             isCompact: true,
             deadline: deadline
         )

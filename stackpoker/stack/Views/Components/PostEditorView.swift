@@ -205,25 +205,16 @@ struct PostEditorView: View {
 
     var body: some View {
         NavigationView {
-            GeometryReader { geometry in
-                let screenSize = geometry.size
-                ZStack {
-                    // Background
-                    Color.clear
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            isTextEditorFocused = false
-                            hideKeyboard()
-                        }
-                    
-                    AppBackgroundView()
-                        .ignoresSafeArea()
-
+            ZStack {
+                // Background
+                AppBackgroundView()
+                    .ignoresSafeArea()
+                
+                ScrollView {
                     VStack(spacing: 0) {
                         // Header with user profile
                         profileHeaderView
-                            .padding(.top, 20) // Reduced top padding to move UI upward
+                            .padding(.top, 20)
 
                         // Session display section
                         sessionDisplayView
@@ -233,17 +224,6 @@ struct PostEditorView: View {
                             NoteCardView(noteText: initialText)
                                 .padding(.horizontal)
                         }
-
-                        // REMOVED: Hand Summary functionality
-                        /*
-                        if isHandPost, let handData = initialHand {
-                            HandSummaryView(hand: handData)
-                                .padding(.horizontal)
-                            locationTextField
-                                .padding(.horizontal)
-                                .padding(.bottom, 8)
-                        }
-                        */
 
                         // Completed Session Display
                         if let completedSession = selectedCompletedSession {
@@ -258,16 +238,15 @@ struct PostEditorView: View {
 
                                 // Caption TextEditor - Directly below title  
                                 ZStack(alignment: .topLeading) {
-                                    TextEditor(text: $postText) // Using postText for caption here
+                                    TextEditor(text: $postText)
                                         .foregroundColor(.white)
                                         .font(.system(size: 16))
-                                        .frame(height: 80) // Fixed height for caption editor
+                                        .frame(height: 80)
                                         .scrollContentBackground(.hidden)
                                         .background(Color.black.opacity(0.1))
                                         .cornerRadius(8)
                                         .focused($isTextEditorFocused)
                                     
-                                    // Proper placeholder text that doesn't interfere with actual content
                                     if postText.isEmpty && !isTextEditorFocused {
                                         Text("Describe your session...")
                                             .foregroundColor(.gray.opacity(0.6))
@@ -279,21 +258,11 @@ struct PostEditorView: View {
                                 .padding(.bottom, 12)
                                 
                                 // Session Stats - Strava-like prominent display
-                                // Arrange in HStacks for a row-based metric display
-                                VStack(alignment: .leading, spacing: 16) { // Overall container for stats
-                                    HStack(spacing: 16) {
-                                        SessionStatMetricView(label: "Game", value: "\(completedSession.gameName) @ \(completedSession.stakes)", isWide: true)
-                                    }
-                                    HStack(spacing: 16) {
-                                        SessionStatMetricView(label: "Duration", value: String(format: "%.1f hr", completedSession.hoursPlayed))
-                                        SessionStatMetricView(label: "Buy-in", value: formatCurrency(completedSession.buyIn))
-                                    }
-                                    HStack(spacing: 16) {
-                                        SessionStatMetricView(label: "Cashout", value: formatCurrency(completedSession.cashout))
-                                        SessionStatMetricView(label: "Profit", value: formatProfit(completedSession.profit), 
-                                                            valueColor: completedSession.profit >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
-                                    }
-                                }
+                                AdaptiveSessionStatsView(
+                                    completedSession: completedSession,
+                                    formatCurrency: formatCurrency,
+                                    formatProfit: formatProfit
+                                )
                             }
                             .padding(.horizontal)
                             .padding(.bottom, 15)
@@ -319,7 +288,7 @@ struct PostEditorView: View {
                             }
                             .padding(.horizontal)
                         } else {
-                            // Text Editor for regular posts / notes / hands / session starts (not a completed session share)
+                            // Text Editor for regular posts
                             ZStack(alignment: .topLeading) {
                                 TextEditor(text: $postText)
                                     .focused($isTextEditorFocused)
@@ -328,10 +297,10 @@ struct PostEditorView: View {
                                     .scrollContentBackground(.hidden)
                                     .padding()
                                     .background(Color.clear)
-                                    .frame(minHeight: 100, idealHeight: 200 ,maxHeight: .infinity)
+                                    .frame(minHeight: 150)
 
                                 if postText.isEmpty && !isTextEditorFocused {
-                                    Text(placeholderText) // Original placeholder logic
+                                    Text(placeholderText)
                                         .foregroundColor(Color.gray)
                                         .font(.system(size: 16))
                                         .padding(.horizontal, 20)
@@ -340,18 +309,22 @@ struct PostEditorView: View {
                             }
                         }
 
-                        // Spacer() // Pushes buttons to the bottom - this might need to be conditional or removed if stats are large
-                        Spacer(minLength: selectedCompletedSession != nil ? 20 : 0) // Add more space if session details are shown
-
                         // Image picker and preview (only for regular posts)
                         if !isHandPost && !isNote {
                             actionButtonsView
                         }
+                        
+                        // Bottom spacer to ensure content can scroll above keyboard
+                        Spacer(minLength: 150)
                     }
-                    .padding(.bottom, 100) // Reduced bottom padding to lift action buttons
                 }
+                .scrollDismissesKeyboard(.interactively)
             }
-            .ignoresSafeArea(.keyboard) // Prevent keyboard from pushing content up
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isTextEditorFocused = false
+                hideKeyboard()
+            }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -990,23 +963,26 @@ struct PostEditorView: View {
             Image(uiImage: selectedImages[index])
                 .resizable()
                 .scaledToFill()
-                .aspectRatio(1, contentMode: .fill) // Square aspect ratio
-                .clipped() // Crop to square
+                .frame(height: 200) // Fixed height for consistent display
+                .clipped()
+                .cornerRadius(12)
 
             Button(action: {
                 selectedImages.remove(at: index)
             }) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
+                    .font(.system(size: 20))
                     .foregroundColor(.white)
                     .background(
                         Circle()
-                            .fill(Color.black.opacity(0.6))
-                            .frame(width: 20, height: 20)
+                            .fill(Color.black.opacity(0.7))
+                            .frame(width: 24, height: 24)
                     )
             }
-            .padding(6)
+            .padding(8)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
     }
 
     // REMOVED: Hand picker functionality for launch
@@ -1219,23 +1195,77 @@ private struct SessionStatMetricView: View {
     let value: String
     var valueColor: Color = .white
     var isWide: Bool = false // For stats like Game Name that might need more width
+    var fontSize: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: dynamicFontSize, weight: .bold))
+                .font(.system(size: fontSize, weight: .bold))
                 .foregroundColor(valueColor)
                 .lineLimit(1)
-                .minimumScaleFactor(0.4) // More aggressive scaling to prevent cutoff
             Text(label.uppercased())
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.gray)
         }
-        .frame(maxWidth: isWide ? .infinity : nil, alignment: isWide ? .leading : .center)
+        .frame(maxWidth: isWide ? .infinity : nil, alignment: .leading)
+    }
+}
+
+// New view to handle adaptive stats display
+private struct AdaptiveSessionStatsView: View {
+    let completedSession: Session
+    let formatCurrency: (Double) -> String
+    let formatProfit: (Double) -> String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Game/Stakes view (can have a larger, fixed font size as it's on its own line)
+            SessionStatMetricView(
+                label: "Game",
+                value: "\(completedSession.gameName) @ \(completedSession.stakes)",
+                isWide: true,
+                fontSize: 22
+            )
+            
+            // Use ViewThatFits for the 2x2 grid of metrics
+            ViewThatFits {
+                statsGrid(fontSize: 22)
+                statsGrid(fontSize: 20)
+                statsGrid(fontSize: 18)
+                statsGrid(fontSize: 16)
+                statsGrid(fontSize: 14)
+            }
+        }
     }
     
-    // Use consistent font size for all metrics in a row
-    private var dynamicFontSize: CGFloat {
-        return 22 // Consistent size that works well for all values
+    // Helper to create the grid of stats with a given font size
+    private func statsGrid(fontSize: CGFloat) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
+            GridRow {
+                SessionStatMetricView(
+                    label: "Duration",
+                    value: String(format: "%.1f hr", completedSession.hoursPlayed),
+                    fontSize: fontSize
+                )
+                SessionStatMetricView(
+                    label: "Buy-in",
+                    value: formatCurrency(completedSession.buyIn),
+                    fontSize: fontSize
+                )
+            }
+            GridRow {
+                SessionStatMetricView(
+                    label: "Cashout",
+                    value: formatCurrency(completedSession.cashout),
+                    fontSize: fontSize
+                )
+                SessionStatMetricView(
+                    label: "Profit",
+                    value: formatProfit(completedSession.profit),
+                    valueColor: completedSession.profit >= 0 ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red,
+                    fontSize: fontSize
+                )
+            }
+        }
     }
 }

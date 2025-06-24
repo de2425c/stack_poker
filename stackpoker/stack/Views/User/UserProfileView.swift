@@ -167,12 +167,13 @@ struct UserProfileView: View {
                     // List of user's posts (using existing PostView)
                     ForEach(profilePostService.posts) { post in
                         NavigationLink(destination: PostDetailView(post: post, userId: loggedInUserId ?? "").environmentObject(userService).environmentObject(profilePostService)) {
-                            PostView(
+                            PostCardView(
                                 post: post, 
                                 onLike: { 
                                     Task { try? await profilePostService.toggleLike(postId: post.id ?? "", userId: loggedInUserId ?? "") } 
                                 }, 
                                 onComment: { /* Comment handling for profile view if needed */ }, 
+                                isCurrentUser: post.userId == loggedInUserId,
                                 userId: loggedInUserId ?? "" // Pass logged-in user ID
                             )
                         }

@@ -80,6 +80,19 @@ class StakeService: ObservableObject {
         }
     }
     
+    // MARK: - Read stakes by live session UUID (active sessions)
+    func fetchStakesForLiveSession(_ liveSessionId: String) async throws -> [Stake] {
+        // Stakes saved during an in-progress live session are keyed by `liveSessionId` rather than a session document ID.
+        let query = stakesCollectionRef.whereField("liveSessionId", isEqualTo: liveSessionId)
+        do {
+            let snapshot = try await query.getDocuments()
+            let stakes = snapshot.documents.compactMap { try? $0.data(as: Stake.self) }
+            return stakes.sorted { $0.proposedAt > $1.proposedAt }
+        } catch {
+            throw error
+        }
+    }
+    
     // WORKAROUND: Fetch by user then filter (calls the direct query first)
     func fetchStakesForSession(_ sessionId: String, forUser userId: String) async throws -> [Stake] {
         // Try direct query first

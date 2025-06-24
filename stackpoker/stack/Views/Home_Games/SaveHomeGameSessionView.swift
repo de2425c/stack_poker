@@ -15,6 +15,8 @@ struct SaveHomeGameSessionView: View {
     let cashOut: Double
     let duration: TimeInterval
     let date: Date
+    let gameName: String
+    let gameStakes: String
 
     @State private var sessionName: String = ""
     @State private var sessionStakes: String = ""
@@ -114,6 +116,15 @@ struct SaveHomeGameSessionView: View {
         }
         .onTapGesture {
             hideKeyboard()
+        }
+        .onAppear {
+            // Pre-fill the form with game data
+            if sessionName.isEmpty {
+                sessionName = gameName
+            }
+            if sessionStakes.isEmpty {
+                sessionStakes = gameStakes
+            }
         }
         .ignoresSafeArea(.keyboard)
     }

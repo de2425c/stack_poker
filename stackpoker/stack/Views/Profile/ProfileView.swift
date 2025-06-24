@@ -93,9 +93,6 @@ struct ProfileView: View {
         sessionStore.sessions.filter { sessionMatchesFilter($0) }
     }
     
-    // In ProfileView, add state for the selected day-of-week stats period:
-    @State private var dayOfWeekStatsPeriod: DayOfWeekStatsPeriod = .month
-    
     init(userId: String) {
         self.userId = userId
         let bankrollStore = BankrollStore(userId: userId)
@@ -1122,7 +1119,7 @@ struct ProfileView: View {
                 
                 // Spacer before detailed analytics to prevent overlap
                 Spacer()
-                    .frame(height: 20)
+                    .frame(height: 15)
                 
                 // Beautiful Whoop-style Detailed Analytics Tabs
                 VStack(spacing: 16) {
@@ -1131,139 +1128,9 @@ struct ProfileView: View {
                         .foregroundColor(.white.opacity(0.85))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 20)
-                        .padding(.top, 24)
+                        .padding(.top, 8)
                     
                     VStack(spacing: 12) {
-                        // Cash Analytics Tab
-                        NavigationLink(destination: CashAnalyticsView()) {
-                            HStack(spacing: 16) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(stops: [
-                                                    .init(color: Color.green.opacity(0.8), location: 0),
-                                                    .init(color: Color.green.opacity(0.6), location: 0.5),
-                                                    .init(color: Color.green.opacity(0.4), location: 1)
-                                                ]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                        .frame(width: 50, height: 50)
-                                    
-                                Image(systemName: "dollarsign.circle.fill")
-                                        .font(.system(size: 24, weight: .semibold))
-                                        .foregroundColor(.white)
-                            }
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Cash Game Analytics")
-                                        .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(.white)
-                                    
-                                    Text("Deep dive into cash game performance")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.gray)
-                                }
-                                
-                                Spacer()
-                                
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .background(
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Material.ultraThinMaterial)
-                                        .opacity(0.1)
-                                    
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(
-                                            LinearGradient(
-                                                gradient: Gradient(colors: [
-                                                    Color.green.opacity(0.3),
-                                                    Color.white.opacity(0.1),
-                                                    Color.clear
-                                                ]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            ),
-                                            lineWidth: 1
-                                        )
-                                }
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        // Tournament Analytics Tab
-                        NavigationLink(destination: TournamentAnalyticsView()) {
-                            HStack(spacing: 16) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(stops: [
-                                                    .init(color: Color.orange.opacity(0.8), location: 0),
-                                                    .init(color: Color.orange.opacity(0.6), location: 0.5),
-                                                    .init(color: Color.orange.opacity(0.4), location: 1)
-                                                ]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                        .frame(width: 50, height: 50)
-                                    
-                                Image(systemName: "trophy.fill")
-                                        .font(.system(size: 24, weight: .semibold))
-                                        .foregroundColor(.white)
-                            }
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Tournament Analytics")
-                                        .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(.white)
-                                    
-                                    Text("Analyze your tournament performance")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.gray)
-                                }
-                                
-                                Spacer()
-                                
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .background(
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Material.ultraThinMaterial)
-                                        .opacity(0.1)
-                                    
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(
-                                            LinearGradient(
-                                                gradient: Gradient(colors: [
-                                                    Color.orange.opacity(0.3),
-                                                    Color.white.opacity(0.1),
-                                                    Color.clear
-                                                ]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            ),
-                                            lineWidth: 1
-                                        )
-                                }
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
                         // Graphs Dashboard Tab
                         NavigationLink(destination: GraphsDashboardView(userId: userId, sessionStore: sessionStore, bankrollStore: bankrollStore, selectedGraphs: $selectedGraphs)) {
                             HStack(spacing: 16) {
@@ -1332,111 +1199,37 @@ struct ProfileView: View {
                     .padding(.horizontal, 20)
                 }
 
-                // Spacer for consistent layout
-                Spacer()
-                    .frame(height: 16)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                
                 // Selected Graphs Section Header
                 HStack {
-                    Text("SELECTED GRAPHS")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.85))
-                    
-                    Text("\(selectedGraphs.count)/2")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.gray.opacity(0.6))
+                                    Text("SELECTED GRAPHS")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
+                
+                Text("\(selectedGraphs.count)/3")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.gray.opacity(0.6))
                     
                     Spacer()
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 4)
+                .padding(.top, 16)
                 
-                // Display selected graphs (limited to 2)
-                ForEach(selectedGraphs.prefix(2), id: \.id) { graphType in
-                        switch graphType {
+                // Display selected graphs (limited to 3)
+                ForEach(selectedGraphs.prefix(3), id: \.id) { graphType in
+                    switch graphType {
                     case .dollarPerHour:
                         DollarPerHourGraph(sessions: filteredSessions)
-                            .padding(.top, 8)
-                    case .profit:
-                        ProfitGraph(sessionStore: sessionStore)
-                            .padding(.horizontal, 20)
-                            .padding(.top, 8)
-                        case .bankroll:
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Bankroll")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 20)
-                                    .padding(.top, 16)
-                                
-                                Text("Bankroll graph coming soon...")
-                                    .foregroundColor(.gray)
-                                    .frame(height: 200)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.horizontal, 20)
-                            }
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color(.systemGray6).opacity(0.1))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                    )
-                            )
-                            .padding(.horizontal, 20)
-                            .padding(.top, 8)
-                    case .monthly:
-                        MonthlyProfitBarChart(
-                            sessions: filteredSessions,
-                            bankrollTransactions: bankrollStore.transactions,
-                            onBarTouch: { _ in }
-                            )
-                            .padding(.horizontal, 20)
-                            .padding(.top, 8)
+                            .padding(.top, 16)
                     case .daily:
                         DailyTimeMoneyBarGraph(sessions: filteredSessions)
-                            .padding(.top, 8)
+                            .padding(.top, 16)
                     case .dayOfWeek:
-                        DayOfWeekStatsBarChart(sessions: filteredSessions, period: dayOfWeekStatsPeriod)
-                            .padding(.top, 8)
-                            .padding(.horizontal, 8)
-                    case .winRate:
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Win Rate")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 20)
-                                    .padding(.top, 16)
-                                
-                            HStack {
-                                Spacer()
-                                WinRateCard(winRate: winRate)
-                                    .frame(width: 200, height: 200)
-                                Spacer()
-                            }
-                                    .padding(.horizontal, 20)
-                            .padding(.bottom, 16)
-                            }
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color(.systemGray6).opacity(0.1))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                    )
-                            )
-                            .padding(.horizontal, 20)
-                                .padding(.top, 8)
+                        DayOfWeekStatsBarChart(sessions: filteredSessions)
+                            .padding(.top, 16)
                     }
                 }
             }
             .padding(.bottom, 24) // Slightly reduced bottom padding
-            
-            // Add more spacing between graphs and performance stats
-            Spacer()
-                .frame(height: 32)
             
             // Performance Stats with Customization
             HStack {
@@ -1463,7 +1256,7 @@ struct ProfileView: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.top, 8) // Reduced from 24 to 8 since we added spacer above
+            .padding(.top, 16)
             
             if isCustomizingStats {
                 // Customization Interface
@@ -1642,31 +1435,9 @@ struct ProfileView: View {
         .padding(.bottom, 0)
         
         // Day of Week Stats Bar Chart
-        DayOfWeekStatsBarChart(sessions: filteredSessions, period: dayOfWeekStatsPeriod)
+        DayOfWeekStatsBarChart(sessions: filteredSessions)
             .padding(.top, 18)
             .padding(.horizontal, 8)
-        
-        // Segmented control for period selection
-        HStack(spacing: 12) {
-            ForEach(DayOfWeekStatsPeriod.allCases) { period in
-                Button(action: {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                        dayOfWeekStatsPeriod = period
-                    }
-                }) {
-                    Text(period.rawValue)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(dayOfWeekStatsPeriod == period ? .white : .gray.opacity(0.7))
-                        .padding(.vertical, 7)
-                        .padding(.horizontal, 18)
-                        .background(dayOfWeekStatsPeriod == period ? Color.accentColor.opacity(0.85) : Color.clear)
-                        .clipShape(Capsule())
-                }
-            }
-        }
-        .padding(.top, 8)
-        .padding(.bottom, 18)
-        .scrollDisabled(isDraggingAny)
     }
         
 
@@ -2440,66 +2211,46 @@ enum PerformanceStat: String, CaseIterable, Identifiable, Equatable {
 
 // MARK: - Graph Type Enum
 enum GraphType: String, CaseIterable, Identifiable, Equatable {
-    case bankroll = "bankroll"
     case dollarPerHour = "dollarPerHour"
-    case profit = "profit"
-    case monthly = "monthly"
     case daily = "daily"
     case dayOfWeek = "dayOfWeek"
-    case winRate = "winRate"
     
     var id: String { rawValue }
     
     var title: String {
         switch self {
-        case .bankroll: return "Bankroll"
         case .dollarPerHour: return "$/Hour"
-        case .profit: return "Profit"
-        case .monthly: return "Monthly Profit"
         case .daily: return "Daily Activity"
         case .dayOfWeek: return "Day of Week Stats"
-        case .winRate: return "Win Rate"
         }
     }
     
     var description: String {
         switch self {
-        case .bankroll: return "Track your total bankroll over time"
         case .dollarPerHour: return "Monitor your hourly earnings"
-        case .profit: return "View cumulative session profits"
-        case .monthly: return "Monthly profit breakdown"
         case .daily: return "Daily hours and profit patterns"
         case .dayOfWeek: return "Performance by day of the week"
-        case .winRate: return "Win rate and session statistics"
         }
     }
     
     var icon: String {
         switch self {
-        case .bankroll: return "chart.line.uptrend.xyaxis"
         case .dollarPerHour: return "clock.arrow.circlepath"
-        case .profit: return "chart.line.uptrend.xyaxis"
-        case .monthly: return "calendar"
         case .daily: return "chart.bar.fill"
         case .dayOfWeek: return "calendar.badge.clock"
-        case .winRate: return "chart.pie.fill"
         }
     }
     
     var color: Color {
         switch self {
-        case .bankroll: return .green
         case .dollarPerHour: return .mint
-        case .profit: return .blue
-        case .monthly: return .orange
         case .daily: return .purple
         case .dayOfWeek: return .cyan
-        case .winRate: return .pink
         }
     }
     
     static var defaultSelection: [GraphType] {
-        [.dollarPerHour, .profit]
+        [.dollarPerHour]
     }
 }
 
@@ -3038,6 +2789,7 @@ struct SettingsView: View {
     @State private var showFileImporter: Bool = false
     @State private var importStatusMessage: String? = nil
     @State private var isImporting = false
+    @State private var showPokerIncomeAlert = false
     
     var body: some View {
         ZStack {
@@ -3213,11 +2965,20 @@ struct SettingsView: View {
         } message: {
             Text(importStatusMessage ?? "")
         }
+        .alert("Import from Poker Income Ultimate", isPresented: $showPokerIncomeAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("To import your data from Poker Income Ultimate, please forward the export email to support@stackpoker.gg and include your username in the email body.")
+        }
         .sheet(isPresented: $showImportOptionsSheet) {
             ImportOptionsSheet(
                 onImportSelected: { importType in
-                    currentImportType = importType
-                    showFileImporter = true
+                    if importType == .pokerIncomeUltimate {
+                        showPokerIncomeAlert = true
+                    } else {
+                        currentImportType = importType
+                        showFileImporter = true
+                    }
                 }
             )
         }
@@ -3276,6 +3037,10 @@ struct SettingsView: View {
                             }
                         }
                     }
+                case .pokerIncomeUltimate:
+                    // Handle Poker Income Ultimate import
+                    importStatusMessage = "Import from Poker Income Ultimate is not supported in this version."
+                    isImporting = false
                 }
             case .failure(let error):
                 print("File picker error: \(error)")
@@ -3449,7 +3214,7 @@ struct SettingsRow: View {
 
 // MARK: - Import Type Definition (moved outside of SettingsView for accessibility)
 enum ImportType: Hashable {
-    case pokerbase, pokerAnalytics, pbt, regroup
+    case pokerbase, pokerAnalytics, pbt, regroup, pokerIncomeUltimate
     
     var title: String {
         switch self {
@@ -3457,6 +3222,7 @@ enum ImportType: Hashable {
         case .pokerAnalytics: return "Poker Analytics"
         case .pbt: return "Poker Bankroll Tracker"
         case .regroup: return "Regroup"
+        case .pokerIncomeUltimate: return "Poker Income Ultimate"
         }
     }
     
@@ -3466,6 +3232,7 @@ enum ImportType: Hashable {
         case .pokerAnalytics: return "TSV/CSV"
         case .pbt: return "CSV"
         case .regroup: return "CSV"
+        case .pokerIncomeUltimate: return "via Email"
         }
     }
     
@@ -3475,6 +3242,7 @@ enum ImportType: Hashable {
         case .pokerAnalytics: return .cyan
         case .pbt: return .purple
         case .regroup: return .orange
+        case .pokerIncomeUltimate: return .yellow
         }
     }
 }
@@ -4232,7 +4000,7 @@ struct GraphCustomizationView: View {
     @Binding var selectedGraphs: [GraphType]
     @Environment(\.dismiss) private var dismiss
     
-    private let maxSelectedGraphs = 2
+    private let maxSelectedGraphs = 3
     
     var body: some View {
         ZStack {
@@ -4246,7 +4014,7 @@ struct GraphCustomizationView: View {
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
                     
-                    Text("Select up to 2 graphs to display on your profile home page")
+                    Text("Select up to 3 graphs to display on your profile home page")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.gray)
                     
@@ -4319,14 +4087,6 @@ struct GraphCustomizationView: View {
         }
         .navigationTitle("Graphs")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .foregroundColor(.white)
-            }
-        }
     }
 }
 
@@ -4442,7 +4202,7 @@ struct ImportOptionsSheet: View {
                         .padding(.horizontal, 20)
                     
                     VStack(spacing: 16) {
-                        ForEach([ImportType.pokerbase, .pokerAnalytics, .pbt, .regroup], id: \.self) { importType in
+                        ForEach([ImportType.pokerbase, .pokerAnalytics, .pbt, .regroup, .pokerIncomeUltimate], id: \.self) { importType in
                             Button(action: {
                                 onImportSelected(importType)
                                 dismiss()

@@ -11,6 +11,7 @@ struct CSVImportFlow: View {
     @State private var importStatusMessage: String?
     @State private var showingImportResult = false
     @State private var importSuccessCount = 0
+    @State private var showPokerIncomeAlert = false
     
     let userId: String
     
@@ -69,6 +70,11 @@ struct CSVImportFlow: View {
         } message: {
             Text(importStatusMessage ?? "")
         }
+        .alert("Import from Poker Income Ultimate", isPresented: $showPokerIncomeAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("To import your data from Poker Income Ultimate, please forward the export email to support@stackpoker.gg and include your username in the email body.")
+        }
     }
     
     // MARK: - Header Section
@@ -108,13 +114,17 @@ struct CSVImportFlow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             
             VStack(spacing: 12) {
-                ForEach([ImportType.pokerbase, .pokerAnalytics, .pbt, .regroup], id: \.self) { importType in
+                ForEach([ImportType.pokerbase, .pokerAnalytics, .pbt, .regroup, .pokerIncomeUltimate], id: \.self) { importType in
                     ImportOptionCard(
                         importType: importType,
                         isSelected: currentImportType == importType,
                         onTap: {
-                            currentImportType = importType
-                            showFileImporter = true
+                            if importType == .pokerIncomeUltimate {
+                                showPokerIncomeAlert = true
+                            } else {
+                                currentImportType = importType
+                                showFileImporter = true
+                            }
                         }
                     )
                 }
@@ -187,6 +197,12 @@ struct CSVImportFlow: View {
                         handleImportResult(importResult)
                     }
                 }
+            case .pokerIncomeUltimate:
+                // This path should ideally not be taken as it doesn't use the file importer.
+                // It's here to make the switch exhaustive.
+                isImporting = false
+                importStatusMessage = "Email import does not use the file picker. Please follow the instructions provided."
+                showingImportResult = true
             }
             
         case .failure(let error):

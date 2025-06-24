@@ -10,6 +10,7 @@ struct ImageCropperView: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     @State private var lastScale: CGFloat = 1.0
+    @State private var normalizedImage: UIImage?
     
     private let cropSize: CGFloat = 300
     
@@ -26,7 +27,7 @@ struct ImageCropperView: View {
                         .ignoresSafeArea()
                     
                     // Image with gestures
-                    Image(uiImage: image)
+                    Image(uiImage: normalizedImage ?? image)
                         .resizable()
                         .scaledToFit()
                         .scaleEffect(scale)
@@ -51,8 +52,15 @@ struct ImageCropperView: View {
                                         let newScale = lastScale * value
                                         scale = max(0.5, min(newScale, 5.0)) // Limit scale between 0.5x and 5x
                                     }
-                                    .onEnded { _ in
+                                    .onEnded { value in
                                         lastScale = scale
+                                        // Ensure the scale doesn't go below a reasonable minimum
+                                        if scale < 0.8 {
+                                            withAnimation(.easeInOut(duration: 0.3)) {
+                                                scale = 1.0
+                                                lastScale = 1.0
+                                            }
+                                        }
                                     }
                             )
                         )
@@ -110,6 +118,7 @@ struct ImageCropperView: View {
             .preferredColorScheme(.dark)
         }
         .onAppear {
+            normalizedImage = normalizeImageOrientation(image)
             setupInitialImagePosition()
         }
     }
@@ -126,17 +135,33 @@ struct ImageCropperView: View {
     }
     
     private func setupInitialImagePosition() {
-        // Calculate initial scale to fit the image within the crop area
-        let imageSize = image.size
+        // Use normalized image size for calculations
+        let imageToUse = normalizedImage ?? image
+        let imageSize = imageToUse.size
         let imageAspectRatio = imageSize.width / imageSize.height
         
-        if imageAspectRatio > 1 {
-            // Landscape image - scale based on height
-            scale = cropSize / imageSize.height
+        // Calculate what the displayed size would be when scaledToFit
+        let screenWidth = UIScreen.main.bounds.width
+        let screenHeight = UIScreen.main.bounds.height - 200 // Account for navigation and toolbar
+        let screenAspectRatio = screenWidth / screenHeight
+        
+        let displayWidth: CGFloat
+        let displayHeight: CGFloat
+        
+        if imageAspectRatio > screenAspectRatio {
+            // Image is wider relative to screen - fit to width
+            displayWidth = screenWidth
+            displayHeight = screenWidth / imageAspectRatio
         } else {
-            // Portrait or square image - scale based on width
-            scale = cropSize / imageSize.width
+            // Image is taller relative to screen - fit to height
+            displayHeight = screenHeight
+            displayWidth = screenHeight * imageAspectRatio
         }
+        
+        // Calculate scale to make the crop area fit nicely
+        let scaleForWidth = cropSize / displayWidth
+        let scaleForHeight = cropSize / displayHeight
+        scale = max(scaleForWidth, scaleForHeight) * 1.1 // 1.1 gives a bit more room for adjustment
         
         lastScale = scale
         
@@ -146,37 +171,90 @@ struct ImageCropperView: View {
     }
     
     private func cropImage() {
+        // Create a normalized image with correct orientation first
+        let normalizedImage = normalizeImageOrientation(image)
+        
         // Create a graphics context to render the cropped image
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: cropSize, height: cropSize))
         
         let croppedImage = renderer.image { context in
-            // Calculate the image's actual displayed size and position
-            let imageSize = image.size
-            let displaySize = CGSize(
-                width: imageSize.width * scale,
-                height: imageSize.height * scale
-            )
+            // Use a simpler approach that matches what's displayed
+            let imageSize = normalizedImage.size
+            let imageAspectRatio = imageSize.width / imageSize.height
             
-            // Calculate the crop rectangle in the image's coordinate system
+            // Calculate the displayed size on screen
+            let screenWidth = UIScreen.main.bounds.width
+            let screenHeight = UIScreen.main.bounds.height - 200 // Account for navigation and toolbar
+            
+            let displayWidth: CGFloat
+            let displayHeight: CGFloat
+            
+            if imageAspectRatio > screenWidth / screenHeight {
+                // Image is wider relative to screen
+                displayWidth = screenWidth
+                displayHeight = screenWidth / imageAspectRatio
+            } else {
+                // Image is taller relative to screen
+                displayHeight = screenHeight
+                displayWidth = screenHeight * imageAspectRatio
+            }
+            
+            // Apply the current scale
+            let scaledWidth = displayWidth * scale
+            let scaledHeight = displayHeight * scale
+            
+            // Calculate the crop area in image coordinates
+            let imageScale = imageSize.width / scaledWidth
+            
+            // Center point of the crop area in screen coordinates
+            let cropCenterX = screenWidth / 2 - offset.width
+            let cropCenterY = screenHeight / 2 - offset.height
+            
+            // Convert to image coordinates
+            let imageCenterX = (cropCenterX - (screenWidth - scaledWidth) / 2) * imageScale
+            let imageCenterY = (cropCenterY - (screenHeight - scaledHeight) / 2) * imageScale
+            
+            // Crop rectangle in image coordinates
+            let cropRectSize = cropSize * imageScale
             let cropRect = CGRect(
-                x: (displaySize.width - cropSize) / 2 - offset.width,
-                y: (displaySize.height - cropSize) / 2 - offset.height,
-                width: cropSize,
-                height: cropSize
+                x: imageCenterX - cropRectSize / 2,
+                y: imageCenterY - cropRectSize / 2,
+                width: cropRectSize,
+                height: cropRectSize
             )
             
-            // Draw the image scaled and positioned
-            let drawRect = CGRect(
-                x: -cropRect.minX,
-                y: -cropRect.minY,
-                width: displaySize.width,
-                height: displaySize.height
+            // Ensure crop rect is within image bounds
+            let clampedCropRect = CGRect(
+                x: max(0, min(cropRect.minX, imageSize.width - cropRect.width)),
+                y: max(0, min(cropRect.minY, imageSize.height - cropRect.height)),
+                width: min(cropRect.width, imageSize.width),
+                height: min(cropRect.height, imageSize.height)
             )
             
-            image.draw(in: drawRect)
+            // Crop and draw
+            if let cgImage = normalizedImage.cgImage?.cropping(to: clampedCropRect) {
+                let croppedUIImage = UIImage(cgImage: cgImage)
+                croppedUIImage.draw(in: CGRect(x: 0, y: 0, width: cropSize, height: cropSize))
+            } else {
+                // Fallback
+                normalizedImage.draw(in: CGRect(x: 0, y: 0, width: cropSize, height: cropSize))
+            }
         }
         
         onCropComplete(croppedImage)
+    }
+    
+    private func normalizeImageOrientation(_ image: UIImage) -> UIImage {
+        if image.imageOrientation == .up {
+            return image
+        }
+        
+        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+        image.draw(in: CGRect(origin: .zero, size: image.size))
+        let normalizedImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        return normalizedImage ?? image
     }
 }
 

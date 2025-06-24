@@ -8,8 +8,13 @@ struct UserEventCardView: View {
     var onSelect: (() -> Void)? = nil
     @EnvironmentObject var userEventService: UserEventService
     @EnvironmentObject var userService: UserService
+    @EnvironmentObject var sessionStore: SessionStore
 
     private let accentColor = Color(red: 64/255, green: 156/255, blue: 255/255)
+    
+    private var isResumeSession: Bool {
+        return event.eventType == .resumeSession
+    }
 
     private var formattedDate: String {
         let formatter = DateFormatter()
@@ -37,6 +42,106 @@ struct UserEventCardView: View {
     }
 
     var body: some View {
+        if isResumeSession {
+            resumeSessionCard
+        } else {
+            standardEventCard
+        }
+    }
+    
+    // MARK: - Resume Session Card
+    private var resumeSessionCard: some View {
+        Button(action: {
+            // Resume the session
+            Task {
+                await MainActor.run {
+                    print("[UserEventCardView] Resuming session for Day \(sessionStore.liveSession.currentDay + 1)")
+                    // Resume the session FIRST to ensure proper state
+                    sessionStore.resumeFromNextDay()
+                }
+                
+                // Remove the resume event AFTER resuming
+                await sessionStore.removeResumeEvent()
+                
+                print("[UserEventCardView] Resume sequence completed")
+            }
+        }) {
+            VStack(alignment: .leading, spacing: 16) {
+                // Header with play icon
+                HStack {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.green)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(event.title)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        
+                        if let description = event.description {
+                            Text(description)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray)
+                                .lineLimit(2)
+                        }
+                    }
+                    
+                    Spacer()
+                }
+                
+                // Resume button
+                HStack {
+                    Spacer()
+                    
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 14, weight: .bold))
+                        Text("Resume")
+                            .font(.system(size: 16, weight: .bold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.green,
+                                Color.green.opacity(0.8)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .cornerRadius(20)
+                }
+            }
+            .padding(20)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color(red: 0/255, green: 40/255, blue: 20/255).opacity(0.8),
+                                    Color(red: 0/255, green: 60/255, blue: 30/255).opacity(0.6)
+                                ]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                }
+            )
+            .shadow(color: Color.green.opacity(0.2), radius: 8, x: 0, y: 4)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    // MARK: - Standard Event Card
+    private var standardEventCard: some View {
         Button(action: { onSelect?() }) {
             VStack(alignment: .leading, spacing: 0) {
                 // MARK: - Event Image (if available)

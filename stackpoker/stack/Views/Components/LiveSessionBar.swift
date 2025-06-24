@@ -6,6 +6,11 @@ struct LiveSessionBar: View {
     var onTap: () -> Void
     let isFirstBar: Bool
     
+    // Hide the bar if session is paused for next day
+    private var shouldShowBar: Bool {
+        return !sessionStore.liveSession.pausedForNextDay
+    }
+    
     // Computed properties for formatted time
     private var formattedElapsedTime: String {
         let totalSeconds = Int(sessionStore.liveSession.elapsedTime)
@@ -30,18 +35,19 @@ struct LiveSessionBar: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Pull handle - always visible
-            Rectangle()
-                .fill(Color.white.opacity(0.3))
-                .frame(width: 36, height: 4)
-                .cornerRadius(2)
-                .padding(.vertical, 6)
-                .onTapGesture {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        isExpanded.toggle()
+        if shouldShowBar {
+            VStack(spacing: 0) {
+                // Pull handle - always visible
+                Rectangle()
+                    .fill(Color.white.opacity(0.3))
+                    .frame(width: 36, height: 4)
+                    .cornerRadius(2)
+                    .padding(.vertical, 6)
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            isExpanded.toggle()
+                        }
                     }
-                }
             
             if isExpanded {
                 // Expanded view with detailed session information
@@ -210,19 +216,20 @@ struct LiveSessionBar: View {
                     onTap()
                 }
             }
-        }
-        .padding(.top, isFirstBar ? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0 : 0)
-        .background(
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(red: 30/255, green: 32/255, blue: 40/255),
-                    Color(red: 22/255, green: 24/255, blue: 30/255)
-                ]),
-                startPoint: .top,
-                endPoint: .bottom
+            }
+            .padding(.top, isFirstBar ? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0 : 0)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 30/255, green: 32/255, blue: 40/255),
+                        Color(red: 22/255, green: 24/255, blue: 30/255)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea(edges: isFirstBar ? .top : [])
             )
-            .ignoresSafeArea(edges: isFirstBar ? .top : [])
-        )
+        }
     }
 }
 
