@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseFirestore
 import FirebaseAuth
+import PhotosUI
 
 // MARK: - Session Type Picker
 // enum SessionLogType: String, CaseIterable, Identifiable { // This will be moved
@@ -676,13 +677,6 @@ struct SessionFormView: View {
     @State private var selectedTournamentFormat: TournamentFormat = .standard
 
     // Staking State Variables - REPLACED
-    // @State private var stakerSearchQuery = ""
-    // @State private var stakerSearchResults: [UserProfile] = []
-    // @State private var selectedStaker: UserProfile? = nil
-    // @State private var isSearchingStakers = false
-    // @State private var searchDebounceTimer: Timer? = nil
-    // @State private var stakeMarkup = ""
-    // @State private var stakePercentageSold = ""
     @State private var stakerConfigs: [StakerConfig] = [] // New state for multiple stakers
     @State private var stakerConfigsForPopup: [StakerConfig] = [] // Temporary copy for the popup
 
@@ -696,6 +690,24 @@ struct SessionFormView: View {
     @StateObject private var stakeService = StakeService() // Add StakeService
     @StateObject private var userService = UserService() // Add UserService to potentially fetch staker by username/ID later
     @StateObject private var manualStakerService = ManualStakerService() // Add ManualStakerService
+    @StateObject private var postService = PostService() // Add PostService for sharing
+    
+    // Session result sharing state - NEW
+    @State private var sessionDetails: (buyIn: Double, cashout: Double, profit: Double, duration: String, gameName: String, stakes: String, sessionId: String)? = nil
+    
+    // Consolidated sharing flow state - NEW
+    enum SharingFlowState {
+        case none
+        case resultShare
+        case imagePicker
+        case imageComposition
+        case postEditor
+    }
+    @State private var sharingFlowState: SharingFlowState = .none
+    @State private var selectedImageForResult: UIImage? = nil
+    @State private var selectedPhotoForResult: PhotosPickerItem? = nil
+    @State private var selectedCardTypeForSharing: ShareCardType = .detailed
+    @State private var editedGameNameForSharing: String? = nil
     
     // Colors & Font
     private let primaryTextColor = Color(red: 0.98, green: 0.96, blue: 0.94) // Light cream for high contrast
@@ -1064,6 +1076,103 @@ struct SessionFormView: View {
                 print("[SessionFormView] After sync, main stakerConfigs count: \(stakerConfigs.count)")
             }
         }
+        .fullScreenCover(isPresented: .constant(sharingFlowState != .none)) {
+            Group {
+                switch sharingFlowState {
+                case .none:
+                    EmptyView()
+                case .resultShare:
+                    sessionResultShareView
+                case .imagePicker:
+                    PhotosPicker(selection: $selectedPhotoForResult, matching: .images) {
+                        VStack {
+                            Text("Select Photo")
+                                .font(.title)
+                                .foregroundColor(.white)
+                                .padding()
+                            Button("Cancel") {
+                                sharingFlowState = .resultShare
+                            }
+                            .foregroundColor(.white)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(AppBackgroundView())
+                    }
+                    .onChange(of: selectedPhotoForResult) { newItem in
+                        Task {
+                            if let data = try? await newItem?.loadTransferable(type: Data.self),
+                               let uiImage = UIImage(data: data) {
+                                selectedImageForResult = uiImage
+                                sharingFlowState = .imageComposition
+                            }
+                        }
+                    }
+                case .imageComposition:
+                    if let details = sessionDetails, let backgroundImage = selectedImageForResult {
+                        let sessionData: [String: Any] = [
+                            "id": details.sessionId,
+                            "userId": userId,
+                            "gameName": details.gameName,
+                            "stakes": details.stakes,
+                            "buyIn": details.buyIn,
+                            "cashout": details.cashout,
+                            "profit": details.profit,
+                            "startDate": Timestamp(date: startDate),
+                            "endTime": Timestamp(date: endTime),
+                            "hoursPlayed": Double(calculatedHoursPlayed) ?? 0
+                        ]
+                        let session = Session(id: details.sessionId, data: sessionData)
+                        
+                        if #available(iOS 16.0, *) {
+                            ImageCompositionView(session: session, backgroundImage: backgroundImage, selectedCardType: selectedCardTypeForSharing, overrideGameName: editedGameNameForSharing) {
+                                // Called when X button is tapped - go back to result share
+                                sharingFlowState = .resultShare
+                            }
+                        } else {
+                            Text("Image composition requires iOS 16.0+")
+                                .onAppear {
+                                    selectedImageForResult = nil
+                                    sharingFlowState = .none
+                                }
+                        }
+                    }
+                case .postEditor:
+                    // Show post editor within the sharing flow
+                    if let details = sessionDetails {
+                        let sessionData: [String: Any] = [
+                            "id": details.sessionId,
+                            "userId": userId,
+                            "gameName": details.gameName,
+                            "stakes": details.stakes,
+                            "buyIn": details.buyIn,
+                            "cashout": details.cashout,
+                            "profit": details.profit,
+                            "startDate": Timestamp(date: startDate),
+                            "endTime": Timestamp(date: endTime),
+                            "hoursPlayed": Double(calculatedHoursPlayed) ?? 0
+                        ]
+                        let completedSession = Session(id: details.sessionId, data: sessionData)
+                        
+                        SessionPostEditorWrapper(
+                            userId: userId,
+                            completedSession: completedSession,
+                            onSuccess: {
+                                sharingFlowState = .resultShare
+                            },
+                            onCancel: {
+                                sharingFlowState = .resultShare
+                            }
+                        )
+                        .environmentObject(userService)
+                        .environmentObject(sessionStore)
+                        .environmentObject(postService)
+                    }
+                }
+            }
+            .environmentObject(sessionStore)
+            .environmentObject(userService)
+            .environmentObject(postService)
+        }
     }
     
     // Extracted Staking Section Trigger Button
@@ -1323,13 +1432,38 @@ struct SessionFormView: View {
     }
 
     private func saveSessionDataOnly(sessionData: [String: Any]) {
-        db.collection("sessions").addDocument(data: sessionData) { error in
-            DispatchQueue.main.async {
-                isLoading = false
-                if error == nil {
-                    dismiss()
-                } else {
-
+        Task {
+            do {
+                let docRef = try await db.collection("sessions").addDocument(data: sessionData)
+                
+                await MainActor.run {
+                    self.isLoading = false
+                    
+                    // Set up session details for sharing
+                    let finalBuyIn = sessionData["buyIn"] as? Double ?? 0
+                    let finalCashout = sessionData["cashout"] as? Double ?? 0
+                    let profit = finalCashout - finalBuyIn
+                    let hoursPlayed = sessionData["hoursPlayed"] as? Double ?? 0
+                    let duration = self.formatDuration(hoursPlayed)
+                    let gameName = sessionData["gameName"] as? String ?? ""
+                    let stakes = sessionData["stakes"] as? String ?? ""
+                    
+                    self.sessionDetails = (
+                        buyIn: finalBuyIn,
+                        cashout: finalCashout,
+                        profit: profit,
+                        duration: duration,
+                        gameName: gameName,
+                        stakes: stakes,
+                        sessionId: docRef.documentID
+                    )
+                    
+                    // Show session result share view
+                    self.sharingFlowState = .resultShare
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
                     // Handle error (e.g., show an alert)
                 }
             }
@@ -1351,11 +1485,11 @@ struct SessionFormView: View {
         var mutableSessionData = sessionData
         // mutableSessionData["id"] = newDocumentId // Optional
 
-        db.collection("sessions").document(newDocumentId).setData(mutableSessionData) { error in
+        let setDataCompletion: (Error?) -> Void = { error in
             if let error = error {
 
                 DispatchQueue.main.async {
-                    isLoading = false
+                    self.isLoading = false
                     // Handle error
                 }
                 return
@@ -1429,25 +1563,83 @@ struct SessionFormView: View {
                 } // End of for loop
 
                 DispatchQueue.main.async {
-                    isLoading = false
+                    self.isLoading = false
                     if allStakesSuccessful && savedStakeCount == configs.count && savedStakeCount > 0 {
 
-                        dismiss()
+                        // Set up session details for sharing
+                        let finalBuyIn = sessionData["buyIn"] as? Double ?? 0
+                        let finalCashout = sessionData["cashout"] as? Double ?? 0
+                        let profit = finalCashout - finalBuyIn
+                        let hoursPlayed = sessionData["hoursPlayed"] as? Double ?? 0
+                        let duration = self.formatDuration(hoursPlayed)
+                        let gameName = sessionData["gameName"] as? String ?? ""
+                        let stakes = sessionData["stakes"] as? String ?? ""
+                        
+                        self.sessionDetails = (
+                            buyIn: finalBuyIn,
+                            cashout: finalCashout,
+                            profit: profit,
+                            duration: duration,
+                            gameName: gameName,
+                            stakes: stakes,
+                            sessionId: newDocumentId
+                        )
+                        
+                        // Show session result share view
+                        self.sharingFlowState = .resultShare
                     } else if savedStakeCount > 0 {
 
-                        // Still dismiss as session is saved and some stakes might be too.
-                        // User can verify on dashboard.
-                        dismiss()
+                        // Still set up session details even with partial success
+                        let finalBuyIn = sessionData["buyIn"] as? Double ?? 0
+                        let finalCashout = sessionData["cashout"] as? Double ?? 0
+                        let profit = finalCashout - finalBuyIn
+                        let hoursPlayed = sessionData["hoursPlayed"] as? Double ?? 0
+                        let duration = self.formatDuration(hoursPlayed)
+                        let gameName = sessionData["gameName"] as? String ?? ""
+                        let stakes = sessionData["stakes"] as? String ?? ""
+                        
+                        self.sessionDetails = (
+                            buyIn: finalBuyIn,
+                            cashout: finalCashout,
+                            profit: profit,
+                            duration: duration,
+                            gameName: gameName,
+                            stakes: stakes,
+                            sessionId: newDocumentId
+                        )
+                        
+                        // Show session result share view
+                        self.sharingFlowState = .resultShare
                     }
                     else {
 
-                        // Provide more specific feedback or error handling
-                        // For now, we will dismiss as the session itself was likely saved.
-                        dismiss() 
+                        // Even if stakes failed, session was saved, so show share view
+                        let finalBuyIn = sessionData["buyIn"] as? Double ?? 0
+                        let finalCashout = sessionData["cashout"] as? Double ?? 0
+                        let profit = finalCashout - finalBuyIn
+                        let hoursPlayed = sessionData["hoursPlayed"] as? Double ?? 0
+                        let duration = self.formatDuration(hoursPlayed)
+                        let gameName = sessionData["gameName"] as? String ?? ""
+                        let stakes = sessionData["stakes"] as? String ?? ""
+                        
+                        self.sessionDetails = (
+                            buyIn: finalBuyIn,
+                            cashout: finalCashout,
+                            profit: profit,
+                            duration: duration,
+                            gameName: gameName,
+                            stakes: stakes,
+                            sessionId: newDocumentId
+                        )
+                        
+                        // Show session result share view
+                        self.sharingFlowState = .resultShare
                     }
                 }
             } // End of Task
         } // End of setData completion
+        
+        db.collection("sessions").document(newDocumentId).setData(mutableSessionData, completion: setDataCompletion)
     }
 
     // Helper to parse buy-in string (e.g., "$1,000 + $100", "€550") to Double
@@ -1471,10 +1663,70 @@ struct SessionFormView: View {
         missingFieldName = field
         showMissingFieldAlert = true
     }
+    
+    // Session result share view - NEW
+    private var sessionResultShareView: some View {
+        SessionResultShareView(
+            sessionDetails: sessionDetails,
+            isTournament: selectedLogType == .tournament,
+            onShareToFeed: {
+                // Switch to post editor state within the sharing flow
+                sharingFlowState = .postEditor
+            },
+            onShareToSocials: { cardType in
+                selectedCardTypeForSharing = cardType
+                sharingFlowState = .imagePicker
+            },
+            onDone: {
+                sharingFlowState = .none
+                self.dismiss()
+            },
+            onTitleChanged: { newTitle in
+                editedGameNameForSharing = newTitle
+            }
+        )
+    }
+    
+    // Helper to format duration from hours
+    private func formatDuration(_ hours: Double) -> String {
+        let totalMinutes = Int(hours * 60)
+        let hoursPart = totalMinutes / 60
+        let minutesPart = totalMinutes % 60
+        
+        if hoursPart > 0 {
+            return "\(hoursPart)h \(minutesPart)m"
+        } else {
+            return "\(minutesPart)m"
+        }
+    }
 }
 
-// Extracted View for Staking Inputs - This is now replaced by StakerInputView and the loop in SessionFormView
-// struct StakingInputFieldsView: View { ... }
+// Wrapper view to handle PostEditor callbacks - NEW
+private struct SessionPostEditorWrapper: View {
+    let userId: String
+    let completedSession: Session
+    let onSuccess: () -> Void
+    let onCancel: () -> Void
+    
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var userService: UserService
+    @EnvironmentObject var sessionStore: SessionStore
+    @EnvironmentObject var postService: PostService
+    
+    var body: some View {
+        PostEditorView(
+            userId: userId,
+            completedSession: completedSession,
+            onCancel: onCancel
+        )
+        .environmentObject(userService)
+        .environmentObject(sessionStore)
+        .environmentObject(postService)
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PostCreatedSuccessfully"))) { _ in
+            onSuccess()
+        }
+    }
+}
 
 // MARK: - Component Views
 

@@ -131,22 +131,6 @@ struct SignInView: View {
                                 .animation(.easeInOut(duration: 0.2), value: isFormValid)
                                 .contentShape(Rectangle())
                                 
-                                // Forgot password button - only show for email users
-                                if isEmailAddress {
-                                    Button(action: { 
-                                        resetEmail = emailOrPhone
-                                        showingForgotPassword = true 
-                                    }) {
-                                        Text("Forgot Password?")
-                                            .font(.custom("PlusJakartaSans-Medium", size: 14))
-                                            .foregroundColor(.white.opacity(0.8))
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 8)
-                                    }
-                                    .padding(.top, 4)
-                                    .contentShape(Rectangle())
-                                }
-                                
                                 // Or divider
                                 HStack {
                                     Rectangle()
@@ -171,6 +155,20 @@ struct SignInView: View {
                                         .padding(.vertical, 8)
                                 }
                                 .padding(.top, 16)
+                                .contentShape(Rectangle())
+                                
+                                // Forgot password button - shown at bottom for convenience
+                                Button(action: { 
+                                    resetEmail = isEmailAddress ? emailOrPhone : ""
+                                    showingForgotPassword = true 
+                                }) {
+                                    Text("Forgot Password?")
+                                        .font(.custom("PlusJakartaSans-Medium", size: 14))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 8)
+                                }
+                                .padding(.top, 20)
                                 .contentShape(Rectangle())
                             }
                             .padding(.top, 12)

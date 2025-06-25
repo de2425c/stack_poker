@@ -717,33 +717,58 @@ struct ChallengePostView: View {
             
             // Images if any
             if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(imageURLs, id: \.self) { url in
-                            if let imageUrl = URL(string: url) {
-                                KFImage(imageUrl)
-                                    .placeholder {
-                                        Rectangle()
-                                            .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                            .overlay(
-                                                ProgressView()
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                            )
-                                    }
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(height: 350)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        onImageTapped?(url)
-                                    }
+                VStack {
+                    // For ChallengePostView, we'll use a different style - horizontal scroll for different aspect ratio
+                    if imageURLs.count == 1 {
+                        if let url = imageURLs.first, let imageUrl = URL(string: url) {
+                            KFImage(imageUrl)
+                                .placeholder {
+                                    Rectangle()
+                                        .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                        .overlay(
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                        )
+                                }
+                                .resizable()
+                                .scaledToFill()
+                                .frame(height: 350)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    onImageTapped?(url)
+                                }
+                        }
+                    } else {
+                        TabView {
+                            ForEach(imageURLs, id: \.self) { url in
+                                if let imageUrl = URL(string: url) {
+                                    KFImage(imageUrl)
+                                        .placeholder {
+                                            Rectangle()
+                                                .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                                .overlay(
+                                                    ProgressView()
+                                                        .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                                )
+                                        }
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(height: 350)
+                                        .clipped()
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            onImageTapped?(url)
+                                        }
+                                }
                             }
                         }
+                        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .automatic))
+                        .frame(height: 350)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .padding(.leading, 8)
-                    .padding(.trailing, 8)
                 }
+                .padding(.horizontal, 16)
                 .padding(.top, 10)
                 .padding(.bottom, 14)
             }

@@ -22,6 +22,7 @@ struct EventDetailView: View {
     @State private var showingStakingDetails = false
     @State private var existingStakingInvites: [EventStakingInvite] = []
     @State private var existingStakes: [Stake] = []
+    @State private var showingPendingStakersAlert = false
     @StateObject private var eventStakingService = EventStakingService()
     @StateObject private var stakeService = StakeService()
 
@@ -29,6 +30,13 @@ struct EventDetailView: View {
     // Computed properties for display
     private var formattedDate: String {
         event.simpleDate.displayMedium
+    }
+    
+    private var hasPendingStakingInvites: Bool {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return false }
+        return existingStakingInvites.contains { invite in
+            invite.status == .pending && invite.stakerUserId == currentUserId
+        }
     }
     
     private var formattedTime: String {
@@ -100,6 +108,14 @@ struct EventDetailView: View {
         .navigationBarHidden(true)
         .overlay(customNavigationBar, alignment: .top)
         .alert("Error", isPresented: $showError, actions: { Button("OK") {} }, message: { Text(error ?? "An unknown error occurred.") })
+        .alert("Pending Stakers", isPresented: $showingPendingStakersAlert) {
+            Button("Continue") { 
+                showingLiveSession = true
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("You have pending staking invites for this event. You can start the session now - when your stakers accept the invites, they'll automatically receive the session results.")
+        }
         .onAppear {
             checkIfAddedToSchedule()
             fetchExistingStakingInvites()
@@ -394,7 +410,11 @@ struct EventDetailView: View {
             
             // Start Live Session Button
             Button(action: {
-                showingLiveSession = true
+                if hasPendingStakingInvites {
+                    showingPendingStakersAlert = true
+                } else {
+                    showingLiveSession = true
+                }
             }) {
                 Label("Start Live Session", systemImage: "play.circle.fill")
                     .font(.system(size: 17, weight: .semibold, design: .default))
@@ -635,31 +655,51 @@ struct EventDetailView: View {
                                 userService: userService
                             )
                             
-                            HStack(spacing: 8) {
-                                Text("\(invite.percentageBought, specifier: "%.1f")%")
-                                    .font(.system(size: 14, design: .default))
-                                    .foregroundColor(.gray)
-                                Text("•")
-                                    .foregroundColor(.gray)
-                                Text(formatCurrency(invite.amountBought))
-                                    .font(.system(size: 14, design: .default))
-                                    .foregroundColor(.gray)
+                            if invite.hasSessionResults {
+                                // Show session results if available
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 8) {
+                                        Text("Buy-in: \(formatCurrency(invite.sessionBuyIn ?? 0))")
+                                            .font(.system(size: 14, design: .default))
+                                            .foregroundColor(.gray)
+                                        Text("•")
+                                            .foregroundColor(.gray)
+                                        Text("Cashout: \(formatCurrency(invite.sessionCashout ?? 0))")
+                                            .font(.system(size: 14, design: .default))
+                                            .foregroundColor(.gray)
+                                    }
+                                    Text("Profit: \(formatCurrency(invite.sessionProfit ?? 0))")
+                                        .font(.system(size: 14, weight: .semibold, design: .default))
+                                        .foregroundColor(invite.sessionProfit ?? 0 >= 0 ? .green : .red)
+                                }
+                            } else {
+                                // Show stake details if no session results
+                                HStack(spacing: 8) {
+                                    Text("\(invite.percentageBought, specifier: "%.1f")%")
+                                        .font(.system(size: 14, design: .default))
+                                        .foregroundColor(.gray)
+                                    Text("•")
+                                        .foregroundColor(.gray)
+                                    Text(formatCurrency(invite.amountBought))
+                                        .font(.system(size: 14, design: .default))
+                                        .foregroundColor(.gray)
+                                }
                             }
                         }
                         
                         Spacer()
                         
-                        // Status badge
+                        // Status badge - use updated status for session complete invites
                         HStack(spacing: 4) {
-                            Image(systemName: invite.status.icon)
+                            Image(systemName: invite.hasSessionResults && invite.status == .pending ? "checkmark.circle.fill" : invite.status.icon)
                                 .font(.system(size: 12))
-                            Text(invite.status.displayName)
+                            Text(invite.hasSessionResults && invite.status == .pending ? "Session Complete" : invite.status.displayName)
                                 .font(.system(size: 12, weight: .semibold, design: .default))
                         }
-                        .foregroundColor(stakingStatusColor(invite.status))
+                        .foregroundColor(invite.hasSessionResults && invite.status == .pending ? .blue : stakingStatusColor(invite.status))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(stakingStatusColor(invite.status).opacity(0.15))
+                        .background((invite.hasSessionResults && invite.status == .pending ? .blue : stakingStatusColor(invite.status)).opacity(0.15))
                         .clipShape(Capsule())
                     }
                     .padding(12)

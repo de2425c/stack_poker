@@ -267,9 +267,8 @@ struct StakingEventCalendarView: View {
         isLoading = true
         Task {
             do {
-                // Fetch both types of event invites
+                // Fetch only events where current user is the staker (staking others)
                 let stakerInvites = try await eventStakingService.fetchStakingInvitesAsStaker(userId: currentUserId)
-                let playerInvites = try await eventStakingService.fetchStakingInvitesAsPlayer(userId: currentUserId)
                 
                 // ALSO fetch tournament stakes created via "Add Stake"
                 let allStakes = try await stakeService.fetchStakes(forUser: currentUserId)
@@ -318,8 +317,8 @@ struct StakingEventCalendarView: View {
                     )
                 }
                 
-                // Combine both invite types + tournament stakes
-                let allEventInvites = stakerInvites + playerInvites + tournamentInvites
+                // Combine only staker invites + tournament stakes (not events where user is being staked)
+                let allEventInvites = stakerInvites + tournamentInvites
                 
                 // CRITICAL: Pre-load ALL user profiles to prevent race conditions
                 let uniqueUserIds = Set<String>(allEventInvites.compactMap { invite in
@@ -343,7 +342,7 @@ struct StakingEventCalendarView: View {
                 await MainActor.run {
                     self.eventStakingInvites = allEventInvites
                     self.isLoading = false
-                    print("Calendar: Loaded \(stakerInvites.count) staker invites and \(playerInvites.count) player invites")
+                    print("Calendar: Loaded \(stakerInvites.count) staker invites and \(tournamentInvites.count) tournament stakes")
                     print("Calendar: Pre-loaded \(self.userService.loadedUsers.count) user profiles")
                 }
             } catch {
@@ -523,29 +522,49 @@ struct CompactStakingEventCard: View {
                 
                 
             
-            // Staking Details Row - Single line format
+            // Staking Details Row - Single line format OR Session Results
             HStack(spacing: 12) {
-(
-                    Text("STAKE ")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.gray) +
-                    Text("\(String(format: "%.0f", invite.percentageBought))% @ \(String(format: "%.1f", invite.markup))x, ")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.gray) +
-                    Text("AMOUNT ")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.gray) +
-                    Text("\(formatCurrency(invite.amountBought)) ")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.gray) +
-                    Text("BULLETS ")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.gray) +
-                    Text("\(invite.maxBullets)")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.gray)
-                )
-                .lineLimit(1)
+                if invite.hasSessionResults {
+                    // Show session results instead of stake details
+                    (
+                        Text("SESSION ")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.gray) +
+                        Text("\(formatCurrency(invite.sessionBuyIn ?? 0)) → \(formatCurrency(invite.sessionCashout ?? 0)), ")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.gray) +
+                        Text("PROFIT ")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.gray) +
+                        Text("\(formatCurrency(invite.sessionProfit ?? 0))")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(invite.sessionProfit ?? 0 >= 0 ? .green : .red)
+                    )
+                    .lineLimit(1)
+                } else {
+                    // Show stake details
+                    (
+                        Text("STAKE ")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.gray) +
+                        Text("\(String(format: "%.0f", invite.percentageBought))% @ \(String(format: "%.1f", invite.markup))x, ")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.gray) +
+                        Text("AMOUNT ")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.gray) +
+                        Text("\(formatCurrency(invite.amountBought)) ")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.gray) +
+                        Text("BULLETS ")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.gray) +
+                        Text("\(invite.maxBullets)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.gray)
+                    )
+                    .lineLimit(1)
+                }
                 
                 Spacer()
                 
@@ -622,16 +641,24 @@ struct CompactStakingEventCard: View {
     }
     
     private var statusDisplayText: String {
+        // Check if this invite has session results but is still pending
+        if invite.status == .pending && invite.hasSessionResults {
+            return "Session Complete"
+        }
         // Check if this is a tournament stake awaiting cashout
-        if invite.status == .pending && invite.eventId.hasPrefix("tournament_") {
+        else if invite.status == .pending && invite.eventId.hasPrefix("tournament_") {
             return "Awaiting Cashout"
         }
         return invite.status.displayName
     }
     
     private var statusIcon: String {
+        // Check if this invite has session results but is still pending
+        if invite.status == .pending && invite.hasSessionResults {
+            return "checkmark.circle.fill"
+        }
         // Check if this is a tournament stake awaiting cashout
-        if invite.status == .pending && invite.eventId.hasPrefix("tournament_") {
+        else if invite.status == .pending && invite.eventId.hasPrefix("tournament_") {
             return "dollarsign.circle"
         }
         return invite.status.icon
@@ -663,6 +690,11 @@ struct CompactStakingEventCard: View {
     }
     
     private var statusColor: Color {
+        // Check if this invite has session results but is still pending
+        if invite.status == .pending && invite.hasSessionResults {
+            return .blue
+        }
+        
         switch invite.status {
         case .pending: return .orange
         case .accepted: return .green
@@ -763,40 +795,12 @@ struct CompactStakingEventCard: View {
     
     // MARK: - Actions
     private func acceptInvite() {
-        guard let inviteId = invite.id else { return }
         isProcessing = true
         
         Task {
             do {
-                let stakeService = StakeService()
-                
-                // 1. Accept the invite
-                try await eventStakingService.acceptStakingInvite(inviteId: inviteId)
-                
-                // 2. Create a Stake record in the regular staking system
-                let stake = Stake(
-                    id: nil,
-                    sessionId: "event_\(invite.eventId)_\(UUID().uuidString)",
-                    sessionGameName: invite.eventName,
-                    sessionStakes: "Event Stakes",
-                    sessionDate: invite.eventDate,
-                    stakerUserId: invite.stakerUserId,
-                    stakedPlayerUserId: invite.stakedPlayerUserId,
-                    stakePercentage: invite.percentageBought / 100.0,
-                    markup: invite.markup,
-                    totalPlayerBuyInForSession: 0,
-                    playerCashoutForSession: 0,
-                    status: .active,
-                    proposedAt: Date(),
-                    lastUpdatedAt: Date(),
-                    settlementInitiatorUserId: nil,
-                    settlementConfirmerUserId: nil,
-                    isTournamentSession: true,
-                    manualStakerDisplayName: invite.manualStakerDisplayName,
-                    isOffAppStake: invite.isManualStaker
-                )
-                
-                try await stakeService.addStake(stake)
+                // Use the new method that handles both pre-session and post-session acceptance
+                try await eventStakingService.acceptStakingInviteWithStakeCreation(invite: invite)
                 
                 await MainActor.run {
                     isProcessing = false

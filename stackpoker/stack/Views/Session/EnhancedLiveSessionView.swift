@@ -17,6 +17,7 @@ struct EnhancedLiveSessionView: View {
     @StateObject private var challengeService = ChallengeService(userId: Auth.auth().currentUser?.uid ?? "") // Add ChallengeService
     @StateObject private var eventStakingService = EventStakingService() // Add EventStakingService
     @StateObject private var sessionNotificationService = SessionNotificationService() // Add SessionNotificationService
+    @State private var pendingEventStakingInvites: [EventStakingInvite] = [] // Pending invites from events
     @State private var handEntryMinimized = false
     
     // Callback for when a session ends, passing the new session ID
@@ -79,8 +80,7 @@ struct EnhancedLiveSessionView: View {
     // New states for share to feed
     @State private var showingNoProfileAlert = false
     
-    // Add new state for edit session sheet
-    @State private var showingEditSessionSheet = false
+
     
     // Add states for editing session details
     @State private var editSessionStartTime = Date()
@@ -113,6 +113,12 @@ struct EnhancedLiveSessionView: View {
     // State variables for multi-day session progression
     @State private var showingNextDayConfirmation = false
     @State private var nextDayDate = Date()
+    
+    // State variables for game details prompt during cashout
+    @State private var showingGameDetailsPrompt = false
+    @State private var promptGameName = ""
+    @State private var promptStakes = ""
+    @State private var pendingCashoutAmount: Double = 0
     
     // Add state for tracking selected post
     @State private var selectedPost: Post? = nil
@@ -160,12 +166,15 @@ struct EnhancedLiveSessionView: View {
     @State private var sharingFlowState: SharingFlowState = .none
     @State private var selectedImageForResult: UIImage? = nil
     @State private var selectedPhotoForResult: PhotosPickerItem? = nil
+    @State private var selectedCardTypeForSharing: ShareCardType = .detailed
+    @State private var editedGameNameForSharing: String? = nil
     
     // MARK: - Enum Definitions
     enum LiveSessionTab {
         case session
         case notes
         case posts
+        case details
     }
     
     enum SessionMode {
@@ -367,9 +376,7 @@ struct EnhancedLiveSessionView: View {
                 .environmentObject(self.userService) // Add UserService for staking details
             }
         }
-        .sheet(isPresented: $showingEditSessionSheet) {
-            editSessionSheet
-        }
+
     }
     
     // MARK: - Content Views
@@ -457,7 +464,7 @@ struct EnhancedLiveSessionView: View {
                         let session = Session(id: details.sessionId, data: sessionData)
                         
                         if #available(iOS 16.0, *) {
-                            ImageCompositionView(session: session, backgroundImage: backgroundImage) {
+                            ImageCompositionView(session: session, backgroundImage: backgroundImage, selectedCardType: selectedCardTypeForSharing, overrideGameName: editedGameNameForSharing) {
                                 // Called when X button is tapped - go back to result share
                                 sharingFlowState = .resultShare
                             }
@@ -526,6 +533,9 @@ struct EnhancedLiveSessionView: View {
         } message: {
             Text("Enter your final chip count to end the session")
         }
+        .sheet(isPresented: $showingGameDetailsPrompt) {
+            gameDetailsPromptSheet
+        }
         .alert("Share Session Result", isPresented: $showingShareToFeedPrompt) {
             Button("Not Now", role: .cancel) { dismiss() }
             Button("Share to Feed") {
@@ -586,6 +596,10 @@ struct EnhancedLiveSessionView: View {
                 postsTabView
                     .tag(LiveSessionTab.posts)
                     .contentShape(Rectangle())
+                
+                detailsTabView
+                    .tag(LiveSessionTab.details)
+                    .contentShape(Rectangle())
             }
             .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
             .frame(maxWidth: .infinity, maxHeight: .infinity) // Ensure TabView uses full available space
@@ -610,6 +624,7 @@ struct EnhancedLiveSessionView: View {
             tabButton(title: "Session", icon: "timer", tab: .session)
             tabButton(title: "Notes", icon: "note.text", tab: .notes)
             tabButton(title: "Posts", icon: "text.bubble", tab: .posts)
+            tabButton(title: "Details", icon: "gearshape", tab: .details)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -733,6 +748,128 @@ struct EnhancedLiveSessionView: View {
         }
     }
     
+    private var gameDetailsPromptSheet: some View {
+        NavigationView {
+            GeometryReader { geometry in
+                ZStack {
+                    AppBackgroundView()
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                    
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Header
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Add Game Details")
+                                    .font(.plusJakarta(.title2, weight: .bold))
+                                    .foregroundColor(.white)
+                                
+                                Text("Please provide the game details before ending your session")
+                                    .font(.plusJakarta(.subheadline))
+                                    .foregroundColor(.gray)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            
+                            // Game Details Fields
+                            VStack(alignment: .leading, spacing: 16) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    GlassyInputField(
+                                        icon: "gamecontroller",
+                                        title: "Game Name",
+                                        content: AnyGlassyContent(TextFieldContent(
+                                            text: $promptGameName,
+                                            textColor: .white
+                                        )),
+                                        glassOpacity: 0.01,
+                                        labelColor: .gray,
+                                        materialOpacity: 0.2
+                                    )
+                                    
+                                    if promptGameName.isEmpty {
+                                        Text("e.g., Aria 1/2, Home Game, Local Casino")
+                                            .font(.plusJakarta(.caption))
+                                            .foregroundColor(.gray)
+                                            .padding(.leading, 6)
+                                    }
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 8) {
+                                    GlassyInputField(
+                                        icon: "dollarsign.circle",
+                                        title: "Stakes",
+                                        content: AnyGlassyContent(TextFieldContent(
+                                            text: $promptStakes,
+                                            textColor: .white
+                                        )),
+                                        glassOpacity: 0.01,
+                                        labelColor: .gray,
+                                        materialOpacity: 0.2
+                                    )
+                                    
+                                    if promptStakes.isEmpty {
+                                        Text("e.g., $1/$2, $5/$10, $25/$50")
+                                            .font(.plusJakarta(.caption))
+                                            .foregroundColor(.gray)
+                                            .padding(.leading, 6)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                            
+                            // Action Buttons
+                            VStack(spacing: 12) {
+                                // Save and End Session Button
+                                Button(action: saveGameDetailsAndEndSession) {
+                                    Text("Save Details & End Session")
+                                        .font(.plusJakarta(.body, weight: .bold))
+                                        .foregroundColor(.black)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 16)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 20)
+                                                .fill(promptGameName.isEmpty || promptStakes.isEmpty ? Color.white.opacity(0.5) : Color.white)
+                                        )
+                                }
+                                .disabled(promptGameName.isEmpty || promptStakes.isEmpty)
+                                .padding(.horizontal)
+                                
+                                // Skip for Now Button
+                                Button(action: skipGameDetailsAndEndSession) {
+                                    Text("Skip for Now")
+                                        .font(.plusJakarta(.body, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 20)
+                                                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                        )
+                                }
+                                .padding(.horizontal)
+                            }
+                            .padding(.bottom, 20)
+                        }
+                        .padding(.top, 20)
+                    }
+                }
+            }
+            .navigationTitle("Game Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        showingGameDetailsPrompt = false
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+    }
+    
     // MARK: - Toolbar Content
     
     @ToolbarContentBuilder
@@ -753,18 +890,8 @@ struct EnhancedLiveSessionView: View {
         } else if selectedTab == .posts {
             plusButton(action: { showingPostShareOptions = true })
         } else if selectedTab == .session {
-            // Edit button for session tab
-            Button(action: { 
-                // Initialize edit values with current session data
-                editSessionStartTime = sessionStore.liveSession.startTime
-                editGameName = sessionStore.liveSession.gameName
-                editStakes = sessionStore.liveSession.stakes
-                showingEditSessionSheet = true 
-            }) {
-                Image(systemName: "pencil.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(accentColor)
-            }
+            // No edit button for session tab since details is now its own tab
+            EmptyView()
         }
     }
     
@@ -1029,27 +1156,33 @@ struct EnhancedLiveSessionView: View {
                         }
                         .padding(.horizontal)
                         
-                        // Buy-in Section
-                        if selectedGame != nil {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Buy-in Amount")
-                                    .font(.plusJakarta(.headline, weight: .medium))
-                                    .foregroundColor(.white)
+                        // Buy-in Section - Always show for cash games
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Buy-in Amount")
+                                .font(.plusJakarta(.headline, weight: .medium))
+                                .foregroundColor(.white)
+                                .padding(.leading, 6)
+                                .padding(.bottom, 2)
+                            
+                            // Glassy Buy-in field
+                            GlassyInputField(
+                                icon: "dollarsign.circle",
+                                title: "Buy in",
+                                content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
+                                glassOpacity: 0.01,
+                                labelColor: .gray,
+                                materialOpacity: 0.2
+                            )
+                            
+                            if selectedGame == nil {
+                                Text("Game details can be added later in the Details tab")
+                                    .font(.plusJakarta(.caption))
+                                    .foregroundColor(.gray)
                                     .padding(.leading, 6)
-                                    .padding(.bottom, 2)
-                                
-                                // Glassy Buy-in field
-                                GlassyInputField(
-                                    icon: "dollarsign.circle",
-                                    title: "Buy in",
-                                    content: AnyGlassyContent(TextFieldContent(text: $buyIn, keyboardType: .decimalPad, prefix: "$", textColor: .white, prefixColor: .gray)),
-                                    glassOpacity: 0.01,
-                                    labelColor: .gray,
-                                    materialOpacity: 0.2
-                                )
+                                    .padding(.top, 4)
                             }
-                            .padding(.horizontal)
                         }
+                        .padding(.horizontal)
                     } // End of Cash Game Section
                     
                     // Tournament Setup Section
@@ -1245,25 +1378,23 @@ struct EnhancedLiveSessionView: View {
                     // Start Button Section - FIXED POSITIONING
                     VStack(spacing: 20) {
                         if selectedLogType == .cashGame {
-                            // Start Button for Cash Game
-                            if selectedGame != nil {
-                                Button(action: startSession) {
-                                    Text("Start Session")
-                                        .font(.plusJakarta(.body, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 54)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 27)
-                                                .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
-                                                .background(.ultraThinMaterial)
-                                                .clipShape(RoundedRectangle(cornerRadius: 27))
-                                        )
-                                }
-                                .disabled(buyIn.isEmpty)
-                                .padding(.horizontal, 20)
-                                .padding(.top, 16)
+                            // Start Button for Cash Game - Only require buy-in amount
+                            Button(action: startSession) {
+                                Text("Start Session")
+                                    .font(.plusJakarta(.body, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 54)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 27)
+                                            .fill(buyIn.isEmpty ? Color.gray.opacity(0.3) : Color.gray.opacity(0.7))
+                                            .background(.ultraThinMaterial)
+                                            .clipShape(RoundedRectangle(cornerRadius: 27))
+                                    )
                             }
+                            .disabled(buyIn.isEmpty)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 16)
                         } else {
                             // Start Button for Tournament
                             if !tournamentName.isEmpty && !baseBuyInTournament.isEmpty {
@@ -1572,13 +1703,19 @@ struct EnhancedLiveSessionView: View {
     
     private func startSession() {
         if selectedLogType == .cashGame {
-            guard let game = selectedGame, let buyInAmount = Double(buyIn), buyInAmount > 0 else { return }
+            guard let buyInAmount = Double(buyIn), buyInAmount > 0 else { return }
+            
+            // Use selected game details if available, otherwise use placeholder values
+            let gameName = selectedGame?.name ?? "Live Session"
+            let stakes = selectedGame?.stakes ?? "TBD"
+            let gameType = selectedGame?.gameType.rawValue ?? "NLH"
+            
             sessionStore.startLiveSession(
-                gameName: game.name,
-                stakes: game.stakes,
+                gameName: gameName,
+                stakes: stakes,
                 buyIn: buyInAmount,
                 isTournament: false, // Explicitly false for cash games
-                pokerVariant: game.gameType.rawValue // Pass the poker variant for cash games
+                pokerVariant: gameType // Pass the poker variant for cash games
             )
             isTournamentSession = false
             
@@ -1704,8 +1841,8 @@ struct EnhancedLiveSessionView: View {
                 }
                 
                 // Staking Information Section
-                let shouldShowStaking = !existingStakes.isEmpty || !validStakerConfigs.isEmpty
-                let _ = print("[EnhancedLiveSessionView] shouldShowStaking=\(shouldShowStaking), existingStakes=\(existingStakes.count), validStakerConfigs=\(validStakerConfigs.count)")
+                let shouldShowStaking = !existingStakes.isEmpty || !validStakerConfigs.isEmpty || !pendingEventStakingInvites.isEmpty
+                let _ = print("[EnhancedLiveSessionView] shouldShowStaking=\(shouldShowStaking), existingStakes=\(existingStakes.count), validStakerConfigs=\(validStakerConfigs.count), pendingInvites=\(pendingEventStakingInvites.count)")
                 
                 if shouldShowStaking {
                     stakingInfoSection
@@ -1952,6 +2089,232 @@ struct EnhancedLiveSessionView: View {
         }
     }
     
+    // Details Tab - For editing session details and configuration
+    private var detailsTabView: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Session Details")
+                            .font(.plusJakarta(.title2, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text("Modify session information and staking configuration")
+                            .font(.plusJakarta(.subheadline))
+                            .foregroundColor(.gray)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    
+                    // Session Start Time Section
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Session Start Time")
+                            .font(.plusJakarta(.headline, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.leading, 6)
+                        
+                        DatePicker(
+                            "Start Time",
+                            selection: $editSessionStartTime,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                        .datePickerStyle(.compact)
+                        .colorScheme(.dark)
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Material.ultraThinMaterial)
+                                .opacity(0.2)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                    }
+                    .padding(.horizontal)
+                    
+                    // Game Details Section
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Game Details")
+                            .font(.plusJakarta(.headline, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.leading, 6)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            GlassyInputField(
+                                icon: "gamecontroller",
+                                title: "Game Name",
+                                content: AnyGlassyContent(TextFieldContent(
+                                    text: $editGameName,
+                                    textColor: .white
+                                )),
+                                glassOpacity: 0.01,
+                                labelColor: .gray,
+                                materialOpacity: 0.2
+                            )
+                            
+                            if editGameName == "Live Session" || editGameName.isEmpty {
+                                Text("e.g., Aria 1/2, Home Game, Local Casino")
+                                    .font(.plusJakarta(.caption))
+                                    .foregroundColor(.gray)
+                                    .padding(.leading, 6)
+                            }
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            GlassyInputField(
+                                icon: "dollarsign.circle",
+                                title: "Stakes",
+                                content: AnyGlassyContent(TextFieldContent(
+                                    text: $editStakes,
+                                    textColor: .white
+                                )),
+                                glassOpacity: 0.01,
+                                labelColor: .gray,
+                                materialOpacity: 0.2
+                            )
+                            
+                            if editStakes == "TBD" || editStakes.isEmpty {
+                                Text("e.g., $1/$2, $5/$10, $25/$50")
+                                    .font(.plusJakarta(.caption))
+                                    .foregroundColor(.gray)
+                                    .padding(.leading, 6)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    
+                    // Staking Configuration Section
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Text("Staking Configuration")
+                                .font(.plusJakarta(.headline, weight: .medium))
+                                .foregroundColor(.white)
+                            
+                            Spacer()
+                            
+                            HStack(spacing: 8) {
+                                // Add New Staker Button
+                                Button(action: {
+                                    stakerConfigs.append(StakerConfig())
+                                    showingStakingPopup = true
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "plus.circle.fill")
+                                            .font(.system(size: 12))
+                                        Text("Add Staker")
+                                    }
+                                    .font(.plusJakarta(.caption, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.green.opacity(0.2))
+                                    .cornerRadius(8)
+                                }
+                                
+                                // Edit Existing Stakes Button
+                                if !stakerConfigs.isEmpty || !existingStakes.isEmpty {
+                                    Button(action: {
+                                        if stakerConfigs.isEmpty {
+                                            stakerConfigs.append(StakerConfig())
+                                        }
+                                        showingStakingPopup = true
+                                    }) {
+                                        Text("Edit Stakes")
+                                            .font(.plusJakarta(.caption, weight: .semibold))
+                                            .foregroundColor(.white.opacity(0.9))
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(Color.white.opacity(0.1))
+                                            .cornerRadius(8)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.leading, 6)
+                        
+                        if stakerConfigs.isEmpty && existingStakes.isEmpty {
+                            Text("No staking configuration set")
+                                .font(.plusJakarta(.subheadline))
+                                .foregroundColor(.gray)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.white.opacity(0.05))
+                                )
+                        } else {
+                            VStack(spacing: 12) {
+                                // Show existing stakes
+                                ForEach(existingStakes.filter { $0.stakedPlayerUserId == userId }, id: \.id) { stake in
+                                    StakingInfoCard(stake: stake, userService: userService)
+                                }
+                                
+                                // Show configured stakes
+                                ForEach(stakerConfigs, id: \.id) { config in
+                                    if let staker = config.selectedStaker,
+                                       !config.percentageSold.isEmpty,
+                                       !config.markup.isEmpty {
+                                        StakingConfigCard(config: config)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    
+                    // Save Button
+                    Button(action: saveSessionChanges) {
+                        Text("Save Changes")
+                            .font(.plusJakarta(.body, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.white)
+                            )
+                    }
+                    .padding(.horizontal)
+                    
+                    // Discard Session Button
+                    Button(action: {
+                        showingDiscardSessionAlert = true
+                    }) {
+                        Text("Discard Session")
+                            .font(.plusJakarta(.body, weight: .bold))
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(Color.red, lineWidth: 2)
+                                    .background(Color.clear)
+                            )
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
+                }
+                .padding(.top, 20)
+            }
+        }
+        .onAppear {
+            // Initialize edit values with current session data when tab appears
+            editSessionStartTime = sessionStore.liveSession.startTime
+            editGameName = sessionStore.liveSession.gameName
+            editStakes = sessionStore.liveSession.stakes
+        }
+        .alert("Discard Session?", isPresented: $showingDiscardSessionAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Discard", role: .destructive) {
+                discardSession()
+            }
+        } message: {
+            Text("This will delete your current session permanently. All session data, notes, and hand histories will be lost.")
+        }
+    }
+    
     // MARK: - Component Sections
     
     // Timer and controls
@@ -2005,7 +2368,18 @@ struct EnhancedLiveSessionView: View {
 
                     Button(action: { 
                         cashoutAmount = String(Int(sessionStore.enhancedLiveSession.currentChipAmount))
-                        showingCashoutPrompt = true 
+                        
+                        // Check if game details are missing (indicates session started without game selection)
+                        if sessionStore.liveSession.stakes == "TBD" || sessionStore.liveSession.gameName == "Live Session" {
+                            // Prompt for game details first
+                            promptGameName = sessionStore.liveSession.gameName == "Live Session" ? "" : sessionStore.liveSession.gameName
+                            promptStakes = sessionStore.liveSession.stakes == "TBD" ? "" : sessionStore.liveSession.stakes
+                            pendingCashoutAmount = Double(cashoutAmount) ?? 0
+                            showingGameDetailsPrompt = true
+                        } else {
+                            // Game details are already set, proceed with normal cashout
+                            showingCashoutPrompt = true
+                        }
                     }) {
                         HStack(spacing: 8) {
                             Image(systemName: "stop.fill")
@@ -2386,6 +2760,13 @@ struct EnhancedLiveSessionView: View {
             // Update session challenges
             await challengeService.updateSessionChallengesFromSession(session)
             
+            // Update event staking invites if this session is related to an event
+            await updateEventStakingInvitesWithSessionResults(
+                buyIn: session.buyIn,
+                cashout: session.cashout,
+                gameName: session.gameName
+            )
+            
             // Update sessionDetails with the saved session ID
             await MainActor.run {
                 if var details = self.sessionDetails {
@@ -2431,6 +2812,13 @@ struct EnhancedLiveSessionView: View {
             
             // Update session challenges
             await challengeService.updateSessionChallengesFromSession(session)
+            
+            // Update event staking invites if this session is related to an event
+            await updateEventStakingInvitesWithSessionResults(
+                buyIn: actualSessionBuyInForStaking,
+                cashout: sessionCashout,
+                gameName: gameName
+            )
             
             // Now handle stakes - update existing ones or create new ones
             var allStakesSuccessful = true
@@ -2552,6 +2940,32 @@ struct EnhancedLiveSessionView: View {
             await MainActor.run {
                 self.isLoadingSave = false
             }
+        }
+    }
+    
+    // Helper function to update event staking invites with session results
+    private func updateEventStakingInvitesWithSessionResults(
+        buyIn: Double,
+        cashout: Double,
+        gameName: String
+    ) async {
+        // Only update if this session matches an event
+        guard let preselectedEvent = preselectedEvent else {
+            print("No preselected event - skipping event staking invite updates")
+            return
+        }
+        
+        do {
+            // Update all pending staking invites for this event and player
+            try await eventStakingService.updateSessionResultsForEvent(
+                eventId: preselectedEvent.id,
+                stakedPlayerUserId: userId,
+                buyIn: buyIn,
+                cashout: cashout
+            )
+            print("Successfully updated event staking invites with session results")
+        } catch {
+            print("Failed to update event staking invites: \(error)")
         }
     }
     
@@ -3923,11 +4337,77 @@ struct EnhancedLiveSessionView: View {
                         .foregroundColor(.gray)
                 }
                 .padding(.vertical, 8)
-            } else if !existingStakes.isEmpty || !validStakerConfigs.isEmpty {
+            } else if !existingStakes.isEmpty || !validStakerConfigs.isEmpty || !pendingEventStakingInvites.isEmpty {
                 VStack(spacing: 12) {
+                    // Show pending invites notification if any exist
+                    if !pendingEventStakingInvites.isEmpty {
+                        HStack(spacing: 12) {
+                            Image(systemName: "info.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(.blue)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Pending Staking Invites")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                                
+                                Text("Your staking partners have received invites. You can proceed with the session as normal - when they accept, the buy-in and cashout will be automatically shared with them.")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.gray)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.blue.opacity(0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.blue.opacity(0.3), lineWidth: 0.5)
+                                )
+                        )
+                    }
+                    
                     // Show existing stakes first
                     ForEach(existingStakes.filter { $0.stakedPlayerUserId == userId }, id: \.id) { stake in
                         StakingInfoCard(stake: stake, userService: userService)
+                    }
+                    
+                    // Show simple list of pending invites (no action buttons - they're for the other person)
+                    ForEach(pendingEventStakingInvites, id: \.id) { invite in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(getInviteDisplayName(invite))
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(.white)
+                                
+                                Text("\(invite.percentageBought, specifier: "%.1f")% at \(invite.markup, specifier: "%.2f")x markup")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            Spacer()
+                            
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text("Status")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.gray)
+                                
+                                Text("Invite Sent")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .glassyBackground(cornerRadius: 10, materialOpacity: 0.1, glassOpacity: 0.05)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.orange.opacity(0.3), lineWidth: 0.5)
+                        )
                     }
                     
                     // Show configured stakers (that aren't already saved as stakes)
@@ -3946,6 +4426,19 @@ struct EnhancedLiveSessionView: View {
     }
     
     // MARK: - Helper Functions
+    
+    private func getInviteDisplayName(_ invite: EventStakingInvite) -> String {
+        if invite.isManualStaker {
+            return invite.manualStakerDisplayName ?? "Manual Staker"
+        } else {
+            // This is an invite sent to an app user - show the staker's name (who will accept it)
+            if let stakerProfile = userService.loadedUsers[invite.stakerUserId] {
+                return stakerProfile.displayName ?? stakerProfile.username
+            } else {
+                return "Loading..."
+            }
+        }
+    }
     
     // Staking Info Card for existing stakes
     private struct StakingInfoCard: View {
@@ -4082,245 +4575,155 @@ struct EnhancedLiveSessionView: View {
         }
     }
     
-
-    
-    // MARK: - Edit Session Sheet
-    
-    private var editSessionSheet: some View {
-        NavigationView {
-            GeometryReader { geometry in
-                ZStack {
-                    AppBackgroundView()
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        }
-                    
-                    ScrollView {
-                        VStack(spacing: 24) {
-                            // Header
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Edit Session Details")
-                                    .font(.plusJakarta(.title2, weight: .bold))
-                                    .foregroundColor(.white)
-                                
-                                Text("Modify session information and staking configuration")
-                                    .font(.plusJakarta(.subheadline))
-                                    .foregroundColor(.gray)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal)
-                            
-                            // Session Start Time Section
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("Session Start Time")
-                                    .font(.plusJakarta(.headline, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.leading, 6)
-                                
-                                DatePicker(
-                                    "Start Time",
-                                    selection: $editSessionStartTime,
-                                    displayedComponents: [.date, .hourAndMinute]
-                                )
-                                .datePickerStyle(.compact)
-                                .colorScheme(.dark)
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Material.ultraThinMaterial)
-                                        .opacity(0.2)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                )
-                            }
-                            .padding(.horizontal)
-                            
-                            // Game Details Section
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("Game Details")
-                                    .font(.plusJakarta(.headline, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.leading, 6)
-                                
-                                GlassyInputField(
-                                    icon: "gamecontroller",
-                                    title: "Game Name",
-                                    content: AnyGlassyContent(TextFieldContent(
-                                        text: $editGameName,
-                                        textColor: .white
-                                    )),
-                                    glassOpacity: 0.01,
-                                    labelColor: .gray,
-                                    materialOpacity: 0.2
-                                )
-                                
-                                GlassyInputField(
-                                    icon: "dollarsign.circle",
-                                    title: "Stakes",
-                                    content: AnyGlassyContent(TextFieldContent(
-                                        text: $editStakes,
-                                        textColor: .white
-                                    )),
-                                    glassOpacity: 0.01,
-                                    labelColor: .gray,
-                                    materialOpacity: 0.2
-                                )
-                            }
-                            .padding(.horizontal)
-                            
-                            // Staking Configuration Section
-                            VStack(alignment: .leading, spacing: 16) {
-                                HStack {
-                                    Text("Staking Configuration")
-                                        .font(.plusJakarta(.headline, weight: .medium))
-                                        .foregroundColor(.white)
-                                    
-                                    Spacer()
-                                    
-                                    HStack(spacing: 8) {
-                                        // Add New Staker Button
-                                        Button(action: {
-                                            stakerConfigs.append(StakerConfig())
-                                            showingStakingPopup = true
-                                        }) {
-                                            HStack(spacing: 4) {
-                                                Image(systemName: "plus.circle.fill")
-                                                    .font(.system(size: 12))
-                                                Text("Add Staker")
-                                            }
-                                            .font(.plusJakarta(.caption, weight: .semibold))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 6)
-                                            .background(Color.green.opacity(0.2))
-                                            .cornerRadius(8)
-                                        }
-                                        
-                                        // Edit Existing Stakes Button
-                                        if !stakerConfigs.isEmpty || !existingStakes.isEmpty {
-                                            Button(action: {
-                                                if stakerConfigs.isEmpty {
-                                                    stakerConfigs.append(StakerConfig())
-                                                }
-                                                showingStakingPopup = true
-                                            }) {
-                                                Text("Edit Stakes")
-                                                    .font(.plusJakarta(.caption, weight: .semibold))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                    .padding(.horizontal, 10)
-                                                    .padding(.vertical, 6)
-                                                    .background(Color.white.opacity(0.1))
-                                                    .cornerRadius(8)
-                                            }
-                                        }
+    // Pending Event Staking Invite Card
+    private struct PendingEventStakingInviteCard: View {
+        let invite: EventStakingInvite
+        @ObservedObject var userService: UserService
+        let eventStakingService: EventStakingService
+        let onStatusChanged: () -> Void
+        
+        @State private var isProcessing = false
+        @State private var showError = false
+        @State private var errorMessage = ""
+        
+        var body: some View {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    if invite.isManualStaker {
+                        Text(invite.manualStakerDisplayName ?? "Manual Staker")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                    } else {
+                        if let stakerProfile = userService.loadedUsers[invite.stakerUserId] {
+                            Text("\(stakerProfile.displayName ?? stakerProfile.username)")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                        } else {
+                            Text("Loading staker...")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                                .onAppear {
+                                    Task {
+                                        await userService.fetchUser(id: invite.stakerUserId)
                                     }
                                 }
-                                .padding(.leading, 6)
-                                
-                                if stakerConfigs.isEmpty && existingStakes.isEmpty {
-                                    Text("No staking configuration set")
-                                        .font(.plusJakarta(.subheadline))
-                                        .foregroundColor(.gray)
-                                        .padding()
-                                        .frame(maxWidth: .infinity)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(Color.white.opacity(0.05))
-                                        )
-                                } else {
-                                    VStack(spacing: 12) {
-                                        // Show existing stakes
-                                        ForEach(existingStakes.filter { $0.stakedPlayerUserId == userId }, id: \.id) { stake in
-                                            StakingInfoCard(stake: stake, userService: userService)
-                                        }
-                                        
-                                        // Show configured stakes
-                                        ForEach(stakerConfigs, id: \.id) { config in
-                                            if let staker = config.selectedStaker,
-                                               !config.percentageSold.isEmpty,
-                                               !config.markup.isEmpty {
-                                                StakingConfigCard(config: config)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
-                            
-                                        // Save Button
-            Button(action: saveSessionChanges) {
-                Text("Save Changes")
-                    .font(.plusJakarta(.body, weight: .bold))
-                    .foregroundColor(.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(Color.white)
-                    )
-            }
-            .padding(.horizontal)
-            
-            // Discard Session Button
-            Button(action: {
-                showingDiscardSessionAlert = true
-            }) {
-                Text("Discard Session")
-                    .font(.plusJakarta(.body, weight: .bold))
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.red, lineWidth: 2)
-                            .background(Color.clear)
-                    )
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 20)
                         }
-                        .padding(.top, 20)
                     }
+                    
+                    Text("\(invite.percentageBought, specifier: "%.1f")% at \(invite.markup, specifier: "%.2f")x markup")
+                        .font(.system(size: 13))
+                        .foregroundColor(.gray)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Status")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                    
+                    Text("Pending")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.orange)
+                }
+                
+                // Action buttons for pending invites
+                HStack(spacing: 8) {
+                    // Decline button
+                    Button(action: {
+                        declineInvite()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.red.opacity(0.8))
+                            .clipShape(Circle())
+                    }
+                    .disabled(isProcessing)
+                    
+                    // Accept button
+                    Button(action: {
+                        acceptInvite()
+                    }) {
+                        if isProcessing {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    }
+                    .frame(width: 24, height: 24)
+                    .background(Color.green.opacity(0.8))
+                    .clipShape(Circle())
+                    .disabled(isProcessing)
                 }
             }
-            .navigationTitle("Edit Session")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        showingEditSessionSheet = false
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .glassyBackground(cornerRadius: 10, materialOpacity: 0.1, glassOpacity: 0.05)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.orange.opacity(0.3), lineWidth: 0.5)
+            )
+            .alert("Error", isPresented: $showError) {
+                Button("OK") { }
+            } message: {
+                Text(errorMessage)
+            }
+        }
+        
+        private func acceptInvite() {
+            guard let inviteId = invite.id else { return }
+            isProcessing = true
+            
+            Task {
+                do {
+                    // Use the new method that handles both pre-session and post-session acceptance
+                    try await eventStakingService.acceptStakingInviteWithStakeCreation(invite: invite)
+                    
+                    await MainActor.run {
+                        isProcessing = false
+                        onStatusChanged()
                     }
-                    .foregroundColor(.white)
+                } catch {
+                    await MainActor.run {
+                        isProcessing = false
+                        errorMessage = "Failed to accept invite: \(error.localizedDescription)"
+                        showError = true
+                    }
                 }
             }
         }
-        .overlay(
-            // Add floating staking popup overlay specifically to the edit session sheet
-            FloatingStakingPopup(
-                isPresented: $showingStakingPopup,
-                stakerConfigs: $stakerConfigsForPopup, // Pass the copy here
-                userService: userService,
-                manualStakerService: manualStakerService,
-                userId: userId,
-                primaryTextColor: .white,
-                secondaryTextColor: Color.white.opacity(0.7),
-                glassOpacity: 0.01,
-                materialOpacity: 0.2
-            )
-        )
-        .alert("Discard Session?", isPresented: $showingDiscardSessionAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Discard", role: .destructive) {
-                discardSession()
+        
+        private func declineInvite() {
+            guard let inviteId = invite.id else { return }
+            isProcessing = true
+            
+            Task {
+                do {
+                    try await eventStakingService.declineStakingInvite(inviteId: inviteId)
+                    
+                    await MainActor.run {
+                        isProcessing = false
+                        onStatusChanged()
+                    }
+                } catch {
+                    await MainActor.run {
+                        isProcessing = false
+                        errorMessage = "Failed to decline invite: \(error.localizedDescription)"
+                        showError = true
+                    }
+                }
             }
-        } message: {
-            Text("This will delete your current session permanently. All session data, notes, and hand histories will be lost.")
         }
     }
+    
+
+    
     
     // MARK: - Save Session Changes
     
@@ -4339,9 +4742,6 @@ struct EnhancedLiveSessionView: View {
         
         // Save the updated session state
         sessionStore.saveLiveSessionState()
-        
-        // Close the edit sheet
-        showingEditSessionSheet = false
     }
     
     // MARK: - Discard Session
@@ -4350,11 +4750,78 @@ struct EnhancedLiveSessionView: View {
         // Clear the live session from the store
         sessionStore.endAndClearLiveSession()
         
-        // Close the edit sheet first
-        showingEditSessionSheet = false
-        
         // Then dismiss the entire session view
         dismiss()
+    }
+    
+    // MARK: - Game Details Prompt Functions
+    
+    private func saveGameDetailsAndEndSession() {
+        // Update session with the provided game details
+        sessionStore.liveSession.gameName = promptGameName
+        sessionStore.liveSession.stakes = promptStakes
+        
+        // Save the updated session state
+        sessionStore.saveLiveSessionState()
+        
+        // Create a custom game for future use (only for cash games)
+        if !isTournamentSession {
+            createCustomGameFromDetails()
+        }
+        
+        // Close the prompt and proceed with cashout
+        showingGameDetailsPrompt = false
+        
+        // Proceed with the cashout using the pending amount
+        endSession(cashout: pendingCashoutAmount)
+    }
+    
+    private func skipGameDetailsAndEndSession() {
+        // Close the prompt and proceed with cashout using placeholder values
+        showingGameDetailsPrompt = false
+        
+        // Proceed with the cashout using the pending amount
+        endSession(cashout: pendingCashoutAmount)
+    }
+    
+    private func createCustomGameFromDetails() {
+        // Only create custom game if both fields are provided and it's a cash game
+        guard !promptGameName.isEmpty && !promptStakes.isEmpty && !isTournamentSession else {
+            return
+        }
+        
+        // Parse stakes string to extract small blind and big blind
+        let (smallBlind, bigBlind) = parseStakesString(promptStakes)
+        
+        // Add the game to the cash game service
+        Task {
+            do {
+                try await cashGameService.addCashGame(
+                    name: promptGameName,
+                    smallBlind: smallBlind,
+                    bigBlind: bigBlind,
+                    gameType: .nlh // Default to No Limit Hold'em
+                )
+                print("[EnhancedLiveSessionView] Created custom game: \(promptGameName) (\(promptStakes))")
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to create custom game: \(error)")
+            }
+        }
+    }
+    
+    private func parseStakesString(_ stakes: String) -> (smallBlind: Double, bigBlind: Double) {
+        // Try to parse stakes like "$1/$2", "$5/$10", etc.
+        let cleanedStakes = stakes.replacingOccurrences(of: "$", with: "")
+        let components = cleanedStakes.components(separatedBy: "/")
+        
+        if components.count >= 2,
+           let smallBlind = Double(components[0].trimmingCharacters(in: .whitespacesAndNewlines)),
+           let bigBlind = Double(components[1].trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return (smallBlind, bigBlind)
+        }
+        
+        // Default values if parsing fails
+        return (1.0, 2.0)
     }
     
     // MARK: - Live Session Challenge Section
@@ -4638,11 +5105,15 @@ struct EnhancedLiveSessionView: View {
         return restoredConfig
     }
     
-    // Load and populate staker configuration from accepted event staking invites
+    // Load and populate staker configuration from accepted event staking invites + load pending invites
     private func loadEventStakingInvites(for event: Event) async {
         guard let currentUserId = Auth.auth().currentUser?.uid else { return }
         
         do {
+            // Also fetch pending event staking invites
+            let eventInvites = try await eventStakingService.fetchStakingInvitesForEvent(eventId: event.id)
+            let pendingInvites = eventInvites.filter { $0.status == .pending && $0.stakedPlayerUserId == currentUserId }
+            
             // Fetch accepted stakes for this event where current user is the player
             let allStakes = try await stakeService.fetchStakes(forUser: currentUserId)
             print("[EnhancedLiveSessionView] Total stakes fetched: \(allStakes.count)")
@@ -4710,6 +5181,9 @@ struct EnhancedLiveSessionView: View {
             print("[EnhancedLiveSessionView] After deduplication: \(deduplicatedStakes.count) unique stakers")
             
             await MainActor.run {
+                // Store pending invites for display in staking section
+                self.pendingEventStakingInvites = pendingInvites
+                
                 // Convert stakes to StakerConfig objects
                 self.stakerConfigs = deduplicatedStakes.compactMap { stake -> StakerConfig? in
                     var config = StakerConfig()
@@ -4785,17 +5259,20 @@ struct EnhancedLiveSessionView: View {
                 // Auto-restore any missing staker profiles
                 self.restoreMissingStakerProfiles()
                 
-                print("[EnhancedLiveSessionView] Loaded \(self.stakerConfigs.count) stakers from event invites for event: \(event.event_name)")
+                print("[EnhancedLiveSessionView] Loaded \(self.stakerConfigs.count) stakers and \(self.pendingEventStakingInvites.count) pending invites from event: \(event.event_name)")
                 
                 // Show a temporary visual indicator if stakes were loaded
-                if !self.stakerConfigs.isEmpty {
+                if !self.stakerConfigs.isEmpty || !self.pendingEventStakingInvites.isEmpty {
                     // This will help you see if stakes are being loaded properly
-                    print("[EnhancedLiveSessionView] ✅ SUCCESS: Loaded \(self.stakerConfigs.count) staker configurations")
+                    print("[EnhancedLiveSessionView] ✅ SUCCESS: Loaded \(self.stakerConfigs.count) staker configurations and \(self.pendingEventStakingInvites.count) pending invites")
                     for (index, config) in self.stakerConfigs.enumerated() {
                         print("[EnhancedLiveSessionView] Staker \(index + 1): isManual=\(config.isManualEntry), percentage=\(config.percentageSold)%, markup=\(config.markup)x")
                     }
+                    for (index, invite) in self.pendingEventStakingInvites.enumerated() {
+                        print("[EnhancedLiveSessionView] Pending invite \(index + 1): percentage=\(invite.percentageBought)%, markup=\(invite.markup)x, staker=\(invite.isManualStaker ? invite.manualStakerDisplayName ?? "Manual" : "App User")")
+                    }
                 } else {
-                    print("[EnhancedLiveSessionView] ⚠️ WARNING: No staker configurations loaded for event \(event.event_name)")
+                    print("[EnhancedLiveSessionView] ⚠️ WARNING: No staker configurations or pending invites loaded for event \(event.event_name)")
                 }
             }
         } catch {
@@ -4813,12 +5290,16 @@ struct EnhancedLiveSessionView: View {
                 // Switch to post editor state within the sharing flow
                 sharingFlowState = .postEditor
             },
-            onShareToSocials: {
+            onShareToSocials: { cardType in
+                selectedCardTypeForSharing = cardType
                 sharingFlowState = .imagePicker
             },
             onDone: {
                 sharingFlowState = .none
                 dismiss()
+            },
+            onTitleChanged: { newTitle in
+                editedGameNameForSharing = newTitle
             }
         )
     }

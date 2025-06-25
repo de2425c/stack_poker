@@ -137,7 +137,9 @@ struct HomePage: View {
                                     onNavigateToExplore: {
                                         selectedTab = .explore
                                     }
-                                ).edgesIgnoringSafeArea(.top)
+                                )
+                                .environmentObject(sessionStore)
+                                .edgesIgnoringSafeArea(.top)
                             }
                         }
                         .tag(Tab.feed)
@@ -308,6 +310,8 @@ struct HomePage: View {
         // Move all sheet modifiers OUTSIDE NavigationView to prevent white screen issues
         .sheet(isPresented: $showingSessionForm) {
             SessionFormView(userId: userId)
+                .environmentObject(sessionStore)
+                .environmentObject(userService)
         }
         .sheet(isPresented: $showingOpenHomeGameFlow, onDismiss: {
             // If showing game detail, the sheet dismissal should let the navigation link activate

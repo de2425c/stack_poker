@@ -30,6 +30,7 @@ struct ImageCompositionView: View {
     let session: Session
     let backgroundImage: UIImage
     let onDismiss: () -> Void // Add closure for parent to handle dismissal
+    let overrideGameName: String? // Optional override for edited game name
 
     // State for card manipulation (drag and scale)
     @State private var interactiveCardOffset: CGSize = .zero
@@ -38,17 +39,20 @@ struct ImageCompositionView: View {
     @State private var currentMagnification: CGFloat = 0 // For live pinch gesture
     
     // Card Customization States
-    @State private var isBackgroundTransparent: Bool = false
+    @State private var selectedCardType: ShareCardType = .detailed
+    @State private var showingCardPicker: Bool = false
     
     // Sharing State
     @State private var isSharing: Bool = false
     @State private var imageToShare: UIImage?
 
-    // Initializer
-    init(session: Session, backgroundImage: UIImage, onDismiss: @escaping () -> Void) {
+    // Initializer - now accepts the selected card type and optional override game name
+    init(session: Session, backgroundImage: UIImage, selectedCardType: ShareCardType = .detailed, overrideGameName: String? = nil, onDismiss: @escaping () -> Void) {
         self.session = session
         self.backgroundImage = backgroundImage
         self.onDismiss = onDismiss
+        self.overrideGameName = overrideGameName
+        self._selectedCardType = State(initialValue: selectedCardType)
     }
 
     // To ensure date formatting is consistent
@@ -74,14 +78,15 @@ struct ImageCompositionView: View {
                 .scaledToFit() // Match on-screen aspect ratio to avoid stretching
                 .clipped()
 
-            FinishedSessionCardView(
-                gameName: session.gameName,
+            ShareCardView(
+                cardType: selectedCardType,
+                gameName: overrideGameName ?? session.gameName,
                 stakes: session.stakes,
-                date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,
                 cashOut: session.cashout,
-                isBackgroundTransparent: isBackgroundTransparent
+                profit: session.profit,
+                onTitleChanged: nil
             )
             .scaleEffect(cardScale + currentMagnification) // Include live magnification state
             .offset(x: interactiveCardOffset.width + currentDragOffset.width, // Include live drag state
@@ -100,14 +105,15 @@ struct ImageCompositionView: View {
                 .edgesIgnoringSafeArea(.all)
                 .clipped()
 
-            FinishedSessionCardView(
-                gameName: session.gameName,
+            ShareCardView(
+                cardType: selectedCardType,
+                gameName: overrideGameName ?? session.gameName,
                 stakes: session.stakes,
-                date: session.startDate,
                 duration: formatDuration(hours: session.hoursPlayed),
                 buyIn: session.buyIn,
                 cashOut: session.cashout,
-                isBackgroundTransparent: isBackgroundTransparent
+                profit: session.profit,
+                onTitleChanged: nil
             )
             .scaleEffect(cardScale + currentMagnification) // Interactive scaling
             .offset(x: interactiveCardOffset.width + currentDragOffset.width,
@@ -164,20 +170,20 @@ struct ImageCompositionView: View {
 
                     Spacer()
 
-                    // Bottom Controls (Transparency)
+                    // Bottom Controls (Card Type Picker)
                     VStack(spacing: 15) {
-                        // Transparency Toggle
+                        // Card Type Toggle
                         Button {
-                            isBackgroundTransparent.toggle()
+                            selectedCardType = selectedCardType == .detailed ? .minimal : .detailed
                         } label: {
                             HStack {
-                                Image(systemName: isBackgroundTransparent ? "checkmark.circle.fill" : "circle")
-                                    .foregroundColor(isBackgroundTransparent ? .green : .white)
+                                Image(systemName: selectedCardType == .minimal ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(selectedCardType == .minimal ? .green : .white)
                                     .padding(.leading)
-                                Text("Transparent Background")
+                                Text("Simple Card Design")
                                     .foregroundColor(.white)
                                 Spacer()
-                                Image(systemName: "photo.fill.on.rectangle.fill")
+                                Image(systemName: "rectangle.stack")
                                     .foregroundColor(.white)
                                     .padding(.trailing)
                             }

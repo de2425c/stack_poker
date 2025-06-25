@@ -5,8 +5,28 @@ struct SessionResultShareView: View {
     let sessionDetails: (buyIn: Double, cashout: Double, profit: Double, duration: String, gameName: String, stakes: String, sessionId: String)?
     let isTournament: Bool
     let onShareToFeed: () -> Void
-    let onShareToSocials: () -> Void
+    let onShareToSocials: (ShareCardType) -> Void
     let onDone: () -> Void
+    let onTitleChanged: ((String) -> Void)?
+    
+    init(sessionDetails: (buyIn: Double, cashout: Double, profit: Double, duration: String, gameName: String, stakes: String, sessionId: String)?, 
+         isTournament: Bool, 
+         onShareToFeed: @escaping () -> Void, 
+         onShareToSocials: @escaping (ShareCardType) -> Void, 
+         onDone: @escaping () -> Void, 
+         onTitleChanged: ((String) -> Void)? = nil) {
+        self.sessionDetails = sessionDetails
+        self.isTournament = isTournament
+        self.onShareToFeed = onShareToFeed
+        self.onShareToSocials = onShareToSocials
+        self.onDone = onDone
+        self.onTitleChanged = onTitleChanged
+    }
+    
+    @State private var currentCardIndex = 0
+    @State private var editableGameName: String = ""
+    
+    private let cardTypes: [ShareCardType] = [.detailed, .minimal]
     
     var body: some View {
         ZStack {
@@ -41,24 +61,53 @@ struct SessionResultShareView: View {
                 
                 Spacer()
                 
-                // Session Card - tap to share to socials
+                // Swipeable Session Cards
                 if let details = sessionDetails {
-                    Button(action: onShareToSocials) {
-                        FinishedSessionCardView(
-                            gameName: details.gameName,
-                            stakes: details.stakes,
-                            date: Date(),
-                            duration: details.duration,
-                            buyIn: details.buyIn,
-                            cashOut: details.cashout,
-                            isBackgroundTransparent: false
-                        )
+                    VStack(spacing: 20) {
+                        // Card carousel
+                        TabView(selection: $currentCardIndex) {
+                            ForEach(Array(cardTypes.enumerated()), id: \.offset) { index, cardType in
+                                Button(action: { onShareToSocials(cardType) }) {
+                                    ShareCardView(
+                                        cardType: cardType,
+                                        gameName: editableGameName.isEmpty ? details.gameName : editableGameName,
+                                        stakes: details.stakes,
+                                        duration: details.duration,
+                                        buyIn: details.buyIn,
+                                        cashOut: details.cashout,
+                                        profit: details.profit,
+                                        onTitleChanged: { newTitle in
+                                            editableGameName = newTitle
+                                            onTitleChanged?(newTitle)
+                                        }
+                                    )
+                                }
+                                .tag(index)
+                            }
+                        }
+                        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                        .frame(height: 280)
+                        
+                        // Custom page indicator
+                        HStack(spacing: 8) {
+                            ForEach(0..<cardTypes.count, id: \.self) { index in
+                                Circle()
+                                    .fill(currentCardIndex == index ? Color.white : Color.white.opacity(0.3))
+                                    .frame(width: 8, height: 8)
+                                    .animation(.easeInOut(duration: 0.3), value: currentCardIndex)
+                            }
+                        }
+                        
+                        VStack(spacing: 4) {
+                            Text("Swipe to see different designs")
+                                .font(.plusJakarta(.body, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text("Tap card to share to socials")
+                                .font(.plusJakarta(.body, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        .padding(.top, 8)
                     }
-                    
-                    Text("Tap card to share to socials")
-                        .font(.plusJakarta(.body, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
-                        .padding(.top, 16)
                 }
                 
                 Spacer()
@@ -97,10 +146,163 @@ struct SessionResultShareView: View {
                 .padding(.bottom, 100)
             }
         }
-
+        .onAppear {
+            if let details = sessionDetails {
+                editableGameName = details.gameName
+            }
         }
-    
+    }
+}
 
+// MARK: - Share Card Types
+
+enum ShareCardType {
+    case detailed
+    case minimal
+}
+
+// MARK: - Share Card View
+
+struct ShareCardView: View {
+    let cardType: ShareCardType
+    let gameName: String
+    let stakes: String
+    let duration: String
+    let buyIn: Double
+    let cashOut: Double
+    let profit: Double
+    let onTitleChanged: ((String) -> Void)?
+    
+    var body: some View {
+        switch cardType {
+        case .detailed:
+            FinishedSessionCardView(
+                gameName: gameName,
+                stakes: stakes,
+                date: Date(),
+                duration: duration,
+                buyIn: buyIn,
+                cashOut: cashOut,
+                isBackgroundTransparent: false,
+                onTitleChanged: onTitleChanged
+            )
+        case .minimal:
+            MinimalShareCardView(
+                gameName: gameName,
+                stakes: stakes,
+                duration: duration,
+                buyIn: buyIn,
+                cashOut: cashOut,
+                profit: profit,
+                onTitleChanged: onTitleChanged
+            )
+        }
+    }
+}
+
+// MARK: - Minimal Share Card View
+
+struct MinimalShareCardView: View {
+    let gameName: String
+    let stakes: String
+    let duration: String
+    let buyIn: Double
+    let cashOut: Double
+    let profit: Double
+    let onTitleChanged: ((String) -> Void)?
+    
+    @State private var isEditingTitle = false
+    @State private var editedTitle: String = ""
+    
+    private var formattedBuyIn: String { "$\(Int(buyIn))" }
+    private var formattedCashOut: String { "$\(Int(cashOut))" }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Completely transparent background - no borders or background
+                Color.clear
+                
+                VStack(spacing: geometry.size.height * 0.06) {
+                    // Stack logo positioned above content
+                    Image("promo_logo")
+                        .resizable()
+                        .renderingMode(.template)
+                        .foregroundColor(.white)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: geometry.size.width * 0.2, height: geometry.size.height * 0.2)
+                    
+                    // Main content with labels
+                    VStack(spacing: geometry.size.height * 0.05) {
+                        // Duration with label
+                        VStack(spacing: 4) {
+                            Text("DURATION")
+                                .font(.plusJakarta(.caption2, weight: .bold))
+                                .foregroundColor(.white.opacity(0.6))
+                                .tracking(1.2)
+                            Text(duration.uppercased())
+                                .font(.plusJakarta(.title2, weight: .semibold))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                        }
+                        
+                        // Buy-in with label
+                        VStack(spacing: 4) {
+                            Text("BUY-IN")
+                                .font(.plusJakarta(.caption2, weight: .bold))
+                                .foregroundColor(.white.opacity(0.6))
+                                .tracking(1.2)
+                            Text(formattedBuyIn)
+                                .font(.plusJakarta(.title2, weight: .semibold))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                        }
+                        
+                        // Cashout with label
+                        VStack(spacing: 4) {
+                            Text("CASHOUT")
+                                .font(.plusJakarta(.caption2, weight: .bold))
+                                .foregroundColor(.white.opacity(0.6))
+                                .tracking(1.2)
+                            Text(formattedCashOut)
+                                .font(.plusJakarta(.title2, weight: .semibold))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                        }
+                    }
+                    
+                    Spacer()
+                }
+                .padding(geometry.size.width * 0.08)
+            }
+        }
+        .frame(width: 350, height: 280)
+        .onAppear {
+            editedTitle = gameName
+        }
+    }
+    
+    // MARK: - Helper Functions
+    private func startEditing() {
+        editedTitle = gameName
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isEditingTitle = true
+        }
+    }
+    
+    private func saveTitle() {
+        let trimmedTitle = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedTitle.isEmpty {
+            onTitleChanged?(trimmedTitle)
+        }
+        
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isEditingTitle = false
+        }
+        
+        // Dismiss keyboard
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
 }
 
 // MARK: - Color Extension
@@ -145,7 +347,7 @@ extension Color {
         ),
         isTournament: false,
         onShareToFeed: {},
-        onShareToSocials: {},
+        onShareToSocials: { _ in },
         onDone: {}
     )
 } 

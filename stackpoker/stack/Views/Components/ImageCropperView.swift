@@ -69,29 +69,11 @@ struct ImageCropperView: View {
                     VStack {
                         Spacer()
                         
-                        ZStack {
-                            // Crop frame
-                            RoundedRectangle(cornerRadius: 0)
-                                .stroke(Color.white, lineWidth: 2)
-                                .frame(width: cropSize, height: cropSize)
-                                .background(Color.clear)
-                            
-                            // Corner guides
-                            VStack {
-                                HStack {
-                                    cornerGuide
-                                    Spacer()
-                                    cornerGuide
-                                }
-                                Spacer()
-                                HStack {
-                                    cornerGuide
-                                    Spacer()
-                                    cornerGuide
-                                }
-                            }
+                        // Crop frame - just a simple border
+                        RoundedRectangle(cornerRadius: 0)
+                            .stroke(Color.white, lineWidth: 2)
                             .frame(width: cropSize, height: cropSize)
-                        }
+                            .background(Color.clear)
                         
                         Spacer()
                     }
@@ -121,17 +103,6 @@ struct ImageCropperView: View {
             normalizedImage = normalizeImageOrientation(image)
             setupInitialImagePosition()
         }
-    }
-    
-    private var cornerGuide: some View {
-        Rectangle()
-            .fill(Color.white)
-            .frame(width: 20, height: 2)
-            .overlay(
-                Rectangle()
-                    .fill(Color.white)
-                    .frame(width: 2, height: 20)
-            )
     }
     
     private func setupInitialImagePosition() {

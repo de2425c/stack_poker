@@ -11,6 +11,13 @@ struct FinishedSessionCardView: View {
     let buyIn: Double
     let cashOut: Double
     let isBackgroundTransparent: Bool
+    var onEditTitle: (() -> Void)? = nil // Optional callback for editing title
+    var onTitleChanged: ((String) -> Void)? = nil // Optional callback for title changes
+    
+    // MARK: - State
+    @State private var isEditingTitle = false
+    @State private var editedTitle: String = ""
+    @State private var showingEditField = false
 
     // MARK: - Derived Properties
     private var profit: Double { cashOut - buyIn }
@@ -41,13 +48,66 @@ struct FinishedSessionCardView: View {
                     
                     // Top Section: Game Title & Net Profit
                     HStack(alignment: .top, spacing: 0) {
-                        // Title block with wrapping text
+                        // Title block with wrapping text and edit button
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(gameName.uppercased())
-                                .font(.system(size: 22, weight: .heavy))
-                                .foregroundColor(.white)
-                                .lineLimit(3)
-                                .minimumScaleFactor(0.8)
+                            HStack(alignment: .top, spacing: 8) {
+                                if isEditingTitle {
+                                    // Edit mode: Show text field
+                                    TextField("Game name", text: $editedTitle)
+                                        .font(.system(size: 22, weight: .heavy))
+                                        .foregroundColor(.white)
+                                        .textFieldStyle(PlainTextFieldStyle())
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .fill(Color.white.opacity(0.1))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 6)
+                                                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                                )
+                                        )
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .onSubmit {
+                                            saveTitle()
+                                        }
+                                        .onAppear {
+                                            // Focus the text field when it appears
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                                UIApplication.shared.sendAction(#selector(UIResponder.becomeFirstResponder), to: nil, from: nil, for: nil)
+                                            }
+                                        }
+                                } else {
+                                    // Display mode: Show title text
+                                    Text(gameName.uppercased())
+                                        .font(.system(size: 22, weight: .heavy))
+                                        .foregroundColor(.white)
+                                        .lineLimit(3)
+                                        .minimumScaleFactor(0.8)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .onTapGesture {
+                                            startEditing()
+                                        }
+                                }
+                                
+                                if onEditTitle != nil || onTitleChanged != nil {
+                                    Button(action: {
+                                        if isEditingTitle {
+                                            saveTitle()
+                                        } else {
+                                            startEditing()
+                                        }
+                                    }) {
+                                        Image(systemName: isEditingTitle ? "checkmark" : "pencil")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.7))
+                                            .frame(width: 20, height: 20)
+                                            .background(
+                                                Circle()
+                                                    .fill(Color.white.opacity(0.1))
+                                            )
+                                    }
+                                }
+                            }
                             
                             Text(stakes)
                                 .font(.system(size: 16, weight: .semibold))
@@ -104,6 +164,31 @@ struct FinishedSessionCardView: View {
             .padding(.trailing, 30) // Nudge in from the right
         }
         .frame(width: 350, height: 220) // A beautiful, balanced rectangle
+        .onAppear {
+            editedTitle = gameName
+        }
+    }
+    
+    // MARK: - Helper Functions
+    private func startEditing() {
+        editedTitle = gameName
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isEditingTitle = true
+        }
+    }
+    
+    private func saveTitle() {
+        let trimmedTitle = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedTitle.isEmpty {
+            onTitleChanged?(trimmedTitle)
+        }
+        
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isEditingTitle = false
+        }
+        
+        // Dismiss keyboard
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 

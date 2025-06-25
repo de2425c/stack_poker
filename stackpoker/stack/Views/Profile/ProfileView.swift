@@ -74,10 +74,7 @@ struct ProfileView: View {
     @State private var selectedStats: [PerformanceStat] = []
     @State private var isDraggingAny = false
     
-    // Customizable Graphs
-    @State private var isCustomizingGraphs = false
-    @State private var selectedGraphs: [GraphType] = GraphType.defaultSelection
-    @State private var draggedGraph: GraphType?
+
     
 
     
@@ -534,9 +531,6 @@ struct ProfileView: View {
             // Load saved selected stats
             loadSelectedStats()
             
-            // Load saved selected graphs
-            loadSelectedGraphs()
-            
             if userService.currentUserProfile == nil {
                 Task { try? await userService.fetchUserProfile() }
             }
@@ -563,9 +557,6 @@ struct ProfileView: View {
         }
         .onChange(of: selectedStats) { _ in
             saveSelectedStats()
-        }
-        .onChange(of: selectedGraphs) { _ in
-            saveSelectedGraphs()
         }
     }
     
@@ -1044,10 +1035,17 @@ struct ProfileView: View {
                 if !isMainGraphsCollapsed {
                     VStack(spacing: 8) { // Reduced spacing
                         if filteredSessions.isEmpty {
-                            Text("No sessions recorded")
+                            VStack(spacing: 12) {
+                                Text("😢")
+                                    .font(.system(size: 40))
+                                Text("You haven't recorded a session in the past \(getTimeRangeLabel(for: selectedTimeRange).lowercased())")
+                                    .font(.system(size: 16, weight: .medium))
                                 .foregroundColor(.gray)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 20)
+                            }
                                 .frame(height: 220)
-                                .frame(maxWidth: .infinity) // Ensure it centers if no data
+                            .frame(maxWidth: .infinity)
                         } else {
                                 // Swipeable Graph Carousel
                                 SwipeableGraphCarousel(
@@ -1066,117 +1064,152 @@ struct ProfileView: View {
                     ))
                 }
                 
-                // Spacer before detailed analytics to prevent overlap
+                // Spacer before performance stats to prevent overlap
                 Spacer()
                     .frame(height: 15)
                 
-                // Beautiful Whoop-style Detailed Analytics Tabs
-                VStack(spacing: 16) {
-                    Text("DETAILED ANALYTICS")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.85))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 8)
-                    
-                    VStack(spacing: 12) {
-                        // Graphs Dashboard Tab
-                        NavigationLink(destination: GraphsDashboardView(userId: userId, sessionStore: sessionStore, bankrollStore: bankrollStore, selectedGraphs: $selectedGraphs)) {
-                            HStack(spacing: 16) {
-                                ZStack {
-                                RoundedRectangle(cornerRadius: 12)
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(stops: [
-                                                    .init(color: Color.purple.opacity(0.8), location: 0),
-                                                    .init(color: Color.purple.opacity(0.6), location: 0.5),
-                                                    .init(color: Color.purple.opacity(0.4), location: 1)
-                                                ]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                        .frame(width: 50, height: 50)
-                                    
-                                    Image(systemName: "chart.bar.xaxis")
-                                        .font(.system(size: 24, weight: .semibold))
-                                        .foregroundColor(.white)
-                                }
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Graphs Dashboard")
-                                        .font(.system(size: 17, weight: .bold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("View all graphs & customise home page")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.gray)
-                                }
-                                
-                                Spacer()
-                                
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .background(
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Material.ultraThinMaterial)
-                                        .opacity(0.1)
-                                    
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(
-                                            LinearGradient(
-                                                gradient: Gradient(colors: [
-                                                    Color.purple.opacity(0.3),
-                                                    Color.white.opacity(0.1),
-                                                    Color.clear
-                                                ]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            ),
-                                            lineWidth: 1
-                                        )
-                                }
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    .padding(.horizontal, 20)
-                }
-
-                // Selected Graphs Section Header
-                HStack {
-                                    Text("SELECTED GRAPHS")
+                // Premium Highlights Carousel Section
+                Text("HIGHLIGHTS")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.85))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
                 
-                Text("\(selectedGraphs.count)/3")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.gray.opacity(0.6))
+                // HStack containing Carousel and Win Rate Wheel
+                VStack(spacing: 8) {
+                    // STEP 1: Calculate proper height based on screen width
+                    // Formula: ~50pt padding + (6/3)y + y = screen_width = ~50pt + 3y
+                    // Solving: y = (screen_width - 50) / 3
+                    let screenWidth = UIScreen.main.bounds.width
+                    let squareSize: CGFloat = (screenWidth - 50) / 3
                     
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                
-                // Display selected graphs (limited to 3)
-                ForEach(selectedGraphs.prefix(3), id: \.id) { graphType in
-                    switch graphType {
-                    case .dollarPerHour:
-                        DollarPerHourGraph(sessions: filteredSessions)
-                            .padding(.top, 16)
-                    case .daily:
-                        DailyTimeMoneyBarGraph(sessions: filteredSessions)
-                            .padding(.top, 16)
-                    case .dayOfWeek:
-                        DayOfWeekStatsBarChart(sessions: filteredSessions)
-                            .padding(.top, 16)
+                    // STEP 2: Carousel width is 6/3 (=2) times the square size for 60% screen
+                    let carouselWidth: CGFloat = 2.0 * squareSize
+                    
+                    // STEP 3: Carousel content height matches square size (excluding page indicators)
+                    let carouselContentHeight: CGFloat = squareSize
+                    
+                    // Main content row - carousel and win rate with same height
+                    HStack(spacing: 20) {
+                        // Carousel content only (no page indicators)
+                        TabView(selection: $selectedCarouselIndex) {
+                            ForEach(carouselHighlights.indices, id: \.self) { index in
+                                let highlight = carouselHighlights[index]
+                                
+                                VStack(alignment: .leading, spacing: 12) {
+                                    // Header
+                                    HStack(spacing: 10) {
+                                        Image(systemName: highlight.iconName)
+                                            .font(.system(size: 20, weight: .semibold))
+                                            .foregroundColor(highlight.type == .multiplier ? .orange : (highlight.type == .persona ? .cyan : .pink))
+                                            .frame(width: 28, height: 28)
+                                        
+                                        Text(highlight.title)
+                                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                                            .foregroundColor(.white.opacity(0.9))
+                                        
+                                        Spacer()
+                                    }
+                                    
+                                    // Primary content
+                                    Text(highlight.primaryText)
+                                        .font(.system(size: highlight.type == .multiplier ? 38 : 26, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.7)
+                                    
+                                    // Secondary and tertiary content - for multiplier, show buy-in and cashout adjacent
+                                    if highlight.type == .multiplier {
+                                        if let secondaryText = highlight.secondaryText, let tertiaryText = highlight.tertiaryText {
+                                            HStack(spacing: 12) {
+                                                Text(secondaryText)
+                                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                                    .foregroundColor(.white.opacity(0.75))
+                                                Text(tertiaryText)
+                                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                                    .foregroundColor(.white.opacity(0.75))
+                                            }
+                                        }
+                                    } else {
+                                        // For other types, show normally
+                                        if let secondaryText = highlight.secondaryText {
+                                            Text(secondaryText)
+                                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                                .foregroundColor(.white.opacity(0.75))
+                                        }
+                                        
+                                        if let tertiaryText = highlight.tertiaryText {
+                                            Text(tertiaryText)
+                                                .font(.system(size: 13, weight: .regular, design: .rounded))
+                                                .foregroundColor(.white.opacity(0.65))
+                                        }
+                                    }
+                                    
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                                .background(
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
+                                            .fill(Material.ultraThinMaterial)
+                                            .opacity(0.08)
+                                        
+                                        RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
+                                            .fill(Color.white.opacity(0.02))
+                                        
+                                        RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
+                                            .stroke(
+                                                LinearGradient(
+                                                    gradient: Gradient(colors: [
+                                                        Color.white.opacity(0.15),
+                                                        Color.white.opacity(0.05),
+                                                        Color.clear
+                                                    ]),
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ),
+                                                lineWidth: 0.7
+                                            )
+                                    }
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
+                                .tag(index)
+                            }
+                        }
+                        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                        .frame(width: carouselWidth, height: carouselContentHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
+                        
+                        // Win-rate square (height = width = carousel height)
+                        WinRateCard(winRate: winRate)
+                            .frame(width: squareSize, height: squareSize)
+                    }
+                    
+                    // Page indicators below the main content
+                    if carouselHighlights.count > 1 {
+                        HStack {
+                            // Spacer to center indicators under carousel
+                            HStack(spacing: 7) {
+                                ForEach(carouselHighlights.indices, id: \.self) { index in
+                                    Capsule()
+                                        .fill(selectedCarouselIndex == index ? Color.white.opacity(0.85) : Color.white.opacity(0.3))
+                                        .frame(width: selectedCarouselIndex == index ? 20 : 7, height: 7)
+                                        .animation(.spring(response: 0.35, dampingFraction: 0.65), value: selectedCarouselIndex)
+                                }
+                            }
+                            .frame(width: carouselWidth)
+                            
+                            Spacer()
+                        }
                     }
                 }
+                .frame(height: (UIScreen.main.bounds.width - 50) / 3 + 20) // Dynamic height + small buffer
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+
             }
             .padding(.bottom, 24) // Slightly reduced bottom padding
             
@@ -1240,148 +1273,6 @@ struct ProfileView: View {
             }
         }
         .background(AppBackgroundView().ignoresSafeArea())
-        
-        // Premium Highlights Carousel Section
-        Text("HIGHLIGHTS")
-            .font(.system(size: 15, weight: .bold, design: .rounded))
-            .foregroundColor(.white.opacity(0.85))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
-        
-        // HStack containing Carousel and Win Rate Wheel
-        VStack(spacing: 8) {
-            // STEP 1: Calculate proper height based on screen width
-            // Formula: ~50pt padding + (6/3)y + y = screen_width = ~50pt + 3y
-            // Solving: y = (screen_width - 50) / 3
-            let screenWidth = UIScreen.main.bounds.width
-            let squareSize: CGFloat = (screenWidth - 50) / 3
-            
-            // STEP 2: Carousel width is 6/3 (=2) times the square size for 60% screen
-            let carouselWidth: CGFloat = 2.0 * squareSize
-            
-            // STEP 3: Carousel content height matches square size (excluding page indicators)
-            let carouselContentHeight: CGFloat = squareSize
-            
-            // Main content row - carousel and win rate with same height
-            HStack(spacing: 20) {
-                // Carousel content only (no page indicators)
-                TabView(selection: $selectedCarouselIndex) {
-                    ForEach(carouselHighlights.indices, id: \.self) { index in
-                        let highlight = carouselHighlights[index]
-                        
-                        VStack(alignment: .leading, spacing: 12) {
-                            // Header
-                            HStack(spacing: 10) {
-                                Image(systemName: highlight.iconName)
-                                    .font(.system(size: 20, weight: .semibold))
-                                    .foregroundColor(highlight.type == .multiplier ? .orange : (highlight.type == .persona ? .cyan : .pink))
-                                    .frame(width: 28, height: 28)
-                                
-                                Text(highlight.title)
-                                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.9))
-                                
-                                Spacer()
-                            }
-                            
-                            // Primary content
-                            Text(highlight.primaryText)
-                                .font(.system(size: highlight.type == .multiplier ? 38 : 26, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                            
-                            // Secondary and tertiary content - for multiplier, show buy-in and cashout adjacent
-                            if highlight.type == .multiplier {
-                                if let secondaryText = highlight.secondaryText, let tertiaryText = highlight.tertiaryText {
-                                    HStack(spacing: 12) {
-                                        Text(secondaryText)
-                                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                                            .foregroundColor(.white.opacity(0.75))
-                                        Text(tertiaryText)
-                                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                                            .foregroundColor(.white.opacity(0.75))
-                                    }
-                                }
-                            } else {
-                                // For other types, show normally
-                                if let secondaryText = highlight.secondaryText {
-                                    Text(secondaryText)
-                                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                                        .foregroundColor(.white.opacity(0.75))
-                                }
-                                
-                                if let tertiaryText = highlight.tertiaryText {
-                                    Text(tertiaryText)
-                                        .font(.system(size: 13, weight: .regular, design: .rounded))
-                                        .foregroundColor(.white.opacity(0.65))
-                                }
-                            }
-                            
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .background(
-                            ZStack {
-                                RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
-                                    .fill(Material.ultraThinMaterial)
-                                    .opacity(0.08)
-                                
-                                RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
-                                    .fill(Color.white.opacity(0.02))
-                                
-                                RoundedRectangle(cornerRadius: carouselContentHeight * 0.15)
-                                    .stroke(
-                                        LinearGradient(
-                                            gradient: Gradient(colors: [
-                                                Color.white.opacity(0.15),
-                                                Color.white.opacity(0.05),
-                                                Color.clear
-                                            ]),
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 0.7
-                                    )
-                            }
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
-                        .tag(index)
-                    }
-                }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                .frame(width: carouselWidth, height: carouselContentHeight)
-                .clipShape(RoundedRectangle(cornerRadius: carouselContentHeight * 0.15))
-                
-                // Win-rate square (height = width = carousel height)
-                WinRateCard(winRate: winRate)
-                    .frame(width: squareSize, height: squareSize)
-            }
-            
-            // Page indicators below the main content
-            if carouselHighlights.count > 1 {
-                HStack {
-                    // Spacer to center indicators under carousel
-                    HStack(spacing: 7) {
-                        ForEach(carouselHighlights.indices, id: \.self) { index in
-                            Capsule()
-                                .fill(selectedCarouselIndex == index ? Color.white.opacity(0.85) : Color.white.opacity(0.3))
-                                .frame(width: selectedCarouselIndex == index ? 20 : 7, height: 7)
-                                .animation(.spring(response: 0.35, dampingFraction: 0.65), value: selectedCarouselIndex)
-                        }
-                    }
-                    .frame(width: carouselWidth)
-                    
-                    Spacer()
-                }
-            }
-        }
-        .frame(height: (UIScreen.main.bounds.width - 50) / 3 + 20) // Dynamic height + small buffer
-        .padding(.horizontal, 20)
-        .padding(.bottom, 0)
         
         // Day of Week Stats Bar Chart
         DayOfWeekStatsBarChart(sessions: filteredSessions)
@@ -1692,13 +1583,13 @@ struct ProfileView: View {
         guard index >= 0 && index < self.timeRanges.count else { return "Selected Period" }
         let range = self.timeRanges[index]
         switch range {
-            case "24H": return "Past 24H"
-            case "1W": return "Past week"
-            case "1M": return "Past month"
-            case "6M": return "Past 6 months"
-            case "1Y": return "Past year"
-            case "All": return "All time"
-            default: return "Selected period"
+            case "24H": return "day"
+            case "1W": return "week"
+            case "1M": return "month"
+            case "6M": return "6 months"
+            case "1Y": return "year"
+            case "All": return "ever"
+            default: return "selected period"
         }
     }
 
@@ -1995,25 +1886,6 @@ struct ProfileView: View {
         )
     }
     
-    private func saveSelectedGraphs() {
-        let graphStrings = selectedGraphs.map { $0.rawValue }
-        UserDefaults.standard.set(graphStrings, forKey: "selectedGraphs_\(userId)")
-    }
-    
-    private func loadSelectedGraphs() {
-        if let savedGraphStrings = UserDefaults.standard.object(forKey: "selectedGraphs_\(userId)") as? [String] {
-            let savedGraphs = savedGraphStrings.compactMap { GraphType(rawValue: $0) }
-            if !savedGraphs.isEmpty {
-                selectedGraphs = savedGraphs
-            } else {
-                // Use default if nothing saved or invalid data
-                selectedGraphs = GraphType.defaultSelection
-            }
-        } else {
-            // Use default for first time users
-            selectedGraphs = GraphType.defaultSelection
-        }
-    }
 }
 
 // Wrapper for ActivityContentView to manage its own dismissal and title
@@ -2090,50 +1962,7 @@ enum PerformanceStat: String, CaseIterable, Identifiable, Equatable {
     }
 }
 
-// MARK: - Graph Type Enum
-enum GraphType: String, CaseIterable, Identifiable, Equatable {
-    case dollarPerHour = "dollarPerHour"
-    case daily = "daily"
-    case dayOfWeek = "dayOfWeek"
-    
-    var id: String { rawValue }
-    
-    var title: String {
-        switch self {
-        case .dollarPerHour: return "$/Hour"
-        case .daily: return "Daily Activity"
-        case .dayOfWeek: return "Day of Week Stats"
-        }
-    }
-    
-    var description: String {
-        switch self {
-        case .dollarPerHour: return "Monitor your hourly earnings"
-        case .daily: return "Daily hours and profit patterns"
-        case .dayOfWeek: return "Performance by day of the week"
-        }
-    }
-    
-    var icon: String {
-        switch self {
-        case .dollarPerHour: return "clock.arrow.circlepath"
-        case .daily: return "chart.bar.fill"
-        case .dayOfWeek: return "calendar.badge.clock"
-        }
-    }
-    
-    var color: Color {
-        switch self {
-        case .dollarPerHour: return .mint
-        case .daily: return .purple
-        case .dayOfWeek: return .cyan
-        }
-    }
-    
-    static var defaultSelection: [GraphType] {
-        [.dollarPerHour]
-    }
-}
+
 
 // MARK: - Customize Stats View
 struct CustomizeStatsView: View {
@@ -3229,6 +3058,20 @@ struct BankrollGraphView: View {
     let selectedTimeRange: Int
     let timeRanges: [String]
     
+    private func getTimeRangeLabel(for index: Int) -> String {
+        guard index >= 0 && index < timeRanges.count else { return "selected period" }
+        let range = timeRanges[index]
+        switch range {
+        case "24H": return "day"
+        case "1W": return "week"
+        case "1M": return "month"
+        case "6M": return "6 months"
+        case "1Y": return "year"
+        case "All": return "ever"
+        default: return "selected period"
+        }
+    }
+    
     private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
         let now = Date()
         let calendar = Calendar.current
@@ -3306,6 +3149,18 @@ struct BankrollGraphView: View {
                         color: chartColor,
                         showFill: true
                     )
+                } else {
+                    // Empty state message inside the graph area
+                    VStack(spacing: 12) {
+                        Text("😢")
+                            .font(.system(size: 40))
+                        Text("You haven't recorded a session in the past \(getTimeRangeLabel(for: selectedTimeRange).lowercased())")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -3317,6 +3172,20 @@ struct ProfitGraphView: View {
     let sessions: [Session]
     let selectedTimeRange: Int
     let timeRanges: [String]
+    
+    private func getTimeRangeLabel(for index: Int) -> String {
+        guard index >= 0 && index < timeRanges.count else { return "selected period" }
+        let range = timeRanges[index]
+        switch range {
+        case "24H": return "day"
+        case "1W": return "week"
+        case "1M": return "month"
+        case "6M": return "6 months"
+        case "1Y": return "year"
+        case "All": return "ever"
+        default: return "selected period"
+        }
+    }
     
     private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
         let now = Date()
@@ -3390,6 +3259,18 @@ struct ProfitGraphView: View {
                         color: chartColor,
                         showFill: true
                     )
+                } else {
+                    // Empty state message inside the graph area
+                    VStack(spacing: 12) {
+                        Text("😢")
+                            .font(.system(size: 40))
+                        Text("You haven't recorded a session in the past \(getTimeRangeLabel(for: selectedTimeRange).lowercased())")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -3779,190 +3660,7 @@ struct ChartPath: View {
     }
 }
 
-// MARK: - Graph Customization View
-struct GraphCustomizationView: View {
-    let userId: String
-    @ObservedObject var sessionStore: SessionStore
-    @Binding var selectedGraphs: [GraphType]
-    @Environment(\.dismiss) private var dismiss
-    
-    private let maxSelectedGraphs = 3
-    
-    var body: some View {
-        ZStack {
-            AppBackgroundView()
-                .ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                // Header
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Customize Your Home Page")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.white)
-                    
-                    Text("Select up to 3 graphs to display on your profile home page")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
-                    
-                    // Selected count
-                    Text("\(selectedGraphs.count)/\(maxSelectedGraphs) selected")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(selectedGraphs.count == maxSelectedGraphs ? .green : .orange)
-                        .padding(.top, 4)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 24)
-                
-                // Graph Selection Grid
-                ScrollView {
-                    LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 16),
-                        GridItem(.flexible(), spacing: 16)
-                    ], spacing: 16) {
-                        ForEach(GraphType.allCases, id: \.id) { graphType in
-                            GraphSelectionCard(
-                                graphType: graphType,
-                                isSelected: selectedGraphs.contains(graphType),
-                                canSelect: selectedGraphs.count < maxSelectedGraphs || selectedGraphs.contains(graphType),
-                                onTap: {
-                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                                        if selectedGraphs.contains(graphType) {
-                                            selectedGraphs.removeAll { $0 == graphType }
-                                        } else if selectedGraphs.count < maxSelectedGraphs {
-                                            selectedGraphs.append(graphType)
-                                        }
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 100) // Space for bottom button
-                }
-                
-                Spacer()
-            }
-            
-            // Floating Save Button
-            VStack {
-                Spacer()
-                
-                Button(action: {
-                    dismiss()
-                }) {
-                    HStack {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Save Changes")
-                            .font(.system(size: 16, weight: .semibold))
-                    }
-                    .foregroundColor(.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                            .shadow(color: Color.green.opacity(0.3), radius: 8, y: 4)
-                    )
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 34)
-            }
-        }
-        .navigationTitle("Graphs")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
 
-// MARK: - Graph Selection Card
-struct GraphSelectionCard: View {
-    let graphType: GraphType
-    let isSelected: Bool
-    let canSelect: Bool
-    let onTap: () -> Void
-    
-    var body: some View {
-        Button(action: {
-            if canSelect {
-                onTap()
-            }
-        }) {
-            VStack(alignment: .leading, spacing: 12) {
-                // Header with icon and selection indicator
-                HStack {
-                    ZStack {
-                        Circle()
-                            .fill(graphType.color.opacity(isSelected ? 0.8 : 0.3))
-                            .frame(width: 40, height: 40)
-                        
-                        Image(systemName: graphType.icon)
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                    
-                    Spacer()
-                    
-                    if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.green)
-                    } else if !canSelect {
-                        Image(systemName: "lock.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.gray)
-                    }
-                }
-                
-                // Title and description
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(graphType.title)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(isSelected ? .white : (canSelect ? .white : .gray))
-                        .lineLimit(1)
-                    
-                    Text(graphType.description)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(isSelected ? .white.opacity(0.8) : (canSelect ? .gray : .gray.opacity(0.6)))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                }
-                
-                Spacer()
-            }
-            .padding(16)
-            .frame(height: 140)
-            .background(
-                ZStack {
-                                    RoundedRectangle(cornerRadius: 16)
-                    .fill(
-                        isSelected 
-                        ? Color.white.opacity(0.15)
-                        : (canSelect ? Color.white.opacity(0.05) : Color.clear)
-                    )
-                    
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(
-                            isSelected 
-                            ? graphType.color.opacity(0.8)
-                            : (canSelect ? Color.white.opacity(0.2) : Color.gray.opacity(0.3)),
-                            lineWidth: isSelected ? 2 : 1
-                        )
-                }
-            )
-            .scaleEffect(isSelected ? 1.02 : 1.0)
-            .shadow(
-                color: isSelected ? graphType.color.opacity(0.3) : Color.clear,
-                radius: isSelected ? 8 : 0,
-                y: isSelected ? 4 : 0
-            )
-            .opacity(canSelect ? 1.0 : 0.6)
-        }
-        .buttonStyle(PlainButtonStyle())
-        .disabled(!canSelect)
-    }
-}
 
 // MARK: - Import Options Sheet
 struct ImportOptionsSheet: View {
@@ -4072,234 +3770,6 @@ struct ScalePressButtonStyle: ButtonStyle {
 
 
 
-// MARK: - Customize Graphs View
-struct CustomizeGraphsView: View {
-    @Binding var selectedGraphs: [GraphType]
-    @Binding var isDraggingAny: Bool
-    
-    @State private var allowReordering = true
-    @State private var combinedItems: [GraphItem] = []
-    @State private var isUpdatingFromDrag = false
-    
-    private var availableGraphs: [GraphType] {
-        GraphType.allCases.filter { !selectedGraphs.contains($0) }
-    }
-    
-    var body: some View {
-        VStack(spacing: 24) {
-            // Selected Graphs Section Header
-            HStack {
-                Text("Selected Graphs")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                
-                Text("\(selectedGraphs.count)/\(GraphType.allCases.count)")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.gray)
-                
-                Spacer()
-            }
-            
-            // Combined Reorderable List with Visual Sections
-            VStack(spacing: 8) {
-                ReorderableForEach($combinedItems, allowReordering: $allowReordering) { item, isDragged in
-                    Group {
-                        if item.isHeader {
-                            // Section header
-                            HStack {
-                                Text(item.headerTitle ?? "")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.white)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.top, item.headerTitle == "Available Graphs" ? 16 : 0)
-                        } else if let graph = item.graph {
-                            // Graph card
-                            ReorderableGraphCard(
-                                graph: graph,
-                                isSelected: item.isSelected,
-                                isDragged: isDragged,
-                                onTap: {
-                                    withAnimation(.spring()) {
-                                        if item.isSelected {
-                                            selectedGraphs.removeAll { $0 == graph }
-                                        } else {
-                                            selectedGraphs.append(graph)
-                                        }
-                                        updateCombinedItems()
-                                    }
-                                }
-                            )
-                        } else {
-                            // Empty state
-                            Text(item.emptyMessage ?? "")
-                                .font(.system(size: 14))
-                                .foregroundColor(.gray)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 20)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
-                                )
-                                .padding(.horizontal, 16)
-                        }
-                    }
-                }
-            }
-        }
-        .onAppear {
-            updateCombinedItems()
-        }
-        .onChange(of: selectedGraphs) { newGraphs in
-            guard !isUpdatingFromDrag else { return }
-            isDraggingAny = false
-            updateCombinedItems()
-        }
-        .onChange(of: combinedItems) { newItems in
-            // When items are reordered via drag, update selectedGraphs
-            let newSelectedGraphs = newItems.compactMap { item -> GraphType? in
-                if let graph = item.graph {
-                    // Check if this graph is in the "selected" section (before "Available Graphs" header)
-                    if let availableHeaderIndex = newItems.firstIndex(where: { $0.headerTitle == "Available Graphs" }),
-                       let graphIndex = newItems.firstIndex(where: { $0.graph?.id == graph.id }),
-                       graphIndex < availableHeaderIndex {
-                        return graph
-                    }
-                }
-                return nil
-            }
-            
-            // Only update if different to avoid infinite loop
-            if newSelectedGraphs.map(\.id) != selectedGraphs.map(\.id) {
-                isUpdatingFromDrag = true
-                selectedGraphs = newSelectedGraphs
-                
-                // Reset flag after a brief delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isUpdatingFromDrag = false
-                }
-            }
-        }
-    }
-    
-    private func updateCombinedItems() {
-        var newItems: [GraphItem] = []
-        
-        // Selected Graphs Section
-        if selectedGraphs.isEmpty {
-            newItems.append(GraphItem(emptyMessage: "Drag graphs here to display them"))
-        } else {
-            for graph in selectedGraphs {
-                newItems.append(GraphItem(graph: graph, isSelected: true))
-            }
-        }
-        
-        // Available Graphs Section Header
-        newItems.append(GraphItem(headerTitle: "Available Graphs"))
-        
-        // Available Graphs
-        if availableGraphs.isEmpty {
-            newItems.append(GraphItem(emptyMessage: "All graphs are currently selected"))
-        } else {
-            for graph in availableGraphs {
-                newItems.append(GraphItem(graph: graph, isSelected: false))
-            }
-        }
-        
-        combinedItems = newItems
-    }
-}
 
-// MARK: - GraphItem for Combined List
-struct GraphItem: Identifiable, Hashable {
-    let id = UUID()
-    let graph: GraphType?
-    let isSelected: Bool
-    let isHeader: Bool
-    let headerTitle: String?
-    let emptyMessage: String?
-    
-    init(graph: GraphType?, isSelected: Bool) {
-        self.graph = graph
-        self.isSelected = isSelected
-        self.isHeader = false
-        self.headerTitle = nil
-        self.emptyMessage = nil
-    }
-    
-    init(headerTitle: String) {
-        self.graph = nil
-        self.isSelected = false
-        self.isHeader = true
-        self.headerTitle = headerTitle
-        self.emptyMessage = nil
-    }
-    
-    init(emptyMessage: String) {
-        self.graph = nil
-        self.isSelected = false
-        self.isHeader = false
-        self.headerTitle = nil
-        self.emptyMessage = emptyMessage
-    }
-    
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-    
-    static func == (lhs: GraphItem, rhs: GraphItem) -> Bool {
-        lhs.id == rhs.id
-    }
-}
-
-// MARK: - Reorderable Graph Card
-struct ReorderableGraphCard: View {
-    let graph: GraphType
-    let isSelected: Bool
-    let isDragged: Bool
-    let onTap: () -> Void
-    
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Icon
-                Image(systemName: graph.icon)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(isSelected ? .white : .gray)
-                    .frame(width: 24)
-                
-                // Title
-                Text(graph.title)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(isSelected ? .white : .gray)
-                
-                Spacer()
-                
-                // Selection indicator
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(.green)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? Color.green.opacity(0.2) : Color.clear)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected ? Color.green.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-            )
-            .scaleEffect(isDragged ? 1.05 : 1.0)
-            .shadow(color: isDragged ? Color.black.opacity(0.2) : Color.clear, radius: 4, x: 0, y: 2)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isDragged)
-        }
-        .buttonStyle(PlainButtonStyle())
-        .padding(.horizontal, 16)
-    }
-}
 
                 

@@ -147,6 +147,79 @@ class EventStakingService: ObservableObject {
         try await eventStakingInvitesCollectionRef.document(inviteId).updateData(data)
     }
     
+    /// Accept a staking invite and create a settled stake if session results exist
+    func acceptStakingInviteWithStakeCreation(invite: EventStakingInvite) async throws {
+        let stakeService = StakeService()
+        
+        // First, accept the invite
+        try await acceptStakingInvite(inviteId: invite.id!)
+        
+        // Create a stake based on whether session results exist
+        let stake: Stake
+        
+        if invite.hasSessionResults {
+            // Session completed - create settled stake
+            let buyIn = invite.sessionBuyIn!
+            let cashout = invite.sessionCashout!
+            let profit = cashout - buyIn
+            
+            // Calculate staker cost and settlement amount
+            let stakerCost = buyIn * (invite.percentageBought / 100.0)
+            let stakerPortion = profit * (invite.percentageBought / 100.0)
+            let markupAdjustment = stakerPortion > 0 ? stakerPortion * (invite.markup - 1.0) : 0
+            let finalStakerShare = stakerPortion - markupAdjustment
+            
+            // Amount transferred: positive = player pays staker, negative = staker pays player
+            let amountTransferred = -finalStakerShare // Negative because staker pays/receives
+            
+            stake = Stake(
+                id: nil,
+                sessionId: "event_\(invite.eventId)_\(UUID().uuidString)",
+                sessionGameName: invite.eventName,
+                sessionStakes: "Event Stakes",
+                sessionDate: invite.eventDate,
+                stakerUserId: invite.stakerUserId,
+                stakedPlayerUserId: invite.stakedPlayerUserId,
+                stakePercentage: invite.percentageBought / 100.0,
+                markup: invite.markup,
+                totalPlayerBuyInForSession: buyIn,
+                playerCashoutForSession: cashout,
+                storedAmountTransferredAtSettlement: amountTransferred,
+                status: .settled,
+                proposedAt: invite.createdAt,
+                lastUpdatedAt: Date(),
+                settlementInitiatorUserId: invite.stakerUserId,
+                settlementConfirmerUserId: invite.stakedPlayerUserId,
+                isTournamentSession: true,
+                manualStakerDisplayName: invite.manualStakerDisplayName,
+                isOffAppStake: invite.isManualStaker
+            )
+        } else {
+            // No session results - create active stake
+            stake = Stake(
+                id: nil,
+                sessionId: "event_\(invite.eventId)_\(UUID().uuidString)",
+                sessionGameName: invite.eventName,
+                sessionStakes: "Event Stakes", 
+                sessionDate: invite.eventDate,
+                stakerUserId: invite.stakerUserId,
+                stakedPlayerUserId: invite.stakedPlayerUserId,
+                stakePercentage: invite.percentageBought / 100.0,
+                markup: invite.markup,
+                totalPlayerBuyInForSession: 0,
+                playerCashoutForSession: 0,
+                status: .active,
+                proposedAt: invite.createdAt,
+                lastUpdatedAt: Date(),
+                isTournamentSession: true,
+                manualStakerDisplayName: invite.manualStakerDisplayName,
+                isOffAppStake: invite.isManualStaker
+            )
+        }
+        
+        try await stakeService.addStake(stake)
+    }
+    
     /// Decline a staking invite
     func declineStakingInvite(inviteId: String) async throws {
         let data: [String: Any] = [
@@ -156,6 +229,36 @@ class EventStakingService: ObservableObject {
         ]
         
         try await eventStakingInvitesCollectionRef.document(inviteId).updateData(data)
+    }
+    
+    /// Update session results for staking invites related to an event and player
+    func updateSessionResultsForEvent(
+        eventId: String,
+        stakedPlayerUserId: String,
+        buyIn: Double,
+        cashout: Double
+    ) async throws {
+        // Find all pending invites for this event and player
+        let query = eventStakingInvitesCollectionRef
+            .whereField(EventStakingInvite.CodingKeys.eventId.rawValue, isEqualTo: eventId)
+            .whereField(EventStakingInvite.CodingKeys.stakedPlayerUserId.rawValue, isEqualTo: stakedPlayerUserId)
+            .whereField(EventStakingInvite.CodingKeys.status.rawValue, isEqualTo: EventStakingInvite.InviteStatus.pending.rawValue)
+        
+        let snapshot = try await query.getDocuments()
+        
+        let updateData: [String: Any] = [
+            EventStakingInvite.CodingKeys.sessionBuyIn.rawValue: buyIn,
+            EventStakingInvite.CodingKeys.sessionCashout.rawValue: cashout,
+            EventStakingInvite.CodingKeys.sessionCompletedAt.rawValue: Timestamp(date: Date()),
+            EventStakingInvite.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
+        ]
+        
+        // Update all matching invites with session results
+        for document in snapshot.documents {
+            try await document.reference.updateData(updateData)
+        }
+        
+        print("Updated session results for \(snapshot.documents.count) pending invites")
     }
     
     // MARK: - Delete

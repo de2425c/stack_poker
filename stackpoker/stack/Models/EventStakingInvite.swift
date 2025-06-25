@@ -21,6 +21,11 @@ struct EventStakingInvite: Codable, Identifiable {
     let isManualStaker: Bool
     let manualStakerDisplayName: String?
     
+    // Session results (populated when session is completed)
+    var sessionBuyIn: Double?
+    var sessionCashout: Double?
+    var sessionCompletedAt: Date?
+    
     // Status and timestamps
     var status: InviteStatus
     let createdAt: Date
@@ -47,6 +52,9 @@ struct EventStakingInvite: Codable, Identifiable {
         case amountBought
         case isManualStaker
         case manualStakerDisplayName
+        case sessionBuyIn
+        case sessionCashout
+        case sessionCompletedAt
         case status
         case createdAt
         case respondedAt
@@ -66,6 +74,9 @@ struct EventStakingInvite: Codable, Identifiable {
         amountBought: Double,
         isManualStaker: Bool = false,
         manualStakerDisplayName: String? = nil,
+        sessionBuyIn: Double? = nil,
+        sessionCashout: Double? = nil,
+        sessionCompletedAt: Date? = nil,
         status: InviteStatus = .pending,
         createdAt: Date = Date(),
         respondedAt: Date? = nil,
@@ -83,10 +94,23 @@ struct EventStakingInvite: Codable, Identifiable {
         self.amountBought = amountBought
         self.isManualStaker = isManualStaker
         self.manualStakerDisplayName = manualStakerDisplayName
+        self.sessionBuyIn = sessionBuyIn
+        self.sessionCashout = sessionCashout
+        self.sessionCompletedAt = sessionCompletedAt
         self.status = status
         self.createdAt = createdAt
         self.respondedAt = respondedAt
         self.lastUpdatedAt = lastUpdatedAt
+    }
+    
+    // Computed properties
+    var hasSessionResults: Bool {
+        return sessionBuyIn != nil && sessionCashout != nil && sessionCompletedAt != nil
+    }
+    
+    var sessionProfit: Double? {
+        guard let buyIn = sessionBuyIn, let cashout = sessionCashout else { return nil }
+        return cashout - buyIn
     }
 }
 

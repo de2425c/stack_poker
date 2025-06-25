@@ -9,8 +9,8 @@ import MessageUI
 struct FeedView: View {
     @EnvironmentObject var postService: PostService
     @EnvironmentObject var userService: UserService
+    @EnvironmentObject var sessionStore: SessionStore // Use injected SessionStore
     @StateObject private var handStore: HandStore // Added HandStore
-    @StateObject private var sessionStore: SessionStore // Added SessionStore
     @State private var showingNewPost = false
     @State private var isRefreshing = false
     @State private var showingUserSearchView = false
@@ -63,10 +63,6 @@ struct FeedView: View {
         self.hasLiveSessionBar = hasLiveSessionBar
         self.onNavigateToExplore = onNavigateToExplore
         _handStore = StateObject(wrappedValue: HandStore(userId: userId)) // Initialize HandStore
-        
-        // Create bankrollStore first, then pass it to sessionStore
-        let bankrollStore = BankrollStore(userId: userId)
-        _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId, bankrollStore: bankrollStore)) // Initialize SessionStore with bankrollStore
         
         // Configure the Kingfisher cache
         let cache = ImageCache.default
@@ -345,7 +341,6 @@ struct FeedView: View {
                 Image("stack_logo") 
                     .resizable()
                     .renderingMode(.original) // Render the original image to preserve details
-                    .colorInvert() // Make the logo white, assuming the source is black
                     .scaledToFit()
                     .frame(height: 35)      // User updated height
 
@@ -966,33 +961,10 @@ struct BasicPostCardView: View {
                 
                 // Images - Square display with side padding
                 if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(imageURLs, id: \.self) { url in
-                            if let imageUrl = URL(string: url) {
-                                KFImage(imageUrl)
-                                    .placeholder {
-                                        Rectangle()
-                                            .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                            .overlay(
-                                                ProgressView()
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                            )
-                                    }
-                                    .resizable()
-                                    .scaledToFill()
-                                    .aspectRatio(1, contentMode: .fill) // Square aspect ratio
-                                    .clipped() // Crop to square
-                                    .cornerRadius(8) // Add slight rounding
-                                    .contentShape(Rectangle()) // Ensure the whole area is tappable
-                                    .onTapGesture {
-                                        onImageTapped?(url)
-                                    }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16) // Add side padding
-                    .padding(.top, 10)
-                    .padding(.bottom, 14)
+                    ImageCarouselView(imageURLs: imageURLs, onImageTapped: onImageTapped)
+                        .padding(.horizontal, 16) // Add side padding
+                        .padding(.top, 10)
+                        .padding(.bottom, 14)
                 }
                 
                 // Twitter-like actions bar
@@ -1390,31 +1362,10 @@ struct PostCardView: View {
             
             // Images - Square display with side padding
             if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(imageURLs, id: \.self) { url in
-                        if let imageUrl = URL(string: url) {
-                            KFImage(imageUrl)
-                                .placeholder {
-                                    Rectangle()
-                                        .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                        .overlay(
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .gray))
-                                        )
-                                }
-                                .resizable()
-                                .scaledToFill()
-                                .aspectRatio(1, contentMode: .fill) // Square aspect ratio
-                                .clipped() // Crop to square
-                                .cornerRadius(8) // Add slight rounding
-                                .contentShape(Rectangle()) // Ensure the whole area is tappable
-                                // PostCardView doesn't handle image taps
-                        }
-                    }
-                }
-                .padding(.horizontal, 16) // Add side padding
-                .padding(.top, 10)
-                .padding(.bottom, 14)
+                ImageCarouselView(imageURLs: imageURLs, onImageTapped: nil) // PostCardView doesn't handle image taps
+                    .padding(.horizontal, 16) // Add side padding
+                    .padding(.top, 10)
+                    .padding(.bottom, 14)
             }
             
             // Twitter-like actions bar
@@ -2705,32 +2656,9 @@ private struct PostBodyContentView: View {
             
             // Images - Square display with side padding
             if let imageURLs = post.imageURLs, !imageURLs.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(imageURLs, id: \.self) { url in
-                        if let imageUrl = URL(string: url) {
-                            KFImage(imageUrl)
-                                .placeholder {
-                                    Rectangle()
-                                        .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
-                                        .overlay(
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        )
-                                }
-                                .resizable()
-                                .scaledToFill()
-                                .aspectRatio(1, contentMode: .fill) // Square aspect ratio
-                                .clipped() // Crop to square
-                                .cornerRadius(8) // Add slight rounding
-                                .contentShape(Rectangle()) // Ensure the whole area is tappable
-                                .onTapGesture {
-                                    onImageTapped?(url)
-                                }
-                        }
-                    }
-                }
-                .padding(.horizontal, 16) // Add side padding
-                .padding(.top, 8)
+                ImageCarouselView(imageURLs: imageURLs, onImageTapped: onImageTapped)
+                    .padding(.horizontal, 16) // Add side padding
+                    .padding(.top, 8)
             }
         }
     }
@@ -3500,6 +3428,66 @@ private func challengeStatusText(_ content: String) -> String? {
         return "Challenge Completed"
     }
     return nil
+}
+
+// MARK: - Image Carousel Component
+struct ImageCarouselView: View {
+    let imageURLs: [String]
+    let onImageTapped: ((String) -> Void)?
+    
+    var body: some View {
+        if imageURLs.count == 1 {
+            // Single image - no carousel needed
+            if let url = imageURLs.first, let imageUrl = URL(string: url) {
+                KFImage(imageUrl)
+                    .placeholder {
+                        Rectangle()
+                            .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                            .overlay(
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                            )
+                    }
+                    .resizable()
+                    .scaledToFill()
+                    .aspectRatio(1, contentMode: .fill) // Square aspect ratio
+                    .clipped() // Crop to square
+                    .cornerRadius(8) // Add slight rounding
+                    .contentShape(Rectangle()) // Ensure the whole area is tappable
+                    .onTapGesture {
+                        onImageTapped?(url)
+                    }
+            }
+        } else {
+            // Multiple images - use carousel
+            TabView {
+                ForEach(imageURLs, id: \.self) { url in
+                    if let imageUrl = URL(string: url) {
+                        KFImage(imageUrl)
+                            .placeholder {
+                                Rectangle()
+                                    .fill(Color(UIColor(red: 22/255, green: 22/255, blue: 26/255, alpha: 1.0)))
+                                    .overlay(
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                                    )
+                            }
+                            .resizable()
+                            .scaledToFill()
+                            .aspectRatio(1, contentMode: .fill) // Square aspect ratio
+                            .clipped() // Crop to square
+                            .contentShape(Rectangle()) // Ensure the whole area is tappable
+                            .onTapGesture {
+                                onImageTapped?(url)
+                            }
+                    }
+                }
+            }
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .automatic))
+            .aspectRatio(1, contentMode: .fit) // Maintain square aspect ratio for carousel
+            .cornerRadius(8)
+        }
+    }
 }
 
 
