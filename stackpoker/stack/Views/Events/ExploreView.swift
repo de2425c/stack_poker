@@ -83,6 +83,204 @@ struct IdentifiableSimpleDate: Identifiable, Hashable {
 }
 // --- End SimpleDate Structures ---
 
+// MARK: - Event Status Extension
+extension Event {
+    /// Calculate the current status of a public event based on timing
+    var currentStatus: UserEvent.EventStatus {
+        let now = Date()
+        let calendar = Calendar.current
+        
+        // Create base date from SimpleDate
+        let baseEventDate = calendar.date(from: DateComponents(
+            year: simpleDate.year,
+            month: simpleDate.month,
+            day: simpleDate.day
+        )) ?? Date()
+        
+        // Parse start time if available
+        let eventStartTime = parseEventStartTime(baseDate: baseEventDate, timeString: time)
+        
+        // Parse late registration end time if available
+        let lateRegEndTime = parseLateRegistrationEndTime(startTime: eventStartTime, lateRegString: lateRegistration)
+        
+        // Calculate ongoing period end (12 hours after late reg ends, or start time if no late reg)
+        let ongoingEndTime = calendar.date(byAdding: .hour, value: 12, to: lateRegEndTime ?? eventStartTime) ?? eventStartTime
+        
+        // Determine status based on current time
+        if now < eventStartTime {
+            return .upcoming
+        } else if let lateRegEnd = lateRegEndTime, now >= eventStartTime && now < lateRegEnd {
+            return .lateRegistration
+        } else if now < ongoingEndTime {
+            return .active
+        } else {
+            return .completed
+        }
+    }
+    
+    // MARK: - Time Parsing Helper Functions
+    
+    private func parseEventStartTime(baseDate: Date, timeString: String?) -> Date {
+        guard let timeString = timeString, !timeString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            // Default to 6 PM if no time specified
+            let calendar = Calendar.current
+            return calendar.date(bySettingHour: 18, minute: 0, second: 0, of: baseDate) ?? baseDate
+        }
+        
+        let calendar = Calendar.current
+        let cleanTimeString = timeString.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Try to parse time in various formats
+        let timeFormats = ["h:mm a", "HH:mm", "h a", "ha", "h:mma"]
+        let formatter = DateFormatter()
+        
+        for format in timeFormats {
+            formatter.dateFormat = format
+            if let time = formatter.date(from: cleanTimeString) {
+                let timeComponents = calendar.dateComponents([.hour, .minute], from: time)
+                if let hour = timeComponents.hour, let minute = timeComponents.minute {
+                    return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: baseDate) ?? baseDate
+                }
+            }
+        }
+        
+        // If parsing fails, default to 6 PM
+        return calendar.date(bySettingHour: 18, minute: 0, second: 0, of: baseDate) ?? baseDate
+    }
+    
+    private func parseLateRegistrationEndTime(startTime: Date, lateRegString: String?) -> Date? {
+        guard let lateRegString = lateRegString, !lateRegString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        
+        let calendar = Calendar.current
+        let cleanString = lateRegString.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Try to extract level information (e.g., "End of Level 8", "Level 10", "8 levels")
+        if let levelMatch = extractLevelNumber(from: cleanString) {
+            // Assume each level is the levelLength from the event (default 20 minutes if not specified)
+            let levelLengthMinutes = levelLength ?? 20
+            let totalMinutes = levelMatch * levelLengthMinutes
+            return calendar.date(byAdding: .minute, value: totalMinutes, to: startTime)
+        }
+        
+        // Try to extract time duration (e.g., "2 hours", "90 minutes", "1.5 hours")
+        if let durationMinutes = extractDurationMinutes(from: cleanString) {
+            return calendar.date(byAdding: .minute, value: durationMinutes, to: startTime)
+        }
+        
+        // Try to extract specific time (e.g., "9:30 PM", "21:30")
+        if let specificTime = parseSpecificTime(from: cleanString, baseDate: startTime) {
+            return specificTime
+        }
+        
+        // Default fallback: 2 hours after start if we can't parse
+        return calendar.date(byAdding: .hour, value: 2, to: startTime)
+    }
+    
+    private func extractLevelNumber(from string: String) -> Int? {
+        // Patterns to match: "end of level 8", "level 10", "8 levels", etc.
+        let patterns = [
+            "(?:end of )?level (\\d+)",
+            "(\\d+) levels?",
+            "through level (\\d+)"
+        ]
+        
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                let range = NSRange(location: 0, length: string.utf16.count)
+                if let match = regex.firstMatch(in: string, options: [], range: range) {
+                    let numberRange = match.range(at: 1)
+                    if let range = Range(numberRange, in: string) {
+                        if let number = Int(String(string[range])) {
+                            return number
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func extractDurationMinutes(from string: String) -> Int? {
+        // Patterns for duration: "2 hours", "90 minutes", "1.5 hours", "2h 30m"
+        let patterns = [
+            "(\\d+(?:\\.\\d+)?)\\s*hours?",
+            "(\\d+)\\s*minutes?",
+            "(\\d+)h\\s*(\\d+)m",
+            "(\\d+)\\s*hrs?",
+            "(\\d+)\\s*mins?"
+        ]
+        
+        for (index, pattern) in patterns.enumerated() {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                let range = NSRange(location: 0, length: string.utf16.count)
+                if let match = regex.firstMatch(in: string, options: [], range: range) {
+                    switch index {
+                    case 0, 3: // hours patterns
+                        let hoursRange = match.range(at: 1)
+                        if let range = Range(hoursRange, in: string),
+                           let hours = Double(String(string[range])) {
+                            return Int(hours * 60)
+                        }
+                    case 1, 4: // minutes patterns  
+                        let minutesRange = match.range(at: 1)
+                        if let range = Range(minutesRange, in: string),
+                           let minutes = Int(String(string[range])) {
+                            return minutes
+                        }
+                    case 2: // "2h 30m" pattern
+                        let hoursRange = match.range(at: 1)
+                        let minutesRange = match.range(at: 2)
+                        if let hoursStringRange = Range(hoursRange, in: string),
+                           let minutesStringRange = Range(minutesRange, in: string),
+                           let hours = Int(String(string[hoursStringRange])),
+                           let minutes = Int(String(string[minutesStringRange])) {
+                            return hours * 60 + minutes
+                        }
+                    default:
+                        break
+                    }
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func parseSpecificTime(from string: String, baseDate: Date) -> Date? {
+        let calendar = Calendar.current
+        let timeFormats = ["h:mm a", "HH:mm", "h a", "ha"]
+        let formatter = DateFormatter()
+        
+        for format in timeFormats {
+            formatter.dateFormat = format
+            // Try to find time pattern in the string
+            if let regex = try? NSRegularExpression(pattern: "\\b\\d{1,2}:?\\d{0,2}\\s*[ap]?m?\\b", options: .caseInsensitive) {
+                let range = NSRange(location: 0, length: string.utf16.count)
+                if let match = regex.firstMatch(in: string, options: [], range: range) {
+                    if let timeRange = Range(match.range, in: string) {
+                        let timeString = String(string[timeRange])
+                        if let time = formatter.date(from: timeString) {
+                            let timeComponents = calendar.dateComponents([.hour, .minute], from: time)
+                            if let hour = timeComponents.hour, let minute = timeComponents.minute {
+                                let baseDateComponents = calendar.dateComponents([.year, .month, .day], from: baseDate)
+                                var newComponents = DateComponents()
+                                newComponents.year = baseDateComponents.year
+                                newComponents.month = baseDateComponents.month
+                                newComponents.day = baseDateComponents.day
+                                newComponents.hour = hour
+                                newComponents.minute = minute
+                                return calendar.date(from: newComponents)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+}
+
 // --- New BuyinRange Enum ---
 enum BuyinRange: String, CaseIterable, Identifiable {
     case all = "All Buy-ins"
@@ -122,11 +320,24 @@ struct CachedEvent: Codable {
     let time: String?
     let buyin_usd: Double?
     let casino: String?
+    // New fields for new_event format
+    let chipsFormatted: String?
+    let game: String?
+    let guarantee: Double?
+    let guaranteeFormatted: String?
+    let lateRegistration: String?
+    let levelLength: Int?
+    let levelsFormatted: String?
+    let pdfLink: String?
+    let seriesEnd: String?
+    let seriesStart: String?
+    let startingChips: Int?
+    let imageUrl: String?
 }
 
 // Old IdentifiableDate struct removed (was lines 4-16)
 
-// 1. Event Model (Updated for enhanced_events collection)
+// 1. Event Model (Updated for new_event collection)
 struct Event: Identifiable, Hashable {
     let id: String 
     let buyin_string: String
@@ -137,6 +348,20 @@ struct Event: Identifiable, Hashable {
     let time: String?
     let buyin_usd: Double? // New field for USD buy-in
     let casino: String? // New optional casino field
+    
+    // New fields for new_event format
+    let chipsFormatted: String?
+    let game: String?
+    let guarantee: Double?
+    let guaranteeFormatted: String?
+    let lateRegistration: String?
+    let levelLength: Int?
+    let levelsFormatted: String?
+    let pdfLink: String?
+    let seriesEnd: Date?
+    let seriesStart: Date?
+    let startingChips: Int?
+    let imageUrl: String?
 
     init?(document: QueryDocumentSnapshot) {
         let data = document.data()
@@ -146,40 +371,73 @@ struct Event: Identifiable, Hashable {
         }
         self.id = docId
 
-        guard let buyinStr = data["buyin_string"] as? String, !buyinStr.isEmpty else { 
+        // Parse buy-in information - use buyInFormatted and buyIn from new_event format
+        guard let buyinFormatted = data["buyInFormatted"] as? String, !buyinFormatted.isEmpty else { 
             return nil 
         }
-        self.buyin_string = buyinStr
+        self.buyin_string = buyinFormatted
+        self.buyin_usd = data["buyIn"] as? Double
 
-        guard let dateStringFromFirestore = data["date"] as? String,
-              let parsedSimpleDate = SimpleDate(from: dateStringFromFirestore) else { 
+        // Parse event date - convert from Timestamp to SimpleDate
+        guard let eventDateTimestamp = data["eventDate"] as? Timestamp else { 
             return nil
         }
-        self.simpleDate = parsedSimpleDate
+        let eventDate = eventDateTimestamp.dateValue()
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: eventDate)
+        let month = calendar.component(.month, from: eventDate)
+        let day = calendar.component(.day, from: eventDate)
+        self.simpleDate = SimpleDate(year: year, month: month, day: day)
 
-        guard let eventNameStr = data["event_name"] as? String, !eventNameStr.isEmpty else { 
+        // Parse event name
+        guard let eventNameStr = data["eventName"] as? String, !eventNameStr.isEmpty else { 
             return nil
         }
         self.event_name = eventNameStr
 
-        // Optional fields
-        self.series_name = data["series_name"] as? String
-        self.description = data["description"] as? String
-        self.buyin_usd = data["buyin_usd"] as? Double // Initialize new field
+        // Parse series name
+        self.series_name = data["series"] as? String
 
-        // Optional casino field
-        self.casino = data["casino"] as? String
-
-        let timeValue = data["time"] as? String
+        // Parse event time
+        let timeValue = data["eventTime"] as? String
         if let t = timeValue, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             self.time = t
         } else {
             self.time = nil
         }
+
+        // Legacy fields (not in new format but keeping for compatibility)
+        self.description = nil // Not present in new format
+        self.casino = data["casino"] as? String // Read casino directly from Firebase
+
+        // New fields from new_event format
+        self.chipsFormatted = data["chipsFormatted"] as? String
+        self.game = data["game"] as? String
+        self.guarantee = data["guarantee"] as? Double
+        self.guaranteeFormatted = data["guaranteeFormatted"] as? String
+        self.lateRegistration = data["lateRegistration"] as? String
+        self.levelLength = data["levelLength"] as? Int
+        self.levelsFormatted = data["levelsFormatted"] as? String
+        self.pdfLink = data["pdfLink"] as? String
+        self.startingChips = data["startingChips"] as? Int
+        self.imageUrl = data["imageUrl"] as? String
+        
+        // Parse series dates
+        if let seriesEndTimestamp = data["seriesEnd"] as? Timestamp {
+            self.seriesEnd = seriesEndTimestamp.dateValue()
+        } else {
+            self.seriesEnd = nil
+        }
+        
+        if let seriesStartTimestamp = data["seriesStart"] as? Timestamp {
+            self.seriesStart = seriesStartTimestamp.dateValue()
+        } else {
+            self.seriesStart = nil
+        }
     }
     
     // Manual initializer for creating events from RSVP data
-    init(id: String, buyin_string: String, simpleDate: SimpleDate, event_name: String, series_name: String? = nil, description: String? = nil, time: String? = nil, buyin_usd: Double? = nil, casino: String? = nil) {
+    init(id: String, buyin_string: String, simpleDate: SimpleDate, event_name: String, series_name: String? = nil, description: String? = nil, time: String? = nil, buyin_usd: Double? = nil, casino: String? = nil, chipsFormatted: String? = nil, game: String? = nil, guarantee: Double? = nil, guaranteeFormatted: String? = nil, lateRegistration: String? = nil, levelLength: Int? = nil, levelsFormatted: String? = nil, pdfLink: String? = nil, seriesEnd: Date? = nil, seriesStart: Date? = nil, startingChips: Int? = nil, imageUrl: String? = nil) {
         self.id = id
         self.buyin_string = buyin_string
         self.simpleDate = simpleDate
@@ -189,6 +447,18 @@ struct Event: Identifiable, Hashable {
         self.time = time
         self.buyin_usd = buyin_usd
         self.casino = casino
+        self.chipsFormatted = chipsFormatted
+        self.game = game
+        self.guarantee = guarantee
+        self.guaranteeFormatted = guaranteeFormatted
+        self.lateRegistration = lateRegistration
+        self.levelLength = levelLength
+        self.levelsFormatted = levelsFormatted
+        self.pdfLink = pdfLink
+        self.seriesEnd = seriesEnd
+        self.seriesStart = seriesStart
+        self.startingChips = startingChips
+        self.imageUrl = imageUrl
     }
 
     func hash(into hasher: inout Hasher) {
@@ -219,6 +489,66 @@ struct InfoRow: View {
                 .foregroundColor(valueColor)
                 .lineLimit(alignment == .leading ? 2 : 1)
         }
+    }
+}
+
+// MARK: - Event List Item View (Flat Format)
+struct EventListItemView: View {
+    let event: Event
+    let onSelect: () -> Void
+    
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 16) {
+                // Left side - Event Name and Game type
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(event.event_name)
+                        .font(.system(size: 16, weight: .medium, design: .default))
+                        .foregroundColor(.white)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    if let game = event.game, !game.isEmpty {
+                        Text(game)
+                            .font(.system(size: 13, weight: .regular, design: .default))
+                            .foregroundColor(.gray)
+                    }
+                }
+                
+                // Right side - Buy-in and Time 
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(event.buyin_string)
+                        .font(.system(size: 14, weight: .regular, design: .default))
+                        .foregroundColor(.gray)
+                    
+                    if let time = event.time {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                            Text(time)
+                                .font(.system(size: 14, weight: .regular, design: .default))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(
+                ZStack {
+                    // Base background
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.white.opacity(0.02))
+                    
+                    // Border
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                }
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
@@ -345,8 +675,8 @@ class ExploreViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>() // For observing changes
     
     // MARK: - Caching Properties
-    private let cacheKey = "cached_enhanced_events"
-    private let cacheTimestampKey = "cached_events_timestamp"
+    private let cacheKey = "cached_enhanced_events_v2" // Updated version to include imageUrl
+    private let cacheTimestampKey = "cached_events_timestamp_v2"
     private let cacheExpiryHours: TimeInterval = 6 // Cache expires after 6 hours
     
     // MARK: - Performance Properties
@@ -436,7 +766,19 @@ class ExploreViewModel: ObservableObject {
                             description: cachedEvent.description,
                             time: cachedEvent.time,
                             buyin_usd: cachedEvent.buyin_usd,
-                            casino: cachedEvent.casino
+                            casino: cachedEvent.casino,
+                            chipsFormatted: cachedEvent.chipsFormatted,
+                            game: cachedEvent.game,
+                            guarantee: cachedEvent.guarantee,
+                            guaranteeFormatted: cachedEvent.guaranteeFormatted,
+                            lateRegistration: cachedEvent.lateRegistration,
+                            levelLength: cachedEvent.levelLength,
+                            levelsFormatted: cachedEvent.levelsFormatted,
+                            pdfLink: cachedEvent.pdfLink,
+                            seriesEnd: cachedEvent.seriesEnd != nil ? Date(timeIntervalSince1970: Double(cachedEvent.seriesEnd!) ?? 0) : nil,
+                            seriesStart: cachedEvent.seriesStart != nil ? Date(timeIntervalSince1970: Double(cachedEvent.seriesStart!) ?? 0) : nil,
+                            startingChips: cachedEvent.startingChips,
+                            imageUrl: cachedEvent.imageUrl
                         )
                     }
                     continuation.resume(returning: events)
@@ -460,7 +802,19 @@ class ExploreViewModel: ObservableObject {
                     description: event.description,
                     time: event.time,
                     buyin_usd: event.buyin_usd,
-                    casino: event.casino
+                    casino: event.casino,
+                    chipsFormatted: event.chipsFormatted,
+                    game: event.game,
+                    guarantee: event.guarantee,
+                    guaranteeFormatted: event.guaranteeFormatted,
+                    lateRegistration: event.lateRegistration,
+                    levelLength: event.levelLength,
+                    levelsFormatted: event.levelsFormatted,
+                    pdfLink: event.pdfLink,
+                    seriesEnd: event.seriesEnd?.timeIntervalSince1970.description,
+                    seriesStart: event.seriesStart?.timeIntervalSince1970.description,
+                    startingChips: event.startingChips,
+                    imageUrl: event.imageUrl
                 )
             }
             
@@ -515,7 +869,7 @@ class ExploreViewModel: ObservableObject {
             }
             
             do {
-                let querySnapshot = try await db.collection("enhanced_events").order(by: "date").getDocuments()
+                let querySnapshot = try await db.collection("new_event").order(by: "eventDate").getDocuments()
                 
                 await MainActor.run {
                     self.loadingProgress = 0.7
@@ -579,7 +933,7 @@ class ExploreViewModel: ObservableObject {
             }
             
             do {
-                let querySnapshot = try await db.collection("enhanced_events").order(by: "date").getDocuments()
+                let querySnapshot = try await db.collection("new_event").order(by: "eventDate").getDocuments()
                 
                 await MainActor.run {
                     self.loadingProgress = 0.7
@@ -656,6 +1010,7 @@ struct ExploreView: View {
     @StateObject private var userEventService = UserEventService()
     @StateObject private var userService = UserService()
     @EnvironmentObject var sessionStore: SessionStore
+    @EnvironmentObject var tutorialManager: TutorialManager
     @State private var selectedSimpleDate: SimpleDate? = nil
     @State private var selectedTab: EventsTab = .events
     @State private var showingCreateEvent = false
@@ -668,6 +1023,9 @@ struct ExploreView: View {
     @State private var selectedSeriesName: String? = nil // New: Currently selected series for detailed view
     @State private var calendarSelectedDate = Date()
     @State private var isLoadingMyEvents = false // Track loading state for My Events tab
+    @State private var isListViewMode = false // Toggle between card view and list view in series detail
+    @State private var selectedDateInSeries: SimpleDate? = nil // For date navigation within series
+    @State private var showingDatePicker = false // For calendar date picker
     var onEventSelected: ((Event) -> Void)? // Callback for when an event is selected
     var isSheetPresentation: Bool = false // New parameter to control top padding
     @Environment(\.dismiss) var dismiss // To dismiss the view if used as a sheet
@@ -803,7 +1161,18 @@ struct ExploreView: View {
         }
         
         return eventsToFilter.sorted { (event1, event2) -> Bool in
-            // Sort alphabetically by event name
+            // First, sort by buy-in amount (put $0 events last)
+            let buyin1 = event1.buyin_usd ?? parseBuyinFromString(event1.buyin_string) ?? 0
+            let buyin2 = event2.buyin_usd ?? parseBuyinFromString(event2.buyin_string) ?? 0
+            
+            // If one is $0 and the other isn't, put the $0 one last
+            if buyin1 == 0 && buyin2 > 0 {
+                return false
+            } else if buyin2 == 0 && buyin1 > 0 {
+                return true
+            }
+            
+            // If both are $0 or both are non-zero, sort alphabetically by event name
             return event1.event_name.localizedCompare(event2.event_name) == .orderedAscending
         }
     }
@@ -866,14 +1235,23 @@ struct ExploreView: View {
 
     // MARK: - Series Grouping
     private var groupedEventsBySeries: [String: [Event]] {
-        let eventsForCurrentFilters = viewModel.allEvents.filter { event in
-            // Apply date filter
-            if let currentFilterDate = selectedSimpleDate {
-                return event.simpleDate == currentFilterDate
-            } else if let fallbackDate = allAvailableDates.first?.simpleDate {
-                return event.simpleDate == fallbackDate
+        // For series overview, show ALL events across all dates (no date filter)
+        // Only apply buy-in filter if selected
+        var eventsForCurrentFilters = viewModel.allEvents
+        
+        // Apply buy-in filter if not "all"
+        if viewModel.selectedBuyinRange != .all {
+            eventsForCurrentFilters = eventsForCurrentFilters.filter { event in
+                let buyinAmount: Double?
+                if let usdBuyin = event.buyin_usd {
+                    buyinAmount = usdBuyin
+                } else {
+                    buyinAmount = parseBuyinFromString(event.buyin_string)
+                }
+                
+                guard let amount = buyinAmount else { return false }
+                return viewModel.selectedBuyinRange.contains(amount)
             }
-            return false
         }
         
         // Group by series, handling events without series
@@ -906,7 +1284,7 @@ struct ExploreView: View {
         }
     }
     
-    // Events for currently selected series (when in series detail view)
+    // Events for currently selected series (when in series detail view) - ALL dates
     private var eventsForSelectedSeries: [Event] {
         guard let seriesName = selectedSeriesName else { return [] }
         
@@ -934,16 +1312,45 @@ struct ExploreView: View {
             }
         }
         
-        // Apply date filter
-        if let currentFilterDate = selectedSimpleDate {
-            eventsToFilter = eventsToFilter.filter { $0.simpleDate == currentFilterDate }
-        } else if let fallbackDate = allAvailableDates.first?.simpleDate {
-            eventsToFilter = eventsToFilter.filter { $0.simpleDate == fallbackDate }
-        }
+        // NO date filter - show all events for the series across all dates
         
         return eventsToFilter.sorted { (event1, event2) -> Bool in
+            // Sort by date first
+            if event1.simpleDate != event2.simpleDate {
+                return event1.simpleDate < event2.simpleDate
+            }
+            
+            // Then sort by buy-in amount (put $0 events last within the same date)
+            let buyin1 = event1.buyin_usd ?? parseBuyinFromString(event1.buyin_string) ?? 0
+            let buyin2 = event2.buyin_usd ?? parseBuyinFromString(event2.buyin_string) ?? 0
+            
+            // If one is $0 and the other isn't, put the $0 one last
+            if buyin1 == 0 && buyin2 > 0 {
+                return false
+            } else if buyin2 == 0 && buyin1 > 0 {
+                return true
+            }
+            
+            // If both are $0 or both are non-zero, sort alphabetically by event name
             return event1.event_name.localizedCompare(event2.event_name) == .orderedAscending
         }
+    }
+    
+    // Group events by date for series detail view
+    private var eventsGroupedByDateForSeries: [SimpleDate: [Event]] {
+        return Dictionary(grouping: eventsForSelectedSeries) { $0.simpleDate }
+    }
+    
+    private var sortedDatesForSeries: [SimpleDate] {
+        return eventsGroupedByDateForSeries.keys.sorted()
+    }
+    
+    // Current date display for series navigation
+    private var currentDateInSeriesDisplay: String {
+        guard let currentDate = selectedDateInSeries else {
+            return sortedDatesForSeries.first?.displayMedium ?? "No Date"
+        }
+        return currentDate.displayMedium
     }
 
     var body: some View {
@@ -984,6 +1391,8 @@ struct ExploreView: View {
                     }
                 }
             }
+            
+            // Tutorial: User will advance by tapping groups tab
         }
         .onChange(of: selectedTab) { newTab in
             if newTab == .events {
@@ -1013,10 +1422,10 @@ struct ExploreView: View {
         .onChange(of: viewModel.allEvents) { _ in 
             // Only set initial date if none is selected
             if selectedSimpleDate == nil {
-                // Try to select current system date if it has events, otherwise select the first available date
+                // Always try to select current system date first if it has events
                 let hasEventsToday = allAvailableDates.contains { $0.simpleDate == currentSystemSimpleDate }
                 if hasEventsToday {
-                selectedSimpleDate = currentSystemSimpleDate
+                    selectedSimpleDate = currentSystemSimpleDate
                 } else if let firstDate = allAvailableDates.first?.simpleDate {
                     selectedSimpleDate = firstDate
                 }
@@ -1058,6 +1467,78 @@ struct ExploreView: View {
             UserEventDetailView(event: userEvent)
                 .environmentObject(userEventService)
                 .environmentObject(userService)
+        }
+        .sheet(isPresented: $showingDatePicker) {
+            NavigationView {
+                VStack {
+                    DatePicker(
+                        "Select Date",
+                        selection: Binding(
+                            get: {
+                                // Convert selectedDateInSeries to Date
+                                guard let simpleDate = selectedDateInSeries else {
+                                    return Date()
+                                }
+                                var components = DateComponents()
+                                components.year = simpleDate.year
+                                components.month = simpleDate.month
+                                components.day = simpleDate.day
+                                return Calendar.current.date(from: components) ?? Date()
+                            },
+                            set: { newDate in
+                                // Convert Date to SimpleDate
+                                let calendar = Calendar.current
+                                let year = calendar.component(.year, from: newDate)
+                                let month = calendar.component(.month, from: newDate)
+                                let day = calendar.component(.day, from: newDate)
+                                let newSimpleDate = SimpleDate(year: year, month: month, day: day)
+                                
+                                // Only set if this date exists in the series
+                                if sortedDatesForSeries.contains(newSimpleDate) {
+                                    selectedDateInSeries = newSimpleDate
+                                }
+                            }
+                        ),
+                        in: {
+                            // Create date range from available dates
+                            guard let firstDate = sortedDatesForSeries.first,
+                                  let lastDate = sortedDatesForSeries.last else {
+                                return Date()...Date()
+                            }
+                            
+                            var firstComponents = DateComponents()
+                            firstComponents.year = firstDate.year
+                            firstComponents.month = firstDate.month
+                            firstComponents.day = firstDate.day
+                            
+                            var lastComponents = DateComponents()
+                            lastComponents.year = lastDate.year
+                            lastComponents.month = lastDate.month
+                            lastComponents.day = lastDate.day
+                            
+                            let startDate = Calendar.current.date(from: firstComponents) ?? Date()
+                            let endDate = Calendar.current.date(from: lastComponents) ?? Date()
+                            
+                            return startDate...endDate
+                        }(),
+                        displayedComponents: [.date]
+                    )
+                    .datePickerStyle(.graphical)
+                    .padding()
+                    
+                    Spacer()
+                }
+                .navigationTitle("Select Date")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            showingDatePicker = false
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
         }
     }
     
@@ -1169,6 +1650,7 @@ struct ExploreView: View {
     }
     
     @Namespace private var tabNamespace
+    @Namespace private var viewToggleNamespace
     
     // MARK: - Public Events View (Series-based)
     private var publicEventsView: some View {
@@ -1182,6 +1664,7 @@ struct ExploreView: View {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                 showingSeriesView = true
                                 selectedSeriesName = nil
+                                selectedDateInSeries = nil
                             }
                         }) {
                             Image(systemName: "chevron.left")
@@ -1223,61 +1706,72 @@ struct ExploreView: View {
                 
                 Spacer()
                 
-                // --- Centered Date Navigation ---
-                HStack(spacing: 16) {
-                    // Previous Date Button
-                    Button(action: {
-                        navigateToDate(direction: -1)
-                    }) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(canNavigateToDate(direction: -1) ? 0.1 : 0.05))
-                                .frame(width: 32, height: 32)
-                            
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(canNavigateToDate(direction: -1) ? .white : .white.opacity(0.3))
+                // --- Centered Navigation ---
+                if showingSeriesView {
+                    // Simple title for main events view
+                    Text("Series")
+                        .font(.system(size: 18, weight: .bold, design: .default))
+                        .foregroundColor(.white)
+                } else {
+                    // Date Navigation for series detail view
+                    HStack(spacing: 16) {
+                        // Previous Date Button
+                        Button(action: {
+                            navigateToDateInSeries(direction: -1)
+                        }) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.white.opacity(canNavigateToDateInSeries(direction: -1) ? 0.1 : 0.05))
+                                    .frame(width: 32, height: 32)
+                                
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(canNavigateToDateInSeries(direction: -1) ? .white : .white.opacity(0.3))
+                            }
                         }
-                    }
-                    .disabled(!canNavigateToDate(direction: -1))
-                    
-                    // Date Display
-                    VStack(alignment: .center, spacing: 2) {
-                        if showingSeriesView {
-                            Text("Events On")
-                                .font(.system(size: 13, weight: .medium, design: .default))
-                                .foregroundColor(.white.opacity(0.7))
+                        .disabled(!canNavigateToDateInSeries(direction: -1))
+                        
+                        // Date Display (Clickable)
+                        Button(action: {
+                            showingDatePicker = true
+                        }) {
+                            VStack(alignment: .center, spacing: 2) {
+                                Text(selectedSeriesName ?? "Events")
+                                    .font(.system(size: 13, weight: .medium, design: .default))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .lineLimit(1)
+                                Text(currentDateInSeriesDisplay)
+                                   .font(.system(size: 16, weight: .bold, design: .default))
+                                    .foregroundColor(.white)
+                                   .lineLimit(1)
+                            }
                         }
-                        Text(selectedDateDisplayString)
-                           .font(.system(size: 16, weight: .bold, design: .default))
-                            .foregroundColor(.white)
-                           .lineLimit(1)
-                    }
-                    .frame(minWidth: 120)
-                    
-                    // Next Date Button
-                    Button(action: {
-                        navigateToDate(direction: 1)
-                    }) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(canNavigateToDate(direction: 1) ? 0.1 : 0.05))
-                                .frame(width: 32, height: 32)
-                            
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(canNavigateToDate(direction: 1) ? .white : .white.opacity(0.3))
+                        .frame(minWidth: 120)
+                        
+                        // Next Date Button
+                        Button(action: {
+                            navigateToDateInSeries(direction: 1)
+                        }) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.white.opacity(canNavigateToDateInSeries(direction: 1) ? 0.1 : 0.05))
+                                    .frame(width: 32, height: 32)
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(canNavigateToDateInSeries(direction: 1) ? .white : .white.opacity(0.3))
+                            }
                         }
+                        .disabled(!canNavigateToDateInSeries(direction: 1))
                     }
-                    .disabled(!canNavigateToDate(direction: 1))
                 }
                 
                 Spacer()
                 
-                // Trailing Section - Filter or Spacer
+                // Trailing Section - Filter
                 HStack {
                     if !showingSeriesView {
-                        // Buy-in Filter (Simple)
+                        // Buy-in Filter
                         Menu {
                             ForEach(BuyinRange.allCases) { range in
                                 Button(action: {
@@ -1413,6 +1907,7 @@ struct ExploreView: View {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                         selectedSeriesName = seriesName
                                         showingSeriesView = false
+                                        selectedDateInSeries = nil // Reset date selection for new series
                                     }
                                 }
                             )
@@ -1430,7 +1925,94 @@ struct ExploreView: View {
     
     // MARK: - Events Within Series View
     private var eventsWithinSeriesView: some View {
-        ScrollView {
+        VStack(spacing: 0) {
+            // View Toggle Bar (Box vs List)
+            HStack(spacing: 0) {
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        isListViewMode = false
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "rectangle.grid.1x2")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("Box")
+                            .font(.system(size: 13, weight: .semibold, design: .default))
+                    }
+                    .foregroundColor(!isListViewMode ? .white : .white.opacity(0.6))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(
+                        ZStack {
+                            if !isListViewMode {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color(red: 64/255, green: 156/255, blue: 255/255),
+                                                Color(red: 100/255, green: 180/255, blue: 255/255)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .matchedGeometryEffect(id: "viewToggleBackground", in: viewToggleNamespace)
+                            }
+                        }
+                    )
+                }
+                
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        isListViewMode = true
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("List")
+                            .font(.system(size: 13, weight: .semibold, design: .default))
+                    }
+                    .foregroundColor(isListViewMode ? .white : .white.opacity(0.6))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(
+                        ZStack {
+                            if isListViewMode {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color(red: 64/255, green: 156/255, blue: 255/255),
+                                                Color(red: 100/255, green: 180/255, blue: 255/255)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .matchedGeometryEffect(id: "viewToggleBackground", in: viewToggleNamespace)
+                            }
+                        }
+                    )
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 3)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.white.opacity(0.03))
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                }
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            
+
+            
+        ScrollViewReader { proxy in
+            ScrollView {
             if eventsForSelectedSeries.isEmpty {
                 VStack {
                     Spacer(minLength: 50)
@@ -1447,26 +2029,135 @@ struct ExploreView: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                VStack(spacing: 14) {
-                    ForEach(eventsForSelectedSeries) { event in 
-                        EventCardView(event: event, onSelect: {
-                            if let onEventSelected = onEventSelected {
-                                onEventSelected(event) // Call the callback if provided
-                            } else {
-                                // Show detail view
-                                selectedEvent = event
-                                showingEventDetail = true
+            } else if isListViewMode {
+                // List View - Show all dates with dividers
+                LazyVStack(spacing: 0) {
+                    ForEach(sortedDatesForSeries, id: \.self) { date in
+                        if let eventsForDate = eventsGroupedByDateForSeries[date] {
+                            // Date Section Header
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(date.displayMedium)
+                                        .font(.system(size: 18, weight: .bold, design: .default))
+                                        .foregroundColor(.white)
+                                    
+                                    Text(relativeDateStringForSimpleDate(date))
+                                        .font(.system(size: 13, weight: .medium, design: .default))
+                                        .foregroundColor(.gray)
+                                }
+                                
+                                Spacer()
+                                
+                                // Event count badge
+                                Text("\(eventsForDate.count)")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 24, height: 24)
+                                    .background(Color(red: 64/255, green: 156/255, blue: 255/255))
+                                    .clipShape(Circle())
                             }
-                        })
+                            .padding(.horizontal, 20)
+                            .padding(.top, date == sortedDatesForSeries.first ? 8 : 24)
+                            .padding(.bottom, 12)
+                            .id("date_\(date.year)_\(date.month)_\(date.day)") // ID for scrolling
+                            
+                            // Events for this date - List View
+                            VStack(spacing: 8) {
+                                ForEach(eventsForDate.sorted { $0.event_name < $1.event_name }) { event in
+                                    EventListItemView(event: event, onSelect: {
+                                        if let onEventSelected = onEventSelected {
+                                            onEventSelected(event)
+                                        } else {
+                                            selectedEvent = event
+                                            showingEventDetail = true
+                                        }
+                                    })
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                    
+                    // Bottom padding
+                    Color.clear.frame(height: 100)
+                }
+            } else {
+                // Box View - Show only events for selected date
+                VStack(spacing: 14) {
+                    let currentDate = selectedDateInSeries ?? sortedDatesForSeries.first
+                    if let currentDate = currentDate, 
+                       let eventsForCurrentDate = eventsGroupedByDateForSeries[currentDate] {
+                        ForEach(eventsForCurrentDate.sorted { $0.event_name < $1.event_name }) { event in
+                            EventCardView(event: event, onSelect: {
+                                if let onEventSelected = onEventSelected {
+                                    onEventSelected(event)
+                                } else {
+                                    selectedEvent = event
+                                    showingEventDetail = true
+                                }
+                            })
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 100)
             }
+            }
+            .refreshable {
+                viewModel.refreshEvents()
+            }
+            .onChange(of: selectedDateInSeries) { newDate in
+                if let date = newDate, isListViewMode {
+                    withAnimation(.easeInOut(duration: 0.5)) {
+                        proxy.scrollTo("date_\(date.year)_\(date.month)_\(date.day)", anchor: .top)
+                    }
+                }
+            }
+            .onAppear {
+                // Set initial selected date to current date if available, otherwise first date
+                if selectedDateInSeries == nil && !sortedDatesForSeries.isEmpty {
+                    // Try to find current date in the series
+                    if sortedDatesForSeries.contains(currentSystemSimpleDate) {
+                        selectedDateInSeries = currentSystemSimpleDate
+                    } else {
+                        selectedDateInSeries = sortedDatesForSeries.first
+                    }
+                }
+            }
         }
-        .refreshable {
-            viewModel.refreshEvents()
+        }
+    }
+    
+    // Helper function to convert SimpleDate to relative date string
+    private func relativeDateStringForSimpleDate(_ simpleDate: SimpleDate) -> String {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        
+        // Convert SimpleDate to Date for comparison
+        var dateComponents = DateComponents()
+        dateComponents.year = simpleDate.year
+        dateComponents.month = simpleDate.month
+        dateComponents.day = simpleDate.day
+        
+        guard let eventDate = calendar.date(from: dateComponents) else {
+            return ""
+        }
+        
+        let eventDateStart = calendar.startOfDay(for: eventDate)
+        
+        if calendar.isDate(eventDateStart, inSameDayAs: today) {
+            return "Today"
+        } else if calendar.isDate(eventDateStart, inSameDayAs: calendar.date(byAdding: .day, value: 1, to: today)!) {
+            return "Tomorrow"
+        } else if calendar.isDate(eventDateStart, inSameDayAs: calendar.date(byAdding: .day, value: -1, to: today)!) {
+            return "Yesterday"
+        } else {
+            let daysFromToday = calendar.dateComponents([.day], from: today, to: eventDateStart).day ?? 0
+            if daysFromToday > 0 {
+                return "In \(daysFromToday) day\(daysFromToday == 1 ? "" : "s")"
+            } else {
+                return "\(-daysFromToday) day\(daysFromToday == -1 ? "" : "s") ago"
+            }
         }
     }
     
@@ -1489,6 +2180,32 @@ struct ExploreView: View {
             if newIndex >= 0 && newIndex < allAvailableDates.count {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     selectedSimpleDate = allAvailableDates[newIndex].simpleDate
+                }
+            }
+        }
+    }
+    
+    // MARK: - Series Date Navigation Helpers
+    private func canNavigateToDateInSeries(direction: Int) -> Bool {
+        let currentDate = selectedDateInSeries ?? sortedDatesForSeries.first
+        guard let currentDate = currentDate else { return false }
+        
+        if let currentIndex = sortedDatesForSeries.firstIndex(of: currentDate) {
+            let newIndex = currentIndex + direction
+            return newIndex >= 0 && newIndex < sortedDatesForSeries.count
+        }
+        return false
+    }
+    
+    private func navigateToDateInSeries(direction: Int) {
+        let currentDate = selectedDateInSeries ?? sortedDatesForSeries.first
+        guard let currentDate = currentDate else { return }
+        
+        if let currentIndex = sortedDatesForSeries.firstIndex(of: currentDate) {
+            let newIndex = currentIndex + direction
+            if newIndex >= 0 && newIndex < sortedDatesForSeries.count {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    selectedDateInSeries = sortedDatesForSeries[newIndex]
                 }
             }
         }
@@ -1808,17 +2525,20 @@ struct ExploreView: View {
         
         // Add Public Event RSVPs (only active ones)
         for rsvp in userEventService.publicEventRSVPs {
-            // Calculate if this public event is completed (12 hours after start)
-            let completionTime = Calendar.current.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
-            let now = Date()
-            
-            // Only include if not completed
-            if now < completionTime {
-                // Look up the original event from viewModel.allEvents to get complete data
-                if let originalEvent = viewModel.allEvents.first(where: { $0.id == rsvp.publicEventId }) {
+            // Look up the original event to get complete timing data
+            if let originalEvent = viewModel.allEvents.first(where: { $0.id == rsvp.publicEventId }) {
+                // Only include if not completed using sophisticated timing
+                if originalEvent.currentStatus != .completed {
                     combinedItems.append(CombinedEventItem(publicEvent: originalEvent, rsvpDate: rsvp.eventDate))
-                } else {
-                    // Fallback: Create event from RSVP data if original not found
+                }
+            } else {
+                // Fallback to simple 12-hour rule if event not found
+                let completionTime = Calendar.current.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
+                let now = Date()
+                
+                // Only include if not completed
+                if now < completionTime {
+                    // Create event from RSVP data if original not found
                     let fallbackEvent = Event(
                         id: rsvp.publicEventId,
                         buyin_string: "TBD",
@@ -1832,7 +2552,19 @@ struct ExploreView: View {
                         description: nil,
                         time: nil,
                         buyin_usd: nil,
-                        casino: nil
+                        casino: nil,
+                        chipsFormatted: nil,
+                        game: nil,
+                        guarantee: nil,
+                        guaranteeFormatted: nil,
+                        lateRegistration: nil,
+                        levelLength: nil,
+                        levelsFormatted: nil,
+                        pdfLink: nil,
+                        seriesEnd: nil,
+                        seriesStart: nil,
+                        startingChips: nil,
+                        imageUrl: nil
                     )
                     
                     combinedItems.append(CombinedEventItem(publicEvent: fallbackEvent, rsvpDate: rsvp.eventDate))
@@ -1860,12 +2592,15 @@ struct ExploreView: View {
     
     // MARK: - Completed Public Event RSVPs
     private var completedPublicEventRSVPs: [PublicEventRSVP] {
-        let calendar = Calendar.current
-        let now = Date()
-        
         return userEventService.publicEventRSVPs.filter { rsvp in
-            let completionTime = calendar.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
-            return now >= completionTime
+            // Look up the original event to get complete timing data
+            if let originalEvent = viewModel.allEvents.first(where: { $0.id == rsvp.publicEventId }) {
+                return originalEvent.currentStatus == .completed
+            } else {
+                // Fallback to simple 12-hour rule if event not found
+                let completionTime = Calendar.current.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
+                return Date() >= completionTime
+            }
         }
     }
     

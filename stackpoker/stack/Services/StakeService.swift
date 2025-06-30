@@ -67,6 +67,25 @@ class StakeService: ObservableObject {
         }
     }
     
+    // NEW: Fetch stakes where user is specifically the staked player
+    func fetchStakesForUser(userId: String, asStakedPlayer: Bool) async throws -> [Stake] {
+        if asStakedPlayer {
+            // Only fetch stakes where the user is the staked player
+            let stakedPlayerQuery = stakesCollectionRef.whereField(Stake.CodingKeys.stakedPlayerUserId.rawValue, isEqualTo: userId)
+            
+            do {
+                let snapshot = try await stakedPlayerQuery.getDocuments()
+                let stakes = snapshot.documents.compactMap { try? $0.data(as: Stake.self) }
+                return stakes.sorted { $0.proposedAt > $1.proposedAt }
+            } catch {
+                throw error
+            }
+        } else {
+            // Fallback to the existing method that fetches all stakes
+            return try await fetchStakes(forUser: userId)
+        }
+    }
+    
     // MARK: - Read (single session fetch by ID)
     func fetchStakesForSession(_ sessionId: String) async throws -> [Stake] {
         // Simple query by sessionId (document ID of the session)
@@ -82,13 +101,39 @@ class StakeService: ObservableObject {
     
     // MARK: - Read stakes by live session UUID (active sessions)
     func fetchStakesForLiveSession(_ liveSessionId: String) async throws -> [Stake] {
-        // Stakes saved during an in-progress live session are keyed by `liveSessionId` rather than a session document ID.
-        let query = stakesCollectionRef.whereField("liveSessionId", isEqualTo: liveSessionId)
+        // Stakes saved during an in-progress live session can be keyed by either:
+        // 1. `liveSessionId` field (for paused sessions)
+        // 2. `sessionId` field (for immediately persisted stakes)
+        
+        print("StakeService: Fetching stakes for live session ID: \(liveSessionId)")
+        
+        // First try to find by liveSessionId field
+        let liveSessionQuery = stakesCollectionRef.whereField("liveSessionId", isEqualTo: liveSessionId)
+        var stakes: [Stake] = []
+        
         do {
-            let snapshot = try await query.getDocuments()
-            let stakes = snapshot.documents.compactMap { try? $0.data(as: Stake.self) }
-            return stakes.sorted { $0.proposedAt > $1.proposedAt }
+            let liveSessionSnapshot = try await liveSessionQuery.getDocuments()
+            stakes = liveSessionSnapshot.documents.compactMap { try? $0.data(as: Stake.self) }
+            print("StakeService: Found \(stakes.count) stakes with liveSessionId field")
+            
+            // Also try to find by sessionId field (for immediately persisted stakes)
+            let sessionIdQuery = stakesCollectionRef.whereField(Stake.CodingKeys.sessionId.rawValue, isEqualTo: liveSessionId)
+            let sessionIdSnapshot = try await sessionIdQuery.getDocuments()
+            let sessionIdStakes = sessionIdSnapshot.documents.compactMap { try? $0.data(as: Stake.self) }
+            print("StakeService: Found \(sessionIdStakes.count) stakes with sessionId field")
+            
+            // Combine and deduplicate
+            var allStakes = stakes
+            for stake in sessionIdStakes {
+                if !allStakes.contains(where: { $0.id == stake.id }) {
+                    allStakes.append(stake)
+                }
+            }
+            
+            print("StakeService: Total unique stakes found: \(allStakes.count)")
+            return allStakes.sorted { $0.proposedAt > $1.proposedAt }
         } catch {
+            print("StakeService: Error fetching stakes: \(error)")
             throw error
         }
     }
@@ -277,4 +322,30 @@ class StakeService: ObservableObject {
         try await batch.commit()
     }
     */
+    
+    // NEW: Callback for when stakes are updated - allows other services to recalculate adjusted profits
+    var onStakeUpdated: ((String) -> Void)? // Callback with sessionId
+    
+    // NEW: Helper method to trigger adjusted profit recalculation
+    func notifyStakeUpdated(for sessionId: String) {
+        onStakeUpdated?(sessionId)
+    }
+    
+    // MARK: - Enhanced methods that trigger adjusted profit recalculation
+    
+    func addStakeWithAdjustedProfitUpdate(_ stake: Stake) async throws {
+        try await addStake(stake)
+        notifyStakeUpdated(for: stake.sessionId)
+    }
+    
+    func updateStakeWithAdjustedProfitUpdate(stakeId: String, updateData: [String: Any]) async throws {
+        // Get the stake first to know which session to update
+        let stakeDoc = try await stakesCollectionRef.document(stakeId).getDocument()
+        guard let currentStake = try? stakeDoc.data(as: Stake.self) else {
+            throw NSError(domain: "StakeService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Stake not found"])
+        }
+        
+        try await updateStake(stakeId: stakeId, updateData: updateData)
+        notifyStakeUpdated(for: currentStake.sessionId)
+    }
 } 

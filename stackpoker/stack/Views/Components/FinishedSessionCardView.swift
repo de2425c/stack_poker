@@ -15,20 +15,53 @@ struct FinishedSessionCardView: View {
     var onTitleChanged: ((String) -> Void)? = nil // Optional callback for title changes
     
     // MARK: - State
-    @State private var isEditingTitle = false
+    @State private var showingEditAlert = false
     @State private var editedTitle: String = ""
-    @State private var showingEditField = false
 
     // MARK: - Derived Properties
     private var profit: Double { cashOut - buyIn }
     private var profitColor: Color { profit < 0 ? .red : .green }
-    // This now correctly formats negative profit, e.g., "-$250"
+    // This now correctly formats negative profit with K/M logic, e.g., "-$250", "$1.2K", "$1.5M"
     private var formattedProfit: String {
+        let absProfit = abs(profit)
         let sign = profit < 0 ? "-" : ""
-        return "\(sign)$\(Int(abs(profit)))"
+        
+        if absProfit >= 1000000 {
+            let millions = absProfit / 1000000
+            return "\(sign)$\(String(format: "%.1f", millions))M"
+        } else if absProfit >= 10000 {
+            let thousands = absProfit / 1000
+            return "\(sign)$\(String(format: "%.1f", thousands))K"
+        } else {
+            return "\(sign)$\(Int(absProfit))"
+        }
     }
     private var formattedBuyIn: String { "$\(Int(buyIn))" }
     private var formattedCashOut: String { "$\(Int(cashOut))" }
+    
+    // Round time to closest hour for cleaner display
+    private var roundedDuration: String {
+        // Extract hours and minutes from duration string (e.g., "4H 15M")
+        let components = duration.uppercased().components(separatedBy: " ")
+        guard components.count >= 2,
+              let firstComponent = components.first else {
+            return duration.uppercased()
+        }
+        
+        let hoursStr = firstComponent.replacingOccurrences(of: "H", with: "")
+        let minutesStr = components[1].replacingOccurrences(of: "M", with: "")
+        
+        guard let hours = Int(hoursStr),
+              let minutes = Int(minutesStr) else {
+            return duration.uppercased()
+        }
+        
+        // Round to nearest hour
+        let totalMinutes = hours * 60 + minutes
+        let roundedHours = Int(round(Double(totalMinutes) / 60.0))
+        
+        return "\(roundedHours)H"
+    }
 
     // MARK: - Body
     var body: some View {
@@ -51,53 +84,22 @@ struct FinishedSessionCardView: View {
                         // Title block with wrapping text and edit button
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(alignment: .top, spacing: 8) {
-                                if isEditingTitle {
-                                    // Edit mode: Show text field
-                                    TextField("Game name", text: $editedTitle)
-                                        .font(.system(size: 22, weight: .heavy))
-                                        .foregroundColor(.white)
-                                        .textFieldStyle(PlainTextFieldStyle())
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .fill(Color.white.opacity(0.1))
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 6)
-                                                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
-                                                )
-                                        )
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .onSubmit {
-                                            saveTitle()
-                                        }
-                                        .onAppear {
-                                            // Focus the text field when it appears
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                                UIApplication.shared.sendAction(#selector(UIResponder.becomeFirstResponder), to: nil, from: nil, for: nil)
-                                            }
-                                        }
-                                } else {
-                                    // Display mode: Show title text
-                                    Text(gameName.uppercased())
-                                        .font(.system(size: 22, weight: .heavy))
-                                        .foregroundColor(.white)
-                                        .lineLimit(3)
-                                        .minimumScaleFactor(0.8)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .onTapGesture {
-                                            startEditing()
-                                        }
-                                }
+                                // Always show title text (no inline editing)
+                                Text(gameName.uppercased())
+                                    .font(.system(size: 22, weight: .heavy))
+                                    .foregroundColor(.white)
+                                    .lineLimit(3)
+                                    .minimumScaleFactor(0.8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .onTapGesture {
+                                        showEditAlert()
+                                    }
                                 
                                 if onEditTitle != nil || onTitleChanged != nil {
                                     Button(action: {
-                                        if isEditingTitle {
-                                            saveTitle()
-                                        } else {
-                                            startEditing()
-                                        }
+                                        showEditAlert()
                                     }) {
-                                        Image(systemName: isEditingTitle ? "checkmark" : "pencil")
+                                        Image(systemName: "pencil")
                                             .font(.system(size: 14, weight: .medium))
                                             .foregroundColor(.white.opacity(0.7))
                                             .frame(width: 20, height: 20)
@@ -126,12 +128,12 @@ struct FinishedSessionCardView: View {
                                 .foregroundColor(.white.opacity(0.6))
                                 .tracking(1)
                             Text(formattedProfit)
-                                .font(.system(size: 28, weight: .bold))
+                                .font(.system(size: 26, weight: .bold))
                                 .foregroundColor(profitColor)
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.8)
+                                .minimumScaleFactor(0.7)
                         }
-                        .frame(width: geo.size.width * 0.25) // Reduced to push PNL further right
+                        .frame(minWidth: 100, maxWidth: 120) // Fixed width to prevent cutoff
                     }
 
                     Spacer()
@@ -140,7 +142,7 @@ struct FinishedSessionCardView: View {
                     HStack(spacing: 24) {
                         MetricView(label: "BUY-IN", value: formattedBuyIn)
                         MetricView(label: "CASHOUT", value: formattedCashOut)
-                        MetricView(label: "TIME", value: duration.uppercased())
+                        MetricView(label: "TIME", value: roundedDuration)
                         Spacer() // Pushes metrics to the left
                     }
                 }
@@ -167,14 +169,23 @@ struct FinishedSessionCardView: View {
         .onAppear {
             editedTitle = gameName
         }
+        .alert("Edit Game Name", isPresented: $showingEditAlert) {
+            TextField("Game name", text: $editedTitle)
+            Button("Cancel", role: .cancel) {
+                editedTitle = gameName // Reset to original
+            }
+            Button("Save") {
+                saveTitle()
+            }
+        } message: {
+            Text("Enter a new name for this game")
+        }
     }
     
     // MARK: - Helper Functions
-    private func startEditing() {
+    private func showEditAlert() {
         editedTitle = gameName
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isEditingTitle = true
-        }
+        showingEditAlert = true
     }
     
     private func saveTitle() {
@@ -182,13 +193,6 @@ struct FinishedSessionCardView: View {
         if !trimmedTitle.isEmpty {
             onTitleChanged?(trimmedTitle)
         }
-        
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isEditingTitle = false
-        }
-        
-        // Dismiss keyboard
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 

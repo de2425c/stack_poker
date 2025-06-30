@@ -52,12 +52,33 @@ struct UserEventCardView: View {
     // MARK: - Resume Session Card
     private var resumeSessionCard: some View {
         Button(action: {
-            // Resume the session
+            // Resume the session using new parked sessions system
             Task {
                 await MainActor.run {
-                    print("[UserEventCardView] Resuming session for Day \(sessionStore.liveSession.currentDay + 1)")
-                    // Resume the session FIRST to ensure proper state
-                    sessionStore.resumeFromNextDay()
+                    print("[UserEventCardView] Attempting to resume session")
+                    
+                    // First, try to find a parked session that matches this resume event
+                    if let associatedSessionId = event.associatedLiveSessionId {
+                        // Look for a parked session with this session ID
+                        let matchingParkedKey = sessionStore.parkedSessions.keys.first { key in
+                            key.contains(associatedSessionId)
+                        }
+                        
+                        if let parkedKey = matchingParkedKey {
+                            print("[UserEventCardView] Found parked session: \(parkedKey)")
+                            sessionStore.restoreParkedSession(key: parkedKey)
+                        } else {
+                            // Fallback: check if there's an active session to resume (old system)
+                            if sessionStore.liveSession.buyIn > 0 && sessionStore.liveSession.pausedForNextDay {
+                                print("[UserEventCardView] Resuming from old system")
+                                sessionStore.resumeFromNextDay()
+                            } else {
+                                print("[UserEventCardView] No session found to resume")
+                            }
+                        }
+                    } else {
+                        print("[UserEventCardView] No associated session ID found")
+                    }
                 }
                 
                 // Remove the resume event AFTER resuming
@@ -276,28 +297,28 @@ struct UserEventCardView: View {
         }
     }
     
-    private func statusColor(_ status: UserEvent.EventStatus) -> Color {
+    private func statusGradientColors(_ status: UserEvent.EventStatus) -> [Color] {
         switch status {
-        case .upcoming: return Color(red: 64/255, green: 156/255, blue: 255/255)
-        case .active: return .orange
-        case .completed: return Color.blue.opacity(0.8)
-        case .cancelled: return Color.red.opacity(0.8)
+        case .upcoming:
+            return [Color(red: 123/255, green: 255/255, blue: 99/255), Color(red: 100/255, green: 230/255, blue: 80/255)]
+        case .lateRegistration:
+            return [Color(red: 255/255, green: 149/255, blue: 0/255), Color(red: 255/255, green: 179/255, blue: 64/255)]
+        case .active:
+            return [Color(red: 255/255, green: 59/255, blue: 48/255), Color(red: 255/255, green: 89/255, blue: 78/255)]
+        case .completed:
+            return [Color(red: 64/255, green: 156/255, blue: 255/255), Color(red: 100/255, green: 180/255, blue: 255/255)]
+        case .cancelled:
+            return [Color.gray, Color.gray.opacity(0.8)]
         }
     }
     
-    private func statusGradientColors(_ status: UserEvent.EventStatus) -> [Color] {
+    private func statusColor(_ status: UserEvent.EventStatus) -> Color {
         switch status {
-        case .upcoming: 
-            return [
-                Color(red: 64/255, green: 156/255, blue: 255/255),
-                Color(red: 100/255, green: 180/255, blue: 255/255)
-            ]
-        case .active: 
-            return [.orange, Color.orange.opacity(0.8)]
-        case .completed: 
-            return [Color.blue.opacity(0.8), Color.blue.opacity(0.6)]
-        case .cancelled: 
-            return [Color.red.opacity(0.8), Color.red.opacity(0.6)]
+        case .upcoming: return Color(red: 123/255, green: 255/255, blue: 99/255)
+        case .lateRegistration: return Color(red: 255/255, green: 149/255, blue: 0/255)
+        case .active: return Color(red: 255/255, green: 59/255, blue: 48/255)
+        case .completed: return Color(red: 64/255, green: 156/255, blue: 255/255)
+        case .cancelled: return .gray
         }
     }
 }

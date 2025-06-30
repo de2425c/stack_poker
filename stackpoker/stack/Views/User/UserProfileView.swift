@@ -5,12 +5,19 @@ import FirebaseFirestore
 
 struct UserProfileView: View {
     let userId: String // The ID of the profile being viewed
-    @StateObject private var profilePostService = PostService() // For fetching user's posts
+    @StateObject private var profilePostService = PostService(profileMode: true) // For fetching user's posts - won't respond to follow changes
+    @StateObject private var publicSessionService = PublicSessionService() // For fetching user's public sessions
     @EnvironmentObject var userService: UserService // To get user details and current user info
 
     // State for the follow button
     @State private var isFollowing: Bool = false // Placeholder: actual value needs to be fetched
     @State private var isProcessingFollow: Bool = false
+    
+    // State for post notifications
+    @State private var postNotificationsEnabled: Bool = false
+    @State private var isProcessingNotifications: Bool = false
+    @State private var showingPostNotificationPrompt: Bool = false
+    @State private var targetUserName: String = ""
     
     // State for blocking functionality
     @State private var showingBlockAlert: Bool = false
@@ -23,6 +30,9 @@ struct UserProfileView: View {
     // Active challenges for the user
     @State private var activeChallenges: [Challenge] = []
     
+    // User's public sessions
+    @State private var userPublicSessions: [PublicLiveSession] = []
+    
     // State for edit profile
     @State private var showingEditProfile = false
 
@@ -32,6 +42,48 @@ struct UserProfileView: View {
     
     private var isCurrentUserProfile: Bool {
         userId == loggedInUserId
+    }
+    
+    // Combined content type for profile activity
+    enum ProfileContentType: Identifiable {
+        case post(Post)
+        case publicSession(PublicLiveSession)
+        
+        var id: String {
+            switch self {
+            case .post(let post):
+                return "post_\(post.id ?? "")"
+            case .publicSession(let session):
+                return "session_\(session.id)"
+            }
+        }
+        
+        var timestamp: Date {
+            switch self {
+            case .post(let post):
+                return post.createdAt
+            case .publicSession(let session):
+                return session.createdAt
+            }
+        }
+    }
+    
+    // Computed property to get combined and sorted user activity
+    private var combinedUserActivity: [ProfileContentType] {
+        var combined: [ProfileContentType] = []
+        
+        // Add posts
+        combined.append(contentsOf: profilePostService.posts.map { .post($0) })
+        print("📝 [UserProfileView] Added \(profilePostService.posts.count) posts to combined activity")
+        
+        // Add public sessions
+        combined.append(contentsOf: userPublicSessions.map { .publicSession($0) })
+        print("🎮 [UserProfileView] Added \(userPublicSessions.count) public sessions to combined activity")
+        
+        // Sort by timestamp (newest first)
+        let sorted = combined.sorted { $0.timestamp > $1.timestamp }
+        print("📊 [UserProfileView] Total combined activity items: \(sorted.count)")
+        return sorted
     }
 
     var body: some View {
@@ -72,22 +124,44 @@ struct UserProfileView: View {
                         StatView(count: localFollowingCount, label: "Following")
                         Spacer()
                         if !isCurrentUserProfile {
-                                                    Button(action: toggleFollow) {
-                            Text(isFollowing ? "Unfollow" : "Follow")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(isFollowing ? .white : .black)
-                                .lineLimit(1)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(isFollowing ? Color.gray.opacity(0.7) : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                .cornerRadius(20)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .stroke(isFollowing ? Color.gray : Color.clear, lineWidth: 1)
-                                )
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .disabled(isProcessingFollow)
+                            Button(action: toggleFollow) {
+                                Text(isFollowing ? "Unfollow" : "Follow")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(isFollowing ? .white : .black)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .background(isFollowing ? Color.gray.opacity(0.7) : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                    .cornerRadius(20)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(isFollowing ? Color.gray : Color.clear, lineWidth: 1)
+                                    )
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .disabled(isProcessingFollow)
+                            
+                            // Post Notifications Toggle (only show when following)
+                            if isFollowing {
+                                Button(action: { 
+                                    // Show popup to ask about notifications
+                                    if let user = userService.loadedUsers[userId] {
+                                        targetUserName = user.username
+                                    } else {
+                                        targetUserName = "this user"
+                                    }
+                                    showingPostNotificationPrompt = true
+                                }) {
+                                    Image(systemName: postNotificationsEnabled ? "bell.fill" : "bell.slash")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 8)
+                                        .background(postNotificationsEnabled ? Color.blue.opacity(0.7) : Color.gray.opacity(0.5))
+                                        .cornerRadius(20)
+                                }
+                                .disabled(isProcessingNotifications)
+                            }
                             
                             // Block Button
                             Button(action: { 
@@ -101,6 +175,8 @@ struct UserProfileView: View {
                                     .background(Color.red.opacity(0.7))
                                     .cornerRadius(20)
                             }
+                            
+
                         } else {
                             // Edit Profile button for current user
                             Button(action: { 
@@ -120,14 +196,38 @@ struct UserProfileView: View {
                     }
                     .padding(.horizontal)
 
-                    // Bio
-                    if let bio = user.bio, !bio.isEmpty {
-                        Text(bio)
-                            .font(.body)
-                            .foregroundColor(.white.opacity(0.9))
-                            .padding(.horizontal)
-                            .lineLimit(nil) // Allow multi-line bio
+                    // Bio and hyperlink combined
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let bio = user.bio, !bio.isEmpty {
+                            Text(bio)
+                                .font(.body)
+                                .foregroundColor(.white.opacity(0.9))
+                                .lineLimit(nil) // Allow multi-line bio
+                        }
+                        
+                        // Simple hyperlink - just colored text
+                        if let hyperlinkText = user.hyperlinkText, !hyperlinkText.isEmpty,
+                           let hyperlinkURL = user.hyperlinkURL, !hyperlinkURL.isEmpty {
+                            Button(action: {
+                                // Ensure URL has proper scheme
+                                var urlString = hyperlinkURL
+                                if !urlString.lowercased().hasPrefix("http://") && !urlString.lowercased().hasPrefix("https://") {
+                                    urlString = "https://" + urlString
+                                }
+                                
+                                if let url = URL(string: urlString) {
+                                    UIApplication.shared.open(url)
+                                }
+                            }) {
+                                Text(hyperlinkText)
+                                    .font(.body)
+                                    .foregroundColor(.blue)
+                                    .underline()
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
                     }
+                    .padding(.horizontal)
                     
                     // Active Challenges Section
                     if !activeChallenges.isEmpty {
@@ -156,29 +256,46 @@ struct UserProfileView: View {
                         .foregroundColor(.white) // Ensure text is white
                         .padding([.horizontal, .top])
                     
-                    if profilePostService.posts.isEmpty && !profilePostService.isLoading {
-                        Text("This user hasn't made any posts yet.")
+                    if combinedUserActivity.isEmpty && !profilePostService.isLoading {
+                        Text("This user hasn't shared any activity yet.")
                             .foregroundColor(.gray)
                             .padding()
                     } else if profilePostService.isLoading {
                         ProgressView().padding()
                     }
                     
-                    // List of user's posts (using existing PostView)
-                    ForEach(profilePostService.posts) { post in
-                        NavigationLink(destination: PostDetailView(post: post, userId: loggedInUserId ?? "").environmentObject(userService).environmentObject(profilePostService)) {
-                            PostCardView(
-                                post: post, 
-                                onLike: { 
-                                    Task { try? await profilePostService.toggleLike(postId: post.id ?? "", userId: loggedInUserId ?? "") } 
-                                }, 
-                                onComment: { /* Comment handling for profile view if needed */ }, 
-                                isCurrentUser: post.userId == loggedInUserId,
-                                userId: loggedInUserId ?? "" // Pass logged-in user ID
-                            )
+                    // List of user's activity (posts and public sessions)
+                    ForEach(combinedUserActivity) { content in
+                        VStack(spacing: 0) {
+                            switch content {
+                            case .post(let post):
+                                NavigationLink(destination: PostDetailView(post: post, userId: loggedInUserId ?? "").environmentObject(userService).environmentObject(profilePostService)) {
+                                    PostCardView(
+                                        post: post, 
+                                        onLike: { 
+                                            Task { try? await profilePostService.toggleLike(postId: post.id ?? "", userId: loggedInUserId ?? "") } 
+                                        }, 
+                                        onComment: { /* Comment handling for profile view if needed */ }, 
+                                        isCurrentUser: post.userId == loggedInUserId,
+                                        userId: loggedInUserId ?? "" // Pass logged-in user ID
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle()) // Ensures the whole PostView is tappable like a button
+                                
+                            case .publicSession(let session):
+                                PublicLiveSessionCard(
+                                    session: session,
+                                    currentUserId: loggedInUserId ?? "",
+                                    onViewTapped: {
+                                        // TODO: Implement view session functionality
+                                        print("View session tapped: \(session.id)")
+                                    }
+                                )
+                                .environmentObject(userService)
+                            }
+                            
+                            Divider()
                         }
-                        .buttonStyle(PlainButtonStyle()) // Ensures the whole PostView is tappable like a button
-                        Divider()
                     }
                     
                 }
@@ -201,6 +318,25 @@ struct UserProfileView: View {
             if let user = userService.loadedUsers[userId] {
                 Text("\(user.displayName ?? user.username) has been blocked. You will no longer see their posts in your feed.")
             }
+        }
+        .alert("Turn on Post Notifications?", isPresented: $showingPostNotificationPrompt) {
+            Button("Yes") {
+                Task {
+                    do {
+                        try await userService.updatePostNotificationPreference(targetUserId: userId, enabled: true)
+                        await MainActor.run {
+                            self.postNotificationsEnabled = true
+                        }
+                    } catch {
+                        print("Error enabling post notifications: \(error)")
+                    }
+                }
+            }
+            Button("No", role: .cancel) { 
+                // Do nothing, keep notifications disabled
+            }
+        } message: {
+            Text("Turn on post notifications for @\(targetUserName)?")
         }
         .sheet(isPresented: $showingEditProfile) {
             if let user = userService.loadedUsers[userId] {
@@ -229,15 +365,28 @@ struct UserProfileView: View {
                 if let profile = userService.loadedUsers[userId] {
                     self.localFollowersCount = profile.followersCount
                     self.localFollowingCount = profile.followingCount
+                    
+                    // Debug: Print hyperlink data
+                    print("🔗 [UserProfileView] User \(profile.username) hyperlink data:")
+                    print("   - hyperlinkText: '\(profile.hyperlinkText ?? "nil")'")
+                    print("   - hyperlinkURL: '\(profile.hyperlinkURL ?? "nil")'")
                 }
 
                 // Fetch initial follow state
                 if let currentLoggedInUserId = loggedInUserId {
                     self.isFollowing = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
+                    
+                    // If following, also fetch post notification preference
+                    if self.isFollowing {
+                        self.postNotificationsEnabled = await userService.getPostNotificationPreference(targetUserId: userId, currentUserId: currentLoggedInUserId)
+                    }
                 }
 
                 // Fetch user's posts
                 try? await profilePostService.fetchPosts(forUserId: userId)
+                
+                // Fetch user's public sessions
+                try? await fetchUserPublicSessions()
                 
                 // Fetch user's active challenges
                 await fetchActiveChallenges()
@@ -257,12 +406,14 @@ struct UserProfileView: View {
                     try await userService.unfollowUser(userIdToUnfollow: userId)
                     await MainActor.run {
                         self.localFollowersCount = max(0, self.localFollowersCount - 1)
+                        self.postNotificationsEnabled = false // Reset to default when unfollowing
                     }
                 } else {
                     // Not following –> follow
                     try await userService.followUser(userIdToFollow: userId)
                     await MainActor.run {
                         self.localFollowersCount += 1
+                        self.postNotificationsEnabled = false // Default to false when following
                     }
                 }
 
@@ -277,6 +428,44 @@ struct UserProfileView: View {
                     self.isProcessingFollow = false
                 }
             }
+        }
+    }
+    
+    func togglePostNotifications() {
+        guard let currentLoggedInUserId = loggedInUserId, isFollowing else { return }
+        
+        isProcessingNotifications = true
+        
+        Task {
+            do {
+                let newState = !postNotificationsEnabled
+                try await userService.updatePostNotificationPreference(targetUserId: userId, enabled: newState)
+                
+                await MainActor.run {
+                    self.postNotificationsEnabled = newState
+                    self.isProcessingNotifications = false
+                }
+            } catch {
+                print("Error toggling post notifications: \(error)")
+                await MainActor.run {
+                    self.isProcessingNotifications = false
+                }
+            }
+        }
+    }
+    
+    private func fetchUserPublicSessions() async throws {
+        print("🔍 [UserProfileView] Fetching public sessions for userId: \(userId)")
+        do {
+            let sessions = try await publicSessionService.fetchUserSessions(userId: userId)
+            print("✅ [UserProfileView] Fetched \(sessions.count) public sessions for user \(userId)")
+            await MainActor.run {
+                self.userPublicSessions = sessions
+                print("📱 [UserProfileView] Updated userPublicSessions with \(sessions.count) sessions")
+            }
+        } catch {
+            print("❌ [UserProfileView] Error fetching user public sessions: \(error)")
+            throw error
         }
     }
     
@@ -436,6 +625,8 @@ struct UserProfileView_Previews: PreviewProvider {
             avatarURL: nil, // Or a placeholder image URL string
             location: "Sample Location", 
             favoriteGame: "Poker", 
+            hyperlinkText: "My Website",
+            hyperlinkURL: "https://example.com",
             followersCount: 125, 
             followingCount: 78
         )

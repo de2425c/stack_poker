@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseAuth
+import Kingfisher
 
 struct GroupSelectionSheet: View {
     @Environment(\.dismiss) var dismiss
@@ -129,17 +130,16 @@ struct GroupSelectionRow: View {
                         .frame(width: 44, height: 44)
                     
                     if let avatarURL = group.avatarURL, let url = URL(string: avatarURL) {
-                        AsyncImage(url: url) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Image(systemName: "person.2.fill")
-                                .font(.system(size: 20))
-                                .foregroundColor(.gray)
-                        }
-                        .frame(width: 44, height: 44)
-                        .clipShape(Circle())
+                        KFImage(url)
+                            .placeholder {
+                                Image(systemName: "person.2.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.gray)
+                            }
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 44, height: 44)
+                            .clipShape(Circle())
                     } else {
                         Image(systemName: "person.2.fill")
                             .font(.system(size: 20))

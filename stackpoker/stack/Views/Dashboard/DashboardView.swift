@@ -1463,8 +1463,11 @@ struct SessionsTab: View {
                             items: groupedItems.today, 
                             onSelect: { session in selectedSession = session },
                             onDelete: { session in
-                                selectedSession = session
-                                showingDeleteAlert = true
+                                sessionStore.deleteSession(session.id) { error in
+                                    if let error = error {
+                                        print("Error deleting session: \(error)")
+                                    }
+                                }
                             }
                         )
                         .padding(.horizontal, 16)
@@ -1473,24 +1476,33 @@ struct SessionsTab: View {
                     VStack(spacing: 22) {
                         if !groupedItems.today.isEmpty {
                             EnhancedItemsSection(title: "Today", items: groupedItems.today, onSelect: { session in selectedSession = session }, onDelete: { session in
-                                selectedSession = session
-                                showingDeleteAlert = true
+                                sessionStore.deleteSession(session.id) { error in
+                                    if let error = error {
+                                        print("Error deleting session: \(error)")
+                                    }
+                                }
                             })
                             .padding(.horizontal, 16)
                         }
                         
                         if !groupedItems.lastWeek.isEmpty {
                             EnhancedItemsSection(title: "Last Week", items: groupedItems.lastWeek, onSelect: { session in selectedSession = session }, onDelete: { session in
-                                selectedSession = session
-                                showingDeleteAlert = true
+                                sessionStore.deleteSession(session.id) { error in
+                                    if let error = error {
+                                        print("Error deleting session: \(error)")
+                                    }
+                                }
                             })
                             .padding(.horizontal, 16)
                         }
                         
                         if !groupedItems.older.isEmpty {
                             EnhancedItemsSection(title: "All Time", items: groupedItems.older, onSelect: { session in selectedSession = session }, onDelete: { session in
-                                selectedSession = session
-                                showingDeleteAlert = true
+                                sessionStore.deleteSession(session.id) { error in
+                                    if let error = error {
+                                        print("Error deleting session: \(error)")
+                                    }
+                                }
                             })
                             .padding(.horizontal, 16)
                         }
@@ -1522,21 +1534,6 @@ struct SessionsTab: View {
                         }
                     }
             }
-        }
-        .alert("Delete Session", isPresented: $showingDeleteAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                if let sessionToDelete = selectedSession {
-                    sessionStore.deleteSession(sessionToDelete.id) { error in
-                        if let error = error {
-                            print("Error deleting session: \(error)")
-                        }
-                    }
-                }
-                selectedSession = nil
-            }
-        } message: {
-            Text("Are you sure you want to delete this session? This action cannot be undone.")
         }
     }
 }
@@ -2190,11 +2187,15 @@ struct EnhancedSessionSummaryRow: View {
     let session: Session
     let onSelect: () -> Void
     let onDelete: () -> Void
+    @State private var offset: CGFloat = 0
     @State private var showingActions = false
     
+    private let actionButtonWidth: CGFloat = 80
+    private let maxOffset: CGFloat = -180 // Adjusted for extra spacing
+    
     private func formatMoney(_ amount: Double) -> String {
-            return "$\(abs(Int(amount)))"
-        }
+        return "$\(abs(Int(amount)))"
+    }
     
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
@@ -2203,8 +2204,72 @@ struct EnhancedSessionSummaryRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header with game info and profit
+        ZStack {
+            // Background action buttons (shown when swiped)
+            if showingActions {
+                HStack {
+                    Spacer()
+                    
+                    // Edit button
+                    Button(action: {
+                        resetPosition()
+                        onSelect()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 18, weight: .medium))
+                            Text("Edit")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .frame(width: actionButtonWidth)
+                        .frame(maxHeight: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color(red: 0.25, green: 0.61, blue: 1.0), // #409CFF
+                                            Color(red: 0.39, green: 0.71, blue: 1.0)  // #64B4FF
+                                        ]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+                        .padding(.leading, 10) // Added padding to prevent overlap
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Delete button
+                    Button(action: {
+                        resetPosition()
+                        onDelete() // Directly call delete without confirmation
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 18, weight: .medium))
+                            Text("Delete")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .frame(width: actionButtonWidth)
+                        .frame(maxHeight: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(red: 0.85, green: 0.3, blue: 0.3))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(.trailing, 4)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .trailing).combined(with: .opacity)
+                ))
+            }
+            
+            // Main session card content
             HStack(alignment: .center) {
                 // Game info with icon removed
                 VStack(alignment: .leading, spacing: 2) {
@@ -2247,31 +2312,68 @@ struct EnhancedSessionSummaryRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
+            .background(
+                ZStack { // Applying GlassyInputField style to session rows
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(0.2)
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.01))
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
+                }
+            )
+            .offset(x: offset)
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let translation = value.translation.width
+                        if translation < 0 { // Only allow left swipes
+                            offset = max(translation, maxOffset)
+                        }
+                    }
+                    .onEnded { value in
+                        let translation = value.translation.width
+                        let velocity = value.velocity.width
+                        
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            if translation < -50 || velocity < -300 {
+                                // Show actions
+                                offset = maxOffset
+                                showingActions = true
+                            } else {
+                                // Reset to original position
+                                resetPosition()
+                            }
+                        }
+                    }
+            )
+            .onTapGesture {
+                if showingActions {
+                    resetPosition()
+                } else {
+                    hapticFeedback(style: .light)
+                    onSelect()
+                }
+            }
+            .contextMenu {
+                Button(action: onSelect) {
+                    Label("Edit", systemImage: "pencil")
+                }
+                
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
         }
-        .background(
-            ZStack { // Applying GlassyInputField style to session rows
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Material.ultraThinMaterial)
-                    .opacity(0.2)
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.white.opacity(0.01))
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5) // Subtle border
-            }
-        )
-        .contentShape(Rectangle()) 
-        .onTapGesture {
-            hapticFeedback(style: .light)
-            onSelect()
-        }
-        .contextMenu {
-            Button(action: onSelect) {
-                Label("Edit", systemImage: "pencil")
-            }
-            
-            Button(role: .destructive, action: onDelete) {
-                Label("Delete", systemImage: "trash")
-            }
+        .clipped()
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showingActions)
+    }
+    
+    private func resetPosition() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            offset = 0
+            showingActions = false
         }
     }
     
@@ -2280,8 +2382,6 @@ struct EnhancedSessionSummaryRow: View {
         generator.impactOccurred()
     }
 }
-
-
 
 // Beautiful form field component
 struct LuxuryFormField: View {

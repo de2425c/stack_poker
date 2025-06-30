@@ -6,9 +6,9 @@ struct LiveSessionBar: View {
     var onTap: () -> Void
     let isFirstBar: Bool
     
-    // Hide the bar if session is paused for next day
+    // Show the bar if there's an active session (regardless of parked sessions)
     private var shouldShowBar: Bool {
-        return !sessionStore.liveSession.pausedForNextDay
+        return sessionStore.liveSession.buyIn > 0
     }
     
     // Computed properties for formatted time

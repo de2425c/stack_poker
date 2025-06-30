@@ -29,6 +29,7 @@ struct SignUpView: View {
             GeometryReader { geometry in
                 ZStack {
                     AppBackgroundView()
+                        .ignoresSafeArea(.all)
                     
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
@@ -122,8 +123,17 @@ struct SignUpView: View {
                                     .animation(.easeInOut(duration: 0.2), value: isLoading)
                                 }
                                 .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(buttonBackgroundColor)
+                                    RoundedRectangle(cornerRadius: 28)
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [
+                                                    Color(red: 64/255, green: 156/255, blue: 255/255), // #409CFF
+                                                    Color(red: 100/255, green: 180/255, blue: 255/255) // #64B4FF
+                                                ]),
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            )
+                                        )
                                         .scaleEffect(isLoading ? 0.98 : 1.0)
                                         .animation(.easeInOut(duration: 0.1), value: isLoading)
                                 )

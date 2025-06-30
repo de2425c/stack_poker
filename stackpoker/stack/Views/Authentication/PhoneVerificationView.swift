@@ -25,8 +25,9 @@ struct PhoneVerificationView: View {
     }
     
     var body: some View {
-        ZStack {
-            AppBackgroundView()
+                    ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea(.all)
             
             VStack(spacing: 24) {
                 // Header section
@@ -103,21 +104,21 @@ struct PhoneVerificationView: View {
                         HStack {
                             if isLoading {
                                 ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                     .scaleEffect(0.8)
                                 Text("Verifying...")
                                     .font(.custom("PlusJakartaSans-SemiBold", size: 18))
-                                    .foregroundColor(.black)
+                                    .foregroundColor(.white)
                             } else {
                                 Text("Verify Code")
                                     .font(.custom("PlusJakartaSans-SemiBold", size: 18))
-                                    .foregroundColor(.black)
+                                    .foregroundColor(.white)
                             }
                         }
                         .frame(maxWidth: .infinity, minHeight: 56)
                     }
                     .background(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: 28)
                             .fill(buttonBackgroundColor)
                             .scaleEffect(isLoading ? 0.98 : 1.0)
                             .animation(.easeInOut(duration: 0.1), value: isLoading)
@@ -185,13 +186,32 @@ struct PhoneVerificationView: View {
         return codeIsValid ? Color.green.opacity(0.8) : Color.red.opacity(0.8)
     }
     
-    private var buttonBackgroundColor: Color {
-        if isLoading {
-            return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8))
+    private var buttonBackgroundColor: LinearGradient {
+        if !hasInteracted || !isFormValid {
+            return LinearGradient(
+                gradient: Gradient(colors: [Color.gray.opacity(0.6), Color.gray.opacity(0.6)]),
+                startPoint: .leading,
+                endPoint: .trailing
+            )
         }
-        return isFormValid || !hasInteracted ? 
-            Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
-            Color.gray.opacity(0.6)
+        if isLoading {
+            return LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.8),
+                    Color(red: 100/255, green: 180/255, blue: 255/255).opacity(0.8)
+                ]),
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
+        return LinearGradient(
+            gradient: Gradient(colors: [
+                Color(red: 64/255, green: 156/255, blue: 255/255), // #409CFF
+                Color(red: 100/255, green: 180/255, blue: 255/255) // #64B4FF
+            ]),
+            startPoint: .leading,
+            endPoint: .trailing
+        )
     }
     
     private var buttonOpacity: Double {

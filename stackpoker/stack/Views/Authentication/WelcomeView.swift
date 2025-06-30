@@ -15,10 +15,9 @@ struct WelcomeView: View {
     // Carousel state
     @State private var currentFeatureIndex = 0
     private let features: [(image: String, description: String)] = [
-        ("promo_feed", "Share your biggest wins and hands"),
-        ("promo_logging", "Intuitive session logging"),
         ("promo_events", "Create and join events"),
-        ("promo_analytics", "Advanced analytics")
+        ("promo_feed", "Share your biggest wins and hands"),
+        ("promo_logging", "Intuitive session logging")
     ]
     
     // Timer for auto-rotating features - 6 seconds
@@ -28,96 +27,158 @@ struct WelcomeView: View {
         GeometryReader { geometry in
             ZStack {
                 AppBackgroundView()
+                    .ignoresSafeArea(.all) // Ensure background covers everything
                 
-                // Bottom section background overlay - always covers bottom area completely
-                VStack {
-                    Spacer()
-                    
-                    // Rich dark blue background - extends to very bottom with no gaps
-                    Rectangle()
-                        .fill(Color(red: 20/255, green: 30/255, blue: 50/255))
-                        .frame(height: geometry.size.height * 0.45) // Cover bottom 45% of screen
-                        .edgesIgnoringSafeArea(.bottom) // Ensure it goes to absolute bottom
-                        .opacity(buttonsOpacity)
-                }
-                .edgesIgnoringSafeArea(.bottom) // Make sure VStack extends to bottom
-                
-                VStack(spacing: 10) {
-                    // Top content area - constrained to never overlap buttons
-                    VStack(spacing: 5) {
-                        // Stack logo at very top
+                VStack(spacing: 0) {
+                    // Top section with heading text
+                    VStack(spacing: 20) {
+                        Spacer()
+                            .frame(height: geometry.safeAreaInsets.top + 20)
+                        
+                        // Stack logo
                         Image("promo_logo")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: min(geometry.size.width * 0.8, 280), height: min(geometry.size.width * 0.6, 210))
+                            .frame(maxWidth: min(geometry.size.width * 0.7, 300))
+                            .frame(height: 60)
                             .scaleEffect(logoScale)
                             .opacity(logoOpacity)
-                            .padding(.top, max(10, geometry.safeAreaInsets.top + 5)) // Much higher
-                        
-                        // Feature carousel - bigger image, moved UP away from buttons
-                        VStack(spacing: 5) {
-                            // Feature image - bigger and moved up
-                            Image(features[currentFeatureIndex].image)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(
-                                    width: geometry.size.width - 15, // Even wider
-                                    height: min(geometry.size.height * 0.48, 420) // Even bigger - 48% of screen height
-                                )
-                                .opacity(carouselOpacity)
-                                .id(currentFeatureIndex)
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                                    removal: .move(edge: .leading).combined(with: .opacity)
-                                ))
-                            
-                            // Feature description
-                            Text(features[currentFeatureIndex].description)
-                                .font(.custom("PlusJakartaSans-Medium", size: 18))
-                                .foregroundColor(.white.opacity(0.9))
-                                .multilineTextAlignment(.center)
-                                .opacity(carouselOpacity)
-                                .padding(.horizontal, 30)
-                                .lineLimit(2)
-                            
-                            // Carousel dots
-                            HStack(spacing: 8) {
-                                ForEach(0..<features.count, id: \.self) { index in
-                                    Circle()
-                                        .fill(index == currentFeatureIndex ? Color.white : Color.white.opacity(0.3))
-                                        .frame(width: index == currentFeatureIndex ? 10 : 8, 
-                                               height: index == currentFeatureIndex ? 10 : 8)
-                                        .animation(.spring(response: 0.3), value: currentFeatureIndex)
-                                }
-                            }
-                            .opacity(carouselOpacity)
-                        }
-                        .padding(.bottom, 40) // Add padding between carousel and buttons
                     }
-                    .frame(maxHeight: geometry.size.height * 0.65) // Content area
                     
-                    Spacer(minLength: 180) // Much more spacing to push image UP away from buttons
-                }
-                
-                // Fixed buttons at bottom
-                VStack {
                     Spacer()
+                        .frame(maxHeight: 40)
                     
-                    VStack(spacing: 16) {
-                        // Email Sign Up Button
+                    // Middle section with carousel
+                    VStack(spacing: 8) {
+                        // Feature image with border and gradient background
+                        ZStack {
+                            // More pronounced gradient background behind image
+                            RadialGradient(
+                                gradient: Gradient(colors: [
+                                    Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.6), // Stronger blue center
+                                    Color(red: 100/255, green: 180/255, blue: 255/255).opacity(0.4), // More visible blue
+                                    Color(red: 30/255, green: 80/255, blue: 150/255).opacity(0.2), // Darker blue ring
+                                    Color.clear // Transparent edges
+                                ]),
+                                center: .center,
+                                startRadius: 30,
+                                endRadius: 250
+                            )
+                            .frame(width: geometry.size.width * 0.95, height: min(geometry.size.height * 0.6, 450))
+                            .opacity(carouselOpacity)
+                            
+                            // Phone with squircle shape and metallic border
+                            ZStack {
+                                // Main phone body with squircle shape
+                                Image(features[currentFeatureIndex].image)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(height: max(geometry.size.height * 0.5, 380))
+                                    .clipShape(RoundedRectangle(cornerRadius: 30)) // Sharper squircle corners
+                                    .overlay(
+                                        // Metallic border with multiple layers for realism
+                                        RoundedRectangle(cornerRadius: 30)
+                                            .strokeBorder(
+                                                LinearGradient(
+                                                    gradient: Gradient(colors: [
+                                                        Color(red: 0.05, green: 0.05, blue: 0.05), // Very dark
+                                                        Color(red: 0.15, green: 0.15, blue: 0.15), // Dark metallic
+                                                        Color(red: 0.35, green: 0.35, blue: 0.35), // Metallic highlight
+                                                        Color(red: 0.08, green: 0.08, blue: 0.08), // Dark shadow
+                                                        Color.black // Pure black edge
+                                                    ]),
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ),
+                                                lineWidth: 6
+                                            )
+                                    )
+                                    .overlay(
+                                        // Inner metallic shine
+                                        RoundedRectangle(cornerRadius: 30)
+                                            .strokeBorder(
+                                                LinearGradient(
+                                                    gradient: Gradient(colors: [
+                                                        Color.white.opacity(0.1),
+                                                        Color.clear,
+                                                        Color.clear,
+                                                        Color.white.opacity(0.05)
+                                                    ]),
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                                    .opacity(carouselOpacity)
+                                    .id(currentFeatureIndex)
+                                    .transition(.asymmetric(
+                                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                                        removal: .move(edge: .leading).combined(with: .opacity)
+                                    ))
+                                    .shadow(color: Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.3), radius: 25, x: 0, y: 15)
+                                
+                                // Side button (power button)
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color(red: 0.1, green: 0.1, blue: 0.1),
+                                                Color(red: 0.25, green: 0.25, blue: 0.25),
+                                                Color(red: 0.05, green: 0.05, blue: 0.05)
+                                            ]),
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: 4, height: 30)
+                                    .offset(x: max(geometry.size.width * 0.25, 190), y: -40) // Position on right side
+                                    .opacity(carouselOpacity)
+                            }
+                        }
+                        
+                        // Carousel dots
+                        HStack(spacing: 8) {
+                            ForEach(0..<features.count, id: \.self) { index in
+                                Circle()
+                                    .fill(index == currentFeatureIndex ? Color.white : Color.white.opacity(0.3))
+                                    .frame(width: index == currentFeatureIndex ? 10 : 8, 
+                                           height: index == currentFeatureIndex ? 10 : 8)
+                                    .animation(.spring(response: 0.3), value: currentFeatureIndex)
+                            }
+                        }
+                        .opacity(carouselOpacity)
+                        .padding(.top, 16)
+                    }
+                    
+                    Spacer()
+                        .frame(maxHeight: 30) // Reduced from 40
+                    
+                    // Bottom section with buttons - always at bottom
+                    VStack() {
+                        // Email Sign Up Button with blue gradient
                         Button(action: { showingSignUp = true }) {
                             HStack {
                                 Image(systemName: "envelope")
                                     .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.black)
+                                    .foregroundColor(.white)
                                 Text("Sign Up with Email")
                                     .font(.custom("PlusJakartaSans-SemiBold", size: 18))
-                                    .foregroundColor(.black)
+                                    .foregroundColor(.white)
                             }
                             .frame(maxWidth: .infinity)
                             .frame(height: 56)
-                            .background(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                            .cornerRadius(12)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 64/255, green: 156/255, blue: 255/255), // #409CFF
+                                        Color(red: 100/255, green: 180/255, blue: 255/255) // #64B4FF
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(28)
                         }
                         
                         // Phone Sign Up Button
@@ -132,8 +193,17 @@ struct WelcomeView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .frame(height: 56)
-                            .background(Color.white.opacity(0.15))
-                            .cornerRadius(12)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color.white.opacity(0.15),
+                                        Color.white.opacity(0.25)
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(28)
                         }
                         
                         // Sign In Button
@@ -144,8 +214,8 @@ struct WelcomeView: View {
                         }
                         .padding(.top, 8)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, max(5, geometry.safeAreaInsets.bottom - 55)) // Much closer to bottom
+                    .padding(.horizontal, 38)
+                    .padding(.bottom, max(geometry.safeAreaInsets.bottom + 20, 20)) // Ensure minimum padding
                     .opacity(buttonsOpacity)
                 }
             }
@@ -182,6 +252,7 @@ struct WelcomeView: View {
             PhoneSignUpView()
                 .environmentObject(authViewModel)
         }
+        .ignoresSafeArea(.all) // Ensure the entire view ignores safe areas
     }
 }
 

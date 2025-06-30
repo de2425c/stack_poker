@@ -12,11 +12,18 @@ struct EventCardView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // MARK: - Header Section (Event Name & Series)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(event.event_name)
-                        .font(.system(size: 18, weight: .bold, design: .default))
-                        .foregroundColor(.white)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
+                    HStack {
+                        Text(event.event_name)
+                            .font(.system(size: 18, weight: .bold, design: .default))
+                            .foregroundColor(.white)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                        
+                        Spacer()
+                        
+                        // Status Badge
+                        statusBadge
+                    }
                     
                     if let seriesName = event.series_name, !seriesName.isEmpty {
                         HStack {
@@ -153,6 +160,30 @@ struct EventCardView: View {
             
         }
         .buttonStyle(PlainButtonStyle())
+    }
+
+    private var statusBadge: some View {
+        let status = event.currentStatus
+        return Text(status.displayName.uppercased())
+            .font(.system(size: 8, weight: .bold, design: .default))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(statusColor(status))
+                    .shadow(color: statusColor(status).opacity(0.3), radius: 2, x: 0, y: 1)
+            )
+    }
+    
+    private func statusColor(_ status: UserEvent.EventStatus) -> Color {
+        switch status {
+        case .upcoming: return Color(red: 123/255, green: 255/255, blue: 99/255)
+        case .lateRegistration: return Color(red: 255/255, green: 149/255, blue: 0/255)
+        case .active: return Color(red: 255/255, green: 59/255, blue: 48/255)
+        case .completed: return Color(red: 64/255, green: 156/255, blue: 255/255)
+        case .cancelled: return .gray
+        }
     }
 }
 

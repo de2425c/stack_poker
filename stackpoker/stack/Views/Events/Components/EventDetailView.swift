@@ -35,7 +35,7 @@ struct EventDetailView: View {
     private var hasPendingStakingInvites: Bool {
         guard let currentUserId = Auth.auth().currentUser?.uid else { return false }
         return existingStakingInvites.contains { invite in
-            invite.status == .pending && invite.stakerUserId == currentUserId
+            invite.status == .pending && invite.stakedPlayerUserId == currentUserId
         }
     }
     
@@ -51,23 +51,29 @@ struct EventDetailView: View {
         let now = Date()
         let calendar = Calendar.current
         
-        // Create date from SimpleDate
-        let eventDate = calendar.date(from: DateComponents(
+        // Create base date from SimpleDate
+        let baseEventDate = calendar.date(from: DateComponents(
             year: event.simpleDate.year,
             month: event.simpleDate.month,
             day: event.simpleDate.day
         )) ?? Date()
         
-        // Calculate completion time (12 hours after event start)
-        let completionTime = calendar.date(byAdding: .hour, value: 12, to: eventDate) ?? eventDate
+        // Parse start time if available
+        let eventStartTime = parseEventStartTime(baseDate: baseEventDate, timeString: event.time)
         
-        // Compare dates
-        if now >= completionTime {
-            return .completed
-        } else if calendar.isDate(now, inSameDayAs: eventDate) {
-            return .active
-        } else if eventDate > now {
+        // Parse late registration end time if available
+        let lateRegEndTime = parseLateRegistrationEndTime(startTime: eventStartTime, lateRegString: event.lateRegistration)
+        
+        // Calculate ongoing period end (12 hours after late reg ends, or start time if no late reg)
+        let ongoingEndTime = calendar.date(byAdding: .hour, value: 12, to: lateRegEndTime ?? eventStartTime) ?? eventStartTime
+        
+        // Determine status based on current time
+        if now < eventStartTime {
             return .upcoming
+        } else if let lateRegEnd = lateRegEndTime, now >= eventStartTime && now < lateRegEnd {
+            return .lateRegistration
+        } else if now < ongoingEndTime {
+            return .active
         } else {
             return .completed
         }
@@ -79,12 +85,14 @@ struct EventDetailView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    // Header Image / Event Type Icon
-                    eventHeaderImage
+                    // Event Banner Image at top
+                    eventImage
+                    
+                    // Title section in a nice card below the image
+                    titleCard
                     
                     // Main Content VStack
                     VStack(alignment: .leading, spacing: 24) {
-                        titleAndSeriesSection
                         eventDetailsSection
                         
                         if let description = event.description, !description.isEmpty {
@@ -106,7 +114,6 @@ struct EventDetailView: View {
             }
         }
         .navigationBarHidden(true)
-        .overlay(customNavigationBar, alignment: .top)
         .alert("Error", isPresented: $showError, actions: { Button("OK") {} }, message: { Text(error ?? "An unknown error occurred.") })
         .alert("Pending Stakers", isPresented: $showingPendingStakersAlert) {
             Button("Continue") { 
@@ -140,89 +147,221 @@ struct EventDetailView: View {
     }
 
     // MARK: - UI Sections
-    private var eventHeaderImage: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Event thematic background image based on series
-            Image("stack_logo")
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(height: 280)
-                .clipped()
-                .overlay(
+    private var titleCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Status and Series badges
+            HStack {
+                Text(eventStatus.displayName.uppercased())
+                    .font(.system(size: 12, weight: .bold, design: .default))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(statusColor(eventStatus).opacity(0.3))
+                            .overlay(
+                                Capsule()
+                                    .stroke(statusColor(eventStatus), lineWidth: 1)
+                            )
+                    )
+                
+                Spacer()
+                
+                // Series name badge if available
+                if let seriesName = event.series_name, !seriesName.isEmpty {
+                    Text(seriesName)
+                        .font(.system(size: 11, weight: .medium, design: .default))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(0.2))
+                                .overlay(
+                                    Capsule()
+                                        .stroke(Color.white.opacity(0.4), lineWidth: 0.5)
+                                )
+                        )
+                }
+            }
+            
+            // Event Title
+            Text(event.event_name)
+                .font(.system(size: 26, weight: .bold, design: .default))
+                .foregroundColor(.white)
+                .lineLimit(3)
+                .minimumScaleFactor(0.8)
+            
+            // Buy-in and Game Info
+            HStack(spacing: 20) {
+                HStack(spacing: 8) {
+                    Image(systemName: "dollarsign.circle.fill")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(Color(red: 255/255, green: 215/255, blue: 0/255))
+                    Text(event.buyin_string)
+                        .font(.system(size: 20, weight: .bold, design: .default))
+                        .foregroundColor(.white)
+                }
+                
+                if let game = event.game, !game.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "suit.spade.fill")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        Text(game)
+                            .font(.system(size: 16, weight: .medium, design: .default))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
+                
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
+        .background(
+            ZStack {
+                // Nice card background that extends full width
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.08),
+                                Color.white.opacity(0.04)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                
+                // Top border line for separation
+                VStack {
                     Rectangle()
                         .fill(
                             LinearGradient(
                                 gradient: Gradient(colors: [
-                                    Color.black.opacity(0.7),
-                                    Color.black.opacity(0.3),
-                                    Color.black.opacity(0.7)
+                                    Color.white.opacity(0.2),
+                                    Color.white.opacity(0.1)
                                 ]),
-                                startPoint: .top, endPoint: .bottom
+                                startPoint: .leading,
+                                endPoint: .trailing
                             )
                         )
-                )
-            
-            // Content overlaid on the image
-            VStack(alignment: .leading, spacing: 8) {
-                // Event Status Badge
-                Text(eventStatus.displayName.uppercased())
-                    .font(.system(size: 12, weight: .bold, design: .default))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(statusColor(eventStatus).opacity(0.15))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(statusColor(eventStatus).opacity(0.3), lineWidth: 1))
-
-                // Event Title
-                Text(event.event_name)
-                    .font(.system(size: 30, weight: .bold, design: .default))
-                    .foregroundColor(.white)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.6)
-                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                        .frame(height: 0.5)
+                    Spacer()
+                }
             }
-            .padding(20)
+        )
+        .padding(.bottom, 16) // Add spacing underneath
+    }
+    
+    private var eventImage: some View {
+        Group {
+            // Banner image at top
+            if let imageUrl = event.imageUrl, !imageUrl.isEmpty {
+                KFImage(URL(string: imageUrl))
+                    .placeholder {
+                        // Show placeholder while loading
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(height: 200)
+                            .overlay(
+                                Text("Loading...")
+                                    .foregroundColor(.white)
+                            )
+                    }
+                    .onFailure { error in
+                        print("DEBUG: Failed to load image: \(error)")
+                    }
+                    .onSuccess { result in
+                        print("DEBUG: Successfully loaded image")
+                    }
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 200)
+                    .background(Color.black.opacity(0.8))
+                    .clipped()
+            } else {
+                // Fallback to default logo if no imageUrl
+                Image("stack_logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 160)
+                    .background(Color.black.opacity(0.8))
+                    .clipped()
+                    .opacity(0.7)
+            }
         }
     }
     
-    private var titleAndSeriesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let seriesName = event.series_name, !seriesName.isEmpty {
-                HStack {
-                    Image(systemName: "trophy.fill")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(Color(red: 255/255, green: 215/255, blue: 0/255))
-                    Text(seriesName)
-                        .font(.system(size: 16, weight: .medium, design: .default))
-                        .foregroundColor(.white)
-                }
-            }
-            
-            HStack {
-                Label("Tournament Event", systemImage: "crown.fill")
-                    .font(.system(size: 14, design: .default))
-                    .foregroundColor(.white)
-                
-                Spacer()
-                
-                Text(eventStatus.displayName)
-                    .font(.system(size: 14, weight: .semibold, design: .default))
-                    .foregroundColor(statusColor(eventStatus))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(statusColor(eventStatus).opacity(0.15))
-                    .clipShape(Capsule())
-            }
-        }
-        .padding(.top, 16)
-    }
+
     
     private var eventDetailsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
+            // Tournament type header
+            HStack {
+                Label("Tournament Details", systemImage: "crown.fill")
+                    .font(.system(size: 18, weight: .semibold, design: .default))
+                    .foregroundColor(.white)
+                Spacer()
+            }
+            .padding(.bottom, 8)
+            
             infoRow(icon: "calendar", text: formattedDate)
             infoRow(icon: "clock.fill", text: formattedTime)
-            infoRow(icon: "dollarsign.circle.fill", text: "Buy-in: \(buyinDisplay)")
+            
+            // New fields from new_event collection - removed duplicate game since it's in header
+            
+            if let chipsFormatted = event.chipsFormatted, !chipsFormatted.isEmpty {
+                infoRow(icon: "cpu", text: "Starting chips: \(chipsFormatted)")
+            }
+            
+            if let guaranteeFormatted = event.guaranteeFormatted, !guaranteeFormatted.isEmpty {
+                infoRow(icon: "dollarsign.square.fill", text: "Guarantee: \(guaranteeFormatted)")
+            }
+            
+            if let levelsFormatted = event.levelsFormatted, !levelsFormatted.isEmpty {
+                infoRow(icon: "clock.arrow.circlepath", text: "Level length: \(levelsFormatted) min")
+            }
+            
+            if let lateReg = event.lateRegistration, !lateReg.isEmpty {
+                infoRow(icon: "clock.badge.exclamationmark", text: "Late registration: \(lateReg)")
+            }
+            
+            // PDF Link button
+            if let pdfLink = event.pdfLink, !pdfLink.isEmpty {
+                
+                Button(action: {
+                    if let url = URL(string: pdfLink) {
+                        UIApplication.shared.open(url)
+                    }
+                }) {
+                    HStack(spacing: 16) {
+                        Image(systemName: "doc.text.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.white)
+                            .frame(width: 24, alignment: .center)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("View Schedule PDF")
+                                .font(.system(size: 16, weight: .medium, design: .default))
+                                .foregroundColor(.white)
+                            Text("Open tournament structure")
+                                .font(.system(size: 13, design: .default))
+                                .foregroundColor(.gray)
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
         }
     }
     
@@ -436,31 +575,7 @@ struct EventDetailView: View {
         }
     }
 
-    // MARK: - Custom Navigation Bar
-    private var customNavigationBar: some View {
-        VStack(spacing: 0) {
-            // Status bar spacer
-            Rectangle()
-                .fill(Color.clear)
-                .frame(height: UIApplication.shared.windows.first?.safeAreaInsets.top ?? 0)
-            
-            // Navigation content
-            HStack {
-                Button(action: { presentationMode.wrappedValue.dismiss() }) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold, design: .default))
-                        .foregroundColor(.white)
-                        .padding(10)
-                        .background(Color.black.opacity(0.3))
-                        .clipShape(Circle())
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .frame(height: 56)
-        }
-        .background(Color.clear)
-    }
+
     
     // MARK: - Helper Views & Functions
     private func infoRow(icon: String, text: String, subText: String? = nil) -> some View {
@@ -486,9 +601,10 @@ struct EventDetailView: View {
     private func statusColor(_ status: UserEvent.EventStatus) -> Color {
         switch status {
         case .upcoming: return Color(red: 123/255, green: 255/255, blue: 99/255)
-        case .active: return .orange
+        case .lateRegistration: return Color(red: 255/255, green: 149/255, blue: 0/255) // Orange for late registration
+        case .active: return Color(red: 255/255, green: 59/255, blue: 48/255) // Red for active/ongoing
         case .completed: return .blue
-        case .cancelled: return .red
+        case .cancelled: return .gray
         }
     }
     
@@ -870,6 +986,168 @@ struct EventDetailView: View {
                 print("Failed to fetch existing stakes: \(error)")
             }
         }
+    }
+
+    // MARK: - Time Parsing Helper Functions
+    
+    private func parseEventStartTime(baseDate: Date, timeString: String?) -> Date {
+        guard let timeString = timeString, !timeString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            // Default to 6 PM if no time specified
+            let calendar = Calendar.current
+            return calendar.date(bySettingHour: 18, minute: 0, second: 0, of: baseDate) ?? baseDate
+        }
+        
+        let calendar = Calendar.current
+        let cleanTimeString = timeString.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Try to parse time in various formats
+        let timeFormats = ["h:mm a", "HH:mm", "h a", "ha", "h:mma"]
+        let formatter = DateFormatter()
+        
+        for format in timeFormats {
+            formatter.dateFormat = format
+            if let time = formatter.date(from: cleanTimeString) {
+                let timeComponents = calendar.dateComponents([.hour, .minute], from: time)
+                if let hour = timeComponents.hour, let minute = timeComponents.minute {
+                    return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: baseDate) ?? baseDate
+                }
+            }
+        }
+        
+        // If parsing fails, default to 6 PM
+        return calendar.date(bySettingHour: 18, minute: 0, second: 0, of: baseDate) ?? baseDate
+    }
+    
+    private func parseLateRegistrationEndTime(startTime: Date, lateRegString: String?) -> Date? {
+        guard let lateRegString = lateRegString, !lateRegString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        
+        let calendar = Calendar.current
+        let cleanString = lateRegString.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Try to extract level information (e.g., "End of Level 8", "Level 10", "8 levels")
+        if let levelMatch = extractLevelNumber(from: cleanString) {
+            // Assume each level is the levelLength from the event (default 20 minutes if not specified)
+            let levelLengthMinutes = event.levelLength ?? 20
+            let totalMinutes = levelMatch * levelLengthMinutes
+            return calendar.date(byAdding: .minute, value: totalMinutes, to: startTime)
+        }
+        
+        // Try to extract time duration (e.g., "2 hours", "90 minutes", "1.5 hours")
+        if let durationMinutes = extractDurationMinutes(from: cleanString) {
+            return calendar.date(byAdding: .minute, value: durationMinutes, to: startTime)
+        }
+        
+        // Try to extract specific time (e.g., "9:30 PM", "21:30")
+        if let specificTime = parseSpecificTime(from: cleanString, baseDate: startTime) {
+            return specificTime
+        }
+        
+        // Default fallback: 2 hours after start if we can't parse
+        return calendar.date(byAdding: .hour, value: 2, to: startTime)
+    }
+    
+    private func extractLevelNumber(from string: String) -> Int? {
+        // Patterns to match: "end of level 8", "level 10", "8 levels", etc.
+        let patterns = [
+            "(?:end of )?level (\\d+)",
+            "(\\d+) levels?",
+            "through level (\\d+)"
+        ]
+        
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                let range = NSRange(location: 0, length: string.utf16.count)
+                if let match = regex.firstMatch(in: string, options: [], range: range) {
+                    let numberRange = match.range(at: 1)
+                    if let range = Range(numberRange, in: string) {
+                        if let number = Int(String(string[range])) {
+                            return number
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func extractDurationMinutes(from string: String) -> Int? {
+        // Patterns for duration: "2 hours", "90 minutes", "1.5 hours", "2h 30m"
+        let patterns = [
+            "(\\d+(?:\\.\\d+)?)\\s*hours?",
+            "(\\d+)\\s*minutes?",
+            "(\\d+)h\\s*(\\d+)m",
+            "(\\d+)\\s*hrs?",
+            "(\\d+)\\s*mins?"
+        ]
+        
+        for (index, pattern) in patterns.enumerated() {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                let range = NSRange(location: 0, length: string.utf16.count)
+                if let match = regex.firstMatch(in: string, options: [], range: range) {
+                    switch index {
+                    case 0, 3: // hours patterns
+                        let hoursRange = match.range(at: 1)
+                        if let range = Range(hoursRange, in: string),
+                           let hours = Double(String(string[range])) {
+                            return Int(hours * 60)
+                        }
+                    case 1, 4: // minutes patterns  
+                        let minutesRange = match.range(at: 1)
+                        if let range = Range(minutesRange, in: string),
+                           let minutes = Int(String(string[range])) {
+                            return minutes
+                        }
+                    case 2: // "2h 30m" pattern
+                        let hoursRange = match.range(at: 1)
+                        let minutesRange = match.range(at: 2)
+                        if let hoursStringRange = Range(hoursRange, in: string),
+                           let minutesStringRange = Range(minutesRange, in: string),
+                           let hours = Int(String(string[hoursStringRange])),
+                           let minutes = Int(String(string[minutesStringRange])) {
+                            return hours * 60 + minutes
+                        }
+                    default:
+                        break
+                    }
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func parseSpecificTime(from string: String, baseDate: Date) -> Date? {
+        let calendar = Calendar.current
+        let timeFormats = ["h:mm a", "HH:mm", "h a", "ha"]
+        let formatter = DateFormatter()
+        
+        for format in timeFormats {
+            formatter.dateFormat = format
+            // Try to find time pattern in the string
+            if let regex = try? NSRegularExpression(pattern: "\\b\\d{1,2}:?\\d{0,2}\\s*[ap]?m?\\b", options: .caseInsensitive) {
+                let range = NSRange(location: 0, length: string.utf16.count)
+                if let match = regex.firstMatch(in: string, options: [], range: range) {
+                    if let timeRange = Range(match.range, in: string) {
+                        let timeString = String(string[timeRange])
+                        if let time = formatter.date(from: timeString) {
+                            let timeComponents = calendar.dateComponents([.hour, .minute], from: time)
+                            if let hour = timeComponents.hour, let minute = timeComponents.minute {
+                                let baseDateComponents = calendar.dateComponents([.year, .month, .day], from: baseDate)
+                                var newComponents = DateComponents()
+                                newComponents.year = baseDateComponents.year
+                                newComponents.month = baseDateComponents.month
+                                newComponents.day = baseDateComponents.day
+                                newComponents.hour = hour
+                                newComponents.minute = minute
+                                return calendar.date(from: newComponents)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return nil
     }
 }
 

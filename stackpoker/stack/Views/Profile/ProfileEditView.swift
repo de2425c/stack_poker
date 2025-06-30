@@ -17,6 +17,8 @@ struct ProfileEditView: View {
     @State private var bio: String = ""
     @State private var favoriteGame: String = "NLH"
     @State private var location: String = ""
+    @State private var hyperlinkText: String = ""
+    @State private var hyperlinkURL: String = ""
     
     // UI states
     @State private var selectedImage: UIImage? = nil
@@ -34,7 +36,7 @@ struct ProfileEditView: View {
     
     // Focus management
     enum ProfileField {
-        case displayName, username, bio, location
+        case displayName, username, bio, location, hyperlinkText, hyperlinkURL
     }
     
     var body: some View {
@@ -198,6 +200,31 @@ struct ProfileEditView: View {
                                 .padding(.vertical, 6)
                             }
 
+                            // Hyperlink text field
+                            GlassyInputField(icon: "link", title: "LINK TEXT (OPTIONAL)") {
+                                TextField("Link text (max 15 chars)", text: $hyperlinkText)
+                                    .font(.plusJakarta(.body))
+                                    .foregroundColor(.white)
+                                    .padding(.vertical, 6)
+                                    .onTapGesture { activeField = .hyperlinkText }
+                                    .onChange(of: hyperlinkText) { newValue in
+                                        if newValue.count > 15 {
+                                            hyperlinkText = String(newValue.prefix(15))
+                                        }
+                                    }
+                            }
+
+                            // Hyperlink URL field
+                            GlassyInputField(icon: "globe", title: "LINK URL (OPTIONAL)") {
+                                TextField("https://example.com", text: $hyperlinkURL)
+                                    .font(.plusJakarta(.body))
+                                    .foregroundColor(.white)
+                                    .padding(.vertical, 6)
+                                    .onTapGesture { activeField = .hyperlinkURL }
+                                    .autocapitalization(.none)
+                                    .keyboardType(.URL)
+                            }
+
                             // Bio field
                             GlassyInputField(icon: "text.alignleft", title: "BIO") {
                                 ZStack(alignment: .topLeading) {
@@ -310,6 +337,8 @@ struct ProfileEditView: View {
         bio = profile.bio ?? ""
         favoriteGame = profile.favoriteGame ?? "NLH"
         location = profile.location ?? ""
+        hyperlinkText = profile.hyperlinkText ?? ""
+        hyperlinkURL = profile.hyperlinkURL ?? ""
     }
     
     private func animateIn() {
@@ -350,6 +379,8 @@ struct ProfileEditView: View {
         updatedProfile.bio = bio.isEmpty ? nil : bio
         updatedProfile.favoriteGame = favoriteGame
         updatedProfile.location = location.isEmpty ? nil : location
+        updatedProfile.hyperlinkText = hyperlinkText.isEmpty ? nil : hyperlinkText
+        updatedProfile.hyperlinkURL = hyperlinkURL.isEmpty ? nil : hyperlinkURL
         
         // Handle image upload if needed
         if let selectedImage = selectedImage {
@@ -398,6 +429,14 @@ struct ProfileEditView: View {
                 
                 if let location = updatedProfile.location, !location.isEmpty {
                     updateData["location"] = location
+                }
+                
+                if let hyperlinkText = updatedProfile.hyperlinkText, !hyperlinkText.isEmpty {
+                    updateData["hyperlinkText"] = hyperlinkText
+                }
+                
+                if let hyperlinkURL = updatedProfile.hyperlinkURL, !hyperlinkURL.isEmpty {
+                    updateData["hyperlinkURL"] = hyperlinkURL
                 }
                 
                 if let avatarURL = updatedProfile.avatarURL, !avatarURL.isEmpty {

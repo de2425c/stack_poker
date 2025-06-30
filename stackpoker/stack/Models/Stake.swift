@@ -42,15 +42,15 @@ struct Stake: Codable, Identifiable {
     //    Positive: Player pays Staker. Negative: Staker pays Player.
     //    This is what the staker receives minus what they paid.
     var amountTransferredAtSettlement: Double {
-        // FIXED: Only use stored amount if it's been explicitly calculated (non-zero)
-        // OR if both buy-in and cashout are set AND stored amount is not zero
-        if storedAmountTransferredAtSettlement != 0 {
-            return storedAmountTransferredAtSettlement
-        }
-        
-        // If we have session data but no stored amount, calculate it
+        // Always calculate fresh for now to ensure correct logic after recent fixes
+        // TODO: Re-enable stored amount optimization after confirming all stored values are correct
         if totalPlayerBuyInForSession > 0 && playerCashoutForSession >= 0 {
             return stakerShareOfCashout - stakerCost
+        }
+        
+        // Use stored amount only if we don't have session data to calculate from
+        if storedAmountTransferredAtSettlement != 0 {
+            return storedAmountTransferredAtSettlement
         }
         
         // Fallback to 0 for incomplete data
@@ -85,6 +85,9 @@ struct Stake: Codable, Identifiable {
     // New fields for off-app stakers
     var manualStakerDisplayName: String? = nil
     var isOffAppStake: Bool? = false
+    
+    // Field for tracking live session UUID (for immediately persisted stakes)
+    var liveSessionId: String? = nil
 
     static let OFF_APP_STAKER_ID = "manual_off_app_staker_placeholder_id"
 
@@ -124,6 +127,7 @@ struct Stake: Codable, Identifiable {
         case isTournamentSession
         case manualStakerDisplayName
         case isOffAppStake
+        case liveSessionId
     }
     
     // Initializer for creating a new stake (e.g., from SessionFormView)
@@ -147,7 +151,8 @@ struct Stake: Codable, Identifiable {
         settlementConfirmerUserId: String? = nil,  // Initializer param
         isTournamentSession: Bool? = nil,         // Added to initializer
         manualStakerDisplayName: String? = nil,   // New initializer param
-        isOffAppStake: Bool? = false              // New initializer param
+        isOffAppStake: Bool? = false,             // New initializer param
+        liveSessionId: String? = nil              // New initializer param
     ) {
         self.id = id
         self.sessionId = sessionId
@@ -168,6 +173,7 @@ struct Stake: Codable, Identifiable {
         self.isTournamentSession = isTournamentSession
         self.manualStakerDisplayName = manualStakerDisplayName
         self.isOffAppStake = isOffAppStake
+        self.liveSessionId = liveSessionId
 
         // Manual stakers now follow the same settlement flow as app users
         self.status = status // Use the provided status or its default

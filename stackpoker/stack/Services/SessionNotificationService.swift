@@ -4,6 +4,25 @@ import FirebaseAuth
 
 class SessionNotificationService: ObservableObject {
     
+    // MARK: - Staker Info Model
+    struct StakerInfo {
+        let stakerId: String
+        let stakerDisplayName: String
+        let stakePercentage: Double
+        let markup: Double
+        let isOffAppStaker: Bool
+        
+        var data: [String: Any] {
+            return [
+                "stakerId": stakerId,
+                "stakerDisplayName": stakerDisplayName,
+                "stakePercentage": stakePercentage,
+                "markup": markup,
+                "isOffAppStaker": isOffAppStaker
+            ]
+        }
+    }
+    
     // MARK: - Session Notification Model
     struct SessionNotification {
         let id: String
@@ -17,6 +36,7 @@ class SessionNotificationService: ObservableObject {
         let isTournament: Bool
         let tournamentName: String?
         let casino: String?
+        let stakers: [StakerInfo]
         let createdAt: Date
         
         // Firebase data conversion
@@ -30,6 +50,8 @@ class SessionNotificationService: ObservableObject {
                 "buyIn": buyIn,
                 "startTime": Timestamp(date: startTime),
                 "isTournament": isTournament,
+                "stakers": stakers.map { $0.data },
+                "stakerCount": stakers.count,
                 "createdAt": Timestamp(date: createdAt)
             ]
             
@@ -44,7 +66,7 @@ class SessionNotificationService: ObservableObject {
             return result
         }
         
-        init(id: String = UUID().uuidString, sessionId: String, playerId: String, playerDisplayName: String, gameName: String, stakes: String, buyIn: Double, startTime: Date, isTournament: Bool, tournamentName: String? = nil, casino: String? = nil) {
+        init(id: String = UUID().uuidString, sessionId: String, playerId: String, playerDisplayName: String, gameName: String, stakes: String, buyIn: Double, startTime: Date, isTournament: Bool, tournamentName: String? = nil, casino: String? = nil, stakers: [StakerInfo] = []) {
             self.id = id
             self.sessionId = sessionId
             self.playerId = playerId
@@ -56,6 +78,7 @@ class SessionNotificationService: ObservableObject {
             self.isTournament = isTournament
             self.tournamentName = tournamentName
             self.casino = casino
+            self.stakers = stakers
             self.createdAt = Date()
         }
     }
@@ -73,6 +96,7 @@ class SessionNotificationService: ObservableObject {
         let rebuyTime: Date
         let isTournament: Bool
         let tournamentName: String?
+        let stakers: [StakerInfo]
         let createdAt: Date
         
         var data: [String: Any] {
@@ -86,6 +110,8 @@ class SessionNotificationService: ObservableObject {
                 "newTotalBuyIn": newTotalBuyIn,
                 "rebuyTime": Timestamp(date: rebuyTime),
                 "isTournament": isTournament,
+                "stakers": stakers.map { $0.data },
+                "stakerCount": stakers.count,
                 "createdAt": Timestamp(date: createdAt)
             ]
             
@@ -96,7 +122,7 @@ class SessionNotificationService: ObservableObject {
             return result
         }
         
-        init(id: String = UUID().uuidString, sessionId: String, playerId: String, playerDisplayName: String, gameName: String, stakes: String, rebuyAmount: Double, newTotalBuyIn: Double, rebuyTime: Date, isTournament: Bool, tournamentName: String? = nil) {
+        init(id: String = UUID().uuidString, sessionId: String, playerId: String, playerDisplayName: String, gameName: String, stakes: String, rebuyAmount: Double, newTotalBuyIn: Double, rebuyTime: Date, isTournament: Bool, tournamentName: String? = nil, stakers: [StakerInfo] = []) {
             self.id = id
             self.sessionId = sessionId
             self.playerId = playerId
@@ -108,6 +134,7 @@ class SessionNotificationService: ObservableObject {
             self.rebuyTime = rebuyTime
             self.isTournament = isTournament
             self.tournamentName = tournamentName
+            self.stakers = stakers
             self.createdAt = Date()
         }
     }
@@ -125,10 +152,11 @@ class SessionNotificationService: ObservableObject {
         startTime: Date,
         isTournament: Bool = false,
         tournamentName: String? = nil,
-        casino: String? = nil
+        casino: String? = nil,
+        stakers: [StakerInfo] = []
     ) async throws {
         
-        print("[SessionNotificationService] Creating session start notification for session: \(sessionId), player: \(playerDisplayName)")
+        print("[SessionNotificationService] Creating session start notification for session: \(sessionId), player: \(playerDisplayName), stakers: \(stakers.count)")
         
         let notification = SessionNotification(
             sessionId: sessionId,
@@ -140,7 +168,8 @@ class SessionNotificationService: ObservableObject {
             startTime: startTime,
             isTournament: isTournament,
             tournamentName: tournamentName,
-            casino: casino
+            casino: casino,
+            stakers: stakers
         )
         
         try await Firestore.firestore()
@@ -148,7 +177,7 @@ class SessionNotificationService: ObservableObject {
             .document(notification.id)
             .setData(notification.data)
         
-        print("[SessionNotificationService] ✅ Session start notification created successfully")
+        print("[SessionNotificationService] ✅ Session start notification created successfully for \(stakers.count) stakers")
     }
     
     /// Create a rebuy notification that Firebase Functions can listen to
@@ -161,10 +190,11 @@ class SessionNotificationService: ObservableObject {
         rebuyAmount: Double,
         newTotalBuyIn: Double,
         isTournament: Bool = false,
-        tournamentName: String? = nil
+        tournamentName: String? = nil,
+        stakers: [StakerInfo] = []
     ) async throws {
         
-        print("[SessionNotificationService] Creating rebuy notification for session: \(sessionId), player: \(playerDisplayName), amount: $\(rebuyAmount)")
+        print("[SessionNotificationService] Creating rebuy notification for session: \(sessionId), player: \(playerDisplayName), amount: $\(rebuyAmount), stakers: \(stakers.count)")
         
         let notification = RebuyNotification(
             sessionId: sessionId,
@@ -176,7 +206,8 @@ class SessionNotificationService: ObservableObject {
             newTotalBuyIn: newTotalBuyIn,
             rebuyTime: Date(),
             isTournament: isTournament,
-            tournamentName: tournamentName
+            tournamentName: tournamentName,
+            stakers: stakers
         )
         
         try await Firestore.firestore()
@@ -184,7 +215,7 @@ class SessionNotificationService: ObservableObject {
             .document(notification.id)
             .setData(notification.data)
         
-        print("[SessionNotificationService] ✅ Rebuy notification created successfully")
+        print("[SessionNotificationService] ✅ Rebuy notification created successfully for \(stakers.count) stakers")
     }
     
     /// Get the current user's display name for notifications
@@ -221,7 +252,8 @@ class SessionNotificationService: ObservableObject {
         startTime: Date,
         isTournament: Bool = false,
         tournamentName: String? = nil,
-        casino: String? = nil
+        casino: String? = nil,
+        stakers: [StakerInfo] = []
     ) async throws {
         
         guard let currentUser = Auth.auth().currentUser else {
@@ -240,7 +272,8 @@ class SessionNotificationService: ObservableObject {
             startTime: startTime,
             isTournament: isTournament,
             tournamentName: tournamentName,
-            casino: casino
+            casino: casino,
+            stakers: stakers
         )
     }
     
@@ -252,7 +285,8 @@ class SessionNotificationService: ObservableObject {
         rebuyAmount: Double,
         newTotalBuyIn: Double,
         isTournament: Bool = false,
-        tournamentName: String? = nil
+        tournamentName: String? = nil,
+        stakers: [StakerInfo] = []
     ) async throws {
         
         guard let currentUser = Auth.auth().currentUser else {
@@ -270,7 +304,8 @@ class SessionNotificationService: ObservableObject {
             rebuyAmount: rebuyAmount,
             newTotalBuyIn: newTotalBuyIn,
             isTournament: isTournament,
-            tournamentName: tournamentName
+            tournamentName: tournamentName,
+            stakers: stakers
         )
     }
 } 

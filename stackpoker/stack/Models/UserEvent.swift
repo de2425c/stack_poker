@@ -56,6 +56,7 @@ struct UserEvent: Identifiable, Codable {
     
     enum EventStatus: String, Codable {
         case upcoming = "upcoming"
+        case lateRegistration = "lateRegistration"
         case active = "active"
         case completed = "completed"
         case cancelled = "cancelled"
@@ -63,6 +64,7 @@ struct UserEvent: Identifiable, Codable {
         var displayName: String {
             switch self {
             case .upcoming: return "Upcoming"
+            case .lateRegistration: return "Late Registration"
             case .active: return "Active"
             case .completed: return "Completed"
             case .cancelled: return "Cancelled"

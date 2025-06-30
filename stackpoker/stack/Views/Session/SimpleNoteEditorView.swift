@@ -4,6 +4,7 @@ struct SimpleNoteEditorView: View {
     @Environment(\.dismiss) var dismiss
     @ObservedObject var sessionStore: SessionStore
     let sessionId: String
+    var onNoteAdded: ((String) -> Void)? = nil // Callback for when note is added
     
     @State private var noteText: String = ""
 
@@ -71,6 +72,9 @@ struct SimpleNoteEditorView: View {
         // Save the note using the existing method
         sessionStore.addNote(note: trimmedText)
         
+        // Call the callback if provided (for public session updates)
+        onNoteAdded?(trimmedText)
+        
         // Clear the text and dismiss
         noteText = ""
         dismiss()
@@ -81,7 +85,8 @@ struct SimpleNoteEditorView_Previews: PreviewProvider {
     static var previews: some View {
         SimpleNoteEditorView(
             sessionStore: SessionStore(userId: "previewUser"),
-            sessionId: "previewSession"
+            sessionId: "previewSession",
+            onNoteAdded: nil
         )
     }
 } 

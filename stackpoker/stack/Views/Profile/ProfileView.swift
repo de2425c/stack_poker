@@ -38,11 +38,12 @@ struct TransparentNavigationView<Content: View>: UIViewControllerRepresentable {
 struct ProfileView: View {
     let userId: String
     @EnvironmentObject private var userService: UserService
+    @EnvironmentObject private var tutorialManager: TutorialManager // Added TutorialManager
     @StateObject private var sessionStore: SessionStore
-    // REMOVED: @StateObject private var handStore: HandStore
     @StateObject private var bankrollStore: BankrollStore
     @StateObject private var challengeService: ChallengeService
     @StateObject private var challengeProgressTracker: ChallengeProgressTracker
+    @StateObject private var stakeService = StakeService() // Add StakeService
     @EnvironmentObject private var postService: PostService
     @State private var showEdit = false
     @State private var showSettings = false
@@ -91,11 +92,9 @@ struct ProfileView: View {
         self.userId = userId
         let bankrollStore = BankrollStore(userId: userId)
         let sessionStore = SessionStore(userId: userId, bankrollStore: bankrollStore)
-        // REMOVED: let handStore = HandStore(userId: userId)
         let challengeService = ChallengeService(userId: userId, bankrollStore: bankrollStore)
         
         _sessionStore = StateObject(wrappedValue: sessionStore)
-        // REMOVED: _handStore = StateObject(wrappedValue: handStore)
         _bankrollStore = StateObject(wrappedValue: bankrollStore)
         _challengeService = StateObject(wrappedValue: challengeService)
         _challengeProgressTracker = StateObject(wrappedValue: ChallengeProgressTracker(challengeService: challengeService, sessionStore: sessionStore))
@@ -181,6 +180,12 @@ struct ProfileView: View {
                                 action: { showAnalyticsDetailView = true }
                             ) {
                                 Text("Analyze your results")
+                            }
+                            .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileAnalytics)
+                            .onTapGesture {
+                                if tutorialManager.currentStep == .profileAnalytics {
+                                    tutorialManager.advanceStep()
+                                }
                             }
                         }
                         
@@ -268,6 +273,12 @@ struct ProfileView: View {
                                     .foregroundColor(.white.opacity(0.85))
                             }
                         }
+                        .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileSessions)
+                        .onTapGesture {
+                            if tutorialManager.currentStep == .profileSessions {
+                                tutorialManager.advanceStep()
+                            }
+                        }
                         
                         // Staking Dashboard Card (New)
                         navigationCard(
@@ -279,6 +290,12 @@ struct ProfileView: View {
                             Text("View and manage your stakes")
                                 .font(.plusJakarta(.subheadline))
                                 .foregroundColor(.white.opacity(0.85))
+                        }
+                        .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileStakings)
+                        .onTapGesture {
+                            if tutorialManager.currentStep == .profileStakings {
+                                tutorialManager.advanceStep()
+                            }
                         }
                         
                         // Challenges Dashboard Card (New)
@@ -317,6 +334,12 @@ struct ProfileView: View {
                                 Text("Set goals and track your poker journey")
                                     .font(.plusJakarta(.subheadline))
                                     .foregroundColor(.white.opacity(0.85))
+                            }
+                        }
+                        .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileChallenges)
+                        .onTapGesture {
+                            if tutorialManager.currentStep == .profileChallenges {
+                                tutorialManager.advanceStep()
                             }
                         }
                         
@@ -407,8 +430,8 @@ struct ProfileView: View {
             .environmentObject(userService)
             // Filter configuration sheet
             .sheet(isPresented: $showFilterSheet) {
-                let uniqueGames = Array(Set(sessionStore.sessions.map { $0.gameName.trimmingCharacters(in: .whitespaces) })).filter { !$0.isEmpty }.sorted()
-                AnalyticsFilterSheet(filter: $analyticsFilter, availableGames: uniqueGames)
+                let topGames = getTop5MostCommonGames()
+                AnalyticsFilterSheet(filter: $analyticsFilter, topGames: topGames)
             }
             // Bankroll adjustment sheet
             .sheet(isPresented: $showingBankrollSheet) {
@@ -493,7 +516,7 @@ struct ProfileView: View {
             .background(AppBackgroundView().ignoresSafeArea(.all))
             .accentColor(.white)
             .environmentObject(userService)
-            .environmentObject(StakeService())
+            .environmentObject(stakeService)
             .environmentObject(ManualStakerService())
         }
         .fullScreenCover(isPresented: $showChallengesDetailView) {
@@ -546,14 +569,17 @@ struct ProfileView: View {
                     
                 }
             }
-            // Fetch sessions for Analytics & Sessions cards/views
+            // Fetch sessions for Analytics & Sessions cards/views - only load if empty
             if sessionStore.sessions.isEmpty {
-                
-                sessionStore.fetchSessions()
-                
-            } else {
-                
+                sessionStore.loadSessionsForUI()
             }
+            
+            // Ensure adjusted profits are calculated for sessions that don't have them
+            ensureAdjustedProfitsCalculated()
+        }
+        .onChange(of: sessionStore.sessions) { _ in
+            // Ensure new sessions have adjusted profits calculated
+            ensureAdjustedProfitsCalculated()
         }
         .onChange(of: selectedStats) { _ in
             saveSelectedStats()
@@ -670,13 +696,13 @@ struct ProfileView: View {
     
     // MARK: - Analytics Helper Properties (Unchanged, used by analyticsDetailContent)
     private var totalBankroll: Double {
-        let sessionProfit = filteredSessions.reduce(0) { $0 + $1.profit }
+        let sessionProfit = filteredSessions.reduce(0) { $0 + adjustedProfit(for: $1) } // Use adjusted profit
         return sessionProfit + bankrollStore.bankrollSummary.currentTotal
     }
     
     private var selectedTimeRangeProfit: Double {
         let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
-        return filteredSessions.reduce(0) { $0 + $1.profit }
+        return filteredSessions.reduce(0) { $0 + adjustedProfit(for: $1) } // Use adjusted profit
     }
     
     private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
@@ -709,14 +735,14 @@ struct ProfileView: View {
     private var winRate: Double {
         let totalSessions = filteredSessions.count
         if totalSessions == 0 { return 0 }
-        let winningSessions = filteredSessions.filter { $0.profit > 0 }.count
+        let winningSessions = filteredSessions.filter { adjustedProfit(for: $0) > 0 }.count // Use adjusted profit
         return Double(winningSessions) / Double(totalSessions) * 100
     }
     
     private var averageProfit: Double {
         let totalSessions = filteredSessions.count
         if totalSessions == 0 { return 0 }
-        let sessionProfitOnly = filteredSessions.reduce(0) { $0 + $1.profit }
+        let sessionProfitOnly = filteredSessions.reduce(0) { $0 + adjustedProfit(for: $1) } // Use adjusted profit
         return sessionProfitOnly / Double(totalSessions)
     }
     
@@ -725,8 +751,9 @@ struct ProfileView: View {
     }
     
     private var bestSession: (profit: Double, id: String)? {
-        if let best = filteredSessions.max(by: { $0.profit < $1.profit }) {
-            return (best.profit, best.id)
+        let sessionWithMaxProfit = filteredSessions.max { adjustedProfit(for: $0) < adjustedProfit(for: $1) } // Use adjusted profit
+        if let session = sessionWithMaxProfit {
+            return (adjustedProfit(for: session), session.id) // Use adjusted profit
         }
         return nil
     }
@@ -743,59 +770,303 @@ struct ProfileView: View {
     
     private var dollarPerHour: Double {
         if totalHoursPlayed == 0 { return 0 }
-        let sessionProfitOnly = filteredSessions.reduce(0) { $0 + $1.profit }
+        let sessionProfitOnly = filteredSessions.reduce(0) { $0 + adjustedProfit(for: $1) } // Use adjusted profit
         return sessionProfitOnly / totalHoursPlayed
     }
     
     private var bbPerHour: Double {
-        // Calculate BB/hour properly: total BB won / total hours
+        // Calculate BB/hour with weighted average for mixed stakes
         let cashGameSessions = filteredSessions.filter {
             $0.gameType.lowercased().contains("cash")
         }
         
         guard !cashGameSessions.isEmpty else { return 0 }
         
-        var totalBBWon: Double = 0
-        var totalHours: Double = 0
+        // Group sessions by stakes level for proper weighted calculation
+        var stakeGroups: [String: (totalBB: Double, totalHours: Double)] = [:]
         
         for session in cashGameSessions {
             guard session.hoursPlayed > 0 else { continue }
             
-            // Parse big blind from stakes (e.g., "$1/$2" -> 2.0)
-            let digits = session.stakes.replacingOccurrences(of: " $", with: "")
-            let comps = digits.replacingOccurrences(of: "$", with: "").split(separator: "/")
-            guard comps.count == 2, let bb = Double(comps[1]), bb > 0 else { continue }
+            // Parse big blind from stakes using enhanced parser
+            guard let bigBlind = parseBigBlindFromStakes(session.stakes), bigBlind > 0 else { 
+                continue 
+            }
             
-            // Convert session profit to BB won for this session
-            let bbWonThisSession = session.profit / bb
-            totalBBWon += bbWonThisSession
-            totalHours += session.hoursPlayed
+            // Convert session profit to BB won for this session - use adjusted profit
+            let bbWonThisSession = adjustedProfit(for: session) / bigBlind
+            
+            // Group by stakes level
+            let stakesKey = session.stakes
+            if var group = stakeGroups[stakesKey] {
+                group.totalBB += bbWonThisSession
+                group.totalHours += session.hoursPlayed
+                stakeGroups[stakesKey] = group
+            } else {
+                stakeGroups[stakesKey] = (bbWonThisSession, session.hoursPlayed)
+            }
         }
         
-        guard totalHours > 0 else { return 0 }
+        guard !stakeGroups.isEmpty else { return 0 }
         
-        // Total BB won divided by total hours
-        return totalBBWon / totalHours
+        // Calculate weighted average BB/hour across all stake levels
+        var totalWeightedBBPerHour: Double = 0
+        var totalWeight: Double = 0
+        
+        for (_, group) in stakeGroups {
+            guard group.totalHours > 0 else { continue }
+            let bbPerHourForStake = group.totalBB / group.totalHours
+            totalWeightedBBPerHour += bbPerHourForStake * group.totalHours
+            totalWeight += group.totalHours
+        }
+        
+        guard totalWeight > 0 else { return 0 }
+        
+        return totalWeightedBBPerHour / totalWeight
+    }
+    
+    // MARK: - New Analytics Helper Properties
+    
+    private var longestWinningStreak: Int {
+        guard !filteredSessions.isEmpty else { return 0 }
+        
+        let sortedSessions = filteredSessions.sorted { $0.startDate < $1.startDate }
+        var currentStreak = 0
+        var maxStreak = 0
+        
+        for session in sortedSessions {
+            if adjustedProfit(for: session) > 0 { // Use adjusted profit
+                currentStreak += 1
+                maxStreak = max(maxStreak, currentStreak)
+            } else {
+                currentStreak = 0
+            }
+        }
+        
+        return maxStreak
+    }
+    
+    private var longestLosingStreak: Int {
+        guard !filteredSessions.isEmpty else { return 0 }
+        
+        let sortedSessions = filteredSessions.sorted { $0.startDate < $1.startDate }
+        var currentStreak = 0
+        var maxStreak = 0
+        
+        for session in sortedSessions {
+            if adjustedProfit(for: session) < 0 { // Use adjusted profit
+                currentStreak += 1
+                maxStreak = max(maxStreak, currentStreak)
+            } else {
+                currentStreak = 0
+            }
+        }
+        
+        return maxStreak
+    }
+    
+    private var bestLocationByProfit: (location: String, profit: Double)? {
+        guard !filteredSessions.isEmpty else { return nil }
+        
+        let locationProfits = Dictionary(grouping: filteredSessions) { session in
+            // Use gameName and parse away stakes information
+            return parseLocationFromGameName(session.gameName)
+        }.mapValues { sessions in sessions.reduce(0) { $0 + adjustedProfit(for: $1) } } // Use adjusted profit
+        
+        guard let (location, profit) = locationProfits.max(by: { $0.value < $1.value }) else { return nil }
+        return (location, profit)
+    }
+    
+    /// Parses location name from gameName by removing stakes information
+    private func parseLocationFromGameName(_ gameName: String) -> String {
+        let cleaned = gameName.trimmingCharacters(in: .whitespaces)
+        
+        // Remove common stakes patterns: $X/$Y, $X/$Y/$Z, NLX, PLOX, etc.
+        let stakesPatterns = [
+            #"\$\d+/\$\d+(/\$\d+)?"#,  // $1/$2 or $1/$2/$5
+            #"NL\d+"#,                  // NL200, NL100
+            #"PLO\d+"#,                 // PLO100, PLO200
+            #"FL\d+"#,                  // FL200
+            #"\d+/\d+"#,                // 1/2, 2/5
+            #"\(\$\d+\)"#               // ($1) ante notation
+        ]
+        
+        var result = cleaned
+        for pattern in stakesPatterns {
+            result = result.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        
+        // Clean up extra spaces and common separators
+        result = result.replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-.,"))
+            .trimmingCharacters(in: .whitespaces)
+        
+        return result.isEmpty ? cleaned : result
+    }
+    
+    private var bestStakeByProfit: (stake: String, profit: Double)? {
+        guard !filteredSessions.isEmpty else { return nil }
+        
+        let stakeProfits = Dictionary(grouping: filteredSessions, by: { $0.stakes })
+            .mapValues { sessions in sessions.reduce(0) { $0 + adjustedProfit(for: $1) } } // Use adjusted profit
+        
+        guard let (stake, profit) = stakeProfits.max(by: { $0.value < $1.value }) else { return nil }
+        return (stake, profit)
+    }
+    
+    private var profitStandardDeviation: Double {
+        guard filteredSessions.count > 1 else { return 0 }
+        
+        let profits = filteredSessions.map { adjustedProfit(for: $0) } // Use adjusted profit
+        let mean = profits.reduce(0, +) / Double(profits.count)
+        let variance = profits.map { pow($0 - mean, 2) }.reduce(0, +) / Double(profits.count - 1)
+        
+        return sqrt(variance)
+    }
+    
+    private var tournamentROI: Double {
+        let tournamentSessions = filteredSessions.filter { 
+            $0.gameType.lowercased().contains("tournament") || $0.gameType.lowercased().contains("mtt") || $0.gameType.lowercased().contains("sng")
+        }
+        
+        guard !tournamentSessions.isEmpty else { return 0 }
+        
+        let totalBuyins = tournamentSessions.reduce(0) { $0 + $1.buyIn }
+        let totalCashouts = tournamentSessions.reduce(0) { $0 + $1.cashout }
+        let totalAdjustedProfit = tournamentSessions.reduce(0) { $0 + adjustedProfit(for: $1) } // Use adjusted profit
+        
+        guard totalBuyins > 0 else { return 0 }
+        
+        // Calculate ROI based on adjusted profit rather than raw cashout
+        return (totalAdjustedProfit / totalBuyins) * 100
+    }
+    
+    // MARK: - Enhanced Stakes Parser
+    /// Parses the big blind value from various stakes string formats
+    /// Supports: "$1/$2", "$1/$2/$5", "$2/$5 ($1)", "1/2", "NL200", etc.
+    private func parseBigBlindFromStakes(_ stakesString: String) -> Double? {
+        let stakes = stakesString.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Handle empty stakes
+        guard !stakes.isEmpty else { return nil }
+        
+        // Method 1: Standard format "$X/$Y" or "X/Y"
+        if let bb = parseStandardStakesFormat(stakes) {
+            return bb
+        }
+        
+        // Method 2: Online format "NL200", "PLO100", etc.
+        if let bb = parseOnlineStakesFormat(stakes) {
+            return bb
+        }
+        
+        // Method 3: Tournament format - return nil as tournaments don't have BB/hour
+        if stakes.lowercased().contains("tournament") {
+            return nil
+        }
+        
+        // Method 4: Try to extract any number as last resort
+        return extractNumberFromStakes(stakes)
+    }
+    
+    private func parseStandardStakesFormat(_ stakes: String) -> Double? {
+        // Clean the stakes string
+        let cleanedStakes = stakes
+            .replacingOccurrences(of: " $", with: "")
+            .replacingOccurrences(of: "$", with: "")
+            .replacingOccurrences(of: " ", with: "")
+        
+        // Handle straddle format: "$1/$2/$5" or with ante: "$1/$2 ($0.50)"
+        let baseStakes = cleanedStakes.components(separatedBy: "(")[0] // Remove ante part
+        let components = baseStakes.split(separator: "/")
+        
+        // Need at least small/big blind
+        guard components.count >= 2 else { return nil }
+        
+        // Extract big blind (second component)
+        let bigBlindString = String(components[1])
+        return Double(bigBlindString)
+    }
+    
+    private func parseOnlineStakesFormat(_ stakes: String) -> Double? {
+        // Handle formats like "NL200", "PLO100", "6-max NL100"
+        let pattern = #"(?:NL|PLO|FL)?(\d+)"#
+        let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+        
+        if let match = regex?.firstMatch(in: stakes, options: [], range: NSRange(stakes.startIndex..., in: stakes)),
+           let range = Range(match.range(at: 1), in: stakes) {
+            let numberString = String(stakes[range])
+            // Online stakes are typically in big blinds (e.g., NL200 = $1/$2, so BB = 2)
+            if let number = Double(numberString) {
+                return number / 100.0 // Convert from cents to dollars
+            }
+        }
+        
+        return nil
+    }
+    
+    private func extractNumberFromStakes(_ stakes: String) -> Double? {
+        // Last resort: extract the largest number found
+        let pattern = #"(\d+(?:\.\d+)?)"#
+        let regex = try? NSRegularExpression(pattern: pattern)
+        
+        var largestNumber: Double = 0
+        
+        if let regex = regex {
+            let matches = regex.matches(in: stakes, options: [], range: NSRange(stakes.startIndex..., in: stakes))
+            
+            for match in matches {
+                if let range = Range(match.range(at: 1), in: stakes),
+                   let number = Double(String(stakes[range])) {
+                    largestNumber = max(largestNumber, number)
+                }
+            }
+        }
+        
+        return largestNumber > 0 ? largestNumber : nil
     }
     
     private func getStatValue(for stat: PerformanceStat) -> String {
         switch stat {
         case .avgProfit:
-            return "$\(Int(averageProfit).formattedWithCommas) / session"
+            return "$\(Int(averageProfit).formattedWithCommas)"
         case .bestSession:
             return "$\(Int(bestSession?.profit ?? 0).formattedWithCommas)"
-        case .winRate:
-            return "\(Int(winRate))%"
         case .sessions:
             return "\(totalSessions)"
         case .hours:
             return "\(Int(totalHoursPlayed))"
         case .avgSessionLength:
-            return String(format: "%.1f hrs", averageSessionLength)
+            return String(format: "%.1f", averageSessionLength)
         case .dollarPerHour:
-            return "$\(Int(dollarPerHour).formattedWithCommas)/hr"
+            return "$\(Int(dollarPerHour).formattedWithCommas)"
         case .bbPerHour:
-            return String(format: "%.1f BB/hr", bbPerHour)
+            let bbHr = bbPerHour
+            if bbHr == 0 {
+                return "No data"
+            } else if abs(bbHr) < 0.1 {
+                return String(format: "%.2f", bbHr)
+            } else {
+                return String(format: "%.1f", bbHr)
+            }
+        case .longestWinStreak:
+            return "\(longestWinningStreak)"
+        case .longestLoseStreak:
+            return "\(longestLosingStreak)"
+        case .bestLocation:
+            return bestLocationByProfit?.location ?? "No data"
+        case .bestStake:
+            return bestStakeByProfit?.stake ?? "No data"
+        case .standardDeviation:
+            return "$\(Int(profitStandardDeviation).formattedWithCommas)"
+        case .tournamentROI:
+            let roi = tournamentROI
+            if roi == 0 {
+                return "No data"
+            } else {
+                return String(format: "%.1f%%", roi)
+            }
         }
     }
     
@@ -945,15 +1216,16 @@ struct ProfileView: View {
             VStack(spacing: 15) { // Reduced main spacing
                 // Bankroll section with past month profit/loss indicator
                 VStack(alignment: .leading, spacing: 4) {
-                    // Dynamic header title based on selected graph tab
-                    Text(selectedGraphTab == 0 ? "Bankroll" : (selectedGraphTab == 1 ? "Profit" : "Monthly Profit"))
+                    // Dynamic header title based on selected graph tab and profit calculation mode
+                    let profitMode = analyticsFilter.showRawProfits ? "Raw" : "Staking Adjusted"
+                    Text(selectedGraphTab == 0 ? "Bankroll (\(profitMode))" : (selectedGraphTab == 1 ? "Profit (\(profitMode))" : "Monthly Profit (\(profitMode))"))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.gray)
                     
                     // Show aggregated value with edit button for bankroll
                     HStack(alignment: .bottom, spacing: 12) {
                         Text(selectedGraphTab == 0 ? "$\(Int(totalBankroll).formattedWithCommas)" :
-                                (selectedGraphTab == 1 ? "$\(Int(filteredSessions.reduce(0){$0+$1.profit}).formattedWithCommas)" :
+                                (selectedGraphTab == 1 ? "$\(Int(filteredSessions.reduce(0){$0+adjustedProfit(for: $1)}).formattedWithCommas)" :
                                     "$\(Int(monthlyProfitCurrent()).formattedWithCommas)"))
                         .font(.system(size: 36, weight: .bold))
                         .foregroundColor(.white)
@@ -1007,7 +1279,7 @@ struct ProfileView: View {
                     HStack(spacing: 4) {
                         // Show time range indicator
                         let filteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
-                        let timeRangeProfit = filteredSessions.reduce(0) { $0 + $1.profit }
+                        let timeRangeProfit = filteredSessions.reduce(0) { $0 + adjustedProfit(for: $1) } // Use adjusted profit
                         
                         Image(systemName: timeRangeProfit >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
                             .font(.system(size: 10))
@@ -1053,7 +1325,8 @@ struct ProfileView: View {
                                     bankrollTransactions: bankrollStore.transactions,
                                     selectedTimeRange: $selectedTimeRange,
                                     timeRanges: timeRanges,
-                                    selectedGraphIndex: $selectedGraphTab
+                                    selectedGraphIndex: $selectedGraphTab,
+                                    adjustedProfitCalculator: adjustedProfit
                                 )
                                 .frame(height: 280)
                             }
@@ -1211,34 +1484,42 @@ struct ProfileView: View {
                 .padding(.bottom, 16)
 
             }
-            .padding(.bottom, 24) // Slightly reduced bottom padding
+            .padding(.bottom, 12) // Reduced bottom padding
             
             // Performance Stats with Customization
-            HStack {
-                Text("PERFORMANCE STATS")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.85))
-                
-                if !isCustomizingStats {
-                    Text("\(selectedStats.count)/\(PerformanceStat.allCases.count)")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.gray.opacity(0.6))
-                }
-                
-                Spacer()
-                
-                Button(action: {
-                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                        isCustomizingStats.toggle()
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PERFORMANCE STATS")
+                            .font(.plusJakarta(.subheadline, weight: .bold))
+                            .foregroundColor(.white.opacity(0.85))
+                        
+                        Text(analyticsFilter.showRawProfits ? "Raw Profits" : "Staking-Adjusted Profits")
+                            .font(.plusJakarta(.caption, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.7))
                     }
-                }) {
-                    Text(isCustomizingStats ? "Done" : "Customize Stats")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    
+                    if !isCustomizingStats {
+                        Text("\(selectedStats.count)/\(PerformanceStat.allCases.count)")
+                            .font(.plusJakarta(.caption, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.6))
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                            isCustomizingStats.toggle()
+                        }
+                    }) {
+                        Text(isCustomizingStats ? "Done" : "Customize Stats")
+                            .font(.plusJakarta(.callout, weight: .semibold))
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    }
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.top, 16)
+            .padding(.top, 8)
             
             if isCustomizingStats {
                 // Customization Interface
@@ -1250,7 +1531,7 @@ struct ProfileView: View {
                 // Regular Stats Display as Beautiful Boxes
                 if selectedStats.isEmpty {
                     Text("No stats selected. Tap 'Customize Stats' to add some.")
-                        .font(.system(size: 14))
+                        .font(.plusJakarta(.body))
                         .foregroundColor(.gray)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.vertical, 20)
@@ -1258,8 +1539,9 @@ struct ProfileView: View {
                 } else {
                     LazyVGrid(columns: [
                         GridItem(.flexible()),
+                        GridItem(.flexible()),
                         GridItem(.flexible())
-                    ], spacing: 16) {
+                    ], spacing: 12) {
                         ForEach(selectedStats, id: \.id) { stat in
                             StatDisplayCard(
                                 stat: stat,
@@ -1267,7 +1549,7 @@ struct ProfileView: View {
                             )
                         }
                     }
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 16)
                     .padding(.top, 16)
                 }
             }
@@ -1769,33 +2051,17 @@ struct ProfileView: View {
             break
         }
 
-        // Profitability
-        switch analyticsFilter.profitability {
-        case .winning:
-            if session.profit <= 0 { return false }
-        case .losing:
-            if session.profit >= 0 { return false }
-        default: break
+        // Custom date range
+        if let startDate = analyticsFilter.customStartDate {
+            if session.startDate < startDate {
+                return false
+            }
         }
-
-        // Time of day
-        let hour = Calendar.current.component(.hour, from: session.startTime)
-        switch analyticsFilter.timeOfDay {
-        case .morning:
-            if !(5..<12).contains(hour) { return false }
-        case .afternoon:
-            if !(12..<17).contains(hour) { return false }
-        case .lateNight:
-            if !((22...23).contains(hour) || (0..<6).contains(hour)) { return false }
-        default: break
-        }
-
-        // Day of week (1 = Sunday)
-        if analyticsFilter.dayOfWeek != .all {
-            let weekdaySymbols: [DayOfWeekFilter] = [.sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday]
-            let weekdayIndex = Calendar.current.component(.weekday, from: session.startDate) - 1 // 0–6
-            let sessionDay = weekdaySymbols[weekdayIndex]
-            if sessionDay != analyticsFilter.dayOfWeek { return false }
+        
+        if let endDate = analyticsFilter.customEndDate {
+            if session.startDate > endDate {
+                return false
+            }
         }
 
         return true
@@ -1826,6 +2092,21 @@ struct ProfileView: View {
         return (session.location ?? session.gameName).trimmingCharacters(in: .whitespaces)
     }
     
+    // Get top 5 most common games from user's sessions
+    private func getTop5MostCommonGames() -> [String] {
+        let gameFrequency = sessionStore.sessions
+            .map { $0.gameName.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String: Int]()) { counts, game in
+                counts[game, default: 0] += 1
+            }
+        
+        return gameFrequency
+            .sorted { $0.value > $1.value }
+            .prefix(5)
+            .map { $0.key }
+    }
+    
     // MARK: - Selected Stats Persistence
     private func saveSelectedStats() {
         let statsStrings = selectedStats.map { $0.rawValue }
@@ -1839,11 +2120,11 @@ struct ProfileView: View {
                 selectedStats = savedStats
             } else {
                 // Use default if nothing saved or invalid data
-                selectedStats = [.avgProfit, .bestSession, .winRate, .sessions, .hours, .avgSessionLength]
+                selectedStats = [.avgProfit, .bestSession, .sessions, .hours, .avgSessionLength, .dollarPerHour]
             }
         } else {
             // Use default for first time users
-            selectedStats = [.avgProfit, .bestSession, .winRate, .sessions, .hours, .avgSessionLength]
+            selectedStats = [.avgProfit, .bestSession, .sessions, .hours, .avgSessionLength, .dollarPerHour]
         }
     }
 
@@ -1855,7 +2136,7 @@ struct ProfileView: View {
         
         let sessionProfit = filteredSessions.filter { session in
             calendar.component(.month, from: session.startDate) == month && calendar.component(.year, from: session.startDate) == year
-        }.reduce(0) { $0 + $1.profit }
+        }.reduce(0) { $0 + adjustedProfit(for: $1) }
         
         let bankrollProfit = bankrollStore.transactions.filter { txn in
             calendar.component(.month, from: txn.timestamp) == month && calendar.component(.year, from: txn.timestamp) == year
@@ -1886,6 +2167,24 @@ struct ProfileView: View {
         )
     }
     
+    // Removed old caching system - now using stored adjustedProfit in sessions
+    
+    // MARK: - Staking-Adjusted Analytics Helper Functions
+    
+    /// Get profit for a session, either staking-adjusted or raw based on filter setting
+    private func adjustedProfit(for session: Session) -> Double {
+        return analyticsFilter.showRawProfits ? session.profit : session.effectiveProfit
+    }
+    
+    /// Ensure sessions have adjusted profits calculated (for sessions that don't have them yet)
+    private func ensureAdjustedProfitsCalculated() {
+        Task {
+            await sessionStore.ensureAllSessionsHaveAdjustedProfits()
+        }
+    }
+    
+    
+    
 }
 
 // Wrapper for ActivityContentView to manage its own dismissal and title
@@ -1913,12 +2212,17 @@ struct ActivityContentViewWrapper: View {
 enum PerformanceStat: String, CaseIterable, Identifiable, Equatable {
     case avgProfit = "avg_profit"
     case bestSession = "best_session"
-    case winRate = "win_rate"
     case sessions = "sessions"
     case hours = "hours"
     case avgSessionLength = "avg_length"
     case dollarPerHour = "dollar_per_hour"
     case bbPerHour = "bb_per_hour"
+    case longestWinStreak = "longest_win_streak"
+    case longestLoseStreak = "longest_lose_streak"
+    case bestLocation = "best_location"
+    case bestStake = "best_stake"
+    case standardDeviation = "standard_deviation"
+    case tournamentROI = "tournament_roi"
     
     var id: String { rawValue }
     
@@ -1926,12 +2230,17 @@ enum PerformanceStat: String, CaseIterable, Identifiable, Equatable {
         switch self {
         case .avgProfit: return "Avg. Profit"
         case .bestSession: return "Best Session"
-        case .winRate: return "Win Rate"
-        case .sessions: return "Sessions"
-        case .hours: return "Hours"
-        case .avgSessionLength: return "Avg. Session Length"
+        case .sessions: return "Total Sessions"
+        case .hours: return "Total Hours"
+        case .avgSessionLength: return "Avg. Hours"
         case .dollarPerHour: return "$/Hour"
         case .bbPerHour: return "BB/Hour"
+        case .longestWinStreak: return "Win Streak"
+        case .longestLoseStreak: return "Lose Streak"
+        case .bestLocation: return "Best Location"
+        case .bestStake: return "Best Stake"
+        case .standardDeviation: return "Std. Deviation"
+        case .tournamentROI: return "Tourney ROI"
         }
     }
     
@@ -1939,12 +2248,17 @@ enum PerformanceStat: String, CaseIterable, Identifiable, Equatable {
         switch self {
         case .avgProfit: return "dollarsign.circle.fill"
         case .bestSession: return "star.fill"
-        case .winRate: return "chart.pie.fill"
         case .sessions: return "list.star"
         case .hours: return "clock.fill"
         case .avgSessionLength: return "timer"
         case .dollarPerHour: return "chart.line.uptrend.xyaxis"
         case .bbPerHour: return "speedometer"
+        case .longestWinStreak: return "flame.fill"
+        case .longestLoseStreak: return "thermometer.snowflake"
+        case .bestLocation: return "mappin.and.ellipse"
+        case .bestStake: return "target"
+        case .standardDeviation: return "waveform.path"
+        case .tournamentROI: return "percent"
         }
     }
     
@@ -1952,12 +2266,17 @@ enum PerformanceStat: String, CaseIterable, Identifiable, Equatable {
         switch self {
         case .avgProfit: return .green
         case .bestSession: return .yellow
-        case .winRate: return .cyan
         case .sessions: return .orange
         case .hours: return .purple
         case .avgSessionLength: return .pink
         case .dollarPerHour: return .mint
         case .bbPerHour: return .teal
+        case .longestWinStreak: return .red
+        case .longestLoseStreak: return .blue
+        case .bestLocation: return .cyan
+        case .bestStake: return .indigo
+        case .standardDeviation: return .brown
+        case .tournamentROI: return .gray
         }
     }
 }
@@ -2148,71 +2467,75 @@ struct StatItem: Identifiable, Hashable {
     }
 }
 
-// MARK: - Stat Display Card (Main View) - Clean design without gradients
+// MARK: - Stat Display Card (Main View) - Clean minimal design
 struct StatDisplayCard: View {
     let stat: PerformanceStat
     let value: String
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header with icon and title
-            HStack(spacing: 8) {
-                // Circular icon background
-                ZStack {
-                    Circle()
-                        .fill(stat.color.opacity(0.15))
-                        .frame(width: 28, height: 28)
-                    
-                    Image(systemName: stat.iconName)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(stat.color)
-                }
-                
-                Text(stat.title.uppercased())
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-                    .tracking(0.5)
-                    .lineLimit(1)
-                
-                Spacer()
-            }
-            .padding(.bottom, 12)
-            
-            // Value - large and prominent
-            Text(value)
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            // Subtle accent line at bottom
+            // Icon at top left
             HStack {
+                Image(systemName: stat.iconName)
+                    .font(.plusJakarta(.body, weight: .medium))
+                    .foregroundColor(stat.color.opacity(0.8))
+                    .frame(width: 20, height: 20)
                 Spacer()
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(stat.color)
-                    .frame(width: 30, height: 2)
             }
-            .padding(.top, 8)
+            .padding(.top, 16)
+            .padding(.horizontal, 16)
+            
+            Spacer()
+            
+            // Main value left aligned
+            VStack(alignment: .leading, spacing: 4) {
+                Text(value)
+                    .font(.plusJakarta(.title2, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                    .multilineTextAlignment(.leading)
+                
+                // Title below value
+                Text(stat.title)
+                    .font(.plusJakarta(.caption, weight: .medium))
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
         }
-        .padding(20)
+        .frame(height: 110) // Smaller height for 3-column layout
+        .frame(maxWidth: .infinity)
         .background(
             ZStack {
-                // Glassy background
-                RoundedRectangle(cornerRadius: 20)
+                // Ultra-transparent glassy background like carousel
+                RoundedRectangle(cornerRadius: 16)
                     .fill(Material.ultraThinMaterial)
-                    .opacity(0.3)
+                    .opacity(0.08)
                 
-                // Subtle overlay for depth
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: 16)
                     .fill(Color.white.opacity(0.02))
                 
-                // Border
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                // Subtle border
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.15),
+                                Color.white.opacity(0.05),
+                                Color.clear
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.7
+                    )
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -2290,22 +2613,32 @@ struct ProfileCardView: View {
 
     var body: some View {
         VStack(spacing: 15) {
-                if let profile = userService.currentUserProfile {
+                // Try to get the profile from loadedUsers first, fallback to currentUserProfile
+                if let profile = userService.loadedUsers[userId] ?? userService.currentUserProfile {
                     VStack(alignment: .leading, spacing: 15) {
                         // Top Section: Avatar, Name, Username, Location, Stats
                         HStack(spacing: 16) {
                         // Profile picture
-                            if let url = profile.avatarURL, let imageURL = URL(string: url) {
+                            if let url = profile.avatarURL, !url.isEmpty, let imageURL = URL(string: url) {
                                 AsyncImage(url: imageURL) { phase in
-                                    if let image = phase.image {
-                                        image.resizable().aspectRatio(contentMode: .fill)
-                                        .frame(width: 60, height: 60)
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 60, height: 60)
                                             .clipShape(Circle())
                                             .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                                } else {
-                                    PlaceholderAvatarView(size: 60)
+                                    case .failure(_):
+                                        PlaceholderAvatarView(size: 60)
+                                    case .empty:
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+                                            .frame(width: 60, height: 60)
+                                    @unknown default:
+                                        PlaceholderAvatarView(size: 60)
+                                    }
                                 }
-                            }
                         } else {
                             PlaceholderAvatarView(size: 60)
                         }
@@ -2366,18 +2699,41 @@ struct ProfileCardView: View {
                             }
                         }
 
-                        // Bio and Edit Profile button
-                        HStack(alignment: .bottom) {
+                        // Bio and hyperlink combined
+                        VStack(alignment: .leading, spacing: 8) {
                             if let bio = profile.bio, !bio.isEmpty {
                                 Text(bio)
                                     .font(.system(size: 14))
                                     .foregroundColor(.white.opacity(0.85))
                                     .multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else {
-                                Spacer()
                             }
                             
+                            // Simple hyperlink - just colored text
+                            if let hyperlinkText = profile.hyperlinkText, !hyperlinkText.isEmpty,
+                               let hyperlinkURL = profile.hyperlinkURL, !hyperlinkURL.isEmpty {
+                                Button(action: {
+                                    // Ensure URL has proper scheme
+                                    var urlString = hyperlinkURL
+                                    if !urlString.lowercased().hasPrefix("http://") && !urlString.lowercased().hasPrefix("https://") {
+                                        urlString = "https://" + urlString
+                                    }
+                                    
+                                    if let url = URL(string: urlString) {
+                                        UIApplication.shared.open(url)
+                                    }
+                                }) {
+                                    Text(hyperlinkText)
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.blue)
+                                        .underline()
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+
+                        // Edit Profile button
+                        HStack {
+                            Spacer()
                             Button(action: {
                                 showEdit = true
                             }) {
@@ -2413,8 +2769,13 @@ struct ProfileCardView: View {
             }
         }
         .onAppear {
+            // Ensure we have the profile data loaded
             if userService.currentUserProfile == nil {
                 Task { try? await userService.fetchUserProfile() }
+            }
+            // Also ensure we have the user data in loadedUsers for consistency
+            if userService.loadedUsers[userId] == nil {
+                Task { await userService.fetchUser(id: userId) }
             }
         }
     }
@@ -2964,10 +3325,20 @@ struct SwipeableGraphCarousel: View {
     @Binding var selectedTimeRange: Int
     let timeRanges: [String]
     @Binding var selectedGraphIndex: Int
+    let adjustedProfitCalculator: ((Session) -> Double)?
     
     @State private var dragOffset: CGFloat = 0
     
     private let graphTypes = ["Bankroll", "Profit", "Monthly"]
+    
+    init(sessions: [Session], bankrollTransactions: [BankrollTransaction], selectedTimeRange: Binding<Int>, timeRanges: [String], selectedGraphIndex: Binding<Int>, adjustedProfitCalculator: ((Session) -> Double)? = nil) {
+        self.sessions = sessions
+        self.bankrollTransactions = bankrollTransactions
+        self._selectedTimeRange = selectedTimeRange
+        self.timeRanges = timeRanges
+        self._selectedGraphIndex = selectedGraphIndex
+        self.adjustedProfitCalculator = adjustedProfitCalculator
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -2978,7 +3349,8 @@ struct SwipeableGraphCarousel: View {
                     sessions: sessions,
                     bankrollTransactions: bankrollTransactions,
                     selectedTimeRange: selectedTimeRange,
-                    timeRanges: timeRanges
+                    timeRanges: timeRanges,
+                    adjustedProfitCalculator: adjustedProfitCalculator
                 )
                 .tag(0)
                 
@@ -2986,7 +3358,8 @@ struct SwipeableGraphCarousel: View {
                 ProfitGraphView(
                     sessions: sessions,
                     selectedTimeRange: selectedTimeRange,
-                    timeRanges: timeRanges
+                    timeRanges: timeRanges,
+                    adjustedProfitCalculator: adjustedProfitCalculator
                 )
                 .tag(1)
                 
@@ -2994,6 +3367,7 @@ struct SwipeableGraphCarousel: View {
                 MonthlyProfitBarChart(
                     sessions: sessions,
                     bankrollTransactions: bankrollTransactions,
+                    adjustedProfitCalculator: adjustedProfitCalculator,
                     onBarTouch: { monthData in
                         // Handle bar touch to show monthly profit
                         // Could potentially update selectedDataPoint here if needed
@@ -3057,6 +3431,7 @@ struct BankrollGraphView: View {
     let bankrollTransactions: [BankrollTransaction]
     let selectedTimeRange: Int
     let timeRanges: [String]
+    let adjustedProfitCalculator: ((Session) -> Double)?
     
     private func getTimeRangeLabel(for index: Int) -> String {
         guard index >= 0 && index < timeRanges.count else { return "selected period" }
@@ -3127,8 +3502,10 @@ struct BankrollGraphView: View {
                 let filteredTransactions = bankrollTransactions // Include all bankroll transactions
                 
                 // Combine and sort data points
-                let combinedData = (filteredSessions.map { (date: $0.startDate, amount: $0.profit, type: "session") } +
-                                  filteredTransactions.map { (date: $0.timestamp, amount: $0.amount, type: "transaction") })
+                let combinedData = (filteredSessions.map { session in
+                    let profit = adjustedProfitCalculator?(session) ?? session.profit
+                    return (date: session.startDate, amount: profit, type: "session")
+                } + filteredTransactions.map { (date: $0.timestamp, amount: $0.amount, type: "transaction") })
                     .sorted { $0.date < $1.date }
                 
                 if !combinedData.isEmpty {
@@ -3172,6 +3549,7 @@ struct ProfitGraphView: View {
     let sessions: [Session]
     let selectedTimeRange: Int
     let timeRanges: [String]
+    let adjustedProfitCalculator: ((Session) -> Double)?
     
     private func getTimeRangeLabel(for index: Int) -> String {
         guard index >= 0 && index < timeRanges.count else { return "selected period" }
@@ -3244,7 +3622,8 @@ struct ProfitGraphView: View {
                     let sortedSessions = filteredSessions.sorted { $0.startDate < $1.startDate }
                     let cumulativeData = sortedSessions.reduce(into: [(Date, Double)]()) { result, session in
                         let previousTotal = result.last?.1 ?? 0
-                        result.append((session.startDate, previousTotal + session.profit))
+                        let profit = adjustedProfitCalculator?(session) ?? session.profit
+                        result.append((session.startDate, previousTotal + profit))
                     }
                     
                     let totalProfit = cumulativeData.last?.1 ?? 0
@@ -3281,6 +3660,7 @@ struct ProfitGraphView: View {
 struct MonthlyProfitBarChart: View {
     let sessions: [Session]
     let bankrollTransactions: [BankrollTransaction]
+    let adjustedProfitCalculator: ((Session) -> Double)?
     let onBarTouch: (String) -> Void
     
     @State private var selectedBarIndex: Int? = nil
@@ -3319,7 +3699,10 @@ struct MonthlyProfitBarChart: View {
         return months.map { month in
             let monthProfit = sessions.filter { session in
                 calendar.isDate(session.startDate, equalTo: month, toGranularity: .month)
-            }.reduce(0) { $0 + $1.profit }
+            }.reduce(0) { result, session in
+                let profit = adjustedProfitCalculator?(session) ?? session.profit
+                return result + profit
+            }
             
             let bankrollProfit = bankrollTransactions.filter { transaction in
                 calendar.isDate(transaction.timestamp, equalTo: month, toGranularity: .month)

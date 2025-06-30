@@ -446,6 +446,7 @@ struct EventStakingDetailsView: View {
                 
                 // Create invites for app users (need to pass individual markup)
                 var inviteIds: [String] = []
+                let stakeService = StakeService() // Declare once for both app users and manual stakers
                 if !appStakers.isEmpty {
                     // Since the service might expect a single markup, we'll use the first staker's markup
                     // Or modify the service to handle individual markups
@@ -464,17 +465,44 @@ struct EventStakingDetailsView: View {
                         markup: globalMarkup, // Using first staker's markup for now
                         stakers: stakersForInvite
                     )
+                    
+                    // CRITICAL FIX: Also create pending Stake records for app users
+                    // This ensures they can be found later when the session starts
+                    print("EventStakingDetailsView: Creating \(appStakers.count) pending stakes for app users")
+                    for appStaker in appStakers {
+                        let stake = Stake(
+                            sessionId: "event_\(event.id)_pending",
+                            sessionGameName: event.event_name,
+                            sessionStakes: "Event Stakes",
+                            sessionDate: eventDate,
+                            stakerUserId: appStaker.stakerUserId,
+                            stakedPlayerUserId: currentUserId,
+                            stakePercentage: appStaker.percentageBought / 100.0,
+                            markup: appStaker.markup,
+                            totalPlayerBuyInForSession: 0,
+                            playerCashoutForSession: 0,
+                            storedAmountTransferredAtSettlement: 0,
+                            status: .pendingAcceptance, // Set as pending until they accept
+                            proposedAt: Date(),
+                            lastUpdatedAt: Date(),
+                            isTournamentSession: true,
+                            manualStakerDisplayName: nil, // Not manual
+                            isOffAppStake: false
+                        )
+                        
+                        let createdStakeId = try await stakeService.addStake(stake)
+                        print("EventStakingDetailsView: Created pending stake for app user \(appStaker.stakerUserId) with ID: \(createdStakeId)")
+                    }
                 }
                 
                 // Create active stakes for manual stakers (using individual markup)
-                let stakeService = StakeService()
                 var stakeIds: [String] = []
                 
                 print("EventStakingDetailsView: Processing \(manualStakers.count) manual stakers")
                 for (index, manualStaker) in manualStakers.enumerated() {
                     print("EventStakingDetailsView: Manual staker \(index + 1): markup=\(manualStaker.markup)")
                     let stake = Stake(
-                        sessionId: "event_\(event.id)_\(UUID().uuidString)",
+                        sessionId: "event_\(event.id)_pending",
                         sessionGameName: event.event_name,
                         sessionStakes: "Event Stakes",
                         sessionDate: eventDate,
@@ -485,7 +513,7 @@ struct EventStakingDetailsView: View {
                         totalPlayerBuyInForSession: 0,
                         playerCashoutForSession: 0,
                         storedAmountTransferredAtSettlement: 0,
-                        status: .active,
+                        status: .active, // Manual stakers are considered active immediately
                         proposedAt: Date(),
                         lastUpdatedAt: Date(),
                         isTournamentSession: true,

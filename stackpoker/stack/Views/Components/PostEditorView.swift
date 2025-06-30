@@ -1165,27 +1165,63 @@ struct PostEditorView: View {
     
     // Formatting functions for completed session sharing
     private func formatCurrency(_ amount: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 0
-        
         let absAmount = abs(amount)
-        if let formatted = formatter.string(from: NSNumber(value: absAmount)) {
-            return "$\(formatted)"
+        
+        // Use k notation for 6+ figure amounts (100k and above)
+        if absAmount >= 1_000_000 {
+            let millions = absAmount / 1_000_000
+            if millions.truncatingRemainder(dividingBy: 1) == 0 {
+                return "$\(Int(millions))M"
+            } else {
+                return "$\(String(format: "%.1f", millions))M"
+            }
+        } else if absAmount >= 100_000 {
+            let thousands = absAmount / 1_000
+            if thousands.truncatingRemainder(dividingBy: 1) == 0 {
+                return "$\(Int(thousands))k"
+            } else {
+                return "$\(String(format: "%.1f", thousands))k"
+            }
+        } else {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            formatter.maximumFractionDigits = 0
+            
+            if let formatted = formatter.string(from: NSNumber(value: absAmount)) {
+                return "$\(formatted)"
+            }
+            return "$\(Int(absAmount))"
         }
-        return "$\(Int(absAmount))"
     }
     
     private func formatProfit(_ profit: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 2
-        
         let absProfit = abs(profit)
-        if let formatted = formatter.string(from: NSNumber(value: absProfit)) {
-            return "$\(formatted)"
+        
+        // Use k notation for 6+ figure amounts (100k and above)
+        if absProfit >= 1_000_000 {
+            let millions = absProfit / 1_000_000
+            if millions.truncatingRemainder(dividingBy: 1) == 0 {
+                return "$\(Int(millions))M"
+            } else {
+                return "$\(String(format: "%.1f", millions))M"
+            }
+        } else if absProfit >= 100_000 {
+            let thousands = absProfit / 1_000
+            if thousands.truncatingRemainder(dividingBy: 1) == 0 {
+                return "$\(Int(thousands))k"
+            } else {
+                return "$\(String(format: "%.1f", thousands))k"
+            }
+        } else {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            formatter.maximumFractionDigits = 2
+            
+            if let formatted = formatter.string(from: NSNumber(value: absProfit)) {
+                return "$\(formatted)"
+            }
+            return "$\(String(format: "%.2f", absProfit))"
         }
-        return "$\(String(format: "%.2f", absProfit))"
     }
 }
 

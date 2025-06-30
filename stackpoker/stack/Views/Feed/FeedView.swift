@@ -10,7 +10,9 @@ struct FeedView: View {
     @EnvironmentObject var postService: PostService
     @EnvironmentObject var userService: UserService
     @EnvironmentObject var sessionStore: SessionStore // Use injected SessionStore
+    @EnvironmentObject var tutorialManager: TutorialManager // Added TutorialManager
     @StateObject private var handStore: HandStore // Added HandStore
+    @StateObject private var publicSessionService = PublicSessionService() // Added PublicSessionService
     @State private var showingNewPost = false
     @State private var isRefreshing = false
     @State private var showingUserSearchView = false
@@ -47,10 +49,18 @@ struct FeedView: View {
     
     // Add computed property for dynamic top padding based on bar visibility
     private var dynamicTopPadding: CGFloat {
+        // Debug: Print banner states
+        print("🔍 FeedView Padding Debug:")
+        print("  hasLiveSessionBar: \(hasLiveSessionBar)")
+        print("  hasStandaloneGameBar: \(hasStandaloneGameBar)")
+        print("  hasInviteBar: \(hasInviteBar)")
+        
         // When any top bars are visible, use minimal padding since they provide spacing
         if hasLiveSessionBar || hasStandaloneGameBar || hasInviteBar {
+            print("  ✅ Banners detected - using 0 padding")
             return 0 // No padding when bars are present - they handle safe area
         } else {
+            print("  ❌ No banners - using 55 padding")
             // When no bars, need padding to account for safe area
             return 55 // Enough padding to clear the safe area and provide proper spacing
         }
@@ -176,6 +186,13 @@ struct FeedView: View {
                 }
             }
             
+            // Load public sessions
+            Task {
+                try? await publicSessionService.fetchPublicSessions()
+                // Start listening for real-time updates on live sessions
+                publicSessionService.startListeningToLiveSessions()
+            }
+            
             // Load suggested users for both empty state and feed injection
             loadSuggestedUsers()
             print("DEBUG: Loading suggested users on appear")
@@ -188,6 +205,8 @@ struct FeedView: View {
             ) { _ in
                 loadSuggestedUsers() // Refresh suggested users when following changes
             }
+            
+
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Refresh feed and suggested users when app becomes active
@@ -415,11 +434,11 @@ struct FeedView: View {
                             .background(Color.white.opacity(0.1))
                     }
                     
-                    ForEach(0..<postService.posts.count, id: \.self) { index in
-                        let post = postService.posts[index]
+                    ForEach(0..<combinedFeedContent.count, id: \.self) { index in
+                        let content = combinedFeedContent[index]
                         
-                        // Insert suggestion card BEFORE certain posts
-                        if shouldShowSuggestedContent(at: index) {
+                        // Insert suggestion card BEFORE certain posts (only for posts, not sessions)
+                        if case .post = content, shouldShowSuggestedContent(at: index) {
                             let _ = print("DEBUG: Should show content at index \(index), suggestedUsers.count: \(suggestedUsers.count)")
                             VStack(spacing: 0) {
                                 // Add a subtle background to make it stand out
@@ -493,41 +512,64 @@ struct FeedView: View {
                             }
                         }
                         
-                        // Show the actual post
+                        // Show the actual content (post or public session)
                         VStack(spacing: 0) {
-                            PostCardView(
-                                post: post,
-                                onLike: {
-                                    Task {
-                                        do {
-                                            try await postService.toggleLike(postId: post.id ?? "", userId: userId)
-                                        } catch {
+                            switch content {
+                            case .post(let post):
+                                PostCardView(
+                                    post: post,
+                                    onLike: {
+                                        Task {
+                                            do {
+                                                try await postService.toggleLike(postId: post.id ?? "", userId: userId)
+                                            } catch {
 
+                                            }
+                                        }
+                                    },
+                                    onComment: {
+                                        selectedPost = post
+                                        showingComments = true
+                                    },
+                                    isCurrentUser: post.userId == userId,
+                                    userId: userId
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedPost = post
+                                }
+                                .onAppear {
+                                    // Load more posts when reaching the end
+                                    if post.id == postService.posts.last?.id {
+                                        Task {
+                                            try? await postService.fetchMorePosts()
                                         }
                                     }
-                                },
-                                onComment: {
-                                    selectedPost = post
-                                    showingComments = true
-                                },
-                                isCurrentUser: post.userId == userId,
-                                userId: userId
-                            )
+                                }
+                                
+                            case .publicSession(let session):
+                                PublicLiveSessionCard(
+                                    session: session,
+                                    currentUserId: userId,
+                                    onViewTapped: {
+                                        // TODO: Implement view session functionality
+                                        print("View session tapped: \(session.id)")
+                                    }
+                                )
+                                .environmentObject(userService)
+                                .onAppear {
+                                    // Load more sessions when reaching the end
+                                    if session.id == publicSessionService.liveSessions.last?.id {
+                                        Task {
+                                            try? await publicSessionService.fetchMoreSessions()
+                                        }
+                                    }
+                                }
+                            }
+                            
                             Divider() 
                                 .frame(height: 0.5) 
                                 .background(Color.white.opacity(0.1)) 
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            selectedPost = post
-                        }
-                        .onAppear {
-                            // Load more posts when reaching the end
-                            if post.id == postService.posts.last?.id {
-                                Task {
-                                    try? await postService.fetchMorePosts()
-                                }
-                            }
                         }
                     }
                     
@@ -546,6 +588,7 @@ struct FeedView: View {
     private func refreshFeed() async {
         isRefreshing = true
         try? await postService.forceRefresh() // Use forceRefresh to bypass cache
+        try? await publicSessionService.forceRefresh() // Also refresh public sessions
         isRefreshing = false
     }
     
@@ -620,6 +663,44 @@ struct FeedView: View {
         let shouldShow = (index > 0) && ((index % 7) == 0)
         print("DEBUG: Index \(index), shouldShow: \(shouldShow)")
         return shouldShow
+    }
+    
+    // Combined content type for feed
+    enum FeedContentType: Identifiable {
+        case post(Post)
+        case publicSession(PublicLiveSession)
+        
+        var id: String {
+            switch self {
+            case .post(let post):
+                return "post_\(post.id ?? "")"
+            case .publicSession(let session):
+                return "session_\(session.id)"
+            }
+        }
+        
+        var timestamp: Date {
+            switch self {
+            case .post(let post):
+                return post.createdAt
+            case .publicSession(let session):
+                return session.createdAt
+            }
+        }
+    }
+    
+    // Computed property to get combined and sorted feed content
+    private var combinedFeedContent: [FeedContentType] {
+        var combined: [FeedContentType] = []
+        
+        // Add posts
+        combined.append(contentsOf: postService.posts.map { .post($0) })
+        
+        // Add public sessions
+        combined.append(contentsOf: publicSessionService.liveSessions.map { .publicSession($0) })
+        
+        // Sort by timestamp (newest first)
+        return combined.sorted { $0.timestamp > $1.timestamp }
     }
 }
 

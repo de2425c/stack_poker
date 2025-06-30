@@ -687,6 +687,8 @@ struct SessionFormView: View {
     @State private var missingFieldName = "" // Track which field is missing
 
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
+    @State private var previousCashGameCount = 0
+    @State private var isAddingGame = false
     @StateObject private var stakeService = StakeService() // Add StakeService
     @StateObject private var userService = UserService() // Add UserService to potentially fetch staker by username/ID later
     @StateObject private var manualStakerService = ManualStakerService() // Add ManualStakerService
@@ -740,6 +742,19 @@ struct SessionFormView: View {
         let totalMinutes = Double(components.minute ?? 0)
         let hours = totalMinutes / 60.0
         return String(format: "%.1f", hours)
+    }
+    
+    private var validStakerConfigCount: Int {
+        return stakerConfigs.filter { config in
+            if config.isManualEntry {
+                guard config.selectedManualStaker != nil else { return false }
+            } else {
+                guard config.selectedStaker != nil else { return false }
+            }
+            guard let percentage = Double(config.percentageSold), percentage > 0, percentage <= 100 else { return false }
+            guard let markup = Double(config.markup), markup >= 1.0 else { return false }
+            return true
+        }.count
     }
     
     private func formatStakes(game: CashGame) -> String {
@@ -796,7 +811,11 @@ struct SessionFormView: View {
                                             Spacer()
                                             
                                             // Clean + button for adding games
-                                            Button(action: { showingAddGame = true }) {
+                                            Button(action: { 
+                                                previousCashGameCount = cashGameService.cashGames.count
+                                                isAddingGame = true
+                                                showingAddGame = true 
+                                            }) {
                                                 Image(systemName: "plus")
                                                     .font(.system(size: 16, weight: .medium))
                                                     .foregroundColor(primaryTextColor)
@@ -979,6 +998,26 @@ struct SessionFormView: View {
         }
         .sheet(isPresented: $showingAddGame) {
             AddCashGameView(cashGameService: cashGameService)
+        }
+        .onAppear {
+            previousCashGameCount = cashGameService.cashGames.count
+        }
+        .onChange(of: showingAddGame) { isShowing in
+            // When the add game sheet is dismissed and we were adding a game
+            if !isShowing && isAddingGame {
+                isAddingGame = false
+                // Check if a new game was added
+                if cashGameService.cashGames.count > previousCashGameCount {
+                    if let newestGame = cashGameService.cashGames.first {
+                        let stakes = formatStakes(game: newestGame)
+                        selectedGame = GameOption(
+                            name: newestGame.name,
+                            stakes: stakes,
+                            gameType: newestGame.gameType
+                        )
+                    }
+                }
+            }
         }
         .alert("Select a Game", isPresented: $showGameSelectionAlert) {
             Button("OK", role: .cancel) {}
@@ -1192,12 +1231,12 @@ struct SessionFormView: View {
                         .font(.plusJakarta(.headline, weight: .medium))
                         .foregroundColor(primaryTextColor)
                     
-                    if stakerConfigs.isEmpty {
+                    if validStakerConfigCount == 0 {
                         Text("Tap to add staking details")
                             .font(.plusJakarta(.caption, weight: .medium))
                             .foregroundColor(secondaryTextColor)
                     } else {
-                        Text("\(stakerConfigs.count) staker\(stakerConfigs.count == 1 ? "" : "s") configured")
+                        Text("\(validStakerConfigCount) staker\(validStakerConfigCount == 1 ? "" : "s") configured")
                             .font(.plusJakarta(.caption, weight: .medium))
                             .foregroundColor(.green.opacity(0.8))
                     }
@@ -1206,7 +1245,7 @@ struct SessionFormView: View {
                 Spacer()
                 
                 HStack(spacing: 8) {
-                    if !stakerConfigs.isEmpty {
+                    if validStakerConfigCount > 0 {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
                             .font(.system(size: 16))
@@ -1226,7 +1265,7 @@ struct SessionFormView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(stakerConfigs.isEmpty ? primaryTextColor.opacity(0.2) : Color.green.opacity(0.5), lineWidth: 1)
+                    .stroke(validStakerConfigCount == 0 ? primaryTextColor.opacity(0.2) : Color.green.opacity(0.5), lineWidth: 1)
             )
         }
         .padding(.horizontal)

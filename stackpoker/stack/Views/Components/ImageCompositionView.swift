@@ -86,7 +86,8 @@ struct ImageCompositionView: View {
                 buyIn: session.buyIn,
                 cashOut: session.cashout,
                 profit: session.profit,
-                onTitleChanged: nil
+                onTitleChanged: nil,
+                showSaveButton: false
             )
             .scaleEffect(cardScale + currentMagnification) // Include live magnification state
             .offset(x: interactiveCardOffset.width + currentDragOffset.width, // Include live drag state
@@ -113,7 +114,8 @@ struct ImageCompositionView: View {
                 buyIn: session.buyIn,
                 cashOut: session.cashout,
                 profit: session.profit,
-                onTitleChanged: nil
+                onTitleChanged: nil,
+                showSaveButton: false
             )
             .scaleEffect(cardScale + currentMagnification) // Interactive scaling
             .offset(x: interactiveCardOffset.width + currentDragOffset.width,

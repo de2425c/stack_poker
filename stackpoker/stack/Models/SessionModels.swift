@@ -126,6 +126,10 @@ struct LiveSessionData: Codable {
     var currentDay: Int = 1 // Current day of multi-day session (1, 2, 3, etc.)
     var pausedForNextDay: Bool = false // Special pause flag for multi-day sessions
     var pausedForNextDayDate: Date? = nil // Date when the session was paused for next day
+    
+    // MARK: - Public Session Support
+    var isPublicSession: Bool = false // Whether this session is being shared publicly
+    var publicSessionId: String? = nil // Firestore document ID for the public session
 }
 
 // Extended LiveSessionData to include updates and hand histories
@@ -145,7 +149,12 @@ extension LiveSessionData {
         
         // Get the latest chip amount (or buy-in if no updates)
         var currentChipAmount: Double {
-            return chipUpdates.last?.amount ?? basicSession.buyIn
+            let lastAmount = chipUpdates.last?.amount ?? basicSession.buyIn
+            // Protect against invalid values that could cause crashes
+            if lastAmount.isNaN || lastAmount.isInfinite || lastAmount < 0 {
+                return basicSession.buyIn // Fall back to buy-in if invalid
+            }
+            return lastAmount
         }
         
         // Calculate profit/loss based on latest chip amount
@@ -162,6 +171,18 @@ extension LiveSessionData {
         
         // Add a new chip stack update
         mutating func addChipUpdate(amount: Double, note: String?) {
+            // Define maximum safe chip amount (1 trillion)
+            let maxChipAmount: Double = 1_000_000_000_000
+            
+            // Protect against invalid values and maximum limit
+            guard !amount.isNaN && !amount.isInfinite && amount >= 0 && amount <= maxChipAmount else {
+                if amount > maxChipAmount {
+                    print("Warning: Attempted to add chip amount exceeding maximum limit: \(amount)")
+                } else {
+                    print("Warning: Attempted to add invalid chip amount: \(amount)")
+                }
+                return
+            }
             let update = ChipStackUpdate(amount: amount, note: note)
             chipUpdates.append(update)
         }

@@ -9,15 +9,14 @@ struct AnalyticsFilter: Equatable {
     var stakeLevel: StakeLevelFilter = .all
     var location: String? = nil // nil = all locations
     var sessionLength: SessionLengthFilter = .all
-    var profitability: ProfitabilityFilter = .all
-    var timeOfDay: TimeOfDayFilter = .all
-    var dayOfWeek: DayOfWeekFilter = .all
+    var customStartDate: Date? = nil
+    var customEndDate: Date? = nil
+    var showRawProfits: Bool = false // false = staking-adjusted, true = raw profits
     
     var isActive: Bool {
-        // Returns true when at least one filter is not `.all` / nil
+        // Returns true when at least one filter is not `.all` / nil / default
         return gameType != .all || stakeLevel != .all || location != nil ||
-               sessionLength != .all || profitability != .all ||
-               timeOfDay != .all || dayOfWeek != .all
+               sessionLength != .all || customStartDate != nil || customEndDate != nil || showRawProfits
     }
 }
 
@@ -55,32 +54,7 @@ enum SessionLengthFilter: String, CaseIterable, Identifiable, Equatable {
     var id: String { rawValue }
 }
 
-enum ProfitabilityFilter: String, CaseIterable, Identifiable, Equatable {
-    case all = "All"
-    case winning = "Winning"
-    case losing = "Losing"
-    var id: String { rawValue }
-}
 
-enum TimeOfDayFilter: String, CaseIterable, Identifiable, Equatable {
-    case all = "All"
-    case morning = "Morning"
-    case afternoon = "Afternoon"
-    case lateNight = "Late Night"
-    var id: String { rawValue }
-}
-
-enum DayOfWeekFilter: String, CaseIterable, Identifiable, Equatable {
-    case all = "All"
-    case monday = "Mon"
-    case tuesday = "Tue"
-    case wednesday = "Wed"
-    case thursday = "Thu"
-    case friday = "Fri"
-    case saturday = "Sat"
-    case sunday = "Sun"
-    var id: String { rawValue }
-}
 
 // MARK: - AnalyticsFilterSheet
 
@@ -88,8 +62,8 @@ enum DayOfWeekFilter: String, CaseIterable, Identifiable, Equatable {
 struct AnalyticsFilterSheet: View {
     @Environment(\.presentationMode) private var presentationMode
     @Binding var filter: AnalyticsFilter
-    /// Unique custom games derived from sessions – pass in.
-    let availableGames: [String]
+    /// Top 5 most common games derived from sessions – pass in.
+    let topGames: [String]
     
     var body: some View {
         NavigationView {
@@ -109,6 +83,29 @@ struct AnalyticsFilterSheet: View {
                             .padding(.top, 20)
                         
                         VStack(spacing: 16) {
+                            // Staking Adjustment Toggle
+                            FilterSection(
+                                icon: "person.2.square.stack.fill",
+                                title: "Profit Calculation",
+                                accentColor: .cyan
+                            ) {
+                                Toggle(isOn: $filter.showRawProfits) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(filter.showRawProfits ? "Raw Profits" : "Staking-Adjusted Profits")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(.white)
+                                        Text(filter.showRawProfits ? 
+                                             "Showing session profits without staking adjustments" : 
+                                             "Showing session profits adjusted for staking transfers")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.white.opacity(0.7))
+                                            .lineLimit(2)
+                                    }
+                                }
+                                .tint(.cyan)
+                                .toggleStyle(SwitchToggleStyle())
+                            }
+                            
                             // Game Type Filter
                             FilterSection(
                                 icon: "gamecontroller.fill",
@@ -140,11 +137,11 @@ struct AnalyticsFilterSheet: View {
                                 }
                             }
                             
-                            // Custom Games Filter
-                            if !availableGames.isEmpty {
+                            // Top Games Filter
+                            if !topGames.isEmpty {
                                 FilterSection(
                                     icon: "suit.spade.fill",
-                                    title: "Game",
+                                    title: "Game (Top 5)",
                                     accentColor: .purple
                                 ) {
                                     GameSelectionView(
@@ -154,7 +151,7 @@ struct AnalyticsFilterSheet: View {
                                                 filter.location = newVal == "All" ? nil : newVal
                                             }
                                         ),
-                                        availableGames: availableGames
+                                        availableGames: topGames
                                     )
                                 }
                             }
@@ -173,45 +170,70 @@ struct AnalyticsFilterSheet: View {
                                 }
                             }
                             
-                            // Profitability Filter
+                            // Custom Date Range Filter
                             FilterSection(
-                                icon: "chart.line.uptrend.xyaxis",
-                                title: "Profitability",
+                                icon: "calendar.badge.clock",
+                                title: "Date Range",
                                 accentColor: .mint
                             ) {
-                                SegmentedFilterPicker(
-                                    selection: $filter.profitability,
-                                    options: ProfitabilityFilter.allCases
-                                ) { option in
-                                    Text(option.rawValue)
-                                }
-                            }
-                            
-                            // Time of Day Filter
-                            FilterSection(
-                                icon: "sun.max.fill",
-                                title: "Time of Day",
-                                accentColor: .yellow
-                            ) {
-                                SegmentedFilterPicker(
-                                    selection: $filter.timeOfDay,
-                                    options: TimeOfDayFilter.allCases
-                                ) { option in
-                                    Text(option.rawValue)
-                                }
-                            }
-                            
-                            // Day of Week Filter
-                            FilterSection(
-                                icon: "calendar",
-                                title: "Day of Week",
-                                accentColor: .indigo
-                            ) {
-                                SegmentedFilterPicker(
-                                    selection: $filter.dayOfWeek,
-                                    options: DayOfWeekFilter.allCases
-                                ) { option in
-                                    Text(option.rawValue)
+                                VStack(spacing: 12) {
+                                    // Start Date
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("From Date")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.7))
+                                        
+                                        HStack {
+                                            DatePicker(
+                                                "",
+                                                selection: Binding(
+                                                    get: { filter.customStartDate ?? Date() },
+                                                    set: { filter.customStartDate = $0 }
+                                                ),
+                                                displayedComponents: .date
+                                            )
+                                            .labelsHidden()
+                                            .colorScheme(.dark)
+                                            
+                                            Button(action: {
+                                                filter.customStartDate = nil
+                                            }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.white.opacity(0.6))
+                                                    .font(.system(size: 16))
+                                            }
+                                            .opacity(filter.customStartDate != nil ? 1 : 0)
+                                        }
+                                    }
+                                    
+                                    // End Date
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("To Date")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.7))
+                                        
+                                        HStack {
+                                            DatePicker(
+                                                "",
+                                                selection: Binding(
+                                                    get: { filter.customEndDate ?? Date() },
+                                                    set: { filter.customEndDate = $0 }
+                                                ),
+                                                displayedComponents: .date
+                                            )
+                                            .labelsHidden()
+                                            .colorScheme(.dark)
+                                            
+                                            Button(action: {
+                                                filter.customEndDate = nil
+                                            }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.white.opacity(0.6))
+                                                    .font(.system(size: 16))
+                                            }
+                                            .opacity(filter.customEndDate != nil ? 1 : 0)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -431,7 +453,7 @@ struct GameSelectionView: View {
 #if DEBUG
 struct AnalyticsFilterSheet_Previews: PreviewProvider {
     static var previews: some View {
-        AnalyticsFilterSheet(filter: .constant(AnalyticsFilter()), availableGames: ["Bellagio", "Commerce"])
+        AnalyticsFilterSheet(filter: .constant(AnalyticsFilter()), topGames: ["Bellagio", "Commerce", "Aria", "Wynn", "MGM"])
     }
 }
 #endif 

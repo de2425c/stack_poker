@@ -14,6 +14,10 @@ struct UserProfile: Codable, Identifiable {
     var location: String?
     var favoriteGame: String?
     
+    // Hyperlink fields
+    var hyperlinkText: String?
+    var hyperlinkURL: String?
+    
     // Social fields
     var followersCount: Int
     var followingCount: Int
@@ -29,11 +33,13 @@ struct UserProfile: Codable, Identifiable {
         case avatarURL
         case location
         case favoriteGame
+        case hyperlinkText
+        case hyperlinkURL
         case followersCount
         case followingCount
     }
     
-    init(id: String, username: String, displayName: String?, createdAt: Date, favoriteGames: [String]? = nil, bio: String? = nil, avatarURL: String? = nil, location: String? = nil, favoriteGame: String? = nil, followersCount: Int = 0, followingCount: Int = 0, isFollowing: Bool? = nil) {
+    init(id: String, username: String, displayName: String?, createdAt: Date, favoriteGames: [String]? = nil, bio: String? = nil, avatarURL: String? = nil, location: String? = nil, favoriteGame: String? = nil, hyperlinkText: String? = nil, hyperlinkURL: String? = nil, followersCount: Int = 0, followingCount: Int = 0, isFollowing: Bool? = nil) {
         self.id = id
         self.username = username
         self.displayName = displayName
@@ -43,6 +49,8 @@ struct UserProfile: Codable, Identifiable {
         self.avatarURL = avatarURL
         self.location = location
         self.favoriteGame = favoriteGame
+        self.hyperlinkText = hyperlinkText
+        self.hyperlinkURL = hyperlinkURL
         self.followersCount = followersCount
         self.followingCount = followingCount
         self.isFollowing = isFollowing
@@ -61,6 +69,8 @@ struct UserProfile: Codable, Identifiable {
         self.avatarURL = dictionary["avatarURL"] as? String
         self.location = dictionary["location"] as? String
         self.favoriteGame = dictionary["favoriteGame"] as? String
+        self.hyperlinkText = dictionary["hyperlinkText"] as? String
+        self.hyperlinkURL = dictionary["hyperlinkURL"] as? String
         self.followersCount = dictionary["followersCount"] as? Int ?? 0
         self.followingCount = dictionary["followingCount"] as? Int ?? 0
         self.isFollowing = nil // This is set client-side

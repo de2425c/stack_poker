@@ -166,16 +166,30 @@ struct StakingDashboardView: View {
         
         return grouped.map { key, val in PartnerGroup(key: key, stakes: val) }
             .sorted { lhs, rhs in
-                // Sort by most recent stake date, but put manual stakers with no stakes at the top
-                if lhs.stakes.isEmpty && !rhs.stakes.isEmpty {
+                let lhsHasStakes = !lhs.stakes.isEmpty
+                let rhsHasStakes = !rhs.stakes.isEmpty
+
+                // Partners with stakes should appear before those without.
+                if lhsHasStakes && !rhsHasStakes {
                     return true
-                } else if !lhs.stakes.isEmpty && rhs.stakes.isEmpty {
-                    return false
-                } else {
-                    let lhsDate = lhs.stakes.first?.sessionDate ?? Date.distantPast
-                    let rhsDate = rhs.stakes.first?.sessionDate ?? Date.distantPast
-                    return lhsDate > rhsDate
                 }
+                if !lhsHasStakes && rhsHasStakes {
+                    return false
+                }
+
+                // If both have stakes, sort by the most recent stake's creation date.
+                if lhsHasStakes && rhsHasStakes {
+                    // Find the most recent 'proposedAt' date to sort partners by their latest activity.
+                    let lhsDate = lhs.stakes.map { $0.proposedAt }.max() ?? Date.distantPast
+                    let rhsDate = rhs.stakes.map { $0.proposedAt }.max() ?? Date.distantPast
+                    
+                    if lhsDate != rhsDate {
+                        return lhsDate > rhsDate
+                    }
+                }
+                
+                // For partners with no stakes, or if dates are equal, sort by name for stability.
+                return lhs.key < rhs.key
             }
     }
     
@@ -443,11 +457,6 @@ struct StakingDashboardView: View {
                             backedPerformanceView
                         }
                         
-                        // Pending Staking Requests Section
-                        if !pendingStakingRequests.isEmpty {
-                            pendingStakingRequestsSection
-                        }
-                        
                         // Partner summary cards (only show if there are stakes or manual stakers)
                         if !stakesByPartner.isEmpty {
                             LazyVStack(spacing: 16) {
@@ -490,42 +499,9 @@ struct StakingDashboardView: View {
         .padding(.top, 10)
     }
     
-    // MARK: - Pending Staking Requests
-    private var pendingStakingRequests: [Stake] {
-        stakes.filter { stake in
-            stake.status == .pendingAcceptance && stake.stakerUserId == currentUserId
-        }
-    }
+
     
-    @ViewBuilder
-    private var pendingStakingRequestsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Pending Staking Requests")
-                .font(.plusJakarta(.title2, weight: .bold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            Text("Others have invited you to stake them")
-                .font(.plusJakarta(.caption, weight: .medium))
-                .foregroundColor(.gray)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            LazyVStack(spacing: 12) {
-                ForEach(pendingStakingRequests) { stake in
-                    PendingStakeRequestCard(
-                        stake: stake,
-                        currentUserId: currentUserId ?? "",
-                        userService: userService,
-                        stakeService: stakeService,
-                        onStatusChanged: {
-                            fetchStakesData() // Refresh data after accepting/declining
-                        }
-                    )
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-    }
+
     
     @ViewBuilder
     private var stakingPerformanceView: some View {
@@ -1079,7 +1055,8 @@ struct PartnerStakesListView: View {
         unsettledStakes.reduce(0) { total, stake in
             let isCurrentUserStaker = stake.stakerUserId == currentUserId
             let amount = stake.amountTransferredAtSettlement
-            return total + (isCurrentUserStaker ? amount : -amount)
+            // FIXED: Correct interpretation - negative amount means staker pays player
+            return total + (isCurrentUserStaker ? -amount : amount)
         }
     }
 
@@ -1435,7 +1412,7 @@ struct PartnerStakesListView: View {
                 Image(systemName: youAreOwed ? "arrow.down.circle" : "arrow.up.circle")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(youAreOwed ? .green : .red)
-                Text(youAreOwed ? "They currently owe you" : "You currently owe them")
+                Text(!youAreOwed ? "They currently owe you" : "You currently owe them")
                     .font(.plusJakarta(.subheadline, weight: .medium))
                 Spacer()
                 Text(formatCurrency(abs(unsettledNet)))
@@ -1674,7 +1651,8 @@ struct StakeDetailView: View {
                     .font(.plusJakarta(.body, weight: .medium))
                     .foregroundColor(.gray)
                 Spacer()
-                if stake.playerCashoutForSession == 0 && stake.totalPlayerBuyInForSession > 0 {
+                // FIXED: Use status to determine if results have been entered, not just cashout value
+                if stake.status == .active && stake.totalPlayerBuyInForSession > 0 && stake.playerCashoutForSession == 0 {
                     Text("Not entered")
                         .font(.plusJakarta(.body, weight: .semibold))
                         .foregroundColor(.orange)
@@ -1913,10 +1891,14 @@ struct StakeDetailView: View {
         var owingParty: String
         var owedParty: String
         
-        if amount > 0 { // Player pays Staker
+        // FIXED: The logic was backwards! 
+        // amountTransferredAtSettlement = stakerShareOfCashout - stakerCost
+        // Negative amount means staker pays player (staker gets less than they paid)
+        // Positive amount means player pays staker (staker gets more than they paid)
+        if amount > 0 { // Staker gets more than they paid -> Player pays Staker
             owingParty = youArePlayer ? "You" : playerName
             owedParty = youAreStaker ? "You" : stakerName
-        } else { // Staker pays Player (amount is negative)
+        } else { // Staker gets less than they paid -> Staker pays Player (amount is negative)
             owingParty = youAreStaker ? "You" : stakerName
             owedParty = youArePlayer ? "You" : playerName
         }
@@ -2156,252 +2138,7 @@ struct StakeDetailViewWrapper: View {
     }
 }
 
-// MARK: - Pending Stake Request Card
-struct PendingStakeRequestCard: View {
-    let stake: Stake
-    let currentUserId: String
-    let userService: UserService
-    let stakeService: StakeService
-    let onStatusChanged: () -> Void
-    
-    @State private var isProcessing = false
-    @State private var showError = false
-    @State private var errorMessage = ""
-    
-    private var playerProfile: UserProfile? {
-        userService.loadedUsers[stake.stakedPlayerUserId]
-    }
-    
-    private var playerName: String {
-        if let profile = playerProfile {
-            return profile.displayName ?? profile.username
-        } else {
-            return "Unknown Player"
-        }
-    }
-    
-    var body: some View {
-        VStack(spacing: 12) {
-            // Header info
-            HStack(spacing: 12) {
-                // Player avatar or placeholder
-                Group {
-                    if let profile = playerProfile,
-                       let avatarURL = profile.avatarURL, !avatarURL.isEmpty,
-                       let url = URL(string: avatarURL) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let img):
-                                img
-                                    .resizable()
-                                    .scaledToFill()
-                            default:
-                                Circle()
-                                    .fill(Color.blue.opacity(0.3))
-                                    .overlay(
-                                        Image(systemName: "person.fill")
-                                            .foregroundColor(.white)
-                                    )
-                            }
-                        }
-                        .frame(width: 40, height: 40)
-                        .clipShape(Circle())
-                    } else {
-                        Circle()
-                            .fill(Color.blue.opacity(0.3))
-                            .overlay(
-                                Text(String(playerName.prefix(1)))
-                                    .font(.system(size: 18, weight: .bold))
-                                    .foregroundColor(.white)
-                            )
-                            .frame(width: 40, height: 40)
-                    }
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(playerName) wants you to stake them")
-                        .font(.plusJakarta(.subheadline, weight: .semibold))
-                        .foregroundColor(.white)
-                        .lineLimit(2)
-                    
-                    Text("\(stake.sessionGameName)")
-                        .font(.plusJakarta(.caption, weight: .medium))
-                        .foregroundColor(.gray)
-                        .lineLimit(1)
-                    
-                    Text("\(stake.sessionDate, style: .date)")
-                        .font(.plusJakarta(.caption2, weight: .medium))
-                        .foregroundColor(.gray)
-                }
-                
-                Spacer()
-            }
-            
-            // Staking details
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Percentage")
-                        .font(.plusJakarta(.caption2, weight: .medium))
-                        .foregroundColor(.gray)
-                        .textCase(.uppercase)
-                    Text("\(stake.stakePercentage * 100, specifier: "%.0f")%")
-                        .font(.plusJakarta(.callout, weight: .bold))
-                        .foregroundColor(.white)
-                }
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Markup")
-                        .font(.plusJakarta(.caption2, weight: .medium))
-                        .foregroundColor(.gray)
-                        .textCase(.uppercase)
-                    Text("\(stake.markup, specifier: "%.1f")x")
-                        .font(.plusJakarta(.callout, weight: .bold))
-                        .foregroundColor(.white)
-                }
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Game")
-                        .font(.plusJakarta(.caption2, weight: .medium))
-                        .foregroundColor(.gray)
-                        .textCase(.uppercase)
-                    Text(stake.sessionStakes)
-                        .font(.plusJakarta(.callout, weight: .bold))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                }
-                
-                Spacer()
-            }
-            
-            // Action buttons
-            HStack(spacing: 12) {
-                // Decline button
-                Button(action: {
-                    declineStakeRequest()
-                }) {
-                    Text("Decline")
-                        .font(.plusJakarta(.subheadline, weight: .semibold))
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.red.opacity(0.1))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.red.opacity(0.3), lineWidth: 1)
-                                )
-                        )
-                }
-                .disabled(isProcessing)
-                
-                // Accept button
-                Button(action: {
-                    acceptStakeRequest()
-                }) {
-                    HStack {
-                        if isProcessing {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(0.8)
-                        } else {
-                            Text("Accept")
-                                .font(.plusJakarta(.subheadline, weight: .semibold))
-                        }
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.green)
-                    )
-                }
-                .disabled(isProcessing)
-            }
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.white.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
-                )
-        )
-        .alert("Error", isPresented: $showError) {
-            Button("OK") { }
-        } message: {
-            Text(errorMessage)
-        }
-        .onAppear {
-            // Load player profile if not already loaded
-            if playerProfile == nil && !stake.stakedPlayerUserId.isEmpty {
-                Task {
-                    await userService.fetchUser(id: stake.stakedPlayerUserId)
-                }
-            }
-        }
-    }
-    
-    private func acceptStakeRequest() {
-        guard let stakeId = stake.id else { return }
-        isProcessing = true
-        
-        Task {
-            do {
-                // Update stake status to active
-                let updateData: [String: Any] = [
-                    Stake.CodingKeys.status.rawValue: Stake.StakeStatus.active.rawValue,
-                    Stake.CodingKeys.acceptedAt.rawValue: Timestamp(date: Date()),
-                    Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
-                ]
-                
-                try await stakeService.updateStake(stakeId: stakeId, updateData: updateData)
-                
-                await MainActor.run {
-                    isProcessing = false
-                    onStatusChanged()
-                }
-            } catch {
-                await MainActor.run {
-                    isProcessing = false
-                    errorMessage = "Failed to accept stake request: \(error.localizedDescription)"
-                    showError = true
-                }
-            }
-        }
-    }
-    
-    private func declineStakeRequest() {
-        guard let stakeId = stake.id else { return }
-        isProcessing = true
-        
-        Task {
-            do {
-                // Update stake status to declined
-                let updateData: [String: Any] = [
-                    Stake.CodingKeys.status.rawValue: Stake.StakeStatus.declined.rawValue,
-                    Stake.CodingKeys.declinedAt.rawValue: Timestamp(date: Date()),
-                    Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
-                ]
-                
-                try await stakeService.updateStake(stakeId: stakeId, updateData: updateData)
-                
-                await MainActor.run {
-                    isProcessing = false
-                    onStatusChanged()
-                }
-            } catch {
-                await MainActor.run {
-                    isProcessing = false
-                    errorMessage = "Failed to decline stake request: \(error.localizedDescription)"
-                    showError = true
-                }
-            }
-        }
-    }
-}
+
 
 // Extension for StakeStatus displayName
 extension Stake.StakeStatus {

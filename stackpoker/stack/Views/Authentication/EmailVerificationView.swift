@@ -19,14 +19,15 @@ struct EmailVerificationView: View {
     @EnvironmentObject var postService: PostService
     
     var body: some View {
-        ZStack {
-            AppBackgroundView()
+                    ZStack {
+                AppBackgroundView()
+                    .ignoresSafeArea(.all)
             
             VStack(spacing: 32) {
                 // Email verification icon
                 Image(systemName: "envelope.badge")
                     .font(.system(size: 80))
-                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
                     .padding(.top, 50)
                 
                 VStack(spacing: 16) {
@@ -60,9 +61,18 @@ struct EmailVerificationView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 56)
-                    .background(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                    .foregroundColor(.black)
-                    .cornerRadius(12)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(red: 64/255, green: 156/255, blue: 255/255), // #409CFF
+                                Color(red: 100/255, green: 180/255, blue: 255/255) // #64B4FF
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .foregroundColor(.white)
+                    .cornerRadius(28)
                     .disabled(isLoading)
                     
                     Button(action: resendVerification) {
@@ -78,7 +88,7 @@ struct EmailVerificationView: View {
                     .frame(height: 56)
                     .background(Color.gray.opacity(0.2))
                     .foregroundColor(resendDisabled ? .gray : .white)
-                    .cornerRadius(12)
+                    .cornerRadius(28)
                     .disabled(resendDisabled || isLoading)
                     
                     Button(action: { Task { await signOut() } }) {

@@ -27,6 +27,7 @@ struct Session: Identifiable, Equatable {
     let buyIn: Double
     let cashout: Double
     let profit: Double
+    let adjustedProfit: Double? // NEW: Staking-adjusted profit, nil if not calculated yet
     let createdAt: Date
     let notes: [String]?
     let liveSessionUUID: String?
@@ -71,6 +72,7 @@ struct Session: Identifiable, Equatable {
         self.buyIn = data["buyIn"] as? Double ?? 0
         self.cashout = data["cashout"] as? Double ?? 0
         self.profit = data["profit"] as? Double ?? 0
+        self.adjustedProfit = data["adjustedProfit"] as? Double // NEW: Read adjusted profit from Firestore
         
         if let createdAtTimestamp = data["createdAt"] as? Timestamp {
             self.createdAt = createdAtTimestamp.dateValue()
@@ -108,6 +110,7 @@ struct Session: Identifiable, Equatable {
                lhs.buyIn == rhs.buyIn &&
                lhs.cashout == rhs.cashout &&
                lhs.profit == rhs.profit &&
+               lhs.adjustedProfit == rhs.adjustedProfit && // NEW: Include in equality check
                lhs.createdAt == rhs.createdAt &&
                lhs.notes == rhs.notes &&
                lhs.liveSessionUUID == rhs.liveSessionUUID &&
@@ -118,6 +121,11 @@ struct Session: Identifiable, Equatable {
                lhs.tournamentGameType == rhs.tournamentGameType &&
                lhs.tournamentFormat == rhs.tournamentFormat
     }
+    
+    // Helper property to get the effective profit for analytics
+    var effectiveProfit: Double {
+        return adjustedProfit ?? profit
+    }
 }
 
 // Model to track active live session
@@ -126,6 +134,10 @@ class SessionStore: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var liveSession = LiveSessionData()
     @Published var showLiveSessionBar = false
+    @Published var isLoadingSessions = false
+    
+    // NEW: Storage for parked sessions (day-two paused sessions)
+    @Published var parkedSessions: [String: LiveSessionData] = [:]
     
     // Computed property to get the most recent session
     var mostRecentSession: Session? {
@@ -138,9 +150,19 @@ class SessionStore: ObservableObject {
     private let db = Firestore.firestore()
     private let userId: String
     private var timer: Timer?
+    private var listener: ListenerRegistration?
+    
+    // Caching properties
+    private var sessionsCache: [Session] = []
+    private var lastFetchTime: Date?
+    private let cacheExpirationInterval: TimeInterval = 5 * 60 // 5 minutes
+    private var hasFetchedSessions = false
     
     // Challenge service for updating challenges when sessions are completed
     private var challengeService: ChallengeService?
+    
+    // NEW: StakeService for calculating adjusted profits
+    private let stakeService = StakeService()
     
     // Maximum length (in seconds) that a live session is allowed to run (120 hours).
     private let maximumSessionDuration: TimeInterval = 120 * 60 * 60
@@ -158,8 +180,6 @@ class SessionStore: ObservableObject {
             return
         }
         
-       
-        
         // Initialize with clean defaults
         self.liveSession = LiveSessionData()
         self.enhancedLiveSession = LiveSessionData_Enhanced(basicSession: self.liveSession)
@@ -170,11 +190,24 @@ class SessionStore: ObservableObject {
             self.challengeService = ChallengeService(userId: userId, bankrollStore: bankrollStore)
         }
         
+        // Set up stake service callback for adjusted profit recalculation
+        stakeService.onStakeUpdated = { [weak self] sessionId in
+            Task {
+                await self?.recalculateAdjustedProfitForStakeUpdate(sessionId: sessionId)
+            }
+        }
+        
         // Load any existing session state
         loadLiveSessionState()
         
-        // Fetch historical sessions
-        fetchSessions()
+        // Load any existing parked sessions
+        loadParkedSessionsState()
+        
+        // Sanitize any corrupted data that might have been loaded
+        sanitizeAllSessionData()
+        
+        // DON'T fetch historical sessions automatically - wait for explicit request
+        // fetchSessions() // REMOVED - now called only when sessions tab is opened
         
         // Validate the loaded state
         if !validateSessionState() {
@@ -182,6 +215,97 @@ class SessionStore: ObservableObject {
         }
         
         print("🔄 SESSION STORE: Initialization complete - isActive: \(liveSession.isActive), showBar: \(showLiveSessionBar)")
+    }
+    
+    // NEW: Handle stake updates by recalculating adjusted profit
+    private func recalculateAdjustedProfitForStakeUpdate(sessionId: String) async {
+        do {
+            try await calculateAndUpdateAdjustedProfit(for: sessionId)
+            print("✅ Recalculated adjusted profit for session \(sessionId) due to stake update")
+        } catch {
+            print("❌ Failed to recalculate adjusted profit for session \(sessionId): \(error)")
+        }
+    }
+    
+    // MARK: - Caching Methods
+    
+    /// Fetches sessions with caching - only loads from Firestore if cache is expired or empty
+    func fetchSessionsWithCaching(forceRefresh: Bool = false) {
+        print("📱 SESSION STORE: fetchSessionsWithCaching called (forceRefresh: \(forceRefresh))")
+        
+        // If we have cached data and it's not expired (unless forced), use cache
+        if !forceRefresh,
+           !sessionsCache.isEmpty,
+           let lastFetch = lastFetchTime,
+           Date().timeIntervalSince(lastFetch) < cacheExpirationInterval {
+            print("📱 SESSION STORE: Using cached sessions (\(sessionsCache.count) sessions)")
+            DispatchQueue.main.async {
+                self.sessions = self.sessionsCache
+                self.isLoadingSessions = false
+            }
+            return
+        }
+        
+        // Otherwise, fetch from Firestore
+        print("📱 SESSION STORE: Fetching sessions from Firestore...")
+        DispatchQueue.main.async {
+            self.isLoadingSessions = true
+        }
+        
+        // Remove old listener if exists
+        listener?.remove()
+        
+        listener = db.collection("sessions")
+            .whereField("userId", isEqualTo: userId)
+            .order(by: "startDate", descending: true)
+            .order(by: "startTime", descending: true)
+            .addSnapshotListener { [weak self] snapshot, error in
+                DispatchQueue.main.async {
+                    self?.isLoadingSessions = false
+                }
+                
+                if let error = error {
+                    print("❌ SESSION STORE: Error fetching sessions: \(error)")
+                    return
+                }
+                
+                guard let documents = snapshot?.documents else {
+                    print("📱 SESSION STORE: No sessions found")
+                    return
+                }
+                
+                let newSessions = documents.map { document in
+                    Session(id: document.documentID, data: document.data())
+                }
+                
+                DispatchQueue.main.async {
+                    self?.sessions = newSessions
+                    self?.sessionsCache = newSessions
+                    self?.lastFetchTime = Date()
+                    self?.hasFetchedSessions = true
+                    print("📱 SESSION STORE: Loaded \(newSessions.count) sessions")
+                }
+            }
+    }
+    
+    /// Call this method when the sessions tab is opened
+    func loadSessionsForUI() {
+        if !hasFetchedSessions {
+            print("📱 SESSION STORE: First time loading sessions for UI")
+            fetchSessionsWithCaching(forceRefresh: false)
+        } else {
+            print("📱 SESSION STORE: Sessions already loaded")
+        }
+    }
+    
+    /// Legacy method for backward compatibility
+    func fetchSessions() {
+        fetchSessionsWithCaching(forceRefresh: false)
+    }
+    
+    /// Force refresh sessions (for after adding/updating/deleting)
+    func refreshSessions() {
+        fetchSessionsWithCaching(forceRefresh: true)
     }
     
     // Method to set challenge service (for dependency injection if needed)
@@ -262,58 +386,40 @@ class SessionStore: ObservableObject {
     
     // MARK: - Session Database Operations
     
-    func fetchSessions() {
-
-        db.collection("sessions")
-            .whereField("userId", isEqualTo: userId)
-            .order(by: "startDate", descending: true)
-            .order(by: "startTime", descending: true)
-            .addSnapshotListener { [weak self] snapshot, error in
-                if let error = error {
-
-                    return
-                }
-                
-                guard let documents = snapshot?.documents else {
-
-                    return
-                }
-                
-
-                
-                self?.sessions = documents.map { document in
-                    let data = document.data()
-
-
-
-
-                    return Session(id: document.documentID, data: data)
-                }
-                
-
-                self?.sessions.forEach { session in
-
-
-
-
-                }
-            }
-    }
-    
     func addSession(_ sessionData: [String: Any], completion: @escaping (Error?) -> Void) {
         let docRef = db.collection("sessions").document() // create reference first to use inside closure safely
-        docRef.setData(sessionData) { error in
+        
+        // Calculate adjusted profit for new session
+        var sessionDataWithAdjustedProfit = sessionData
+        let rawProfit = sessionData["profit"] as? Double ?? 0.0
+        
+        // For new sessions, adjusted profit initially equals raw profit (no stakes yet)
+        sessionDataWithAdjustedProfit["adjustedProfit"] = rawProfit
+        
+        docRef.setData(sessionDataWithAdjustedProfit) { error in
             if let err = error {
                 completion(err)
                 return
             }
             // Build a Session object with the saved data and new document ID
-            var mergedData = sessionData
+            var mergedData = sessionDataWithAdjustedProfit
             mergedData["id"] = docRef.documentID // convenience
             let session = Session(id: docRef.documentID, data: mergedData)
+            
             // Update challenges asynchronously
             Task {
                 await self.challengeService?.updateChallengesFromCompletedSession(session)
+                
+                // If there are any stakes for this session, recalculate adjusted profit
+                // This handles the case where stakes were created before the session was logged
+                do {
+                    let stakes = try await self.stakeService.fetchStakesForSession(docRef.documentID)
+                    if !stakes.isEmpty {
+                        try await self.calculateAndUpdateAdjustedProfit(for: docRef.documentID)
+                    }
+                } catch {
+                    print("⚠️ Failed to check/update adjusted profit for new session: \(error)")
+                }
             }
             DispatchQueue.main.async {
                 completion(nil)
@@ -329,14 +435,108 @@ class SessionStore: ObservableObject {
     func updateSessionDetails(sessionId: String, updatedData: [String: Any], completion: @escaping (Error?) -> Void) {
         db.collection("sessions").document(sessionId).updateData(updatedData) { error in
             if let error = error {
-
                 completion(error)
             } else {
-
                 // Refresh the local sessions array to reflect changes
-                self.fetchSessions() 
+                self.refreshSessions() 
                 completion(nil)
             }
+        }
+    }
+    
+    // NEW: Calculate and update adjusted profit for a specific session
+    func calculateAndUpdateAdjustedProfit(for sessionId: String) async throws {
+        // Fetch stakes for this session
+        let stakes = try await stakeService.fetchStakesForSession(sessionId)
+        let stakesWhereUserWasStaked = stakes.filter { $0.stakedPlayerUserId == userId }
+        
+        // Get the current session
+        guard let session = sessions.first(where: { $0.id == sessionId }) else {
+            throw NSError(domain: "SessionStore", code: 404, userInfo: [NSLocalizedDescriptionKey: "Session not found"])
+        }
+        
+        let adjustedProfit: Double
+        if stakesWhereUserWasStaked.isEmpty {
+            // No staking, adjusted profit equals raw profit
+            adjustedProfit = session.profit
+        } else {
+            // Calculate staking-adjusted profit
+            let totalAmountTransferred = stakesWhereUserWasStaked.reduce(0) { $0 + $1.amountTransferredAtSettlement }
+            adjustedProfit = session.profit - totalAmountTransferred
+        }
+        
+        // Update in Firestore
+        try await db.collection("sessions").document(sessionId).updateData([
+            "adjustedProfit": adjustedProfit
+        ])
+        
+        // Update local session
+        await MainActor.run {
+            if let index = self.sessions.firstIndex(where: { $0.id == sessionId }) {
+                var updatedSessionData = [
+                    "userId": session.userId,
+                    "gameType": session.gameType,
+                    "gameName": session.gameName,
+                    "stakes": session.stakes,
+                    "startDate": Timestamp(date: session.startDate),
+                    "startTime": Timestamp(date: session.startTime),
+                    "endTime": Timestamp(date: session.endTime),
+                    "hoursPlayed": session.hoursPlayed,
+                    "buyIn": session.buyIn,
+                    "cashout": session.cashout,
+                    "profit": session.profit,
+                    "adjustedProfit": adjustedProfit,
+                    "createdAt": Timestamp(date: session.createdAt)
+                ] as [String: Any]
+                
+                // Include optional fields
+                if let notes = session.notes { updatedSessionData["notes"] = notes }
+                if let liveSessionUUID = session.liveSessionUUID { updatedSessionData["liveSessionUUID"] = liveSessionUUID }
+                if let location = session.location { updatedSessionData["location"] = location }
+                if let tournamentType = session.tournamentType { updatedSessionData["tournamentType"] = tournamentType }
+                if let series = session.series { updatedSessionData["series"] = series }
+                if let pokerVariant = session.pokerVariant { updatedSessionData["pokerVariant"] = pokerVariant }
+                if let tournamentGameType = session.tournamentGameType { updatedSessionData["tournamentGameType"] = tournamentGameType }
+                if let tournamentFormat = session.tournamentFormat { updatedSessionData["tournamentFormat"] = tournamentFormat }
+                
+                let updatedSession = Session(id: sessionId, data: updatedSessionData)
+                self.sessions[index] = updatedSession
+            }
+        }
+        
+        print("✅ Updated adjusted profit for session \(sessionId): \(adjustedProfit)")
+    }
+    
+
+    
+    // NEW: Calculate and update adjusted profits for sessions that have stakes
+    func ensureAllSessionsHaveAdjustedProfits() async {
+        do {
+            // Query all stakes where current user is the staked player
+            let allUserStakes = try await stakeService.fetchStakesForUser(userId: userId, asStakedPlayer: true)
+            
+            // Get unique session IDs that have stakes
+            let sessionIdsWithStakes = Set(allUserStakes.map { $0.sessionId })
+            
+            if !sessionIdsWithStakes.isEmpty {
+                print("🔄 Found \(sessionIdsWithStakes.count) sessions with stakes, recalculating adjusted profits...")
+                
+                for sessionId in sessionIdsWithStakes {
+                    do {
+                        try await calculateAndUpdateAdjustedProfit(for: sessionId)
+                    } catch {
+                        print("❌ Failed to calculate adjusted profit for session \(sessionId): \(error)")
+                    }
+                }
+                
+                // Refresh sessions to get updated data
+                refreshSessions()
+                print("✅ Completed recalculating adjusted profits for sessions with stakes")
+            } else {
+                print("ℹ️ No sessions with stakes found, no adjustments needed")
+            }
+        } catch {
+            print("❌ Failed to fetch stakes for adjusted profit calculation: \(error)")
         }
     }
     
@@ -431,7 +631,7 @@ class SessionStore: ObservableObject {
             } else {
                 print("✅ Successfully deleted \(deletedCount) duplicate sessions")
                 // Refresh the sessions list after deletion
-                self.fetchSessions()
+                self.refreshSessions()
                 completion(.success(deletedCount))
             }
         }
@@ -543,7 +743,118 @@ class SessionStore: ObservableObject {
         print("[SessionStore] Session resumed to Day \(liveSession.currentDay)")
     }
     
-
+    // MARK: - Enhanced Multi-Day Session Management (Parked Sessions)
+    
+    /// Parks the current live session for day 2 and clears the active session slot
+    func parkSessionForNextDay(nextDayDate: Date) {
+        print("[SessionStore] Parking session for next day: \(nextDayDate)")
+        
+        var sessionToPark = liveSession
+        sessionToPark.isActive = false
+        sessionToPark.pausedForNextDay = true
+        sessionToPark.pausedForNextDayDate = nextDayDate
+        sessionToPark.lastPausedAt = Date()
+        if let lastActive = sessionToPark.lastActiveAt {
+            sessionToPark.elapsedTime += Date().timeIntervalSince(lastActive)
+        }
+        sessionToPark.lastActiveAt = nil
+        
+        // Create a unique key for the parked session
+        let parkedSessionKey = "\(sessionToPark.id)_day\(sessionToPark.currentDay + 1)"
+        
+        // Park the session
+        parkedSessions[parkedSessionKey] = sessionToPark
+        
+        // Clear the live session to allow new sessions
+        liveSession = LiveSessionData()
+        enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
+        
+        // Stop timer and save state
+        stopLiveSessionTimer()
+        saveParkedSessionsState()
+        saveLiveSessionState() // This will save the cleared session
+        
+        // Don't hide the bar - allow new sessions to be started
+        showLiveSessionBar = false // Will be shown again when a new session starts
+        
+        print("[SessionStore] Session parked as '\(parkedSessionKey)' for Day \(sessionToPark.currentDay + 1)")
+    }
+    
+    /// Restores a parked session back to active state
+    func restoreParkedSession(key: String) {
+        guard let parkedSession = parkedSessions[key] else {
+            print("[SessionStore] No parked session found for key: \(key)")
+            return
+        }
+        
+        print("[SessionStore] Restoring parked session: \(key)")
+        
+        // If there's currently an active session, we need to handle this conflict
+        if liveSession.buyIn > 0 && !liveSession.isEnded {
+            print("[SessionStore] WARNING: Attempting to restore parked session while another session is active")
+            print("[SessionStore] Current session: \(liveSession.gameName) with buy-in: \(liveSession.buyIn)")
+            print("[SessionStore] This operation will be blocked to prevent data loss")
+            // For now, we'll prevent this. In the future, we could queue or ask user to choose
+            return
+        }
+        
+        var restoredSession = parkedSession
+        restoredSession.isActive = true
+        restoredSession.pausedForNextDay = false
+        restoredSession.pausedForNextDayDate = nil
+        restoredSession.currentDay += 1
+        restoredSession.lastActiveAt = Date()
+        
+        // Remove from parked sessions
+        parkedSessions.removeValue(forKey: key)
+        
+        // Set as live session
+        liveSession = restoredSession
+        
+        // Try to restore enhanced session data if it exists
+        // Note: Enhanced data might not be available for older parked sessions
+        let enhancedKey = "EnhancedLiveSession_\(userId)_\(restoredSession.id)"
+        if let savedData = UserDefaults.standard.data(forKey: enhancedKey),
+           let loadedEnhancedSession = try? JSONDecoder().decode(LiveSessionData_Enhanced.self, from: savedData) {
+            enhancedLiveSession = loadedEnhancedSession
+            print("[SessionStore] Restored enhanced session data for parked session")
+        } else {
+            // Initialize with basic session if no enhanced data available
+            enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
+            print("[SessionStore] No enhanced data found, initialized new enhanced session")
+        }
+        
+        // Start timer and update display
+        startLiveSessionTimer()
+        saveParkedSessionsState()
+        saveLiveSessionState()
+        showLiveSessionBar = true
+        
+        print("[SessionStore] Session restored to Day \(liveSession.currentDay)")
+    }
+    
+    /// Gets all parked sessions with user-friendly display info
+    func getParkedSessionsInfo() -> [(key: String, displayName: String, nextDayDate: Date)] {
+        return parkedSessions.compactMap { (key, session) in
+            guard let nextDayDate = session.pausedForNextDayDate else { return nil }
+            
+            let displayName: String
+            if session.isTournament {
+                displayName = "\(session.tournamentName ?? session.gameName) - Day \(session.currentDay + 1)"
+            } else {
+                displayName = "\(session.stakes) @ \(session.gameName) - Day \(session.currentDay + 1)"
+            }
+            
+            return (key: key, displayName: displayName, nextDayDate: nextDayDate)
+        }.sorted { $0.nextDayDate < $1.nextDayDate }
+    }
+    
+    /// Removes a parked session permanently (when user decides not to continue)
+    func discardParkedSession(key: String) {
+        parkedSessions.removeValue(forKey: key)
+        saveParkedSessionsState()
+        print("[SessionStore] Discarded parked session: \(key)")
+    }
     
     // Create a "Resume Day X" event
     func createResumeEvent(for nextDayDate: Date) async -> Bool {
@@ -664,6 +975,7 @@ class SessionStore: ObservableObject {
         
         let currentLiveSessionId = liveSession.id
 
+        let rawProfit = cashout - liveSession.buyIn
         let sessionData: [String: Any] = [
             "userId": userId,
             "gameType": liveSession.isTournament ? SessionLogType.tournament.rawValue : SessionLogType.cashGame.rawValue,
@@ -675,7 +987,8 @@ class SessionStore: ObservableObject {
             "hoursPlayed": liveSession.elapsedTime / 3600,
             "buyIn": liveSession.buyIn, // This now includes all rebuys for tournaments too
             "cashout": cashout,
-            "profit": cashout - liveSession.buyIn, // liveSession.buyIn is total for both types
+            "profit": rawProfit, // liveSession.buyIn is total for both types
+            "adjustedProfit": rawProfit, // Initially equals raw profit, will be recalculated if stakes exist
             "createdAt": FieldValue.serverTimestamp(), // Firestore server timestamp for creation
             "notes": enhancedLiveSession.notes, // Include notes
             "liveSessionUUID": currentLiveSessionId, // Link to the live session instance
@@ -695,6 +1008,22 @@ class SessionStore: ObservableObject {
             // Update session challenges if challenge service is available
             if let challengeService = challengeService {
                 await challengeService.updateSessionChallengesFromSession(session)
+            }
+            
+            // Check if there are stakes for this live session and recalculate adjusted profit
+            do {
+                // Check for stakes using both the new session ID and the live session ID
+                var stakes = try await stakeService.fetchStakesForSession(docRef.documentID)
+                if stakes.isEmpty {
+                    stakes = try await stakeService.fetchStakesForLiveSession(currentLiveSessionId)
+                }
+                
+                if !stakes.isEmpty {
+                    print("🔄 Found \(stakes.count) stakes for session, recalculating adjusted profit...")
+                    try await calculateAndUpdateAdjustedProfit(for: docRef.documentID)
+                }
+            } catch {
+                print("⚠️ Failed to check/update adjusted profit for live session: \(error)")
             }
             
             // After successful save, properly end and clear the live session state
@@ -736,12 +1065,14 @@ class SessionStore: ObservableObject {
         // Reset all session data to clean state
         liveSession = LiveSessionData()
         enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
+        parkedSessions = [:] // Clear parked sessions
         showLiveSessionBar = false
         
         // Clear ALL possible UserDefaults keys (current and legacy)
         let possibleKeys = [
             "LiveSession_\(userId)",
             "EnhancedLiveSession_\(userId)",
+            "ParkedSessions_\(userId)", // Add parked sessions key
             "liveSession_\(userId)",
             "enhancedLiveSession_\(userId)",
             "LiveSessionData_\(userId)",
@@ -881,7 +1212,28 @@ class SessionStore: ObservableObject {
     private func loadEnhancedLiveSessionState() {
         if let savedData = UserDefaults.standard.data(forKey: "EnhancedLiveSession_\(userId)"),
            let loadedSession = try? JSONDecoder().decode(LiveSessionData_Enhanced.self, from: savedData) {
-            enhancedLiveSession = loadedSession
+            
+            // Sanitize chip updates to remove any corrupted data
+            var sanitizedSession = loadedSession
+            let originalCount = sanitizedSession.chipUpdates.count
+            
+            // Filter out any invalid chip updates
+            sanitizedSession.chipUpdates = sanitizedSession.chipUpdates.filter { update in
+                let isValid = !update.amount.isNaN && !update.amount.isInfinite && update.amount >= 0
+                if !isValid {
+                    print("🧹 SANITIZING: Removing invalid chip update: \(update.amount)")
+                }
+                return isValid
+            }
+            
+            let sanitizedCount = sanitizedSession.chipUpdates.count
+            enhancedLiveSession = sanitizedSession
+            
+            if originalCount != sanitizedCount {
+                print("🧹 SANITIZING: Removed \(originalCount - sanitizedCount) corrupted chip updates")
+                // Save the sanitized data back to UserDefaults
+                saveEnhancedLiveSessionState()
+            }
         } else {
             // If no enhanced data, initialize with current basic session
             enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
@@ -892,11 +1244,48 @@ class SessionStore: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "EnhancedLiveSession_\(userId)")
     }
     
+    // MARK: - State Persistence for Parked Sessions
+    
+    private func saveParkedSessionsState() {
+        do {
+            let encoder = JSONEncoder()
+            let encoded = try encoder.encode(parkedSessions)
+            UserDefaults.standard.set(encoded, forKey: "ParkedSessions_\(userId)")
+            UserDefaults.standard.synchronize()
+            print("[SessionStore] Parked sessions state saved successfully")
+        } catch {
+            print("[SessionStore] Failed to save parked sessions state: \(error)")
+        }
+    }
+    
+    private func loadParkedSessionsState() {
+        if let savedData = UserDefaults.standard.data(forKey: "ParkedSessions_\(userId)"),
+           let loadedParkedSessions = try? JSONDecoder().decode([String: LiveSessionData].self, from: savedData) {
+            parkedSessions = loadedParkedSessions
+            print("[SessionStore] Loaded \(parkedSessions.count) parked sessions")
+        } else {
+            parkedSessions = [:]
+            print("[SessionStore] No parked sessions found")
+        }
+    }
+    
+    private func removeParkedSessionsState() {
+        UserDefaults.standard.removeObject(forKey: "ParkedSessions_\(userId)")
+        parkedSessions = [:]
+        print("[SessionStore] Parked sessions state cleared")
+    }
+    
     // MARK: - State Persistence
     
     func saveLiveSessionState() {
-        if let encoded = try? JSONEncoder().encode(liveSession) {
+        do {
+            let encoder = JSONEncoder()
+            let encoded = try encoder.encode(liveSession)
             UserDefaults.standard.set(encoded, forKey: "LiveSession_\(userId)")
+            UserDefaults.standard.synchronize()
+            print("[SessionStore] Live session state saved successfully")
+        } catch {
+            print("[SessionStore] Failed to save live session state: \(error)")
         }
     }
     
@@ -953,25 +1342,43 @@ class SessionStore: ObservableObject {
                 }
             }
 
+            print("🔍 LOADING: Session validation - hasValidBuyIn: \(hasValidBuyIn), isPotentiallyRestorable: \(isPotentiallyRestorable), isAbandoned: \(isAbandoned)")
+            print("🔍 LOADING: Session details - buyIn: \(loadedSession.buyIn), isActive: \(loadedSession.isActive), pausedForNextDay: \(loadedSession.pausedForNextDay)")
+            
             if hasValidBuyIn && isPotentiallyRestorable && !isAbandoned {
                 print("✅ LOADING: Restoring valid session")
-                // This session looks like it should be restored.
-                var sessionToRestore = loadedSession
-                if sessionToRestore.isActive, let lastActive = sessionToRestore.lastActiveAt {
-                    // If it was active, calculate time passed since last active and add to elapsed.
-                    let additionalTime = Date().timeIntervalSince(lastActive)
-                    sessionToRestore.elapsedTime += additionalTime
-                    sessionToRestore.lastActiveAt = Date() // Update last active to now
-                }
-                // If it was paused, it's loaded as is.
                 
-                self.liveSession = sessionToRestore
-                
-                if self.liveSession.isActive {
-                    startLiveSessionTimer()
+                // TRANSITION PERIOD FIX: If this session is paused for next day, 
+                // it should be moved to parked sessions instead of staying in live session
+                if loadedSession.pausedForNextDay {
+                    print("🔄 LOADING: Session is paused for next day - converting to parked session")
+                    let parkedSessionKey = "\(loadedSession.id)_day\(loadedSession.currentDay + 1)"
+                    parkedSessions[parkedSessionKey] = loadedSession
+                    saveParkedSessionsState()
+                    
+                    // Clear the live session since it should be parked
+                    self.liveSession = LiveSessionData()
+                    self.enhancedLiveSession = LiveSessionData_Enhanced(basicSession: self.liveSession)
+                    self.showLiveSessionBar = false
+                    
+                    print("✅ LOADING: Converted session to parked session: \(parkedSessionKey)")
+                } else {
+                    // Normal session restoration
+                    var sessionToRestore = loadedSession
+                    if sessionToRestore.isActive, let lastActive = sessionToRestore.lastActiveAt {
+                        // If it was active, calculate time passed since last active and add to elapsed.
+                        let additionalTime = Date().timeIntervalSince(lastActive)
+                        sessionToRestore.elapsedTime += additionalTime
+                        sessionToRestore.lastActiveAt = Date() // Update last active to now
+                    }
+                    
+                    self.liveSession = sessionToRestore
+                    
+                    if self.liveSession.isActive {
+                        startLiveSessionTimer()
+                    }
+                    self.showLiveSessionBar = true
                 }
-                // Only show live session bar if not paused for next day
-                self.showLiveSessionBar = !self.liveSession.pausedForNextDay
                 loadEnhancedLiveSessionState() // Also load its associated enhanced data
                 
                 // SCORCHED EARTH: Validate the restored session
@@ -995,6 +1402,37 @@ class SessionStore: ObservableObject {
     // SCORCHED EARTH: Add backward compatibility method
     func clearLiveSession() {
         scorachedEarthSessionClear()
+    }
+    
+    // MARK: - Data Sanitization
+    
+    /// Sanitizes all session data to remove corrupted values
+    func sanitizeAllSessionData() {
+        print("🧹 SANITIZING: Starting comprehensive data sanitization")
+        
+        // Sanitize current enhanced session
+        let originalCount = enhancedLiveSession.chipUpdates.count
+        enhancedLiveSession.chipUpdates = enhancedLiveSession.chipUpdates.filter { update in
+            let isValid = !update.amount.isNaN && !update.amount.isInfinite && update.amount >= 0
+            if !isValid {
+                print("🧹 SANITIZING: Removing invalid chip update: \(update.amount)")
+            }
+            return isValid
+        }
+        
+        if originalCount != enhancedLiveSession.chipUpdates.count {
+            print("🧹 SANITIZING: Removed \(originalCount - enhancedLiveSession.chipUpdates.count) corrupted chip updates")
+            saveEnhancedLiveSessionState()
+        }
+        
+        // Sanitize basic session data
+        if liveSession.buyIn.isNaN || liveSession.buyIn.isInfinite || liveSession.buyIn < 0 {
+            print("🧹 SANITIZING: Fixing corrupted buy-in: \(liveSession.buyIn)")
+            liveSession.buyIn = 0
+            saveLiveSessionState()
+        }
+        
+        print("🧹 SANITIZING: Data sanitization complete")
     }
     
     // SCORCHED EARTH: Emergency session reset function for UI access
@@ -1148,7 +1586,7 @@ class SessionStore: ObservableObject {
                 group.wait()
 
                 // After importing, refresh local sessions and upload the CSV file for archival.
-                self.fetchSessions()
+                self.refreshSessions()
 
                 let storageRef = Storage.storage().reference().child("pokerbaseImports/\(self.userId)/\(UUID().uuidString).csv")
                 storageRef.putData(data, metadata: nil) { _, _ in }
@@ -1300,7 +1738,7 @@ class SessionStore: ObservableObject {
                 }
 
                 group.wait()
-                self.fetchSessions()
+                self.refreshSessions()
 
                 // Archive raw file
                 let storageRef = Storage.storage().reference().child("pokerAnalyticsImports/\(self.userId)/\(UUID().uuidString).csv")
@@ -1474,6 +1912,7 @@ class SessionStore: ObservableObject {
                         "buyIn": buyIn,
                         "cashout": cashOut,
                         "profit": netProfit,
+                        "adjustedProfit": netProfit, // Initially equals raw profit for imports
                         "createdAt": FieldValue.serverTimestamp(),
                         "location": location,
                         "tournamentType": isTournament ? stakes : nil,
@@ -1493,7 +1932,7 @@ class SessionStore: ObservableObject {
                 }
 
                 group.wait()
-                self.fetchSessions()
+                self.refreshSessions()
 
                 let storageRef = Storage.storage().reference().child("pbtImports/\(self.userId)/\(UUID().uuidString).csv")
                 storageRef.putData(data, metadata: nil) { _, _ in }
@@ -1703,7 +2142,7 @@ class SessionStore: ObservableObject {
                 
                 print("📊 Regroup Import: Complete! Successfully imported \(imported) sessions.")
                 
-                self.fetchSessions()
+                self.refreshSessions()
 
                 // Archive the file
                 let storageRef = Storage.storage().reference().child("regroupImports/\(self.userId)/\(UUID().uuidString).csv")
@@ -1723,5 +2162,6 @@ class SessionStore: ObservableObject {
     
     deinit {
         stopLiveSessionTimer()
+        listener?.remove()
     }
 } 

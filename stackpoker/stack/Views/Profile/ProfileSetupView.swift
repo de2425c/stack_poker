@@ -80,7 +80,7 @@ struct ProfileSetupView: View {
                                                         .frame(width: 20, height: 20)
                                                 } else if let isAvailable = usernameAvailable {
                                                     Image(systemName: isAvailable ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                                        .foregroundColor(isAvailable ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
+                                                        .foregroundColor(isAvailable ? Color(red: 64/255, green: 156/255, blue: 255/255) : .red)
                                                         .frame(width: 20, height: 20)
                                                 }
                                             }
@@ -92,7 +92,7 @@ struct ProfileSetupView: View {
                                         if let isAvailable = usernameAvailable {
                                             Text(isAvailable ? "Username available!" : "Username already taken")
                                                 .font(.custom("PlusJakartaSans-Regular", size: 12))
-                                                .foregroundColor(isAvailable ? Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : .red)
+                                                .foregroundColor(isAvailable ? Color(red: 64/255, green: 156/255, blue: 255/255) : .red)
                                                 .padding(.leading, 8)
                                         }
                                     }
@@ -108,7 +108,7 @@ struct ProfileSetupView: View {
                                         .frame(maxWidth: .infinity, minHeight: 56)
                                 }
                                 .background(
-                                    RoundedRectangle(cornerRadius: 12)
+                                    RoundedRectangle(cornerRadius: 28)
                                         .fill(step1ButtonBackgroundColor)
                                 )
                                 .disabled(isStep1ButtonDisabled)
@@ -160,7 +160,14 @@ struct ProfileSetupView: View {
                                         PhotosPicker(selection: $imagePickerItem, matching: .images) {
                                             ZStack {
                                                 Circle()
-                                                    .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                                    .fill(LinearGradient(
+                                                        gradient: Gradient(colors: [
+                                                            Color(red: 64/255, green: 156/255, blue: 255/255),
+                                                            Color(red: 100/255, green: 180/255, blue: 255/255)
+                                                        ]),
+                                                        startPoint: .leading,
+                                                        endPoint: .trailing
+                                                    ))
                                                     .frame(width: 32, height: 32)
                                                 
                                                 Image(systemName: "camera.fill")
@@ -207,7 +214,7 @@ struct ProfileSetupView: View {
                                     .frame(maxWidth: .infinity, minHeight: 56)
                                     .background(Color.white.opacity(0.15))
                                     .foregroundColor(.white)
-                                    .cornerRadius(12)
+                                    .cornerRadius(28)
                                     
                                     // Complete setup button
                                     Button(action: createProfile) {
@@ -223,8 +230,15 @@ struct ProfileSetupView: View {
                                     }
                                     .frame(maxWidth: .infinity, minHeight: 56)
                                     .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                        RoundedRectangle(cornerRadius: 28)
+                                            .fill(LinearGradient(
+                                                gradient: Gradient(colors: [
+                                                    Color(red: 64/255, green: 156/255, blue: 255/255),
+                                                    Color(red: 100/255, green: 180/255, blue: 255/255)
+                                                ]),
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            ))
                                     )
                                     .disabled(isLoading)
                                     .contentShape(Rectangle())
@@ -295,11 +309,22 @@ struct ProfileSetupView: View {
     }
     
     // Dynamic button background color for step 1
-    private var step1ButtonBackgroundColor: Color {
+    private var step1ButtonBackgroundColor: LinearGradient {
         if isStep1ButtonDisabled {
-            return Color.gray
+            return LinearGradient(
+                gradient: Gradient(colors: [Color.gray, Color.gray]),
+                startPoint: .leading,
+                endPoint: .trailing
+            )
         }
-        return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+        return LinearGradient(
+            gradient: Gradient(colors: [
+                Color(red: 64/255, green: 156/255, blue: 255/255),
+                Color(red: 100/255, green: 180/255, blue: 255/255)
+            ]),
+            startPoint: .leading,
+            endPoint: .trailing
+        )
     }
     
     // Button disabled state for step 1

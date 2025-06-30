@@ -17,6 +17,10 @@ class PostService: ObservableObject {
     private var cachedFollowingUsers: Set<String> = []
     private var lastFollowingCacheUpdate: Date?
     
+    // Mode tracking to prevent profile services from responding to follow changes
+    private var isProfileMode: Bool = false
+    private var profileUserId: String?
+    
     private let db = Firestore.firestore()
     private let storage = Storage.storage()
     private let postsPerPage = 20
@@ -26,6 +30,8 @@ class PostService: ObservableObject {
     private let followingCacheKey = "cached_following_users"
     
     init() {
+        self.isProfileMode = false
+        self.profileUserId = nil
         loadPersistedCache()
         setupAutoRefresh()
         
@@ -44,6 +50,36 @@ class PostService: ObservableObject {
             name: NSNotification.Name("UserFollowingChanged"),
             object: nil
         )
+    }
+    
+    // Initialize for profile mode (doesn't respond to following changes)
+    init(profileMode: Bool, profileUserId: String? = nil) {
+        self.isProfileMode = profileMode
+        self.profileUserId = profileUserId
+        
+        // Profile mode services don't need caching or auto-refresh
+        if !profileMode {
+            loadPersistedCache()
+            setupAutoRefresh()
+        }
+        
+        // Add observer to handle sign out cleanup
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(cleanupOnSignOut),
+            name: NSNotification.Name("UserWillSignOut"),
+            object: nil
+        )
+        
+        // Only listen to following changes if not in profile mode
+        if !profileMode {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleFollowingChanged),
+                name: NSNotification.Name("UserFollowingChanged"),
+                object: nil
+            )
+        }
     }
     
     deinit {
@@ -106,6 +142,12 @@ class PostService: ObservableObject {
     
     // Handle following relationship changes by refreshing feed
     @objc private func handleFollowingChanged() {
+        // Don't respond to following changes when in profile mode
+        guard !isProfileMode else {
+            print("DEBUG: PostService in profile mode, ignoring following change notification")
+            return
+        }
+        
         Task {
             do {
                 // Invalidate following cache and feed cache
@@ -748,10 +790,14 @@ class PostService: ObservableObject {
     
     // MARK: - Fetching Posts for a Specific User
     func fetchPosts(forUserId userId: String) async throws {
+        // Mark this service as being in profile mode for this specific user
+        self.isProfileMode = true
+        self.profileUserId = userId
+        
         isLoading = true
         defer { isLoading = false }
 
-
+        print("DEBUG: PostService fetching posts for profile user: \(userId)")
 
         let query = db.collection("posts")
             .whereField("userId", isEqualTo: userId)
@@ -774,10 +820,10 @@ class PostService: ObservableObject {
             // For now, the primary use case is fetching the initial set.
             self.lastDocument = snapshot.documents.last 
             
-
+            print("DEBUG: Successfully fetched \(fetchedPosts.count) posts for profile user: \(userId)")
 
         } catch {
-
+            print("ERROR: Failed to fetch posts for profile user \(userId): \(error)")
             // Clear posts on error or handle as needed
             self.posts = []
             self.lastDocument = nil

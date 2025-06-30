@@ -16,7 +16,8 @@ class FollowService {
         try await userFollowsRef.setData([
             "followerId": currentUserId,
             "followeeId": targetUserId,
-            "createdAt": FieldValue.serverTimestamp()
+            "createdAt": FieldValue.serverTimestamp(),
+            "postNotifications": false // Default to false for new follows
         ])
     }
     

@@ -24,6 +24,7 @@ struct HomePage: View {
     // REMOVED: @StateObject private var handStore: HandStore
     @StateObject private var postService = PostService()
     @StateObject private var tabBarVisibility = TabBarVisibilityManager()
+    @StateObject private var tutorialManager = TutorialManager()
     @EnvironmentObject private var userService: UserService
     @EnvironmentObject private var authViewModel: AuthViewModel
     
@@ -58,6 +59,32 @@ struct HomePage: View {
         case profile
     }
     
+    // Computed properties to simplify complex expressions
+    private var hasStandaloneGameBar: Bool {
+        let hasGame = activeHostedStandaloneGame != nil
+        print("🏠 HomePage Debug - hasStandaloneGameBar: \(hasGame)")
+        if let game = activeHostedStandaloneGame {
+            print("   Game title: \(game.title)")
+        }
+        return hasGame
+    }
+    
+    private var hasInviteBar: Bool {
+        let hasInvites = !pendingInvites.isEmpty
+        print("📧 HomePage Debug - hasInviteBar: \(hasInvites) (invites: \(pendingInvites.count))")
+        return hasInvites
+    }
+    
+    private var hasLiveSessionBar: Bool {
+        let hasLiveBar = sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive)
+        print("🎰 HomePage Debug - hasLiveSessionBar: \(hasLiveBar)")
+        print("   showLiveSessionBar: \(sessionStore.showLiveSessionBar)")
+        print("   isEnded: \(sessionStore.liveSession.isEnded)")
+        print("   buyIn: \(sessionStore.liveSession.buyIn)")
+        print("   isActive: \(sessionStore.liveSession.isActive)")
+        return hasLiveBar
+    }
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -84,7 +111,7 @@ struct HomePage: View {
                     }
                     
                     // Game Invites Bar - flush with safe area or standalone game bar
-                    if !pendingInvites.isEmpty {
+                    if hasInviteBar {
                         GameInvitesBar(
                             invites: pendingInvites,
                             onTap: { invite in
@@ -93,13 +120,12 @@ struct HomePage: View {
                                 showingInviteAcceptSheet = true
                                 print("🎯 State set - selectedInvite: \(selectedInvite?.gameTitle ?? "nil"), showingInviteAcceptSheet: \(showingInviteAcceptSheet)")
                             },
-                            isFirstBar: activeHostedStandaloneGame == nil
+                            isFirstBar: !hasStandaloneGameBar
                         )
                     }
                     
                     // Live session bar (if active)
-                    if sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && 
-                       (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive) {
+                    if hasLiveSessionBar {
                         LiveSessionBar(
                             sessionStore: sessionStore,
                             isExpanded: $liveSessionBarExpanded,
@@ -107,7 +133,7 @@ struct HomePage: View {
                                 // Make sure the session is shown when tapped
                                 showingLiveSession = true 
                             },
-                            isFirstBar: activeHostedStandaloneGame == nil && pendingInvites.isEmpty
+                            isFirstBar: !hasStandaloneGameBar && !hasInviteBar
                         )
                         .onTapGesture {
                             // Additional tap gesture to ensure it works
@@ -131,14 +157,15 @@ struct HomePage: View {
                                 // FeedView with transparent background
                                 FeedView(
                                     userId: userId,
-                                    hasStandaloneGameBar: activeHostedStandaloneGame != nil,
-                                    hasInviteBar: !pendingInvites.isEmpty,
-                                    hasLiveSessionBar: sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive),
+                                    hasStandaloneGameBar: hasStandaloneGameBar,
+                                    hasInviteBar: hasInviteBar,
+                                    hasLiveSessionBar: hasLiveSessionBar,
                                     onNavigateToExplore: {
                                         selectedTab = .explore
                                     }
                                 )
                                 .environmentObject(sessionStore)
+                                .environmentObject(tutorialManager)
                                 .edgesIgnoringSafeArea(.top)
                             }
                         }
@@ -146,6 +173,7 @@ struct HomePage: View {
                         
                         ExploreView()
                             .environmentObject(sessionStore)
+                            .environmentObject(tutorialManager)
                             .tag(Tab.explore)
                         
                         Color.clear // Placeholder for Add tab
@@ -167,15 +195,16 @@ struct HomePage: View {
                             )
                         
                         GroupsView(
-                            hasStandaloneGameBar: activeHostedStandaloneGame != nil,
-                            hasInviteBar: !pendingInvites.isEmpty,
-                            hasLiveSessionBar: sessionStore.showLiveSessionBar && !sessionStore.liveSession.isEnded && (sessionStore.liveSession.buyIn > 0 || sessionStore.liveSession.isActive)
+                            hasStandaloneGameBar: hasStandaloneGameBar,
+                            hasInviteBar: hasInviteBar,
+                            hasLiveSessionBar: hasLiveSessionBar
                         )
                             .environmentObject(userService)
                             // REMOVED: .environmentObject(handStore)
                             .environmentObject(sessionStore)
                             .environmentObject(postService)
                             .environmentObject(tabBarVisibility)
+                            .environmentObject(tutorialManager)
                             .tag(Tab.groups)
                         
                         ProfileView(userId: userId)
@@ -184,6 +213,7 @@ struct HomePage: View {
                             .environmentObject(sessionStore)
                             .environmentObject(postService)
                             .environmentObject(tabBarVisibility)
+                            .environmentObject(tutorialManager)
                             .tag(Tab.profile)
                     }
                     .compositingGroup() // Ensures the blendMode works properly
@@ -197,7 +227,8 @@ struct HomePage: View {
                     CustomTabBar(
                         selectedTab: $selectedTab,
                         userId: userId,
-                        showingMenu: $showingMenu
+                        showingMenu: $showingMenu,
+                        tutorialManager: tutorialManager
                     )
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, 10)  // Adjusted for the new tab bar design
@@ -205,16 +236,21 @@ struct HomePage: View {
                     .ignoresSafeArea(.keyboard)
                 }
                 
+                // Tutorial overlay (highest z-index)
+                TutorialOverlay(tutorialManager: tutorialManager)
+                    .zIndex(1002) // Higher than menu popup
+                
                 if showingMenu {
                     AddMenuOverlay(
                         showingMenu: $showingMenu,
                         userId: userId,
                         showSessionForm: $showingSessionForm,
                         showingLiveSession: $showingLiveSession,
-                        showingOpenHomeGameFlow: $showingOpenHomeGameFlow
+                        showingOpenHomeGameFlow: $showingOpenHomeGameFlow,
+                        tutorialManager: tutorialManager
                         // REMOVED: showNewHandEntryViewSheet: $showNewHandEntryViewSheet
                     )
-                    .zIndex(1)
+                    .zIndex(1000) // Below tutorial overlay
                 }
 
                 // NavigationLink to HomeGameDetailView (exactly matching GroupsView implementation)
@@ -274,8 +310,29 @@ struct HomePage: View {
                     loadActiveHostedStandaloneGame()
                 }
                 
-                // Check if we should show CSV import prompt
-                checkForCSVImportPrompt()
+                // Observer for tutorial completion to trigger CSV import
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("TutorialCompleted"),
+                    object: nil,
+                    queue: .main
+                ) { [self] _ in
+                    checkForCSVImportPrompt()
+                }
+                
+                // Check and start tutorial (with delay to ensure Auth is ready)
+                Task {
+                    // Small delay to ensure Firebase Auth is fully initialized
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                    
+                    // Get the most current userId
+                    let currentUserId = Auth.auth().currentUser?.uid ?? userId
+                    await tutorialManager.checkAndStartTutorial(userId: currentUserId)
+                }
+                
+                // Check if we should show CSV import prompt (but not during tutorial)
+                if !tutorialManager.isActive {
+                    checkForCSVImportPrompt()
+                }
             }
             .onDisappear {
                 // Clean-up observers & listeners
@@ -463,11 +520,12 @@ struct CustomTabBar: View {
     @Binding var selectedTab: HomePage.Tab
     let userId: String
     @Binding var showingMenu: Bool
+    let tutorialManager: TutorialManager
 
     var body: some View {
         ZStack {
-            // Background color for the tab bar - now transparent
-            Color.clear
+            // Background color for the tab bar - now nearly transparent to capture touches
+            Color.black.opacity(0.01)
                 .frame(height: 80) // Increased height to accommodate larger icons and padding
                 .edgesIgnoringSafeArea(.bottom) // Extend to the bottom edge
 
@@ -475,28 +533,45 @@ struct CustomTabBar: View {
             HStack {
                 TabBarButton(
                     icon: "Feed", // Changed to asset name
-                    isSelected: selectedTab == .feed
-                ) { selectedTab = .feed }
+                    isSelected: selectedTab == .feed,
+                    action: { selectedTab = .feed },
+                    tutorialManager: tutorialManager
+                )
 
                 TabBarButton(
-                    icon: "Search", // Changed to asset name
-                    isSelected: selectedTab == .explore
-                ) { selectedTab = .explore }
+                    icon: "Events", // Changed to calendar/events icon
+                    isSelected: selectedTab == .explore,
+                    action: { 
+                        selectedTab = .explore
+                        tutorialManager.userDidAction(.tappedExploreTab)
+                    },
+                    tutorialManager: tutorialManager
+                )
 
                 // Plus button
-                AddButton(userId: userId, showingMenu: $showingMenu)
+                AddButton(userId: userId, showingMenu: $showingMenu, tutorialManager: tutorialManager)
                     .padding(.horizontal, 20) // Add some spacing around the plus button
 
 
                 TabBarButton(
                     icon: "Groups", // Changed to asset name
-                    isSelected: selectedTab == .groups
-                ) { selectedTab = .groups }
+                    isSelected: selectedTab == .groups,
+                    action: { 
+                        selectedTab = .groups
+                        tutorialManager.userDidAction(.tappedGroupsTab)
+                    },
+                    tutorialManager: tutorialManager
+                )
 
                 TabBarButton(
                     icon: "Profile", // Changed to asset name
-                    isSelected: selectedTab == .profile
-                ) { selectedTab = .profile }
+                    isSelected: selectedTab == .profile,
+                    action: { 
+                        selectedTab = .profile
+                        tutorialManager.userDidAction(.tappedProfileTab)
+                    },
+                    tutorialManager: tutorialManager
+                )
             }
             .padding(.horizontal, 20)
         }
@@ -509,16 +584,26 @@ struct TabBarButton: View {
     let icon: String
     let isSelected: Bool
     let action: () -> Void
+    let tutorialManager: TutorialManager?
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) { 
-                Image(icon) // Using asset image name
-                    .renderingMode(.template)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 30, height: 30) // Increased icon size
-                    .foregroundColor(isSelected ? .white : Color.gray.opacity(0.8))
+                Group {
+                    if icon == "Events" {
+                        // Use system calendar icon for Events tab
+                        Image(systemName: "calendar")
+                            .font(.system(size: 25, weight: .medium))
+                    } else {
+                        // Use asset image for other tabs
+                        Image(icon)
+                            .renderingMode(.template)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 30, height: 30)
+                    }
+                }
+                .foregroundColor(isSelected ? .white : Color.gray.opacity(0.8))
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -529,9 +614,11 @@ struct TabBarButton: View {
 struct AddButton: View {
     let userId: String
     @Binding var showingMenu: Bool
+    let tutorialManager: TutorialManager
 
     var body: some View {
         Button(action: {
+            tutorialManager.userDidAction(.tappedPlusButton)
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                 showingMenu.toggle()
             }
@@ -546,6 +633,7 @@ struct AddButton: View {
                     .foregroundColor(.white)
             }
         }
+        .tutorialPlusHighlight(isHighlighted: tutorialManager.currentStep == .expandMenu)
     }
 }
 
@@ -838,14 +926,39 @@ struct ProfileScreen: View {
                                     .font(.system(size: displayNameVisible(profile) ? 18 : 28, weight: displayNameVisible(profile) ? .medium : .bold, design: .rounded))
                                     .foregroundColor(.gray)
                                     
-                                if let bio = profile.bio, !bio.isEmpty {
-                                    Text(bio)
-                                        .font(.system(size: 16))
-                                        .foregroundColor(.white.opacity(0.85))
-                                        .multilineTextAlignment(.center)
-                                        .padding(.horizontal, 24)
-                                        .padding(.top, 12)
+                                // Bio and hyperlink combined
+                                VStack(spacing: 8) {
+                                    if let bio = profile.bio, !bio.isEmpty {
+                                        Text(bio)
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.white.opacity(0.85))
+                                            .multilineTextAlignment(.center)
+                                            .padding(.horizontal, 24)
+                                    }
+                                    
+                                    // Simple hyperlink - just colored text
+                                    if let hyperlinkText = profile.hyperlinkText, !hyperlinkText.isEmpty,
+                                       let hyperlinkURL = profile.hyperlinkURL, !hyperlinkURL.isEmpty {
+                                        Button(action: {
+                                            // Ensure URL has proper scheme
+                                            var urlString = hyperlinkURL
+                                            if !urlString.lowercased().hasPrefix("http://") && !urlString.lowercased().hasPrefix("https://") {
+                                                urlString = "https://" + urlString
+                                            }
+                                            
+                                            if let url = URL(string: urlString) {
+                                                UIApplication.shared.open(url)
+                                            }
+                                        }) {
+                                            Text(hyperlinkText)
+                                                .font(.system(size: 16, weight: .medium))
+                                                .foregroundColor(.blue)
+                                                .underline()
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
                                 }
+                                .padding(.top, 12)
                             }
                             
                             HStack(spacing: 32) {
@@ -1033,6 +1146,7 @@ struct AddMenuOverlay: View {
     @Binding var showSessionForm: Bool
     @Binding var showingLiveSession: Bool
     @Binding var showingOpenHomeGameFlow: Bool
+    let tutorialManager: TutorialManager
     // REMOVED: @Binding var showNewHandEntryViewSheet: Bool
 
     var body: some View {
@@ -1042,7 +1156,12 @@ struct AddMenuOverlay: View {
                 Color.black.opacity(0.5)
                     .ignoresSafeArea()
                     .onTapGesture {
-                        closeMenu()
+                        // During menu explanation, any tap should advance tutorial
+                        if tutorialManager.currentStep == .menuExplanation {
+                            advanceTutorialFromMenu()
+                        } else {
+                            closeMenu()
+                        }
                     }
                     .transition(.opacity)
             }
@@ -1059,11 +1178,24 @@ struct AddMenuOverlay: View {
                         HStack {
                             Spacer()
                             
-                            Button(action: closeMenu) {
+                            Button(action: {
+                                // During menu explanation, any tap should advance tutorial
+                                if tutorialManager.currentStep == .menuExplanation {
+                                    advanceTutorialFromMenu()
+                                } else {
+                                    closeMenu()
+                                }
+                            }) {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 17, weight: .medium))
                                     .foregroundColor(Color(white: 0.7))
+                                    .padding(10)
+                                    .background(
+                                        Circle()
+                                            .fill(Color.clear)
+                                    )
                             }
+                            .tutorialPlusHighlight(isHighlighted: tutorialManager.currentStep == .menuExplanation)
                             .padding(.top, 16)
                             .padding(.bottom, 16)
                             .padding(.trailing, 20)
@@ -1074,10 +1206,17 @@ struct AddMenuOverlay: View {
                             MenuRow(
                                 icon: "house.fill",
                                 title: "Home Game",
+                                tutorialManager: tutorialManager,
+                                highlightStep: nil,
                                 action: {
-                                    withAnimation(nil) {
-                                        showingOpenHomeGameFlow = true
-                                        showingMenu = false
+                                    // During menu explanation, any tap should advance tutorial
+                                    if tutorialManager.currentStep == .menuExplanation {
+                                        advanceTutorialFromMenu()
+                                    } else {
+                                        withAnimation(nil) {
+                                            showingOpenHomeGameFlow = true
+                                            showingMenu = false
+                                        }
                                     }
                                 }
                             )
@@ -1086,10 +1225,17 @@ struct AddMenuOverlay: View {
                             MenuRow(
                                 icon: "clock.arrow.circlepath",
                                 title: "Past Session",
+                                tutorialManager: tutorialManager,
+                                highlightStep: nil,
                                 action: {
-                                    withAnimation(nil) {
-                                        showSessionForm = true
-                                        showingMenu = false
+                                    // During menu explanation, any tap should advance tutorial
+                                    if tutorialManager.currentStep == .menuExplanation {
+                                        advanceTutorialFromMenu()
+                                    } else {
+                                        withAnimation(nil) {
+                                            showSessionForm = true
+                                            showingMenu = false
+                                        }
                                     }
                                 }
                             )
@@ -1098,10 +1244,17 @@ struct AddMenuOverlay: View {
                             MenuRow(
                                 icon: "clock",
                                 title: "Live Session",
+                                tutorialManager: tutorialManager,
+                                highlightStep: nil,
                                 action: {
-                                    withAnimation(nil) {
-                                        showingLiveSession = true
-                                        showingMenu = false
+                                    // During menu explanation, any tap should advance tutorial
+                                    if tutorialManager.currentStep == .menuExplanation {
+                                        advanceTutorialFromMenu()
+                                    } else {
+                                        withAnimation(nil) {
+                                            showingLiveSession = true
+                                            showingMenu = false
+                                        }
                                     }
                                 }
                             )
@@ -1132,6 +1285,9 @@ struct AddMenuOverlay: View {
                     Spacer()
                 }
                 .transition(.opacity)
+                .onAppear {
+                    // User will close menu manually to advance tutorial
+                }
             }
         }
         // REMOVED: Hand entry sheet
@@ -1147,12 +1303,35 @@ struct AddMenuOverlay: View {
             showingMenu = false
         }
     }
+    
+    private func advanceTutorialFromMenu() {
+        print("🔄 AdvanceTutorialFromMenu: Current step is \(tutorialManager.currentStep)")
+        
+        withAnimation(.easeOut(duration: 0.2)) {
+            showingMenu = false
+        }
+        
+        if tutorialManager.currentStep == .menuExplanation {
+            print("✅ AdvanceTutorialFromMenu: Advancing from menuExplanation step")
+            
+            // Force the UI to update *before* the delay, then advance the step after the delay.
+            // This prevents the user from tapping before the highlight is visible.
+            tutorialManager.objectWillChange.send()
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                self.tutorialManager.advanceStep() // Goes to exploreTab
+                print("✅ AdvanceTutorialFromMenu: Advanced to \(self.tutorialManager.currentStep)")
+            }
+        }
+    }
 }
 
 // Menu row that exactly matches the screenshot
 struct MenuRow: View {
     let icon: String
     let title: String
+    let tutorialManager: TutorialManager?
+    let highlightStep: TutorialManager.TutorialStep?
     let action: () -> Void
     
     var body: some View {

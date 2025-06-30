@@ -148,6 +148,62 @@ class BankrollStore: ObservableObject {
         try await batch.commit()
     }
     
+    // MARK: - Transaction Deletion
+    
+    func deleteTransaction(_ transactionId: String) async throws {
+        guard !userId.isEmpty else {
+            throw BankrollError.invalidUserId
+        }
+        
+        let transactionRef = db.collection("users")
+            .document(userId)
+            .collection("bankroll")
+            .document("summary")
+            .collection("transactions")
+            .document(transactionId)
+        
+        let summaryRef = db.collection("users")
+            .document(userId)
+            .collection("bankroll")
+            .document("summary")
+        
+        try await db.runTransaction { (firestoreTransaction, errorPointer) -> Any? in
+            let transactionDocument: DocumentSnapshot
+            do {
+                try transactionDocument = firestoreTransaction.getDocument(transactionRef)
+            } catch let fetchError as NSError {
+                errorPointer?.pointee = fetchError
+                return nil
+            }
+            
+            guard let transactionToDelete = BankrollTransaction.from(dictionary: transactionDocument.data() ?? [:]) else {
+                let error = BankrollError.networkError // Or a more specific "not found" error
+                errorPointer?.pointee = error as NSError
+                return nil
+            }
+            
+            // Re-fetch summary within transaction for consistency
+            let summaryDocument: DocumentSnapshot
+            do {
+                try summaryDocument = firestoreTransaction.getDocument(summaryRef)
+            } catch let fetchError as NSError {
+                errorPointer?.pointee = fetchError
+                return nil
+            }
+            
+            let currentSummary = BankrollSummary.from(dictionary: summaryDocument.data() ?? [:]) ?? BankrollSummary()
+            
+            // Reverse the transaction amount to update the total
+            let newTotal = currentSummary.currentTotal - transactionToDelete.amount
+            
+            // Perform deletion and update in the transaction
+            firestoreTransaction.deleteDocument(transactionRef)
+            firestoreTransaction.updateData(["currentTotal": newTotal], forDocument: summaryRef)
+            
+            return nil
+        }
+    }
+    
     // MARK: - Convenience Methods
     
     func addToBankroll(amount: Double, note: String? = nil) async throws {

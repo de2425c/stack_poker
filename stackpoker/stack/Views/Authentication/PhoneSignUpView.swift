@@ -25,6 +25,7 @@ struct PhoneSignUpView: View {
             GeometryReader { geometry in
                 ZStack {
                     AppBackgroundView()
+                        .ignoresSafeArea(.all)
                     
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
@@ -103,7 +104,7 @@ struct PhoneSignUpView: View {
                                     .animation(.easeInOut(duration: 0.2), value: isLoading)
                                 }
                                 .background(
-                                    RoundedRectangle(cornerRadius: 12)
+                                    RoundedRectangle(cornerRadius: 28)
                                         .fill(buttonBackgroundColor)
                                         .scaleEffect(isLoading ? 0.98 : 1.0)
                                         .animation(.easeInOut(duration: 0.1), value: isLoading)
@@ -229,13 +230,15 @@ struct PhoneSignUpView: View {
         return phoneIsValid ? Color.green.opacity(0.8) : Color.red.opacity(0.8)
     }
     
-    private var buttonBackgroundColor: Color {
-        if isLoading {
-            return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8))
-        }
-        return isFormValid || !hasInteracted ? 
-            Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
-            Color.gray.opacity(0.6)
+    private var buttonBackgroundColor: LinearGradient {
+        return LinearGradient(
+            gradient: Gradient(colors: [
+                Color(red: 64/255, green: 156/255, blue: 255/255), // #409CFF
+                Color(red: 100/255, green: 180/255, blue: 255/255) // #64B4FF
+            ]),
+            startPoint: .leading,
+            endPoint: .trailing
+        )
     }
     
     private var buttonOpacity: Double {

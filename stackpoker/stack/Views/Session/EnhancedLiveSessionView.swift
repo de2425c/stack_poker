@@ -120,6 +120,14 @@ struct EnhancedLiveSessionView: View {
     @State private var promptStakes = ""
     @State private var pendingCashoutAmount: Double = 0
     
+    // State variables for live following session
+    @State private var isPublicSession = false
+    @State private var showingPublicSessionInfo = false
+    @State private var publicSessionId: String? = nil
+    
+    // State variable for max chips alert
+    @State private var showMaxChipsAlert = false
+    
     // Add state for tracking selected post
     @State private var selectedPost: Post? = nil
     
@@ -139,6 +147,11 @@ struct EnhancedLiveSessionView: View {
     @State private var noteToEdit: String? = nil
     @State private var noteToEditId: String? = nil // Assuming notes will have IDs for reliable editing
     @State private var showingEditNoteSheet = false
+    
+    // Add loading and error state variables for save changes
+    @State private var isSavingChanges = false
+    @State private var saveChangesError: String? = nil
+    @State private var showSaveChangesAlert = false
     
     // Group sharing state for notes
     @State private var showingGroupSelection = false
@@ -174,6 +187,7 @@ struct EnhancedLiveSessionView: View {
         case session
         case notes
         case posts
+        case live  // New case for public session live view
         case details
     }
     
@@ -193,6 +207,7 @@ struct EnhancedLiveSessionView: View {
     @State private var baseBuyInTournament: String = ""
     @State private var selectedTournamentGameType: TournamentGameType = .nlh
     @State private var selectedTournamentFormat: TournamentFormat = .standard
+    @State private var tournamentStartingChips: Double = 20000 // Default tournament starting chips
     // Runtime helpers for tournament sessions
     @State private var isTournamentSession: Bool = false
     @State private var baseBuyInForTournament: Double = 0
@@ -287,6 +302,64 @@ struct EnhancedLiveSessionView: View {
         return filtered
     }
     
+    // Computed property for configs that haven't been saved as stakes yet
+    private var configsNotYetSavedAsStakes: [StakerConfig] {
+        return validStakerConfigs.filter { config in
+            // Check if this config already has a corresponding stake in existingStakes
+            let hasCorrespondingStake = existingStakes.contains { stake in
+                // Only consider stakes for the current user
+                guard stake.stakedPlayerUserId == userId else { return false }
+                
+                // Match by staker identity
+                if config.isManualEntry {
+                    // For manual stakers, check if there's a stake with same manual staker ID or name
+                    let nameMatch = stake.manualStakerDisplayName == (config.selectedManualStaker?.name ?? config.manualStakerName)
+                    let idMatch = config.selectedManualStaker?.id != nil && stake.stakerUserId == config.selectedManualStaker?.id
+                    return (stake.isOffAppStake ?? false) && (nameMatch || idMatch)
+                } else {
+                    // For app users, match by user ID
+                    return !(stake.isOffAppStake ?? false) && stake.stakerUserId == config.selectedStaker?.id
+                }
+            }
+            
+            return !hasCorrespondingStake
+        }
+    }
+    
+    // MARK: - Helper Functions for Notifications
+    
+    /// Convert StakerConfig array to StakerInfo array for notifications
+    private func convertStakersForNotification(_ configs: [StakerConfig]) -> [SessionNotificationService.StakerInfo] {
+        return configs.compactMap { config in
+            guard let percentage = Double(config.percentageSold),
+                  let markup = Double(config.markup) else {
+                return nil
+            }
+            
+            let stakerId: String
+            let stakerDisplayName: String
+            let isOffApp: Bool
+            
+            if config.isManualEntry {
+                stakerId = config.selectedManualStaker?.id ?? "manual_\(UUID().uuidString)"
+                stakerDisplayName = config.selectedManualStaker?.name ?? config.manualStakerName
+                isOffApp = true
+            } else {
+                stakerId = config.selectedStaker?.id ?? "unknown"
+                stakerDisplayName = config.selectedStaker?.displayName ?? config.selectedStaker?.username ?? "Unknown Staker"
+                isOffApp = false
+            }
+            
+            return SessionNotificationService.StakerInfo(
+                stakerId: stakerId,
+                stakerDisplayName: stakerDisplayName,
+                stakePercentage: percentage / 100.0, // Convert to decimal
+                markup: markup,
+                isOffAppStaker: isOffApp
+            )
+        }
+    }
+    
     // MARK: - Main Body
     
     var body: some View {
@@ -316,45 +389,42 @@ struct EnhancedLiveSessionView: View {
         )
         .onChange(of: showingStakingPopup) { newValue in
             if !newValue {
-                // When popup is dismissed, sync the main stakerConfigs from the popup's copy
-                print("[EnhancedLiveSessionView] Popup dismissed. Syncing stakerConfigs.")
-                print("[EnhancedLiveSessionView] Before sync, main stakerConfigs count: \(stakerConfigs.count)")
-                print("[EnhancedLiveSessionView] Popup copy stakerConfigsForPopup count: \(stakerConfigsForPopup.count)")
+                // Update the main stakerConfigs from the popup's copy
+                stakerConfigs = stakerConfigsForPopup
                 
-                // Enhanced sync: preserve existing user profiles if they're missing in popup copy
-                for (index, popupConfig) in stakerConfigsForPopup.enumerated() {
-                    // If the popup config lost the selected staker but we have an originalStakeUserId,
-                    // try to restore it from the userService
-                    if popupConfig.selectedStaker == nil && !popupConfig.isManualEntry {
-                        if let originalUserId = popupConfig.originalStakeUserId,
-                           let existingProfile = userService.loadedUsers[originalUserId] {
-                            print("[EnhancedLiveSessionView] Restoring missing staker profile for \(existingProfile.username)")
-                            stakerConfigsForPopup[index].selectedStaker = existingProfile
+                // Only save to database if session is already active (not in setup mode)
+                if sessionMode != .setup && sessionStore.liveSession.buyIn > 0 {
+                    Task {
+                        for config in validStakerConfigs {
+                            await saveStakeConfigurationImmediately(config)
                         }
+                        
+                        // Reload existing stakes to ensure UI is updated
+                        loadExistingStakes()
                     }
+                    print("[EnhancedLiveSessionView] Popup dismissed. Stakes saved to database and configs synced.")
+                } else {
+                    print("[EnhancedLiveSessionView] Popup dismissed. Stakes saved locally only (session not started yet).")
                 }
-                
-                // It's crucial that stakerConfigs is updated to reflect changes made in the popup.
-                // This will include any additions or removals.
-                self.stakerConfigs = self.stakerConfigsForPopup
-                print("[EnhancedLiveSessionView] After sync, main stakerConfigs count: \(stakerConfigs.count)")
-                
-
-                
-                // Verify that we still have valid configs after sync
-                let validCount = validStakerConfigs.count
-                print("[EnhancedLiveSessionView] After sync, valid configs: \(validCount)")
-                
-                // After syncing, you might need to save these stakes if the session is active
-                // or if they are meant to be persisted immediately without ending the session.
-                // For now, this just updates the @State, persistence happens on session end.
             }
         }
         .onChange(of: stakerConfigs) { newValue in
-            // Persist current staking configs locally keyed by the liveSession UUID so they survive pause-resume even if Firestore write fails.
-            guard !sessionStore.liveSession.id.isEmpty else { return }
+            // Persist current staking configs locally keyed by the TRULY persistent session ID
+            // This MUST match the ID used by getTrulyPersistentSessionId() for consistency
+            let persistentSessionId = getTrulyPersistentSessionId()
             if let data = try? JSONEncoder().encode(newValue) {
-                UserDefaults.standard.set(data, forKey: "StakerConfigs_\(sessionStore.liveSession.id)")
+                UserDefaults.standard.set(data, forKey: "StakerConfigs_\(persistentSessionId)")
+            }
+            print("[EnhancedLiveSessionView] Persisted \(newValue.count) staker configs with persistent ID: \(persistentSessionId)")
+        }
+        .onChange(of: isPublicSession) { newValue in
+            // When session becomes public, switch from posts tab to live tab
+            if newValue && selectedTab == .posts {
+                selectedTab = .live
+            }
+            // When session becomes private, switch from live tab to posts tab
+            else if !newValue && selectedTab == .live {
+                selectedTab = .posts
             }
         }
         .sheet(isPresented: $showSessionDetailSheet) {
@@ -514,14 +584,15 @@ struct EnhancedLiveSessionView: View {
             Button("Cancel", role: .cancel) { }
             Button("Exit Without Saving", role: .destructive) { dismiss() }
             Button("End & Cashout") { 
-                cashoutAmount = String(Int(sessionStore.enhancedLiveSession.currentChipAmount))
+                // For tournaments, don't initialize with chip count - let user enter cashout amount
+                cashoutAmount = isTournamentSession ? "" : String(Int(sessionStore.enhancedLiveSession.currentChipAmount))
                 showingCashoutPrompt = true 
             }
         } message: {
             Text("What would you like to do with your active session?")
         }
         .alert("End Session", isPresented: $showingCashoutPrompt) {
-            TextField("$", text: $cashoutAmount)
+            TextField(isTournamentSession ? "0" : "$", text: $cashoutAmount)
                 .keyboardType(.decimalPad)
             
             Button("Cancel", role: .cancel) { }
@@ -531,7 +602,7 @@ struct EnhancedLiveSessionView: View {
                 }
             }
         } message: {
-            Text("Enter your final chip count to end the session")
+            Text(isTournamentSession ? "Enter your cashout amount" : "Enter your final chip count to end the session")
         }
         .sheet(isPresented: $showingGameDetailsPrompt) {
             gameDetailsPromptSheet
@@ -564,6 +635,11 @@ struct EnhancedLiveSessionView: View {
         } message: {
             Text(shareSuccessMessage)
         }
+        .alert("Maximum Chips Reached", isPresented: $showMaxChipsAlert) {
+            Button("OK") { }
+        } message: {
+            Text("You've reached the maximum chip limit of 1 trillion. Consider ending your session!")
+        }
         .sheet(isPresented: $showingNextDayConfirmation) {
             nextDayConfirmationSheet
         }
@@ -593,9 +669,16 @@ struct EnhancedLiveSessionView: View {
                     .tag(LiveSessionTab.notes)
                     .contentShape(Rectangle())
                 
-                postsTabView
-                    .tag(LiveSessionTab.posts)
-                    .contentShape(Rectangle())
+                // Conditionally show live tab for public sessions, posts tab for others
+                if isPublicSession {
+                    liveTabView
+                        .tag(LiveSessionTab.live)
+                        .contentShape(Rectangle())
+                } else {
+                    postsTabView
+                        .tag(LiveSessionTab.posts)
+                        .contentShape(Rectangle())
+                }
                 
                 detailsTabView
                     .tag(LiveSessionTab.details)
@@ -623,7 +706,14 @@ struct EnhancedLiveSessionView: View {
         HStack(spacing: 0) {
             tabButton(title: "Session", icon: "timer", tab: .session)
             tabButton(title: "Notes", icon: "note.text", tab: .notes)
-            tabButton(title: "Posts", icon: "text.bubble", tab: .posts)
+            
+            // Conditionally show Live or Posts tab
+            if isPublicSession {
+                tabButton(title: "Live", icon: "eye.fill", tab: .live)
+            } else {
+                tabButton(title: "Posts", icon: "text.bubble", tab: .posts)
+            }
+            
             tabButton(title: "Details", icon: "gearshape", tab: .details)
         }
         .padding(.horizontal, 20)
@@ -678,12 +768,12 @@ struct EnhancedLiveSessionView: View {
                     // Current Chips Field using GlassyInputField
                     VStack(alignment: .leading, spacing: 16) {
                         GlassyInputField(
-                            icon: "dollarsign.circle",
+                            icon: isTournamentSession ? "circle.stack" : "dollarsign.circle",
                             title: "Current Chips",
                             content: AnyGlassyContent(TextFieldContent(
                                 text: $chipAmount,
                                 keyboardType: .decimalPad,
-                                prefix: "$",
+                                prefix: isTournamentSession ? "" : "$",
                                 textColor: .white,
                                 prefixColor: .gray
                             )),
@@ -889,6 +979,9 @@ struct EnhancedLiveSessionView: View {
             plusButton(action: { showingSimpleNoteEditor = true })
         } else if selectedTab == .posts {
             plusButton(action: { showingPostShareOptions = true })
+        } else if selectedTab == .live {
+            // No plus button for live tab - users comment directly in the live view
+            EmptyView()
         } else if selectedTab == .session {
             // No edit button for session tab since details is now its own tab
             EmptyView()
@@ -991,12 +1084,16 @@ struct EnhancedLiveSessionView: View {
                 if self.baseBuyInTournament.isEmpty && baseBuyInForTournament > 0 {
                     self.baseBuyInTournament = String(format: "%.0f", baseBuyInForTournament)
                 }
-            } else {
-                // If it's a new cash session or the initial buy-in hasn't been recorded as a chip update yet
-                if sessionStore.enhancedLiveSession.chipUpdates.isEmpty && sessionStore.liveSession.buyIn > 0 {
-                     sessionStore.updateChipStack(amount: sessionStore.liveSession.buyIn, note: "Initial buy-in")
-                }
+                    } else {
+            // If it's a new cash session or the initial buy-in hasn't been recorded as a chip update yet
+            if sessionStore.enhancedLiveSession.chipUpdates.isEmpty && sessionStore.liveSession.buyIn > 0 {
+                 sessionStore.updateChipStack(amount: sessionStore.liveSession.buyIn, note: "Initial buy-in")
             }
+        }
+        
+        // Restore public session state from session data
+        isPublicSession = sessionStore.liveSession.isPublicSession
+        publicSessionId = sessionStore.liveSession.publicSessionId
             // Initialize data from session store's enhanced session
             updateLocalDataFromStore() // This will now include Session Started and the initial chip update if just added
             
@@ -1034,6 +1131,18 @@ struct EnhancedLiveSessionView: View {
             }
             
             tournamentCasino = event.casino ?? ""
+            
+            // Set starting chips from event data instead of default 20,000
+            if let startingChips = event.startingChips {
+                tournamentStartingChips = Double(startingChips)
+            } else if let chipsFormatted = event.chipsFormatted, !chipsFormatted.isEmpty {
+                // Parse chipsFormatted string (e.g., "40,000" -> 40000)
+                let cleanChipsString = chipsFormatted.replacingOccurrences(of: ",", with: "")
+                if let parsedChips = Double(cleanChipsString) {
+                    tournamentStartingChips = parsedChips
+                }
+            }
+            // If neither field is available, keep the default 20,000
             
             // Automatically populate staker configuration from accepted event staking invites
             Task {
@@ -1314,6 +1423,43 @@ struct EnhancedLiveSessionView: View {
                                 labelColor: .gray,
                                 materialOpacity: 0.2
                             )
+                            
+                            // Starting Chips Field
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: "circle.stack")
+                                        .foregroundColor(.gray)
+                                    Text("Starting Chips")
+                                        .font(.plusJakarta(.caption, weight: .medium))
+                                        .foregroundColor(.gray)
+                                }
+                                
+                                TextField("20000", value: $tournamentStartingChips, format: .number)
+                                    .keyboardType(.numberPad)
+                                    .font(.plusJakarta(.body, weight: .regular))
+                                    .foregroundColor(.white)
+                                    .frame(height: 35)
+                                    .toolbar {
+                                        ToolbarItemGroup(placement: .keyboard) {
+                                            Spacer()
+                                            Button("Done") {
+                                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                            }
+                                        }
+                                    }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Material.ultraThinMaterial)
+                                        .opacity(0.2)
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Color.white.opacity(0.01))
+                                }
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
                         .padding(.horizontal) // Padding for the tournament VStack
                     } // End of Tournament Setup Section
@@ -1324,6 +1470,13 @@ struct EnhancedLiveSessionView: View {
                         if stakerConfigs.isEmpty {
                             stakerConfigs.append(StakerConfig())
                         }
+                        
+                        // CRITICAL FIX: Copy stakerConfigs to stakerConfigsForPopup for the popup
+                        stakerConfigsForPopup = stakerConfigs.map { config in
+                            var newConfig = config
+                            return newConfig
+                        }
+                        print("[EnhancedLiveSessionView] Setup staking tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
                         showingStakingPopup = true
                     }) {
                         HStack {
@@ -1372,6 +1525,56 @@ struct EnhancedLiveSessionView: View {
                             RoundedRectangle(cornerRadius: 16)
                                 .stroke(validStakerConfigs.isEmpty ? Color.white.opacity(0.2) : Color.green.opacity(0.5), lineWidth: 1)
                         )
+                    }
+                    .padding(.horizontal)
+                    
+                    // Live Following Session Section
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Live Following")
+                                .font(.plusJakarta(.headline, weight: .medium))
+                                .foregroundColor(.white)
+                            
+                            Button(action: { showingPublicSessionInfo = true }) {
+                                Image(systemName: "info.circle")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(.leading, 6)
+                        
+                        Button(action: { isPublicSession.toggle() }) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Make Session Public")
+                                        .font(.plusJakarta(.body, weight: .medium))
+                                        .foregroundColor(.white)
+                                    
+                                    Text(isPublicSession ? "Others can follow your session live" : "Keep this session private")
+                                        .font(.plusJakarta(.caption, weight: .medium))
+                                        .foregroundColor(isPublicSession ? .green.opacity(0.8) : .white.opacity(0.7))
+                                }
+                                
+                                Spacer()
+                                
+                                Toggle("", isOn: $isPublicSession)
+                                    .toggleStyle(SwitchToggleStyle(tint: .green))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Material.ultraThinMaterial)
+                                    .opacity(0.3)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(isPublicSession ? Color.green.opacity(0.5) : Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                     .padding(.horizontal)
                     
@@ -1489,6 +1692,11 @@ struct EnhancedLiveSessionView: View {
                     }
                 }
             }
+        }
+        .alert("Live Following Session", isPresented: $showingPublicSessionInfo) {
+            Button("Got it", role: .cancel) { }
+        } message: {
+            Text("When enabled, your session will be visible to your followers in real-time. They can see your chip updates, notes, and session progress as it happens. You can always turn this off later.")
         }
     }
     
@@ -1719,21 +1927,28 @@ struct EnhancedLiveSessionView: View {
             )
             isTournamentSession = false
             
-            // Send session start notification for cash games - DISABLED
-            // Task {
-            //     do {
-            //         try await sessionNotificationService.notifyCurrentUserSessionStart(
-            //             sessionId: sessionStore.liveSession.id,
-            //             gameName: game.name,
-            //             stakes: game.stakes,
-            //             buyIn: buyInAmount,
-            //             startTime: sessionStore.liveSession.startTime,
-            //             isTournament: false
-            //         )
-            //     } catch {
-            //         print("[EnhancedLiveSessionView] Failed to send session start notification: \(error)")
-            //     }
-            // }
+            // Send session start notification for cash games ONLY if there are valid stakers configured
+            if !validStakerConfigs.isEmpty {
+                Task {
+                    do {
+                        let stakers = convertStakersForNotification(validStakerConfigs)
+                        try await sessionNotificationService.notifyCurrentUserSessionStart(
+                            sessionId: sessionStore.liveSession.id,
+                            gameName: gameName,
+                            stakes: stakes,
+                            buyIn: buyInAmount,
+                            startTime: sessionStore.liveSession.startTime,
+                            isTournament: false,
+                            stakers: stakers
+                        )
+                        print("[EnhancedLiveSessionView] ✅ Cash game session start notification sent for \(stakers.count) stakers: \(stakers.map { $0.stakerDisplayName }.joined(separator: ", "))")
+                    } catch {
+                        print("[EnhancedLiveSessionView] Failed to send cash game session start notification: \(error)")
+                    }
+                }
+            } else {
+                print("[EnhancedLiveSessionView] ⏭️ Skipping cash game session start notification - no valid stakers configured")
+            }
         } else {
             guard !tournamentName.isEmpty, let baseAmount = Double(baseBuyInTournament), baseAmount > 0 else { return }
             let tournamentStakesString: String // Explicitly declared as String
@@ -1755,40 +1970,71 @@ struct EnhancedLiveSessionView: View {
             isTournamentSession = true
             baseBuyInForTournament = baseAmount
             
-            // Send session start notification for tournaments - DISABLED
-            // Task {
-            //     do {
-            //         try await sessionNotificationService.notifyCurrentUserSessionStart(
-            //             sessionId: sessionStore.liveSession.id,
-            //             gameName: tournamentName,
-            //             stakes: tournamentStakesString,
-            //             buyIn: baseAmount,
-            //             startTime: sessionStore.liveSession.startTime,
-            //             isTournament: true,
-            //             tournamentName: tournamentName,
-            //             casino: tournamentCasino.isEmpty ? nil : tournamentCasino
-            //         )
-            //     } catch {
-            //         print("[EnhancedLiveSessionView] Failed to send tournament session start notification: \(error)")
-            //     }
-            // }
+            // Set starting chip amount for tournaments
+            sessionStore.updateChipStack(amount: tournamentStartingChips, note: "Starting chip stack")
+            
+            // Send session start notification for tournaments ONLY if there are valid stakers configured
+            if !validStakerConfigs.isEmpty {
+                Task {
+                    do {
+                        let stakers = convertStakersForNotification(validStakerConfigs)
+                        try await sessionNotificationService.notifyCurrentUserSessionStart(
+                            sessionId: sessionStore.liveSession.id,
+                            gameName: tournamentName,
+                            stakes: tournamentStakesString,
+                            buyIn: baseAmount,
+                            startTime: sessionStore.liveSession.startTime,
+                            isTournament: true,
+                            tournamentName: tournamentName,
+                            casino: tournamentCasino.isEmpty ? nil : tournamentCasino,
+                            stakers: stakers
+                        )
+                        print("[EnhancedLiveSessionView] ✅ Tournament session start notification sent for \(stakers.count) stakers: \(stakers.map { $0.stakerDisplayName }.joined(separator: ", "))")
+                    } catch {
+                        print("[EnhancedLiveSessionView] Failed to send tournament session start notification: \(error)")
+                    }
+                }
+            } else {
+                print("[EnhancedLiveSessionView] ⏭️ Skipping tournament session start notification - no valid stakers configured")
+            }
         }
         // Reset rebuy count
         tournamentRebuyCount = 0
         // Update UI mode
         sessionMode = .active
 
+        // CRITICAL: Save staking configurations to database now that session has started
+        Task {
+            if !validStakerConfigs.isEmpty {
+                print("[EnhancedLiveSessionView] Session started - saving \(validStakerConfigs.count) staking configurations to database")
+                for config in validStakerConfigs {
+                    await saveStakeConfigurationImmediately(config)
+                }
+                
+                // Reload existing stakes to ensure UI is updated
+                await MainActor.run {
+                    loadExistingStakes()
+                }
+                print("[EnhancedLiveSessionView] All staking configurations saved to database after session start")
+            }
+        }
+
         // Ensure staker configs are preserved after session starts
         print("[EnhancedLiveSessionView] Session started with \(stakerConfigs.count) staker configs")
         stakerConfigsForPopup = stakerConfigs
-        
-
         
         // Restore any missing staker profiles that might have been lost
         restoreMissingStakerProfiles()
 
         // Ensure "Session Started" activity appears immediately
         updateLocalDataFromStore()
+        
+        // Create public session if enabled
+        if isPublicSession {
+            createPublicSession()
+            // Save public session state to session data
+            savePublicSessionStateToSession()
+        }
     }
     
     // MARK: - Tab Content Views
@@ -1801,34 +2047,8 @@ struct EnhancedLiveSessionView: View {
                     .padding(.horizontal)
                 
                 if isTournamentSession {
-                    HStack(spacing: 12) { // HStack to hold Rebuy and Edit buttons
-                        Button(action: addTournamentRebuy) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "plus.circle")
-                                Text("Add Rebuy ($\(Int(baseBuyInForTournament)))")
-                            }
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity) // Let it take available width
-                            .padding()
-                            .background(RoundedRectangle(cornerRadius: 16).fill(Color.gray.opacity(0.4)))
-                        }
-                        
-                        // New Edit Total Buy-in Button for Tournaments
-                        Button(action: {
-                            editBuyInAmount = String(sessionStore.liveSession.buyIn)
-                            showingEditBuyInSheet = true
-                        }) {
-                            Image(systemName: "pencil.circle.fill")
-                                .font(.system(size: 22)) // Slightly larger for better tap target
-                                .foregroundColor(.white.opacity(0.8))
-                                .padding(12) // Adjust padding as needed
-                                .background(Color.gray.opacity(0.25))
-                                .clipShape(Circle())
-                        }
-                        .frame(width: 50) // Give it a defined width to balance with the rebuy button
-                    }
-                    .padding(.horizontal)
+                    tournamentChipStackSection
+                        .padding(.horizontal)
                 } else {
                     chipStackSection
                         .padding(.horizontal)
@@ -1840,9 +2060,9 @@ struct EnhancedLiveSessionView: View {
                         .padding(.horizontal)
                 }
                 
-                // Staking Information Section
-                let shouldShowStaking = !existingStakes.isEmpty || !validStakerConfigs.isEmpty || !pendingEventStakingInvites.isEmpty
-                let _ = print("[EnhancedLiveSessionView] shouldShowStaking=\(shouldShowStaking), existingStakes=\(existingStakes.count), validStakerConfigs=\(validStakerConfigs.count), pendingInvites=\(pendingEventStakingInvites.count)")
+                // Staking Information Section - show if we have database stakes, unsaved configs, or pending invites
+                let shouldShowStaking = !existingStakes.isEmpty || !configsNotYetSavedAsStakes.isEmpty || !pendingEventStakingInvites.isEmpty
+                let _ = print("[EnhancedLiveSessionView] shouldShowStaking=\(shouldShowStaking), existingStakes=\(existingStakes.count), configsNotYetSavedAsStakes=\(configsNotYetSavedAsStakes.count), pendingInvites=\(pendingEventStakingInvites.count)")
                 
                 if shouldShowStaking {
                     stakingInfoSection
@@ -1913,27 +2133,51 @@ struct EnhancedLiveSessionView: View {
     
     // Notes Tab - For viewing and adding notes
     private var notesTabView: some View {
-        VStack(spacing: 0) {
-            // Use a simple @State array that gets refreshed
-            if displayNotes.isEmpty {
-                emptyNotesView
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 16) {
-                        ForEach(Array(displayNotes.enumerated()).reversed(), id: \.offset) { index, note in
-                            NoteCardView(noteText: note, onShareTapped: {
-                                noteToShare = note
-                                showingGroupSelection = true
-                            })
-                                .onTapGesture {
-                                    self.noteToEditId = String(index)
-                                    self.noteToEdit = note
-                                    self.showingEditNoteSheet = true
-                                }
+        ZStack {
+            VStack(spacing: 0) {
+                // Use a simple @State array that gets refreshed
+                if displayNotes.isEmpty {
+                    emptyNotesView
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 16) {
+                            ForEach(Array(displayNotes.enumerated()).reversed(), id: \.offset) { index, note in
+                                NoteCardView(noteText: note, onShareTapped: {
+                                    noteToShare = note
+                                    showingGroupSelection = true
+                                })
+                                    .onTapGesture {
+                                        self.noteToEditId = String(index)
+                                        self.noteToEdit = note
+                                        self.showingEditNoteSheet = true
+                                    }
+                            }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 100) // Extra padding for floating button
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
+                }
+            }
+            
+            // Floating Action Button for adding notes
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button(action: { showingSimpleNoteEditor = true }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 56, height: 56)
+                            .background(
+                                Circle()
+                                    .fill(Color.blue)
+                                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                            )
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 20)
                 }
             }
         }
@@ -1943,7 +2187,16 @@ struct EnhancedLiveSessionView: View {
         .sheet(isPresented: $showingSimpleNoteEditor, onDismiss: {
             refreshDisplayNotes()
         }) { 
-            SimpleNoteEditorView(sessionStore: sessionStore, sessionId: sessionStore.liveSession.id)
+            SimpleNoteEditorView(
+                sessionStore: sessionStore, 
+                sessionId: sessionStore.liveSession.id,
+                onNoteAdded: { note in
+                    // Update public session if enabled
+                    if isPublicSession {
+                        updatePublicSessionNote(note)
+                    }
+                }
+            )
         }
         .sheet(isPresented: $showingGroupSelection) {
             if let noteToShare = noteToShare {
@@ -1985,6 +2238,19 @@ struct EnhancedLiveSessionView: View {
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+            
+            Button(action: { showingSimpleNoteEditor = true }) {
+                Text("Add First Note")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.blue)
+                    )
+            }
+            .padding(.top, 8)
             
             Spacer()
         }
@@ -2087,6 +2353,15 @@ struct EnhancedLiveSessionView: View {
             }
             .navigationViewStyle(StackNavigationViewStyle())
         }
+    }
+    
+    // Live Tab - For public sessions to show live view with chat
+    private var liveTabView: some View {
+        PublicLiveSessionWatchView(
+            sessionId: publicSessionId ?? "",
+            currentUserId: userId
+        )
+        .environmentObject(userService)
     }
     
     // Details Tab - For editing session details and configuration
@@ -2198,6 +2473,13 @@ struct EnhancedLiveSessionView: View {
                                 // Add New Staker Button
                                 Button(action: {
                                     stakerConfigs.append(StakerConfig())
+                                    
+                                    // Copy stakerConfigs to stakerConfigsForPopup for the popup
+                                    stakerConfigsForPopup = stakerConfigs.map { config in
+                                        var newConfig = config
+                                        return newConfig
+                                    }
+                                    print("[EnhancedLiveSessionView] Edit session Add staker tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
                                     showingStakingPopup = true
                                 }) {
                                     HStack(spacing: 4) {
@@ -2219,6 +2501,13 @@ struct EnhancedLiveSessionView: View {
                                         if stakerConfigs.isEmpty {
                                             stakerConfigs.append(StakerConfig())
                                         }
+                                        
+                                        // Copy stakerConfigs to stakerConfigsForPopup for the popup
+                                        stakerConfigsForPopup = stakerConfigs.map { config in
+                                            var newConfig = config
+                                            return newConfig
+                                        }
+                                        print("[EnhancedLiveSessionView] Edit session Edit stakes tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
                                         showingStakingPopup = true
                                     }) {
                                         Text("Edit Stakes")
@@ -2266,16 +2555,25 @@ struct EnhancedLiveSessionView: View {
                     
                     // Save Button
                     Button(action: saveSessionChanges) {
-                        Text("Save Changes")
-                            .font(.plusJakarta(.body, weight: .bold))
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .fill(Color.white)
-                            )
+                        HStack {
+                            if isSavingChanges {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Text("Save Changes")
+                                    .font(.plusJakarta(.body, weight: .bold))
+                            }
+                        }
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(isSavingChanges ? Color.white.opacity(0.7) : Color.white)
+                        )
                     }
+                    .disabled(isSavingChanges)
                     .padding(.horizontal)
                     
                     // Discard Session Button
@@ -2312,6 +2610,11 @@ struct EnhancedLiveSessionView: View {
             }
         } message: {
             Text("This will delete your current session permanently. All session data, notes, and hand histories will be lost.")
+        }
+        .alert("Save Changes Error", isPresented: $showSaveChangesAlert) {
+            Button("OK") { }
+        } message: {
+            Text(saveChangesError ?? "An unknown error occurred while saving changes.")
         }
     }
     
@@ -2367,7 +2670,7 @@ struct EnhancedLiveSessionView: View {
                     }
 
                     Button(action: { 
-                        cashoutAmount = String(Int(sessionStore.enhancedLiveSession.currentChipAmount))
+                        cashoutAmount = isTournamentSession ? "" : String(Int(sessionStore.enhancedLiveSession.currentChipAmount))
                         
                         // Check if game details are missing (indicates session started without game selection)
                         if sessionStore.liveSession.stakes == "TBD" || sessionStore.liveSession.gameName == "Live Session" {
@@ -2418,6 +2721,176 @@ struct EnhancedLiveSessionView: View {
                         )
                     }
                 }
+            }
+        }
+    }
+    
+    // Tournament chip stack section
+    private var tournamentChipStackSection: some View {
+        VStack(spacing: 20) {
+            // Current Chip Stack Display
+            VStack(spacing: 8) {
+                Text("Current Chip Stack")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray)
+                
+                let currentAmount = sessionStore.enhancedLiveSession.currentChipAmount
+                let maxChipAmount: Double = 1_000_000_000_000 // 1 trillion
+                let isNearMax = currentAmount > maxChipAmount * 0.8 // 80% of max
+                
+                Text("\(Int(currentAmount))")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(isNearMax ? .orange : .white)
+                
+                if isNearMax {
+                    Text("⚠️ Approaching chip limit")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.orange)
+                }
+            }
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .glassyBackground(cornerRadius: 16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            )
+            
+            // Quick Update Buttons - Tournament specific increments
+            VStack(spacing: 12) {
+                Text("Quick Update")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                // Calculate tournament increments based on current chip amount
+                let currentChips = sessionStore.enhancedLiveSession.currentChipAmount
+                let maxSafeInt = Double(Int.max)
+                let maxChipAmount: Double = 1_000_000_000_000 // 1 trillion
+                
+                // Protect against invalid current chips and cap at maximum
+                let safeCurrentChips = currentChips.isNaN || currentChips.isInfinite || currentChips < 0 ? 0 : min(currentChips, maxChipAmount)
+                
+                // Safely convert to Int with bounds checking
+                let increment1 = Int(min(max(safeCurrentChips * 0.1, 0), maxSafeInt))   // 10% of current chips
+                let increment2 = Int(min(max(safeCurrentChips * 0.25, 0), maxSafeInt))  // 25% of current chips
+                let increment3 = Int(min(max(safeCurrentChips * 0.5, 0), maxSafeInt))   // 50% of current chips
+                let increment4 = Int(min(max(safeCurrentChips * 1.0, 0), maxSafeInt))   // 100% of current chips
+                
+                // First row: smaller increments
+                HStack(spacing: 10) {
+                    TournamentQuickUpdateButton(amount: increment1, isPositive: false, action: { quickUpdateChipStack(amount: -Double(increment1)) })
+                    TournamentQuickUpdateButton(amount: increment2, isPositive: false, action: { quickUpdateChipStack(amount: -Double(increment2)) })
+                    TournamentQuickUpdateButton(amount: increment1, isPositive: true, action: { quickUpdateChipStack(amount: Double(increment1)) })
+                    TournamentQuickUpdateButton(amount: increment2, isPositive: true, action: { quickUpdateChipStack(amount: Double(increment2)) })
+                }
+                
+                // Second row: larger increments
+                HStack(spacing: 10) {
+                    TournamentQuickUpdateButton(amount: increment3, isPositive: false, action: { quickUpdateChipStack(amount: -Double(increment3)) })
+                    TournamentQuickUpdateButton(amount: increment4, isPositive: false, action: { quickUpdateChipStack(amount: -Double(increment4)) })
+                    TournamentQuickUpdateButton(amount: increment3, isPositive: true, action: { quickUpdateChipStack(amount: Double(increment3)) })
+                    TournamentQuickUpdateButton(amount: increment4, isPositive: true, action: { quickUpdateChipStack(amount: Double(increment4)) })
+                }
+            }
+            
+            // Section Title
+            Text("Tournament Actions")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Top row of action buttons
+            HStack(spacing: 12) {
+                Button(action: {
+                    showingStackUpdateSheet = true
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "dollarsign.circle")
+                            .font(.system(size: 18))
+                        Text("Update Stack")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .glassyBackground(cornerRadius: 12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                
+                Button(action: addTournamentRebuy) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 18))
+                        Text("Rebuy")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .glassyBackground(cornerRadius: 12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    )
+                }
+            }
+            
+            // Edit Buy-In button
+            Button(action: {
+                editBuyInAmount = String(sessionStore.liveSession.buyIn)
+                showingEditBuyInSheet = true
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "pencil.circle")
+                        .font(.system(size: 18))
+                    Text("Edit Buy-in")
+                        .font(.system(size: 15, weight: .medium))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .glassyBackground(cornerRadius: 12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                )
+            }
+        }
+    }
+    
+    // Tournament Quick Update Button Component
+    private struct TournamentQuickUpdateButton: View {
+        let amount: Int
+        let isPositive: Bool
+        let action: () -> Void
+        
+        var body: some View {
+            Button(action: action) {
+                Text("\(isPositive ? "+" : "-")\(formatChipAmount(amount))")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(isPositive ? .green : .red)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .glassyBackground(cornerRadius: 12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isPositive ? Color.green.opacity(0.5) : Color.red.opacity(0.5), lineWidth: 1)
+                    )
+            }
+        }
+        
+        // Helper function to format chip amounts nicely
+        private func formatChipAmount(_ amount: Int) -> String {
+            if amount >= 1000000 {
+                return "\(amount / 1000000)M"
+            } else if amount >= 1000 {
+                return "\(amount / 1000)K"
+            } else {
+                return "\(amount)"
             }
         }
     }
@@ -2562,15 +3035,46 @@ struct EnhancedLiveSessionView: View {
     
     // Quick Update Chip Stack Function
     private func quickUpdateChipStack(amount: Double) {
+        // Protect against invalid amounts
+        guard !amount.isNaN && !amount.isInfinite else {
+            print("Warning: Attempted to update with invalid amount: \(amount)")
+            return
+        }
+        
         let currentAmount = sessionStore.enhancedLiveSession.currentChipAmount
         let newAmount = currentAmount + amount
         
-        // Generate appropriate note based on amount
+        // Define maximum safe chip amount (1 trillion - well below Int.max conversion issues)
+        let maxChipAmount: Double = 1_000_000_000_000 // 1 trillion
+        
+        // Check if new amount would exceed maximum
+        if newAmount > maxChipAmount {
+            print("Warning: Chip amount would exceed maximum limit")
+            // Show user-friendly alert
+            showMaxChipsAlert = true
+            return
+        }
+        
+        // Protect against invalid new amount
+        guard !newAmount.isNaN && !newAmount.isInfinite && newAmount >= 0 else {
+            print("Warning: New amount would be invalid: \(newAmount)")
+            return
+        }
+        
+        // Generate appropriate note based on amount and session type
         let note: String
-        if amount > 0 {
-            note = "Quick add: +$\(Int(amount))"
+        if isTournamentSession {
+            if amount > 0 {
+                note = "Quick add: +\(Int(amount)) chips"
+            } else {
+                note = "Quick subtract: -\(Int(abs(amount))) chips"
+            }
         } else {
-            note = "Quick subtract: -$\(Int(abs(amount)))"
+            if amount > 0 {
+                note = "Quick add: +$\(Int(amount))"
+            } else {
+                note = "Quick subtract: -$\(Int(abs(amount)))"
+            }
         }
         
         // Update the chip stack with the new total amount
@@ -2578,6 +3082,11 @@ struct EnhancedLiveSessionView: View {
         
         // Update local data
         updateLocalDataFromStore()
+        
+        // Update public session if enabled
+        if isPublicSession {
+            updatePublicSessionChipStack(amount: newAmount, note: note)
+        }
     }
     
     // MARK: - Tournament Helpers
@@ -2587,22 +3096,67 @@ struct EnhancedLiveSessionView: View {
         sessionStore.updateLiveSessionBuyIn(amount: baseBuyInForTournament)
         tournamentRebuyCount += 1
         
-        // Send rebuy notification
-        Task {
-            do {
-                try await sessionNotificationService.notifyCurrentUserRebuy(
-                    sessionId: sessionStore.liveSession.id,
-                    gameName: sessionStore.liveSession.tournamentName ?? tournamentName,
-                    stakes: sessionStore.liveSession.stakes,
-                    rebuyAmount: baseBuyInForTournament,
-                    newTotalBuyIn: sessionStore.liveSession.buyIn,
-                    isTournament: true,
-                    tournamentName: sessionStore.liveSession.tournamentName ?? tournamentName
-                )
-            } catch {
-                print("[EnhancedLiveSessionView] Failed to send tournament rebuy notification: \(error)")
+        // Send rebuy notification ONLY if there are valid stakers configured
+        if !validStakerConfigs.isEmpty {
+            Task {
+                do {
+                    let stakers = convertStakersForNotification(validStakerConfigs)
+                    try await sessionNotificationService.notifyCurrentUserRebuy(
+                        sessionId: sessionStore.liveSession.id,
+                        gameName: sessionStore.liveSession.tournamentName ?? tournamentName,
+                        stakes: sessionStore.liveSession.stakes,
+                        rebuyAmount: baseBuyInForTournament,
+                        newTotalBuyIn: sessionStore.liveSession.buyIn,
+                        isTournament: true,
+                        tournamentName: sessionStore.liveSession.tournamentName ?? tournamentName,
+                        stakers: stakers
+                    )
+                    print("[EnhancedLiveSessionView] ✅ Tournament rebuy notification sent for \(stakers.count) stakers: \(stakers.map { $0.stakerDisplayName }.joined(separator: ", "))")
+                } catch {
+                    print("[EnhancedLiveSessionView] Failed to send tournament rebuy notification: \(error)")
+                }
             }
+        } else {
+            print("[EnhancedLiveSessionView] ⏭️ Skipping tournament rebuy notification - no valid stakers configured")
         }
+        
+        // Update public session with rebuy information if enabled
+        if isPublicSession {
+            updatePublicSessionRebuy(amount: baseBuyInForTournament, newTotalBuyIn: sessionStore.liveSession.buyIn, isTournament: true)
+        }
+    }
+    
+    // MARK: - Persistent Session ID Management
+    
+    /// Gets or creates a truly persistent session ID that never changes for the duration of this session
+    /// This ID is stored in UserDefaults and linked to the session UUID, ensuring it persists across app restarts
+    private func getTrulyPersistentSessionId() -> String {
+        let sessionUUID = sessionStore.liveSession.id
+        let persistentIdKey = "PersistentSessionId_\(userId)_\(sessionUUID)"
+        
+        // Check if we already have a persistent ID for this session
+        if let existingId = UserDefaults.standard.string(forKey: persistentIdKey) {
+            print("[getTrulyPersistentSessionId] Found existing persistent ID: \(existingId)")
+            return existingId
+        }
+        
+        // Create a new persistent ID using the current timestamp
+        // This will only happen once per session, when the first stake is created
+        let persistentId = "\(userId)_\(Int(Date().timeIntervalSince1970))"
+        
+        // Store it for this session UUID
+        UserDefaults.standard.set(persistentId, forKey: persistentIdKey)
+        print("[getTrulyPersistentSessionId] Created new persistent ID: \(persistentId) for session UUID: \(sessionUUID)")
+        
+        return persistentId
+    }
+    
+    /// Cleans up the persistent session ID when a session is completed
+    private func cleanupPersistentSessionId() {
+        let sessionUUID = sessionStore.liveSession.id
+        let persistentIdKey = "PersistentSessionId_\(userId)_\(sessionUUID)"
+        UserDefaults.standard.removeObject(forKey: persistentIdKey)
+        print("[cleanupPersistentSessionId] Cleaned up persistent ID for session UUID: \(sessionUUID)")
     }
     
     // MARK: - Helper Functions
@@ -2670,6 +3224,11 @@ struct EnhancedLiveSessionView: View {
             // Add casino for tournaments if provided
             if self.sessionStore.liveSession.isTournament, !self.tournamentCasino.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 sessionDataToSave["casino"] = self.tournamentCasino
+            }
+            
+            // End public session if enabled
+            if self.isPublicSession {
+                self.endPublicSession(cashout: finalCashout)
             }
             
             // Handle staking using the same logic as SessionFormView
@@ -2773,6 +3332,9 @@ struct EnhancedLiveSessionView: View {
                     details.sessionId = docRef.documentID
                     self.sessionDetails = details
                 }
+                
+                // Clean up the persistent session ID
+                cleanupPersistentSessionId()
                 
                 self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
@@ -2889,7 +3451,7 @@ struct EnhancedLiveSessionView: View {
                     let settlementAmount = -adjustedStakerShare // Negative means player pays staker
                     
                     let newStake = Stake(
-                        sessionId: newDocumentId,
+                        sessionId: getTrulyPersistentSessionId(),
                         sessionGameName: tournamentName ?? gameName,
                         sessionStakes: stakes,
                         sessionDate: startDateTime,
@@ -2921,6 +3483,9 @@ struct EnhancedLiveSessionView: View {
                     details.sessionId = newDocumentId
                     self.sessionDetails = details
                 }
+                
+                // Clean up the persistent session ID
+                cleanupPersistentSessionId()
                 
                 self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
@@ -2993,6 +3558,13 @@ struct EnhancedLiveSessionView: View {
         
         // Update local data
         updateLocalDataFromStore()
+        
+        // Update public session if enabled
+        if isPublicSession {
+            let finalAmount = (note.lowercased().contains("rebuy") || note.lowercased().contains("add-on")) && !chipUpdates.isEmpty ?
+                (chipUpdates.last?.amount ?? sessionStore.liveSession.buyIn) + amountValue : amountValue
+            updatePublicSessionChipStack(amount: finalAmount, note: note.isEmpty ? nil : note)
+        }
     }
     
     // Handle hand history input from sheet
@@ -3563,22 +4135,22 @@ struct EnhancedLiveSessionView: View {
                             print("🔥🔥🔥 [NextDay Button] Confirm & Progress button tapped!")
                             Task {
                                 print("🔥🔥🔥 [NextDay Button] Task started")
-                                // Save current stakes to Firestore BEFORE pausing
-                                await saveStakesForPause()
+                                                        // Save current stakes to Firestore BEFORE parking
+                        await saveStakesForPause()
+                        
+                        // Create the resume event
+                        let success = await sessionStore.createResumeEvent(for: nextDayDate)
+                        
+                        await MainActor.run {
+                            if success {
+                                // Park the session for next day (stakes are now saved in Firestore)
+                                sessionStore.parkSessionForNextDay(nextDayDate: nextDayDate)
+                                showingNextDayConfirmation = false
                                 
-                                // Create the resume event
-                                let success = await sessionStore.createResumeEvent(for: nextDayDate)
-                                
-                                await MainActor.run {
-                                    if success {
-                                        // Pause the session for next day (stakes are now saved in Firestore)
-                                        sessionStore.pauseForNextDay(nextDayDate: nextDayDate)
-                                        showingNextDayConfirmation = false
-                                        
-                                        // Auto-dismiss the session view after pausing
-                                        dismiss()
-                                    }
-                                }
+                                // Auto-dismiss the session view after parking
+                                dismiss()
+                            }
+                        }
                             }
                         }) {
                             Text("Confirm & Progress")
@@ -3639,24 +4211,36 @@ struct EnhancedLiveSessionView: View {
         let currentAmount = sessionStore.enhancedLiveSession.currentChipAmount + amount
         sessionStore.updateChipStack(amount: currentAmount, note: "Rebuy: +$\(Int(amount))")
         
-        // Send rebuy notification for cash games
-        Task {
-            do {
-                try await sessionNotificationService.notifyCurrentUserRebuy(
-                    sessionId: sessionStore.liveSession.id,
-                    gameName: sessionStore.liveSession.gameName,
-                    stakes: sessionStore.liveSession.stakes,
-                    rebuyAmount: amount,
-                    newTotalBuyIn: sessionStore.liveSession.buyIn,
-                    isTournament: false
-                )
-            } catch {
-                print("[EnhancedLiveSessionView] Failed to send cash game rebuy notification: \(error)")
+        // Send rebuy notification for cash games ONLY if there are valid stakers configured
+        if !validStakerConfigs.isEmpty {
+            Task {
+                do {
+                    let stakers = convertStakersForNotification(validStakerConfigs)
+                    try await sessionNotificationService.notifyCurrentUserRebuy(
+                        sessionId: sessionStore.liveSession.id,
+                        gameName: sessionStore.liveSession.gameName,
+                        stakes: sessionStore.liveSession.stakes,
+                        rebuyAmount: amount,
+                        newTotalBuyIn: sessionStore.liveSession.buyIn,
+                        isTournament: false,
+                        stakers: stakers
+                    )
+                    print("[EnhancedLiveSessionView] ✅ Cash game rebuy notification sent for \(stakers.count) stakers: \(stakers.map { $0.stakerDisplayName }.joined(separator: ", "))")
+                } catch {
+                    print("[EnhancedLiveSessionView] Failed to send cash game rebuy notification: \(error)")
+                }
             }
+        } else {
+            print("[EnhancedLiveSessionView] ⏭️ Skipping cash game rebuy notification - no valid stakers configured")
         }
         
         // Update local data
         updateLocalDataFromStore()
+        
+        // Update public session with rebuy information if enabled
+        if isPublicSession {
+            updatePublicSessionRebuy(amount: amount, newTotalBuyIn: sessionStore.liveSession.buyIn, isTournament: false)
+        }
         
         // Reset the rebuy amount
         rebuyAmount = ""
@@ -3963,30 +4547,85 @@ struct EnhancedLiveSessionView: View {
             return 
         }
         
-        print("🔥🔥🔥 [loadExistingStakes] Loading stakes for session ID: \(sessionStore.liveSession.id)")
+        // Use the truly persistent session identifier
+        let persistentSessionId = getTrulyPersistentSessionId()
+        
+        print("🔥🔥🔥 [loadExistingStakes] Loading stakes for persistent session ID: \(persistentSessionId)")
+        print("🔥🔥🔥 [loadExistingStakes] Original live session UUID: \(sessionStore.liveSession.id)")
+        print("🔥🔥🔥 [loadExistingStakes] Current user ID: \(userId)")
         isLoadingStakes = true
         Task {
             do {
-                print("🔥🔥🔥 [loadExistingStakes] Calling fetchStakesForLiveSession with ID: \(sessionStore.liveSession.id)")
-                var stakes = try await stakeService.fetchStakesForLiveSession(sessionStore.liveSession.id)
+                print("🔥🔥🔥 [loadExistingStakes] Calling fetchStakesForLiveSession with persistent ID: \(persistentSessionId)")
+                var stakes = try await stakeService.fetchStakesForLiveSession(persistentSessionId)
                 print("🔥🔥🔥 [loadExistingStakes] Received \(stakes.count) stakes from liveSession query")
                 
-                // If no stakes found for live session, also check for event-based stakes
-                // This handles the case where stakes were created from an event before starting the live session
+                // If no stakes found for persistent session, also try with event-prefixed session ID
                 if stakes.isEmpty, let preselectedEvent = preselectedEvent {
-                    print("🔥🔥🔥 [loadExistingStakes] No stakes found for liveSession, checking for event stakes")
-                    let allUserStakes = try await stakeService.fetchStakes(forUser: userId)
-                    let eventStakes = allUserStakes.filter { stake in
-                        stake.sessionGameName == preselectedEvent.event_name &&
-                        stake.stakedPlayerUserId == userId &&
-                        stake.status == .active &&
-                        stake.totalPlayerBuyInForSession == 0 &&
-                        stake.playerCashoutForSession == 0
-                    }
-                    stakes = eventStakes
-                    print("🔥🔥🔥 [loadExistingStakes] Found \(eventStakes.count) event-based stakes for '\(preselectedEvent.event_name)'")
+                    let eventPrefixedSessionId = "event_\(preselectedEvent.id)_\(persistentSessionId)"
+                    print("🔥🔥🔥 [loadExistingStakes] No stakes found for persistent session, trying event-prefixed ID: \(eventPrefixedSessionId)")
+                    stakes = try await stakeService.fetchStakesForLiveSession(eventPrefixedSessionId)
+                    print("🔥🔥🔥 [loadExistingStakes] Found \(stakes.count) stakes with event-prefixed ID")
                 }
                 
+                // If still no stakes found, check for event-based stakes using the new pending pattern
+                // This handles the case where stakes were created from an event before starting the live session
+                if stakes.isEmpty, let preselectedEvent = preselectedEvent {
+                    print("🔥🔥🔥 [loadExistingStakes] Still no stakes found, checking for pending event stakes")
+                    let pendingEventSessionId = "event_\(preselectedEvent.id)_pending"
+                    stakes = try await stakeService.fetchStakesForLiveSession(pendingEventSessionId)
+                    print("🔥🔥🔥 [loadExistingStakes] Found \(stakes.count) pending event stakes with ID: \(pendingEventSessionId)")
+                    
+                    // If no stakes found with the new pattern, fallback to the old filtering method for backwards compatibility
+                    if stakes.isEmpty {
+                        print("🔥🔥🔥 [loadExistingStakes] No pending stakes found, trying legacy filtering method")
+                        let allUserStakes = try await stakeService.fetchStakes(forUser: userId)
+                        let eventStakes = allUserStakes.filter { stake in
+                            stake.sessionGameName == preselectedEvent.event_name &&
+                            stake.stakedPlayerUserId == userId &&
+                            (stake.status == .active || stake.status == .pendingAcceptance) &&
+                            stake.totalPlayerBuyInForSession == 0 &&
+                            stake.playerCashoutForSession == 0
+                        }
+                        stakes = eventStakes
+                        print("🔥🔥🔥 [loadExistingStakes] Found \(eventStakes.count) legacy event-based stakes for '\(preselectedEvent.event_name)'")
+                    }
+                }
+                
+                // CRITICAL: Update session IDs to match current persistent session ID for stakes found with event-prefixed IDs
+                if !stakes.isEmpty && stakes.first?.sessionId.contains("event_") == true {
+                    print("🔥🔥🔥 [loadExistingStakes] Updating event-based stakes to use persistent session ID")
+                    
+                    for stake in stakes {
+                        guard let stakeId = stake.id else { continue }
+                        
+                        do {
+                            // Update both sessionId and liveSessionId to the persistent session ID
+                            // Also update status to .active if it was .pendingAcceptance
+                            var updateData: [String: Any] = [
+                                Stake.CodingKeys.sessionId.rawValue: persistentSessionId,
+                                "liveSessionId": persistentSessionId, // Also update the liveSessionId field for consistency
+                                Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
+                            ]
+                            
+                            // If the stake was pendingAcceptance, update it to active since session is starting
+                            if stake.status == .pendingAcceptance {
+                                updateData[Stake.CodingKeys.status.rawValue] = Stake.StakeStatus.active.rawValue
+                                print("🔥🔥🔥 [loadExistingStakes] Updating pending stake \(stakeId) to active status")
+                            }
+                            
+                            try await stakeService.updateStake(stakeId: stakeId, updateData: updateData)
+                            print("🔥🔥🔥 [loadExistingStakes] Updated stake \(stakeId) to use persistent session ID \(persistentSessionId)")
+                        } catch {
+                            print("🔥🔥🔥 [loadExistingStakes] Failed to update stake \(stakeId): \(error)")
+                        }
+                    }
+                    
+                    // Reload stakes with the updated session IDs
+                    stakes = try await stakeService.fetchStakesForLiveSession(persistentSessionId)
+                    print("🔥🔥🔥 [loadExistingStakes] Reloaded \(stakes.count) stakes after session ID update")
+                }
+
                 await MainActor.run {
                     print("🔥🔥🔥 [loadExistingStakes] MainActor run - setting existingStakes to \(stakes.count) stakes")
                     self.existingStakes = stakes
@@ -4062,11 +4701,24 @@ struct EnhancedLiveSessionView: View {
                     
                     // --- Fallback: if no stakes were found, attempt to restore from local cache ---
                     if stakes.isEmpty {
-                        if let cachedData = UserDefaults.standard.data(forKey: "StakerConfigs_\(sessionStore.liveSession.id)"),
+                        if let cachedData = UserDefaults.standard.data(forKey: "StakerConfigs_\(persistentSessionId)"),
                            let cachedConfigs = try? JSONDecoder().decode([StakerConfig].self, from: cachedData) {
-                            print("🔥🔥🔥 [loadExistingStakes] Restoring \(cachedConfigs.count) staker configs from local cache")
+                            print("🔥🔥🔥 [loadExistingStakes] Restoring \(cachedConfigs.count) staker configs from local cache for persistent ID: \(persistentSessionId)")
                             self.stakerConfigs = cachedConfigs
                             self.stakerConfigsForPopup = cachedConfigs
+                            
+                            // CRITICAL FIX: For pending stakes from events, immediately save them to database
+                            // This ensures configs from EventDetailView are persisted properly after session starts
+                            if !cachedConfigs.isEmpty && self.sessionMode != .setup && self.sessionStore.liveSession.buyIn > 0 {
+                                print("🔥🔥🔥 [loadExistingStakes] Session is active - saving cached configs to database immediately")
+                                Task {
+                                    for config in cachedConfigs {
+                                        await self.saveStakeConfigurationImmediately(config)
+                                    }
+                                    // Reload stakes after saving to ensure consistency
+                                    self.loadExistingStakes()
+                                }
+                            }
                         }
                     }
                 }
@@ -4079,9 +4731,103 @@ struct EnhancedLiveSessionView: View {
         }
     }
     
+    // CRITICAL: Function to save stakes immediately when configured
+    private func saveStakeConfigurationImmediately(_ config: StakerConfig) async {
+        guard let percentageSoldDouble = Double(config.percentageSold),
+              let markupDouble = Double(config.markup),
+              percentageSoldDouble > 0,
+              markupDouble >= 1.0 else {
+            print("[EnhancedLiveSessionView] Invalid config data, skipping immediate save")
+            return
+        }
+        
+        let stakerIdToUse: String
+        let manualName: String?
+        let isOffApp: Bool
+        
+        if config.isManualEntry {
+            guard let selectedManualStaker = config.selectedManualStaker else {
+                print("[EnhancedLiveSessionView] Manual staker not selected, skipping save")
+                return
+            }
+            stakerIdToUse = selectedManualStaker.id ?? Stake.OFF_APP_STAKER_ID
+            manualName = selectedManualStaker.name
+            isOffApp = true
+        } else if let stakerProfile = config.selectedStaker {
+            stakerIdToUse = stakerProfile.id
+            manualName = nil
+            isOffApp = false
+        } else {
+            print("[EnhancedLiveSessionView] No staker selected, skipping save")
+            return
+        }
+        
+        // Check if this config already has a stake ID (update existing)
+        if let existingStakeId = config.originalStakeId {
+            print("[EnhancedLiveSessionView] Updating existing stake: \(existingStakeId)")
+            let updateData: [String: Any] = [
+                Stake.CodingKeys.stakePercentage.rawValue: percentageSoldDouble / 100.0,
+                Stake.CodingKeys.markup.rawValue: markupDouble,
+                Stake.CodingKeys.lastUpdatedAt.rawValue: Timestamp(date: Date())
+            ]
+            
+            do {
+                try await stakeService.updateStake(stakeId: existingStakeId, updateData: updateData)
+                print("[EnhancedLiveSessionView] Successfully updated stake \(existingStakeId)")
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to update stake: \(error)")
+            }
+        } else {
+            // Create new stake immediately with TRULY PERSISTENT session identifier
+            print("[EnhancedLiveSessionView] Creating new stake for immediate persistence")
+            
+            // Get or create a truly persistent session ID that never changes for this session
+            let persistentSessionId = getTrulyPersistentSessionId()
+            print("[EnhancedLiveSessionView] Using truly persistent session ID: \(persistentSessionId)")
+            
+            let stake = Stake(
+                sessionId: persistentSessionId,
+                sessionGameName: sessionStore.liveSession.gameName,
+                sessionStakes: sessionStore.liveSession.stakes,
+                sessionDate: sessionStore.liveSession.startTime,
+                stakerUserId: stakerIdToUse,
+                stakedPlayerUserId: userId,
+                stakePercentage: percentageSoldDouble / 100.0,
+                markup: markupDouble,
+                totalPlayerBuyInForSession: 0, // Will be updated on cashout
+                playerCashoutForSession: 0, // Will be updated on cashout
+                status: .active,
+                proposedAt: Date(),
+                lastUpdatedAt: Date(),
+                isTournamentSession: sessionStore.liveSession.isTournament,
+                manualStakerDisplayName: manualName,
+                isOffAppStake: isOffApp,
+                liveSessionId: persistentSessionId // Critical: use persistent ID for both fields
+            )
+            
+            do {
+                let stakeId = try await stakeService.addStake(stake)
+                print("[EnhancedLiveSessionView] Successfully created stake with ID: \(stakeId)")
+                print("[EnhancedLiveSessionView] Stake saved with sessionId: \(persistentSessionId), liveSessionId: \(persistentSessionId), stakerUserId: \(stakerIdToUse), stakedPlayerUserId: \(userId)")
+                
+                // Update the config with the new stake ID
+                await MainActor.run {
+                    if let index = stakerConfigs.firstIndex(where: { $0.id == config.id }) {
+                        stakerConfigs[index].originalStakeId = stakeId
+                        stakerConfigsForPopup[index].originalStakeId = stakeId
+                    }
+                }
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to create stake: \(error)")
+            }
+        }
+    }
+
     // Function to save current stakes when pausing for next day
     private func saveStakesForPause() async {
-        print("🔥🔥🔥 [saveStakesForPause] Starting - session ID: \(sessionStore.liveSession.id)")
+        let persistentSessionId = getTrulyPersistentSessionId()
+        print("🔥🔥🔥 [saveStakesForPause] Starting - persistent session ID: \(persistentSessionId)")
+        print("🔥🔥🔥 [saveStakesForPause] Original live session UUID: \(sessionStore.liveSession.id)")
         print("🔥🔥🔥 [saveStakesForPause] Current stakerConfigs count: \(stakerConfigs.count)")
         print("🔥🔥🔥 [saveStakesForPause] Saving current stakes to Firestore")
         
@@ -4134,7 +4880,7 @@ struct EnhancedLiveSessionView: View {
                     "gameName": sessionStore.liveSession.gameName,
                     "stakes": sessionStore.liveSession.stakes,
                     "startDateTime": Timestamp(date: sessionStore.liveSession.startTime),
-                    "liveSessionId": sessionStore.liveSession.id,
+                    "liveSessionId": persistentSessionId,
                     "isOffAppStake": true,
                     "manualStakerDisplayName": stakerDisplayName,
                     "createdAt": FieldValue.serverTimestamp()
@@ -4152,7 +4898,7 @@ struct EnhancedLiveSessionView: View {
                     "gameName": sessionStore.liveSession.gameName,
                     "stakes": sessionStore.liveSession.stakes,
                     "startDateTime": Timestamp(date: sessionStore.liveSession.startTime),
-                    "liveSessionId": sessionStore.liveSession.id,
+                    "liveSessionId": persistentSessionId,
                     "isOffAppStake": false,
                     "createdAt": FieldValue.serverTimestamp()
                 ]
@@ -4337,7 +5083,7 @@ struct EnhancedLiveSessionView: View {
                         .foregroundColor(.gray)
                 }
                 .padding(.vertical, 8)
-            } else if !existingStakes.isEmpty || !validStakerConfigs.isEmpty || !pendingEventStakingInvites.isEmpty {
+            } else if !existingStakes.isEmpty || !configsNotYetSavedAsStakes.isEmpty || !pendingEventStakingInvites.isEmpty {
                 VStack(spacing: 12) {
                     // Show pending invites notification if any exist
                     if !pendingEventStakingInvites.isEmpty {
@@ -4411,7 +5157,7 @@ struct EnhancedLiveSessionView: View {
                     }
                     
                     // Show configured stakers (that aren't already saved as stakes)
-                    ForEach(validStakerConfigs, id: \.id) { config in
+                    ForEach(configsNotYetSavedAsStakes, id: \.id) { config in
                         StakingConfigCard(config: getRestoreStakerConfig(config))
                     }
                 }
@@ -4728,10 +5474,29 @@ struct EnhancedLiveSessionView: View {
     // MARK: - Save Session Changes
     
     private func saveSessionChanges() {
+        // Validate inputs
+        let trimmedGameName = editGameName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedStakes = editStakes.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !trimmedGameName.isEmpty else {
+            saveChangesError = "Game name cannot be empty"
+            showSaveChangesAlert = true
+            return
+        }
+        
+        guard !trimmedStakes.isEmpty else {
+            saveChangesError = "Stakes cannot be empty"
+            showSaveChangesAlert = true
+            return
+        }
+        
+        isSavingChanges = true
+        saveChangesError = nil
+        
         // Update session store with new values
         sessionStore.liveSession.startTime = editSessionStartTime
-        sessionStore.liveSession.gameName = editGameName
-        sessionStore.liveSession.stakes = editStakes
+        sessionStore.liveSession.gameName = trimmedGameName
+        sessionStore.liveSession.stakes = trimmedStakes
         
         // Recalculate elapsed time based on new start time
         if sessionStore.liveSession.isActive {
@@ -4740,8 +5505,31 @@ struct EnhancedLiveSessionView: View {
             sessionStore.liveSession.elapsedTime = lastPausedAt.timeIntervalSince(editSessionStartTime)
         }
         
-        // Save the updated session state
-        sessionStore.saveLiveSessionState()
+        // Save the updated session state with error handling
+        do {
+            let encoder = JSONEncoder()
+            let encoded = try encoder.encode(sessionStore.liveSession)
+            UserDefaults.standard.set(encoded, forKey: "LiveSession_\(userId)")
+            UserDefaults.standard.synchronize()
+            
+            // Success feedback
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                isSavingChanges = false
+            }
+            
+            print("[EnhancedLiveSessionView] Session changes saved successfully")
+            
+            // Update public session details if enabled
+            if isPublicSession {
+                updatePublicSessionDetails(gameName: trimmedGameName, stakes: trimmedStakes)
+            }
+            
+        } catch {
+            isSavingChanges = false
+            saveChangesError = "Failed to save changes: \(error.localizedDescription)"
+            showSaveChangesAlert = true
+            print("[EnhancedLiveSessionView] Failed to save session changes: \(error)")
+        }
     }
     
     // MARK: - Discard Session
@@ -4844,6 +5632,188 @@ struct EnhancedLiveSessionView: View {
         }
         .padding(16)
         .glassyBackground(cornerRadius: 16)
+    }
+    
+    // MARK: - Public Session Database Operations
+    
+    private func createPublicSession() {
+        guard isPublicSession else { return }
+        
+        let publicSessionData: [String: Any] = [
+            "userId": userId,
+            "userName": userService.currentUserProfile?.displayName ?? "Unknown",
+            "userProfileImageURL": userService.currentUserProfile?.avatarURL ?? "",
+            "sessionType": selectedLogType.rawValue,
+            "gameName": selectedLogType == .cashGame ? (selectedGame?.name ?? "") : tournamentName,
+            "stakes": selectedLogType == .cashGame ? (selectedGame?.stakes ?? "") : "",
+            "casino": selectedLogType == .tournament ? tournamentCasino : "",
+            "buyIn": selectedLogType == .cashGame ? (Double(buyIn) ?? 0) : (Double(baseBuyInTournament) ?? 0),
+            "startingChips": selectedLogType == .tournament ? tournamentStartingChips : nil,
+            "startTime": Timestamp(date: Date()),
+            "isActive": true,
+            "chipUpdates": [],
+            "notes": [],
+            "currentStack": selectedLogType == .cashGame ? (Double(buyIn) ?? 0) : tournamentStartingChips,
+            "profit": 0.0,
+            "duration": 0,
+            "lastUpdated": Timestamp(date: Date()),
+            "createdAt": Timestamp(date: Date())
+        ]
+        
+        Task {
+            do {
+                let docRef = try await Firestore.firestore().collection("public_sessions").addDocument(data: publicSessionData)
+                await MainActor.run {
+                    self.publicSessionId = docRef.documentID
+                    print("[EnhancedLiveSessionView] Created public session: \(docRef.documentID)")
+                    // Save public session state to session data
+                    self.savePublicSessionStateToSession()
+                }
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to create public session: \(error)")
+            }
+        }
+    }
+    
+    private func savePublicSessionStateToSession() {
+        // Update the session store's live session data with public session state
+        sessionStore.liveSession.isPublicSession = isPublicSession
+        sessionStore.liveSession.publicSessionId = publicSessionId
+        sessionStore.saveLiveSessionState()
+        print("[EnhancedLiveSessionView] Saved public session state: isPublic=\(isPublicSession), id=\(publicSessionId ?? "nil")")
+    }
+    
+    private func updatePublicSessionChipStack(amount: Double, note: String?) {
+        guard isPublicSession, let sessionId = publicSessionId else { return }
+        
+        let chipUpdate: [String: Any] = [
+            "id": UUID().uuidString,
+            "amount": amount,
+            "note": note ?? "",
+            "timestamp": Timestamp(date: Date())
+        ]
+        
+        let currentBuyIn = selectedLogType == .cashGame ? (Double(buyIn) ?? 0) : (Double(baseBuyInTournament) ?? 0)
+        // For tournaments, profit is 0 during live play since we don't know final payout yet
+        // For cash games, profit is current stack minus buy-in
+        let profit = selectedLogType == .cashGame ? (amount - currentBuyIn) : 0.0
+        let duration = sessionStore.liveSession.elapsedTime
+        
+        Task {
+            do {
+                try await Firestore.firestore().collection("public_sessions").document(sessionId).updateData([
+                    "chipUpdates": FieldValue.arrayUnion([chipUpdate]),
+                    "currentStack": amount,
+                    "profit": profit,
+                    "duration": duration,
+                    "lastUpdated": Timestamp(date: Date())
+                ])
+                print("[EnhancedLiveSessionView] Updated public session chip stack: \(amount)")
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to update public session chip stack: \(error)")
+            }
+        }
+    }
+    
+    private func updatePublicSessionNote(_ note: String) {
+        guard isPublicSession, let sessionId = publicSessionId else { return }
+        
+        let noteData: [String: Any] = [
+            "id": UUID().uuidString,
+            "content": note,
+            "timestamp": Timestamp(date: Date())
+        ]
+        
+        Task {
+            do {
+                try await Firestore.firestore().collection("public_sessions").document(sessionId).updateData([
+                    "notes": FieldValue.arrayUnion([noteData]),
+                    "lastUpdated": Timestamp(date: Date())
+                ])
+                print("[EnhancedLiveSessionView] Added note to public session: \(note)")
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to add note to public session: \(error)")
+            }
+        }
+    }
+    
+    private func updatePublicSessionDetails(gameName: String? = nil, stakes: String? = nil) {
+        guard isPublicSession, let sessionId = publicSessionId else { return }
+        
+        var updateData: [String: Any] = [
+            "lastUpdated": Timestamp(date: Date())
+        ]
+        
+        if let gameName = gameName {
+            updateData["gameName"] = gameName
+        }
+        
+        if let stakes = stakes {
+            updateData["stakes"] = stakes
+        }
+        
+        Task {
+            do {
+                try await Firestore.firestore().collection("public_sessions").document(sessionId).updateData(updateData)
+                print("[EnhancedLiveSessionView] Updated public session details")
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to update public session details: \(error)")
+            }
+        }
+    }
+    
+    private func updatePublicSessionRebuy(amount: Double, newTotalBuyIn: Double, isTournament: Bool) {
+        guard isPublicSession, let sessionId = publicSessionId else { return }
+        
+        let rebuyNote: [String: Any] = [
+            "id": UUID().uuidString,
+            "content": isTournament ? "Tournament rebuy: +$\(Int(amount))" : "Rebuy: +$\(Int(amount))",
+            "timestamp": Timestamp(date: Date())
+        ]
+        
+        let duration = sessionStore.liveSession.elapsedTime
+        let currentStack = chipUpdates.last?.amount ?? sessionStore.liveSession.buyIn
+        // For tournaments, profit is 0 during live play since we don't know final payout yet
+        // For cash games, profit is current stack minus total buy-in
+        let profit = isTournament ? 0.0 : (currentStack - newTotalBuyIn)
+        
+        Task {
+            do {
+                try await Firestore.firestore().collection("public_sessions").document(sessionId).updateData([
+                    "notes": FieldValue.arrayUnion([rebuyNote]),
+                    "buyIn": newTotalBuyIn,
+                    "profit": profit,
+                    "duration": duration,
+                    "lastUpdated": Timestamp(date: Date())
+                ])
+                print("[EnhancedLiveSessionView] Updated public session with rebuy: \(amount)")
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to update public session rebuy: \(error)")
+            }
+        }
+    }
+    
+    private func endPublicSession(cashout: Double) {
+        guard isPublicSession, let sessionId = publicSessionId else { return }
+        
+        // Calculate correct profit using actual cashout amount
+        let finalProfit = cashout - sessionStore.liveSession.buyIn
+        
+        Task {
+            do {
+                try await Firestore.firestore().collection("public_sessions").document(sessionId).updateData([
+                    "isActive": false,
+                    "endTime": Timestamp(date: Date()),
+                    "currentStack": cashout, // For finished sessions, currentStack should be the cash out amount
+                    "profit": finalProfit,
+                    "duration": sessionStore.liveSession.elapsedTime,
+                    "lastUpdated": Timestamp(date: Date())
+                ])
+                print("[EnhancedLiveSessionView] Ended public session with cashout: \(cashout), profit: \(finalProfit)")
+            } catch {
+                print("[EnhancedLiveSessionView] Failed to end public session: \(error)")
+            }
+        }
     }
     
     // MARK: - Live Session Challenge Card
@@ -5130,11 +6100,11 @@ struct EnhancedLiveSessionView: View {
             
             let acceptedStakes = allStakes.filter { stake in
                     // Filter for stakes that:
-                    // 1. Are active (accepted from event invite)
+                    // 1. Are active or pendingAcceptance (for event stakes)
                     // 2. Have event name matching
                     // 3. User is the staked player
                     // 4. Haven't started yet (no buy-in/cashout data)
-                    let statusMatch = stake.status == .active
+                    let statusMatch = stake.status == .active || stake.status == .pendingAcceptance
                     let nameMatch = stake.sessionGameName == event.event_name
                     let playerMatch = stake.stakedPlayerUserId == currentUserId
                     let notStartedMatch = stake.totalPlayerBuyInForSession == 0 && stake.playerCashoutForSession == 0
@@ -5144,7 +6114,7 @@ struct EnhancedLiveSessionView: View {
                     print("[EnhancedLiveSessionView] Checking stake: statusMatch=\(statusMatch), nameMatch=\(nameMatch), playerMatch=\(playerMatch), notStartedMatch=\(notStartedMatch), finalMatch=\(matches)")
                     
                     if matches {
-                        print("[EnhancedLiveSessionView] Found matching stake: \(stake.manualStakerDisplayName ?? "app user"), isOffAppStake: \(stake.isOffAppStake ?? false)")
+                        print("[EnhancedLiveSessionView] Found matching stake: \(stake.manualStakerDisplayName ?? "app user"), isOffAppStake: \(stake.isOffAppStake ?? false), status: \(stake.status)")
                     }
                     return matches
                 }
@@ -5260,6 +6230,16 @@ struct EnhancedLiveSessionView: View {
                 self.restoreMissingStakerProfiles()
                 
                 print("[EnhancedLiveSessionView] Loaded \(self.stakerConfigs.count) stakers and \(self.pendingEventStakingInvites.count) pending invites from event: \(event.event_name)")
+                
+                // CRITICAL FIX: Persist the loaded configs using the proper persistent session ID
+                // This ensures that configs from event staking invites are preserved across session refreshes
+                if !self.stakerConfigs.isEmpty {
+                    // Trigger the onChange handler to persist configs with the correct persistent ID
+                    // This will automatically call getTrulyPersistentSessionId() and save to UserDefaults
+                    let configsToSave = self.stakerConfigs
+                    self.stakerConfigs = configsToSave // This triggers the onChange handler
+                    print("[EnhancedLiveSessionView] 🔥 CRITICAL: Triggered config persistence for \(configsToSave.count) configs from event")
+                }
                 
                 // Show a temporary visual indicator if stakes were loaded
                 if !self.stakerConfigs.isEmpty || !self.pendingEventStakingInvites.isEmpty {

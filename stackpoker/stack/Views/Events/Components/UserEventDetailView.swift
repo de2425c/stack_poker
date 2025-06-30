@@ -494,7 +494,8 @@ struct UserEventDetailView: View {
     private func statusColor(_ status: UserEvent.EventStatus) -> Color {
         switch status {
         case .upcoming: return Color(red: 123/255, green: 255/255, blue: 99/255)
-        case .active: return .orange
+        case .lateRegistration: return Color(red: 255/255, green: 149/255, blue: 0/255)
+        case .active: return Color(red: 255/255, green: 59/255, blue: 48/255)
         case .completed: return .blue
         case .cancelled: return .red
         }

@@ -122,6 +122,8 @@ class UserService: ObservableObject {
                     avatarURL: avatarURL,
                     location: data["location"] as? String,
                     favoriteGame: data["favoriteGame"] as? String,
+                    hyperlinkText: data["hyperlinkText"] as? String,
+                    hyperlinkURL: data["hyperlinkURL"] as? String,
                     followersCount: followersCount,
                     followingCount: followingCount
                 )
@@ -239,9 +241,9 @@ class UserService: ObservableObject {
             // Update login count
             try await userDoc.updateData(["loginCount": newCount])
             
-            // Return true if this is one of the first 3 logins and user hasn't dismissed the prompt
+            // Return true only on the second login and user hasn't dismissed the prompt
             let hasShownCSVPrompt = document.data()?["hasShownCSVPrompt"] as? Bool ?? false
-            return newCount <= 3 && !hasShownCSVPrompt
+            return newCount == 2 && !hasShownCSVPrompt
         } catch {
             throw error
         }
@@ -268,7 +270,7 @@ class UserService: ObservableObject {
         let loginCount = document.data()?["loginCount"] as? Int ?? 0
         let hasShownCSVPrompt = document.data()?["hasShownCSVPrompt"] as? Bool ?? false
         
-        return loginCount <= 3 && !hasShownCSVPrompt
+        return loginCount == 2 && !hasShownCSVPrompt
     }
 
     // Function to update or set the FCM token for a user
@@ -416,6 +418,8 @@ class UserService: ObservableObject {
                 avatarURL: avatarURL,
                 location: data["location"] as? String,
                 favoriteGame: data["favoriteGame"] as? String,
+                hyperlinkText: data["hyperlinkText"] as? String,
+                hyperlinkURL: data["hyperlinkURL"] as? String,
                 followersCount: followersCount,
                 followingCount: followingCount
             )
@@ -449,7 +453,7 @@ class UserService: ObservableObject {
             return
         }
 
-        let followData = UserFollow(followerId: currentUserId, followeeId: userIdToFollow, createdAt: Date())
+        let followData = UserFollow(followerId: currentUserId, followeeId: userIdToFollow, createdAt: Date(), postNotifications: false)
         
         do {
             // Store only in the centralized userFollows collection
@@ -583,6 +587,8 @@ class UserService: ObservableObject {
                         avatarURL: data["avatarURL"] as? String,
                         location: data["location"] as? String,
                         favoriteGame: data["favoriteGame"] as? String,
+                        hyperlinkText: data["hyperlinkText"] as? String,
+                        hyperlinkURL: data["hyperlinkURL"] as? String,
                         followersCount: followersCount,
                         followingCount: followingCount
                     )
@@ -635,6 +641,8 @@ class UserService: ObservableObject {
                     avatarURL: data["avatarURL"] as? String,
                     location: data["location"] as? String,
                     favoriteGame: data["favoriteGame"] as? String,
+                    hyperlinkText: data["hyperlinkText"] as? String,
+                    hyperlinkURL: data["hyperlinkURL"] as? String,
                     followersCount: followersCount,
                     followingCount: followingCount
                 )
@@ -745,9 +753,11 @@ class UserService: ObservableObject {
                let usersArray = cacheData["users"] as? [[String: Any]],
                let lastUpdated = cacheData["lastUpdated"] as? Timestamp {
                 
-                // For now, always use cache if it exists (as requested by user)
-                // Later we can add staleness checking when there are more users
-                if true {
+                // Check if cache is recent (less than 1 hour old)
+                let cacheAge = Date().timeIntervalSince(lastUpdated.dateValue())
+                let isRecentCache = cacheAge < 3600 // 1 hour
+                
+                if isRecentCache && !usersArray.isEmpty {
                     // Use cached data
                     var profiles: [UserProfile] = []
                     
@@ -773,6 +783,8 @@ class UserService: ObservableObject {
                             avatarURL: userData["avatarURL"] as? String,
                             location: userData["location"] as? String,
                             favoriteGame: userData["favoriteGame"] as? String,
+                            hyperlinkText: userData["hyperlinkText"] as? String,
+                            hyperlinkURL: userData["hyperlinkURL"] as? String,
                             followersCount: userData["cachedFollowersCount"] as? Int ?? 0,
                             followingCount: userData["cachedFollowingCount"] as? Int ?? 0
                         )
@@ -785,53 +797,85 @@ class UserService: ObservableObject {
                 }
             }
         } catch {
-            print("Failed to fetch from cache, falling back to direct query: \(error)")
+            print("Failed to fetch from cache, falling back to live calculation: \(error)")
         }
         
-        // Cache miss or stale cache - fall back to direct query and update cache
-        print("Cache miss or stale, performing direct query...")
+        // Cache miss, stale cache, or empty cache - calculate live from userFollows collection
+        print("Cache miss or stale, calculating top users from userFollows collection...")
         
-        let snapshot = try await db.collection("users")
-            .order(by: "followersCount", descending: true)
-            .limit(to: limit + followingUserIds.count + 10)
-            .getDocuments()
+        // Get all follow relationships to calculate current top users
+        let allFollowsSnapshot = try await db.collection("userFollows").getDocuments()
         
+        // Count followers for each user
+        var followerCounts: [String: Int] = [:]
+        
+        for document in allFollowsSnapshot.documents {
+            let data = document.data()
+            if let followeeId = data["followeeId"] as? String {
+                followerCounts[followeeId, default: 0] += 1
+            }
+        }
+        
+        // Sort by follower count and get top users (excluding current user and already followed)
+        let topUserIds = followerCounts
+            .filter { userId, count in 
+                userId != currentUserId && 
+                !followingUserIds.contains(userId) &&
+                count > 0 // Only include users with at least 1 follower
+            }
+            .sorted { $0.value > $1.value }
+            .prefix(limit * 2) // Get more than needed in case some fail to load
+            .map { $0.key }
+        
+        print("Top user IDs by actual followers: \(Array(topUserIds.prefix(10)))")
+        
+        // Fetch user details for these top users
         var profiles: [UserProfile] = []
         
-        for document in snapshot.documents {
-            let data = document.data()
-            let userId = document.documentID
-            
-            // Don't include the current user
-            if userId == currentUserId { continue }
-            
-            // Don't include users already being followed
-            if followingUserIds.contains(userId) { continue }
-            
+        for userId in topUserIds {
             // Stop if we have enough profiles
             if profiles.count >= limit { break }
             
-            let (followersCount, followingCount) = (try? await getFollowerCounts(for: userId)) ?? (0, 0)
-            
-            let userProfile = UserProfile(
-                id: userId,
-                username: data["username"] as? String ?? "",
-                displayName: data["displayName"] as? String,
-                createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
-                favoriteGames: data["favoriteGames"] as? [String],
-                bio: data["bio"] as? String,
-                avatarURL: data["avatarURL"] as? String,
-                location: data["location"] as? String,
-                favoriteGame: data["favoriteGame"] as? String,
-                followersCount: followersCount,
-                followingCount: followingCount
-            )
-            profiles.append(userProfile)
-            self.loadedUsers[userId] = userProfile // Cache it
+            do {
+                let userDoc = try await db.collection("users").document(userId).getDocument()
+                
+                if let userData = userDoc.data() {
+                    let actualFollowerCount = followerCounts[userId] ?? 0
+                    let followingCount = allFollowsSnapshot.documents.filter { 
+                        ($0.data()["followerId"] as? String) == userId 
+                    }.count
+                    
+                    let userProfile = UserProfile(
+                        id: userId,
+                        username: userData["username"] as? String ?? "",
+                        displayName: userData["displayName"] as? String,
+                        createdAt: (userData["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                        favoriteGames: userData["favoriteGames"] as? [String],
+                        bio: userData["bio"] as? String,
+                        avatarURL: userData["avatarURL"] as? String,
+                        location: userData["location"] as? String,
+                        favoriteGame: userData["favoriteGame"] as? String,
+                        hyperlinkText: userData["hyperlinkText"] as? String,
+                        hyperlinkURL: userData["hyperlinkURL"] as? String,
+                        followersCount: actualFollowerCount,
+                        followingCount: followingCount
+                    )
+                    profiles.append(userProfile)
+                    self.loadedUsers[userId] = userProfile // Cache it locally
+                    
+                    print("Added user \(userData["username"] as? String ?? "unknown") with \(actualFollowerCount) followers")
+                }
+            } catch {
+                print("Failed to fetch user data for \(userId): \(error)")
+            }
         }
         
-        // Cache update will be triggered manually as needed
+        // Update cache with fresh data for next time
+        Task {
+            try? await updateTopUsersCache()
+        }
         
+        print("Fetched \(profiles.count) suggested users from live calculation")
         return profiles
     }
     
@@ -950,6 +994,8 @@ class UserService: ObservableObject {
                 avatarURL: data["avatarURL"] as? String,
                 location: data["location"] as? String,
                 favoriteGame: data["favoriteGame"] as? String,
+                hyperlinkText: data["hyperlinkText"] as? String,
+                hyperlinkURL: data["hyperlinkURL"] as? String,
                 followersCount: followersCount,
                 followingCount: followingCount
             )
@@ -958,6 +1004,76 @@ class UserService: ObservableObject {
         }
         
         return results
+    }
+
+    // MARK: - Post Notifications Management
+    
+    /// Gets the post notification preference for a specific follow relationship
+    func getPostNotificationPreference(targetUserId: String, currentUserId: String?) async -> Bool {
+        guard let currentUserId = currentUserId else {
+            return false
+        }
+        
+        let query = db.collection(userFollowsCollection)
+            .whereField("followerId", isEqualTo: currentUserId)
+            .whereField("followeeId", isEqualTo: targetUserId)
+            .limit(to: 1)
+        
+        do {
+            let snapshot = try await query.getDocuments()
+            guard let document = snapshot.documents.first else {
+                return false
+            }
+            
+            let data = document.data()
+            
+            // Return the postNotifications value, defaulting to false for new behavior
+            return data["postNotifications"] as? Bool ?? false
+        } catch {
+            print("Error fetching post notification preference: \(error)")
+            return false
+        }
+    }
+    
+    /// Updates the post notification preference for a specific follow relationship
+    func updatePostNotificationPreference(targetUserId: String, enabled: Bool) async throws {
+        guard let currentUserId = Auth.auth().currentUser?.uid else {
+            throw UserServiceError.notAuthenticated
+        }
+        
+        let query = db.collection(userFollowsCollection)
+            .whereField("followerId", isEqualTo: currentUserId)
+            .whereField("followeeId", isEqualTo: targetUserId)
+            .limit(to: 1)
+        
+        do {
+            let snapshot = try await query.getDocuments()
+            guard let document = snapshot.documents.first else {
+                print("Follow relationship not found")
+                return
+            }
+            
+            try await db.collection(userFollowsCollection)
+                .document(document.documentID)
+                .updateData(["postNotifications": enabled])
+            
+            print("Successfully updated post notification preference to \(enabled)")
+        } catch {
+            print("Error updating post notification preference: \(error)")
+            throw error
+        }
+    }
+
+    func fetchUserProfile(userId: String) async throws -> UserProfile {
+        let userDocRef = db.collection("users").document(userId)
+        
+        do {
+            let userProfile = try await userDocRef.getDocument(as: UserProfile.self)
+            return userProfile
+        } catch {
+            print("Error fetching user profile for \(userId): \(error.localizedDescription)")
+            throw error
+        }
     }
 }
 

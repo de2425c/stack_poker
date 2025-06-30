@@ -11,6 +11,8 @@ struct UserGroup: Identifiable, Codable, Hashable {
     var memberCount: Int
     var lastMessage: String?
     var lastMessageTime: Date?
+    var lastMessageSenderName: String?
+    var leaderboardType: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -22,9 +24,11 @@ struct UserGroup: Identifiable, Codable, Hashable {
         case memberCount
         case lastMessage
         case lastMessageTime
+        case lastMessageSenderName
+        case leaderboardType
     }
     
-    init(id: String, name: String, description: String?, createdAt: Date, ownerId: String, avatarURL: String? = nil, memberCount: Int = 1, lastMessage: String? = nil, lastMessageTime: Date? = nil) {
+    init(id: String, name: String, description: String?, createdAt: Date, ownerId: String, avatarURL: String? = nil, memberCount: Int = 1, lastMessage: String? = nil, lastMessageTime: Date? = nil, lastMessageSenderName: String? = nil, leaderboardType: String? = nil) {
         self.id = id
         self.name = name
         self.description = description
@@ -34,6 +38,8 @@ struct UserGroup: Identifiable, Codable, Hashable {
         self.memberCount = memberCount
         self.lastMessage = lastMessage
         self.lastMessageTime = lastMessageTime
+        self.lastMessageSenderName = lastMessageSenderName
+        self.leaderboardType = leaderboardType
     }
     
     init(dictionary: [String: Any], id: String) throws {
@@ -52,6 +58,8 @@ struct UserGroup: Identifiable, Codable, Hashable {
         self.memberCount = dictionary["memberCount"] as? Int ?? 1
         self.lastMessage = dictionary["lastMessage"] as? String
         self.lastMessageTime = (dictionary["lastMessageTime"] as? Timestamp)?.dateValue()
+        self.lastMessageSenderName = dictionary["lastMessageSenderName"] as? String
+        self.leaderboardType = dictionary["leaderboardType"] as? String
     }
     
     // MARK: - Hashable

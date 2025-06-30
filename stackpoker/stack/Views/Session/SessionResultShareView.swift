@@ -1,5 +1,7 @@
 import SwiftUI
 import PhotosUI
+import Photos
+import UniformTypeIdentifiers
 
 struct SessionResultShareView: View {
     let sessionDetails: (buyIn: Double, cashout: Double, profit: Double, duration: String, gameName: String, stakes: String, sessionId: String)?
@@ -172,31 +174,151 @@ struct ShareCardView: View {
     let cashOut: Double
     let profit: Double
     let onTitleChanged: ((String) -> Void)?
+    var showSaveButton: Bool = true
+    
+    @State private var showingSavedAlert = false
     
     var body: some View {
+        ZStack(alignment: .topLeading) {
+            // Main card content (this is what gets saved)
+            Group {
+                switch cardType {
+                case .detailed:
+                    FinishedSessionCardView(
+                        gameName: gameName,
+                        stakes: stakes,
+                        date: Date(),
+                        duration: duration,
+                        buyIn: buyIn,
+                        cashOut: cashOut,
+                        isBackgroundTransparent: false,
+                        onTitleChanged: onTitleChanged
+                    )
+                case .minimal:
+                    MinimalShareCardView(
+                        gameName: gameName,
+                        stakes: stakes,
+                        duration: duration,
+                        buyIn: buyIn,
+                        cashOut: cashOut,
+                        profit: profit,
+                        onTitleChanged: onTitleChanged
+                    )
+                }
+            }
+            
+            // Save to photos button - positioned on the left (overlay, not part of saved image)
+            if showSaveButton {
+                Button(action: {
+                    saveCardToPhotos()
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Save to Photos")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.black.opacity(0.6))
+                    )
+                }
+                .padding(.top, 12)
+                .padding(.leading, 12)
+            }
+        }
+        .alert("Saved to Photos!", isPresented: $showingSavedAlert) {
+            Button("OK") { }
+        } message: {
+            Text("Your poker session card has been saved to your photo library.")
+        }
+    }
+    
+    private func saveCardToPhotos() {
+        let renderer: ImageRenderer<AnyView>
+        
         switch cardType {
         case .detailed:
-            FinishedSessionCardView(
-                gameName: gameName,
-                stakes: stakes,
-                date: Date(),
-                duration: duration,
-                buyIn: buyIn,
-                cashOut: cashOut,
-                isBackgroundTransparent: false,
-                onTitleChanged: onTitleChanged
+            let cardView = AnyView(
+                FinishedSessionCardView(
+                    gameName: gameName,
+                    stakes: stakes,
+                    date: Date(),
+                    duration: duration,
+                    buyIn: buyIn,
+                    cashOut: cashOut,
+                    isBackgroundTransparent: false,
+                    onTitleChanged: nil
+                )
             )
+            renderer = ImageRenderer(content: cardView)
+            
         case .minimal:
-            MinimalShareCardView(
-                gameName: gameName,
-                stakes: stakes,
-                duration: duration,
-                buyIn: buyIn,
-                cashOut: cashOut,
-                profit: profit,
-                onTitleChanged: onTitleChanged
+            // For minimal card, ensure transparent background - capture only the card content
+            let cardView = AnyView(
+                MinimalShareCardView(
+                    gameName: gameName,
+                    stakes: stakes,
+                    duration: duration,
+                    buyIn: buyIn,
+                    cashOut: cashOut,
+                    profit: profit,
+                    onTitleChanged: nil
+                )
+                .frame(width: 350, height: 280)
+                .background(Color.clear)
             )
+            renderer = ImageRenderer(content: cardView)
+            renderer.proposedSize = .init(width: 350, height: 280)
+            renderer.isOpaque = false
         }
+        
+        renderer.scale = UIScreen.main.scale
+        renderer.isOpaque = false // Preserve alpha channel for transparency
+        
+        if let uiImage = renderer.uiImage {
+            if cardType == .minimal {
+                // Save as transparent PNG for minimal card
+                saveTransparentPNG(image: uiImage)
+            } else {
+                // Save normally for detailed card
+                UIImageWriteToSavedPhotosAlbum(uiImage, nil, nil, nil)
+                showSuccessFeedback()
+            }
+        }
+    }
+    
+    @MainActor
+    private func saveTransparentPNG(image: UIImage) {
+        guard let pngData = image.pngData() else { return }
+        
+        PHPhotoLibrary.requestAuthorization { status in
+            guard status == .authorized else { return }
+            PHPhotoLibrary.shared().performChanges {
+                let opts = PHAssetResourceCreationOptions()
+                opts.uniformTypeIdentifier = UTType.png.identifier // Force PNG
+                PHAssetCreationRequest.forAsset().addResource(
+                    with: .photo,
+                    data: pngData,
+                    options: opts
+                )
+            } completionHandler: { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        self.showSuccessFeedback()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func showSuccessFeedback() {
+        showingSavedAlert = true
+        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+        impactFeedback.impactOccurred()
     }
 }
 
@@ -211,7 +333,7 @@ struct MinimalShareCardView: View {
     let profit: Double
     let onTitleChanged: ((String) -> Void)?
     
-    @State private var isEditingTitle = false
+    @State private var showingEditAlert = false
     @State private var editedTitle: String = ""
     
     private var formattedBuyIn: String { "$\(Int(buyIn))" }
@@ -223,71 +345,83 @@ struct MinimalShareCardView: View {
                 // Completely transparent background - no borders or background
                 Color.clear
                 
-                VStack(spacing: geometry.size.height * 0.06) {
-                    // Stack logo positioned above content
+                VStack(spacing: geometry.size.height * 0.02) {
+                    // Stack logo positioned above content - smaller to save space
                     Image("promo_logo")
                         .resizable()
                         .renderingMode(.template)
                         .foregroundColor(.white)
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: geometry.size.width * 0.2, height: geometry.size.height * 0.2)
+                        .frame(width: geometry.size.width * 0.25, height: geometry.size.height * 0.18)
                     
-                    // Main content with labels
-                    VStack(spacing: geometry.size.height * 0.05) {
+                    // Main content with labels - reduced spacing
+                    VStack(spacing: geometry.size.height * 0.03) {
                         // Duration with label
-                        VStack(spacing: 4) {
+                        VStack(spacing: 2) {
                             Text("DURATION")
-                                .font(.plusJakarta(.caption2, weight: .bold))
-                                .foregroundColor(.white.opacity(0.6))
-                                .tracking(1.2)
+                                .font(.plusJakarta(.caption, weight: .medium))
+                                .foregroundColor(.white.opacity(0.5))
+                                .tracking(1.0)
                             Text(duration.uppercased())
-                                .font(.plusJakarta(.title2, weight: .semibold))
+                                .font(.plusJakarta(.title, weight: .heavy))
                                 .foregroundColor(.white)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         
                         // Buy-in with label
-                        VStack(spacing: 4) {
+                        VStack(spacing: 2) {
                             Text("BUY-IN")
-                                .font(.plusJakarta(.caption2, weight: .bold))
-                                .foregroundColor(.white.opacity(0.6))
-                                .tracking(1.2)
+                                .font(.plusJakarta(.caption, weight: .medium))
+                                .foregroundColor(.white.opacity(0.5))
+                                .tracking(1.0)
                             Text(formattedBuyIn)
-                                .font(.plusJakarta(.title2, weight: .semibold))
+                                .font(.plusJakarta(.title, weight: .heavy))
                                 .foregroundColor(.white)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         
                         // Cashout with label
-                        VStack(spacing: 4) {
+                        VStack(spacing: 2) {
                             Text("CASHOUT")
-                                .font(.plusJakarta(.caption2, weight: .bold))
-                                .foregroundColor(.white.opacity(0.6))
-                                .tracking(1.2)
+                                .font(.plusJakarta(.caption, weight: .medium))
+                                .foregroundColor(.white.opacity(0.5))
+                                .tracking(1.0)
                             Text(formattedCashOut)
-                                .font(.plusJakarta(.title2, weight: .semibold))
+                                .font(.plusJakarta(.title, weight: .heavy))
                                 .foregroundColor(.white)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                     }
                     
                     Spacer()
                 }
-                .padding(geometry.size.width * 0.08)
+                .padding(geometry.size.width * 0.06)
             }
         }
         .frame(width: 350, height: 280)
         .onAppear {
             editedTitle = gameName
         }
+        .alert("Edit Game Name", isPresented: $showingEditAlert) {
+            TextField("Game name", text: $editedTitle)
+            Button("Cancel", role: .cancel) {
+                editedTitle = gameName // Reset to original
+            }
+            Button("Save") {
+                saveTitle()
+            }
+        } message: {
+            Text("Enter a new name for this game")
+        }
     }
     
     // MARK: - Helper Functions
-    private func startEditing() {
+    private func showEditAlert() {
         editedTitle = gameName
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isEditingTitle = true
-        }
+        showingEditAlert = true
     }
     
     private func saveTitle() {
@@ -295,13 +429,6 @@ struct MinimalShareCardView: View {
         if !trimmedTitle.isEmpty {
             onTitleChanged?(trimmedTitle)
         }
-        
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isEditingTitle = false
-        }
-        
-        // Dismiss keyboard
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 

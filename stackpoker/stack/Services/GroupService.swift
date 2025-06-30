@@ -3,7 +3,33 @@ import FirebaseFirestore
 import FirebaseAuth
 import FirebaseStorage
 import Combine
+import UIKit
 
+enum GroupError: Error {
+    case notAuthenticated
+    case groupNotFound
+    case userNotFound
+    case invalidData
+    case userAlreadyMember
+    case inviteAlreadyExists
+    case inviteNotFound
+    case ownerCannotLeave
+    case permissionDenied
+    case selfInvite
+}
+
+// Add asyncMap to sequence for concurrent operations
+extension Sequence {
+    func asyncMap<T>(_ transform: (Element) async throws -> T) async rethrows -> [T] {
+        var values = [T]()
+        for element in self {
+            try await values.append(transform(element))
+        }
+        return values
+    }
+}
+
+@MainActor
 class GroupService: ObservableObject {
     private let db = Firestore.firestore()
     private let storage = Storage.storage()
@@ -19,10 +45,19 @@ class GroupService: ObservableObject {
     private var messageListener: ListenerRegistration?
     private var lastMessageDocument: DocumentSnapshot?
     
+    private let userService = UserService()
+    
+    // Cleanup listener
+    deinit {
+        messageListener?.remove()
+        messageListener = nil
+        lastMessageDocument = nil
+    }
+    
     // Create a new group
-    func createGroup(name: String, description: String?, image: UIImage? = nil) async throws -> UserGroup {
+    func createGroup(name: String, description: String?, image: UIImage? = nil, leaderboardType: String? = nil) async throws -> UserGroup {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Create a new group document
@@ -35,8 +70,14 @@ class GroupService: ObservableObject {
             "description": description ?? "",
             "createdAt": timestamp,
             "ownerId": userId,
-            "memberCount": 1
+            "memberCount": 1,
+            "leaderboardType": "most_hours" // Default to most hours
         ]
+        
+        // Add leaderboard type if provided
+        if let leaderboardType = leaderboardType {
+            groupData["leaderboardType"] = leaderboardType
+        }
         
         // If image is provided, upload it first
         if let image = image {
@@ -75,14 +116,13 @@ class GroupService: ObservableObject {
             createdAt: timestamp.dateValue(),
             ownerId: userId,
             avatarURL: groupData["avatarURL"] as? String,
-            memberCount: 1
+            memberCount: 1,
+            leaderboardType: leaderboardType
         )
         
         // Update the published groups list
-        await MainActor.run {
-            self.userGroups.append(newGroup)
-            self.userGroups.sort { $0.createdAt > $1.createdAt }
-        }
+        self.userGroups.append(newGroup)
+        self.userGroups.sort { $0.createdAt > $1.createdAt }
         
         return newGroup
     }
@@ -90,26 +130,20 @@ class GroupService: ObservableObject {
     // Fetch groups the user is a member of
     func fetchUserGroups() async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
-        await MainActor.run {
-            self.isLoading = true
-            self.error = nil
-        }
+        self.isLoading = true
+        self.error = nil
         
         do {
             let fetchedGroups = try await _fetchUserGroupsData(userId: userId)
             
-            await MainActor.run {
-                self.userGroups = fetchedGroups
-                self.isLoading = false
-            }
+            self.userGroups = fetchedGroups
+            self.isLoading = false
         } catch {
-            await MainActor.run {
-                self.error = error
-                self.isLoading = false
-            }
+            self.error = error
+            self.isLoading = false
             throw error
         }
     }
@@ -160,14 +194,14 @@ class GroupService: ObservableObject {
     // Send an invite to a user to join a group
     func inviteUserToGroup(username: String, groupId: String) async throws {
         guard let currentUserId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // First, get the group to confirm existence and get name
         let groupDoc = try await db.collection("groups").document(groupId).getDocument()
         
         guard let groupData = groupDoc.data(), groupDoc.exists else {
-            throw GroupServiceError.groupNotFound
+            throw GroupError.groupNotFound
         }
         
         let groupName = groupData["name"] as? String ?? "Unknown Group"
@@ -178,7 +212,7 @@ class GroupService: ObservableObject {
             .getDocuments()
         
         guard let userDoc = userQuery.documents.first, let inviteeId = userDoc.data()["id"] as? String else {
-            throw GroupServiceError.userNotFound
+            throw GroupError.userNotFound
         }
         
         // Check if the user is already a member
@@ -189,7 +223,7 @@ class GroupService: ObservableObject {
             .getDocument()
         
         if memberDoc.exists {
-            throw GroupServiceError.userAlreadyMember
+            throw GroupError.userAlreadyMember
         }
         
         // Check if an invite is already pending
@@ -201,7 +235,7 @@ class GroupService: ObservableObject {
             .getDocuments()
         
         if !inviteQuery.documents.isEmpty {
-            throw GroupServiceError.inviteAlreadyExists
+            throw GroupError.inviteAlreadyExists
         }
         
         // Get the current user's name
@@ -239,26 +273,20 @@ class GroupService: ObservableObject {
     // Fetch pending group invites for the current user
     func fetchPendingInvites() async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
-        await MainActor.run {
-            self.isLoading = true
-            self.error = nil
-        }
+        self.isLoading = true
+        self.error = nil
         
         do {
             let fetchedInvites = try await _fetchPendingInvitesData(userId: userId)
             
-            await MainActor.run {
-                self.pendingInvites = fetchedInvites
-                self.isLoading = false
-            }
+            self.pendingInvites = fetchedInvites
+            self.isLoading = false
         } catch {
-            await MainActor.run {
-                self.error = error
-                self.isLoading = false
-            }
+            self.error = error
+            self.isLoading = false
             throw error
         }
     }
@@ -289,7 +317,7 @@ class GroupService: ObservableObject {
     // Accept a group invite
     func acceptInvite(inviteId: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Get the invite
@@ -301,11 +329,11 @@ class GroupService: ObservableObject {
         let inviteDoc = try await inviteRef.getDocument()
         
         guard let inviteData = inviteDoc.data(), inviteDoc.exists else {
-            throw GroupServiceError.inviteNotFound
+            throw GroupError.inviteNotFound
         }
         
         guard let groupId = inviteData["groupId"] as? String else {
-            throw GroupServiceError.invalidData
+            throw GroupError.invalidData
         }
         
         // Update the invite status
@@ -345,9 +373,7 @@ class GroupService: ObservableObject {
         ])
         
         // Update the local pending invites list
-        await MainActor.run {
-            self.pendingInvites.removeAll { $0.id == inviteId }
-        }
+        self.pendingInvites.removeAll { $0.id == inviteId }
         
         // Refresh the user's groups
         try await fetchUserGroups()
@@ -356,7 +382,7 @@ class GroupService: ObservableObject {
     // Decline a group invite
     func declineInvite(inviteId: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Update the invite status
@@ -370,29 +396,27 @@ class GroupService: ObservableObject {
         ])
         
         // Update the local pending invites list
-        await MainActor.run {
-            self.pendingInvites.removeAll { $0.id == inviteId }
-        }
+        self.pendingInvites.removeAll { $0.id == inviteId }
     }
     
     // Leave a group
     func leaveGroup(groupId: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Get the group to check if the user is the owner
         let groupDoc = try await db.collection("groups").document(groupId).getDocument()
         
         guard let groupData = groupDoc.data(), groupDoc.exists else {
-            throw GroupServiceError.groupNotFound
+            throw GroupError.groupNotFound
         }
         
         let ownerId = groupData["ownerId"] as? String
         
         // Owner cannot leave the group (they must delete it or transfer ownership)
         if ownerId == userId {
-            throw GroupServiceError.ownerCannotLeave
+            throw GroupError.ownerCannotLeave
         }
         
         // Remove the user from the group's members
@@ -418,35 +442,27 @@ class GroupService: ObservableObject {
         ])
         
         // Update the local groups list
-        await MainActor.run {
-            self.userGroups.removeAll { $0.id == groupId }
-        }
+        self.userGroups.removeAll { $0.id == groupId }
     }
     
     // Fetch users for the invite dropdown
     func fetchAvailableUsers() async throws {
         guard let currentUserId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
 
-        await MainActor.run {
-            self.isLoading = true
-            self.error = nil // Also clear previous error
-        }
+        self.isLoading = true
+        self.error = nil // Also clear previous error
 
         do {
             let fetchedUsers = try await _fetchAvailableUsersData(currentUserId: currentUserId)
             
-            await MainActor.run {
-                self.availableUsers = fetchedUsers
-                self.isLoading = false
-            }
+            self.availableUsers = fetchedUsers
+            self.isLoading = false
             
         } catch {
-            await MainActor.run {
-                self.error = error
-                self.isLoading = false
-            }
+            self.error = error
+            self.isLoading = false
             throw error
         }
     }
@@ -488,28 +504,22 @@ class GroupService: ObservableObject {
     // Fetch all members of a group
     func fetchGroupMembers(groupId: String) async throws {
         guard Auth.auth().currentUser != nil else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
 
-        await MainActor.run {
-            self.isLoading = true
-            self.groupMembers = [] // Clear previous members
-            self.error = nil // Clear previous error
-        }
+        self.isLoading = true
+        self.groupMembers = [] // Clear previous members
+        self.error = nil // Clear previous error
 
         do {
             let fetchedMembers = try await _fetchGroupMembersData(groupId: groupId)
             
-            await MainActor.run {
-                self.groupMembers = fetchedMembers
-                self.isLoading = false
-            }
+            self.groupMembers = fetchedMembers
+            self.isLoading = false
             
         } catch {
-            await MainActor.run {
-                self.error = error
-                self.isLoading = false
-            }
+            self.error = error
+            self.isLoading = false
             throw error
         }
     }
@@ -569,12 +579,58 @@ class GroupService: ObservableObject {
         return members
     }
     
+    // Upload a group profile image with completion handler (like UserService)
+    func uploadGroupImageWithCompletion(_ image: UIImage, groupId: String, completion: @escaping (Result<String, Error>) -> Void) {
+        let fileName = "group_\(groupId)_\(UUID().uuidString).jpg"
+        let storageRef = storage.reference().child("groups/\(fileName)")
+        
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            completion(.failure(NSError(domain: "ImageError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Could not convert image."])))
+            return
+        }
+        
+        // Add metadata to help with parsing
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        
+        storageRef.putData(imageData, metadata: metadata) { metadata, error in
+            if let error = error {
+                print("❌ Upload error: \(error)")
+                completion(.failure(error))
+                return
+            }
+            
+            print("✅ Upload successful, getting download URL...")
+            
+            // Add a small delay to ensure the upload is fully processed
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                storageRef.downloadURL { url, error in
+                    if let error = error {
+                        print("❌ Download URL error: \(error)")
+                        completion(.failure(error))
+                        return
+                    }
+                    
+                    if let urlString = url?.absoluteString {
+                        print("✅ Got download URL: \(urlString)")
+                        // Ensure we're using HTTPS
+                        let httpsUrlString = urlString.replacingOccurrences(of: "http://", with: "https://")
+                        completion(.success(httpsUrlString))
+                    } else {
+                        print("❌ No URL returned")
+                        completion(.failure(NSError(domain: "URLError", code: 0, userInfo: [NSLocalizedDescriptionKey: "No URL returned."])))
+                    }
+                }
+            }
+        }
+    }
+
     // Upload a group profile image and return its download URL
     func uploadGroupImage(_ image: UIImage, groupId: String) async throws -> String {
         
         // Compress the image to reduce upload size
         guard let imageData = image.jpegData(compressionQuality: 0.7) else {
-            throw GroupServiceError.invalidData
+            throw GroupError.invalidData
         }
         
         // Create a unique file name for the image
@@ -621,7 +677,7 @@ class GroupService: ObservableObject {
     // Update the group avatar URL directly
     func updateGroupAvatar(groupId: String, avatarURL: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Check if the user is the group owner or fetch the group if needed
@@ -632,7 +688,7 @@ class GroupService: ObservableObject {
         guard let groupData = groupDoc.data(),
               let ownerId = groupData["ownerId"] as? String,
               ownerId == userId else {
-            throw GroupServiceError.permissionDenied
+            throw GroupError.permissionDenied
         }
         
         // Update the group's avatarURL field
@@ -641,12 +697,10 @@ class GroupService: ObservableObject {
             .updateData(["avatarURL": avatarURL])
         
         // Update the group in the local list
-        await MainActor.run {
-            if let index = self.userGroups.firstIndex(where: { $0.id == groupId }) {
-                var updatedGroup = self.userGroups[index]
-                updatedGroup.avatarURL = avatarURL
-                self.userGroups[index] = updatedGroup
-            }
+        if let index = self.userGroups.firstIndex(where: { $0.id == groupId }) {
+            var updatedGroup = self.userGroups[index]
+            updatedGroup.avatarURL = avatarURL
+            self.userGroups[index] = updatedGroup
         }
     }
     
@@ -655,7 +709,7 @@ class GroupService: ObservableObject {
     // Simple message fetching with pagination
     func fetchGroupMessages(groupId: String, limit: Int = 30, loadMore: Bool = false) async throws {
         guard Auth.auth().currentUser != nil else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
 
         print("🔍 fetchGroupMessages called - groupId: \(groupId), limit: \(limit), loadMore: \(loadMore)")
@@ -703,24 +757,22 @@ class GroupService: ObservableObject {
             // Store last document for pagination
             lastMessageDocument = snapshot.documents.last
             
-            await MainActor.run {
-                if loadMore {
-                    // Append to existing messages (older messages go at the beginning)
-                    self.groupMessages = newMessages + self.groupMessages
-                    print("📈 Load more: total messages now: \(self.groupMessages.count)")
-                } else {
-                    // Replace all messages
-                    self.groupMessages = newMessages
-                    print("🔄 Initial load: \(self.groupMessages.count) messages")
-                    
-                    // Set up real-time listener for new messages only
-                    setupNewMessageListener(groupId: groupId)
-                }
+            if loadMore {
+                // Append to existing messages (older messages go at the beginning)
+                self.groupMessages = newMessages + self.groupMessages
+                print("📈 Load more: total messages now: \(self.groupMessages.count)")
+            } else {
+                // Replace all messages
+                self.groupMessages = newMessages
+                print("🔄 Initial load: \(self.groupMessages.count) messages")
                 
-                // Sort by timestamp (oldest first)
-                self.groupMessages.sort { $0.timestamp < $1.timestamp }
-                print("✅ Final message count after sort: \(self.groupMessages.count)")
+                // Set up real-time listener for new messages only
+                setupNewMessageListener(groupId: groupId)
             }
+            
+            // Sort by timestamp (oldest first)
+            self.groupMessages.sort { $0.timestamp < $1.timestamp }
+            print("✅ Final message count after sort: \(self.groupMessages.count)")
             
         } catch {
             print("❌ Error fetching messages: \(error)")
@@ -743,14 +795,12 @@ class GroupService: ObservableObject {
                 for change in snapshot.documentChanges {
                     if change.type == .added {
                         if let message = try? GroupMessage(dictionary: change.document.data(), id: change.document.documentID) {
-                            DispatchQueue.main.async {
-                                // Check if message already exists
-                                if !self.groupMessages.contains(where: { $0.id == message.id }) {
-                                    self.groupMessages.append(message)
-                                    // Keep sorted
-                                    self.groupMessages.sort { $0.timestamp < $1.timestamp }
-                                    print("📨 New message received via listener: \(message.id)")
-                                }
+                            // Check if message already exists
+                            if !self.groupMessages.contains(where: { $0.id == message.id }) {
+                                self.groupMessages.append(message)
+                                // Keep sorted
+                                self.groupMessages.sort { $0.timestamp < $1.timestamp }
+                                print("📨 New message received via listener: \(message.id)")
                             }
                         }
                     }
@@ -769,13 +819,13 @@ class GroupService: ObservableObject {
     // Send a text message
     func sendTextMessage(groupId: String, text: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Get the user's info
         let userDoc = try await db.collection("users").document(userId).getDocument()
         guard let userData = userDoc.data() else {
-            throw GroupServiceError.invalidData
+            throw GroupError.invalidData
         }
         
         let username = userData["username"] as? String ?? "Unknown"
@@ -811,22 +861,20 @@ class GroupService: ObservableObject {
         ])
         
         // Notify that a message was sent to update group order
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
-        }
+        NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
     }
     
     // Send an image message
     func sendImageMessage(groupId: String, image: UIImage) async throws {
         
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Get the user's info
         let userDoc = try await db.collection("users").document(userId).getDocument()
         guard let userData = userDoc.data() else {
-            throw GroupServiceError.invalidData
+            throw GroupError.invalidData
         }
         
         let username = userData["username"] as? String ?? "Unknown"
@@ -868,7 +916,7 @@ class GroupService: ObservableObject {
         }
         
         guard let finalImageData = imageData else {
-            throw GroupServiceError.invalidData
+            throw GroupError.invalidData
         }
         
         
@@ -934,9 +982,7 @@ class GroupService: ObservableObject {
             ])
             
             // Notify that a message was sent to update group order
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
-            }
+            NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
             
             return
         } catch {
@@ -947,13 +993,13 @@ class GroupService: ObservableObject {
     // Send a hand history message
     func sendHandMessage(groupId: String, handHistoryId: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Get the user's info
         let userDoc = try await db.collection("users").document(userId).getDocument()
         guard let userData = userDoc.data() else {
-            throw GroupServiceError.invalidData
+            throw GroupError.invalidData
         }
         
         let username = userData["username"] as? String ?? "Unknown"
@@ -990,21 +1036,19 @@ class GroupService: ObservableObject {
         ])
         
         // Notify that a message was sent to update group order
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
-        }
+        NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
     }
     
     // Add sendHomeGameMessage function
     func sendHomeGameMessage(groupId: String, homeGame: HomeGame) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Get the user's info
         let userDoc = try await db.collection("users").document(userId).getDocument()
         guard let userData = userDoc.data() else {
-            throw GroupServiceError.invalidData
+            throw GroupError.invalidData
         }
         
         let username = userData["username"] as? String ?? "Unknown"
@@ -1098,29 +1142,27 @@ class GroupService: ObservableObject {
         ])
         
         // Notify that a message was sent to update group order
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
-        }
+        NotificationCenter.default.post(name: NSNotification.Name("GroupMessageSent"), object: nil)
     }
     
     // Delete a group (only owner can do this)
     func deleteGroup(groupId: String) async throws {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupServiceError.notAuthenticated
+            throw GroupError.notAuthenticated
         }
         
         // Get the group to check if the user is the owner
         let groupDoc = try await db.collection("groups").document(groupId).getDocument()
         
         guard let groupData = groupDoc.data(), groupDoc.exists else {
-            throw GroupServiceError.groupNotFound
+            throw GroupError.groupNotFound
         }
         
         let ownerId = groupData["ownerId"] as? String
         
         // Only owner can delete the group
         guard ownerId == userId else {
-            throw GroupServiceError.permissionDenied
+            throw GroupError.permissionDenied
         }
         
         // Delete all messages in the group
@@ -1174,9 +1216,86 @@ class GroupService: ObservableObject {
         try await db.collection("groups").document(groupId).delete()
         
         // Update the local groups list
-        await MainActor.run {
-            self.userGroups.removeAll { $0.id == groupId }
+        self.userGroups.removeAll { $0.id == groupId }
+    }
+    
+    // Update the group's leaderboard type
+    func updateGroupLeaderboard(groupId: String, leaderboardType: String) async throws {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw GroupError.notAuthenticated
         }
+        
+        let groupRef = db.collection("groups").document(groupId)
+        let groupDoc = try await groupRef.getDocument()
+        
+        guard let groupData = groupDoc.data(),
+              let ownerId = groupData["ownerId"] as? String,
+              ownerId == userId else {
+            throw GroupError.permissionDenied
+        }
+        
+        try await groupRef.updateData(["leaderboardType": leaderboardType])
+        
+        // Update the local userGroups cache
+        if let index = userGroups.firstIndex(where: { $0.id == groupId }) {
+            userGroups[index].leaderboardType = leaderboardType
+        }
+    }
+    
+    // MARK: - Leaderboard Functionality
+    
+    func getLeaderboard(groupId: String, type: String) async throws -> [LeaderboardEntry] {
+        guard let currentUserId = Auth.auth().currentUser?.uid else {
+            throw GroupError.notAuthenticated
+        }
+
+        // 1. Fetch all members of the group
+        let membersSnapshot = try await db.collection("groups").document(groupId).collection("members").getDocuments()
+        let memberIds = membersSnapshot.documents.map { $0.documentID }
+        
+        guard !memberIds.isEmpty else {
+            return [] // No members in the group
+        }
+
+        // 2. Fetch all user profiles for the members in parallel
+        let userProfiles = try await memberIds.asyncMap { memberId -> UserProfile? in
+            return try? await userService.fetchUserProfile(userId: memberId)
+        }.compactMap { $0 }
+
+        // 3. Fetch all sessions for all members in parallel
+        let memberHours = try await memberIds.asyncMap { memberId -> (String, Double) in
+            var totalDuration: TimeInterval = 0
+            
+            // Assuming sessions are stored in a 'sessions' subcollection under each user
+            let sessionsSnapshot = try await db.collection("users").document(memberId).collection("sessions").getDocuments()
+            
+            for document in sessionsSnapshot.documents {
+                // Look for 'duration' or 'elapsedTime' and ensure it's a number
+                if let duration = document.data()["duration"] as? TimeInterval {
+                    totalDuration += duration
+                } else if let elapsedTime = document.data()["elapsedTime"] as? TimeInterval {
+                    totalDuration += elapsedTime
+                } else if let hoursPlayed = document.data()["hoursPlayed"] as? Double {
+                    totalDuration += (hoursPlayed * 3600.0) // Convert hours to seconds
+                }
+            }
+            
+            let totalHours = totalDuration / 3600.0
+            return (memberId, totalHours)
+        }
+
+        // 4. Await results and build leaderboard
+        let hoursDictionary = Dictionary(uniqueKeysWithValues: memberHours)
+
+        let leaderboardEntries = userProfiles.map { profile -> LeaderboardEntry in
+            let userHours = hoursDictionary[profile.id] ?? 0.0
+            return LeaderboardEntry(id: profile.id, user: profile, totalHours: userHours)
+        }
+
+        // 5. Sort the leaderboard by hours descending
+        let sortedLeaderboard = leaderboardEntries.sorted { $0.totalHours > $1.totalHours }
+        
+        return sortedLeaderboard
     }
 }
 
