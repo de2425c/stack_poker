@@ -70,11 +70,6 @@ struct GroupChatView: View {
     @State private var scrollToBottom = false
     @State private var lastMessageId: String?
     
-    // Leaderboard State
-    @State private var leaderboard: [LeaderboardEntry] = []
-    @State private var isLeaderboardLoading = false
-    @State private var showingLeaderboard = false
-    
     // To store cancellables
     @State private var cancellables = Set<AnyCancellable>()
     
@@ -155,71 +150,6 @@ struct GroupChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
-    }
-    
-    // MARK: - Leaderboard Banner
-    @ViewBuilder
-    private var leaderboardBanner: some View {
-        if isLeaderboardLoading {
-            HStack {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                
-                Text("Loading leaderboard...")
-                    .font(.custom("PlusJakartaSans-Medium", size: 14))
-                    .foregroundColor(.gray)
-                    .padding(.leading, 8)
-                
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Color.black.opacity(0.2))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-        } else if let topPlayer = leaderboard.first {
-            Button(action: { showingLeaderboard = true }) {
-                HStack(spacing: 12) {
-                    Image(systemName: "crown.fill")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(Color(red: 255/255, green: 193/255, blue: 64/255))
-                    
-                    KFImage(topPlayer.user.avatarURL.flatMap(URL.init))
-                        .placeholder {
-                            Image(systemName: "person.fill")
-                                .frame(width: 36, height: 36)
-                                .background(Color.black.opacity(0.2))
-                                .clipShape(Circle())
-                        }
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 36, height: 36)
-                        .clipShape(Circle())
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(topPlayer.user.displayName ?? "Unknown Player")
-                            .font(.custom("PlusJakartaSans-Bold", size: 15))
-                            .foregroundColor(.white)
-                        Text("is leading with \(String(format: "%.1f", topPlayer.totalHours)) hours")
-                            .font(.custom("PlusJakartaSans-Medium", size: 13))
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Color.black.opacity(0.2))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-        }
     }
     
     // MARK: - Pinned Game View
@@ -539,9 +469,6 @@ struct GroupChatView: View {
             // Custom navigation bar
             navigationBar
             
-            // Leaderboard Banner
-            leaderboardBanner
-            
             // Pinned home game (if any)
             pinnedGameView
             
@@ -665,7 +592,6 @@ struct GroupChatView: View {
             // Set up Combine subscription to groupService
             setupSubscription()
             setupKeyboardObservers()
-            loadLeaderboard()
         }
         .onDisappear {
             // Restore navigation bar appearance
@@ -762,15 +688,6 @@ struct GroupChatView: View {
             GroupDetailView(group: $group)
                 .navigationBarHidden(true)
         }
-        // Present the leaderboard view
-        .sheet(isPresented: $showingLeaderboard) {
-            GroupLeaderboardView(leaderboard: leaderboard, groupName: group.name)
-        }
-        .onChange(of: group.leaderboardType) { _ in
-            loadLeaderboard()
-        }
-        // Remove sheet-specific presentation settings
-
         // Global full-screen image viewer
         .fullScreenCover(item: $viewerImageURL) { url in
             FullScreenImageView(imageURL: url, onDismiss: { viewerImageURL = nil })
@@ -922,37 +839,6 @@ struct GroupChatView: View {
             }
         }
         */
-    }
-    
-    private func loadLeaderboard() {
-        print("Checking leaderboard. Group: \(group.name), Type: \(group.leaderboardType ?? "nil")")
-        guard group.leaderboardType == "most_hours" else {
-            print("Leaderboard type is not 'most_hours'. Aborting.")
-            // Clear the leaderboard if the type is not correct
-            if !leaderboard.isEmpty {
-                self.leaderboard = []
-            }
-            return
-        }
-        
-        isLeaderboardLoading = true
-        print("Leaderboard loading started.")
-        Task {
-            do {
-                let fetchedLeaderboard = try await groupService.getLeaderboard(groupId: group.id, type: "most_hours")
-                await MainActor.run {
-                    print("Fetched leaderboard with \(fetchedLeaderboard.count) entries.")
-                    self.leaderboard = fetchedLeaderboard
-                    self.isLeaderboardLoading = false
-                    print("Leaderboard loading finished.")
-                }
-            } catch {
-                await MainActor.run {
-                    print("Error loading leaderboard: \(error.localizedDescription)")
-                    self.isLeaderboardLoading = false
-                }
-            }
-        }
     }
     
     private func loadMessages() {

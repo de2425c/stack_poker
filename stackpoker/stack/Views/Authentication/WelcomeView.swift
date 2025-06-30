@@ -1,5 +1,33 @@
 import SwiftUI
 
+// Helper function to detect iPad even in compatibility mode
+func isActuallyIpadEvenIfCompatibilityMode() -> Bool {
+    // Check SIMULATOR_MODEL_IDENTIFIER first
+    if let simModel = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
+        let isSimulatorIpad = simModel.contains("iPad")
+        print("🔍 Simulator Model: \(simModel)")
+        print("🔍 Is Simulator iPad: \(isSimulatorIpad)")
+        if isSimulatorIpad {
+            return true
+        }
+    }
+
+    // Fallback for physical device or older simulators
+    var systemInfo = utsname()
+    uname(&systemInfo)
+    let model = withUnsafePointer(to: &systemInfo.machine) {
+        $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+            ptr in String(validatingUTF8: ptr) ?? "unknown"
+        }
+    }
+
+    let isPhysicalIpad = model.contains("iPad")
+    print("🔍 Physical Device Model: \(model)")
+    print("🔍 Is Physical iPad: \(isPhysicalIpad)")
+    
+    return isPhysicalIpad
+}
+
 struct WelcomeView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
     @State private var showingSignIn = false
@@ -152,7 +180,7 @@ struct WelcomeView: View {
                     }
                     
                     Spacer()
-                        .frame(maxHeight: 30) // Reduced from 40
+                        .frame(maxHeight: isActuallyIpadEvenIfCompatibilityMode() ? 10 : 30) // iPad gets less spacer height to push buttons up
                     
                     // Bottom section with buttons - always at bottom
                     VStack() {
@@ -181,29 +209,31 @@ struct WelcomeView: View {
                             .cornerRadius(28)
                         }
                         
-                        // Phone Sign Up Button
-                        Button(action: { showingPhoneSignUp = true }) {
-                            HStack {
-                                Image(systemName: "phone")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white)
-                                Text("Sign Up with Phone")
-                                    .font(.custom("PlusJakartaSans-SemiBold", size: 18))
-                                    .foregroundColor(.white)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [
-                                        Color.white.opacity(0.15),
-                                        Color.white.opacity(0.25)
-                                    ]),
-                                    startPoint: .leading,
-                                    endPoint: .trailing
+                        // Phone Sign Up Button - HIDDEN ON IPAD
+                        if !isActuallyIpadEvenIfCompatibilityMode() {
+                            Button(action: { showingPhoneSignUp = true }) {
+                                HStack {
+                                    Image(systemName: "phone")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.white)
+                                    Text("Sign Up with Phone")
+                                        .font(.custom("PlusJakartaSans-SemiBold", size: 18))
+                                        .foregroundColor(.white)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 56)
+                                .background(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color.white.opacity(0.15),
+                                            Color.white.opacity(0.25)
+                                        ]),
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
                                 )
-                            )
-                            .cornerRadius(28)
+                                .cornerRadius(28)
+                            }
                         }
                         
                         // Sign In Button
@@ -215,7 +245,19 @@ struct WelcomeView: View {
                         .padding(.top, 8)
                     }
                     .padding(.horizontal, 38)
-                    .padding(.bottom, max(geometry.safeAreaInsets.bottom + 20, 20)) // Ensure minimum padding
+                    .padding(.bottom, {
+                        let isIpad = isActuallyIpadEvenIfCompatibilityMode()
+                        let safeAreaBottom = geometry.safeAreaInsets.bottom
+                        let calculatedPadding = max(safeAreaBottom + 20, 20)
+                        let finalPadding = isIpad ? 40 : calculatedPadding
+                        
+                        print("📱 Safe Area Bottom: \(safeAreaBottom)")
+                        print("📱 Calculated Padding (non-iPad): \(calculatedPadding)")
+                        print("📱 Using iPad logic: \(isIpad)")
+                        print("📱 Final Bottom Padding: \(finalPadding)")
+                        
+                        return finalPadding
+                    }()) // iPad gets fixed 40pt padding, others use safe area logic
                     .opacity(buttonsOpacity)
                 }
             }

@@ -1657,7 +1657,6 @@ struct PostDetailView: View {
     @State private var isLoadingComments = true
     @State private var showDeleteConfirm = false
     @FocusState private var isCommentFieldFocused: Bool
-    @State private var keyboardHeight: CGFloat = 0 // Added for manual keyboard handling
     @State private var showFlaggedAlert = false
     
     // Global image viewer state for this detail view
@@ -1719,19 +1718,12 @@ struct PostDetailView: View {
                         .padding(.bottom, 70) 
                     }
                 }
-            } 
-            .overlay( 
-                VStack(spacing:0) {
-                    Spacer() 
-                    commentInputView
-                        .padding(.bottom, keyboardHeight) // Fixed: Remove extra padding to make input bar flush with bottom
-                        .animation(.easeInOut(duration: 0.25), value: keyboardHeight)
-                }
-                .ignoresSafeArea(.keyboard, edges: .bottom)
-                , alignment: .bottom
-            )
+                    } 
+        .safeAreaInset(edge: .bottom) {
+            commentInputView
+        }
         } 
-        .ignoresSafeArea(.keyboard)
+        // .ignoresSafeArea(.keyboard)
         .confirmationDialog(
             "Delete this post?",
             isPresented: $showDeleteConfirm,
@@ -1763,17 +1755,9 @@ struct PostDetailView: View {
         }
         .onAppear {
             loadComments()
-            NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { notification in
-                guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
-                self.keyboardHeight = keyboardFrame.height
-            }
-            NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
-                self.keyboardHeight = 0
-            }
         }
         .onDisappear {
-            NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
-            NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+            // Cleanup when view disappears
         }
         .onChange(of: post.isLiked) { newValue in
             isLiked = newValue
@@ -1920,61 +1904,65 @@ struct PostDetailView: View {
     // Extracted ViewBuilder for Comment Input View
     @ViewBuilder
     private var commentInputView: some View {
-        VStack(spacing: 0) {
-            Divider()
-                .background(Color.white.opacity(0.1))
+        HStack(spacing: 12) {
+            // Profile picture
+            if let profileImageURL = userService.currentUserProfile?.avatarURL {
+                KFImage(URL(string: profileImageURL))
+                    .placeholder {
+                        PlaceholderAvatarView(size: 36)
+                    }
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 36, height: 36)
+                    .clipShape(Circle())
+            } else {
+                PlaceholderAvatarView(size: 36)
+            }
             
-            HStack(spacing: 14) {
-                if let profileImageURL = userService.currentUserProfile?.avatarURL {
-                    KFImage(URL(string: profileImageURL))
-                        .placeholder {
-                            PlaceholderAvatarView(size: 32)
-                        }
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 32, height: 32)
-                        .clipShape(Circle())
-                } else {
-                    PlaceholderAvatarView(size: 32)
-                }
-                
-                ZStack(alignment: .trailing) {
-                    TextField(replyingToComment != nil ? "Replying to @\(replyingToComment!.username)..." : "Add a comment...", text: $newCommentText)
-                        .font(.system(size: 16))
-                        .padding(12)
-                        .background(Color(red: 25/255, green: 25/255, blue: 30/255))
-                        .cornerRadius(20)
-                        .foregroundColor(.white)
-                        .focused($isCommentFieldFocused)
-                        
-                    if !newCommentText.isEmpty {
-                        Button(action: {
+            // Text field with send button
+            HStack(spacing: 8) {
+                TextField(replyingToComment != nil ? "Reply to @\(replyingToComment!.username)" : "Add a comment...", text: $newCommentText, axis: .vertical)
+                    .font(.system(size: 16))
+                    .foregroundColor(.white)
+                    .focused($isCommentFieldFocused)
+                    .submitLabel(.send)
+                    .lineLimit(1...4)
+                    .onSubmit {
+                        if !newCommentText.isEmpty {
                             addComment()
-                            // No animation needed for simple send
-                        }) {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 26))
-                                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                .padding(.trailing, 8)
                         }
                     }
+                
+                if !newCommentText.isEmpty {
+                    Button(action: {
+                        addComment()
+                    }) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    }
+                    .transition(.scale.combined(with: .opacity))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: !newCommentText.isEmpty)
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12) // This is the internal padding of the input bar
+            .padding(.vertical, 12)
             .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(red: 20/255, green: 20/255, blue: 24/255),
-                        Color(red: 18/255, green: 18/255, blue: 22/255)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .shadow(color: .black.opacity(0.3), radius: 5, y: -2)
+                RoundedRectangle(cornerRadius: 24)
+                    .foregroundColor(Color(red: 28/255, green: 28/255, blue: 32/255))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
             )
         }
-        // No .ignoresSafeArea(.keyboard) here on the commentInputView itself
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(
+            Rectangle()
+                .foregroundColor(Color(red: 15/255, green: 15/255, blue: 20/255))
+                .ignoresSafeArea(edges: .horizontal)
+        )
     }
 
     private func loadComments() {

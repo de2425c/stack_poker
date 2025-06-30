@@ -55,69 +55,46 @@ class GroupService: ObservableObject {
     }
     
     // Create a new group
-    func createGroup(name: String, description: String?, image: UIImage? = nil, leaderboardType: String? = nil) async throws -> UserGroup {
+    func createGroup(name: String, description: String?, image: UIImage? = nil) async throws -> UserGroup {
         guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupError.notAuthenticated
+            throw GroupServiceError.notAuthenticated
         }
         
-        // Create a new group document
-        let groupRef = db.collection("groups").document()
-        let groupId = groupRef.documentID
+        let groupId = UUID().uuidString
+        let now = Date()
         
-        let timestamp = Timestamp(date: Date())
         var groupData: [String: Any] = [
             "name": name,
-            "description": description ?? "",
-            "createdAt": timestamp,
             "ownerId": userId,
-            "memberCount": 1,
-            "leaderboardType": "most_hours" // Default to most hours
+            "createdAt": Timestamp(date: now),
+            "memberCount": 1
         ]
         
-        // Add leaderboard type if provided
-        if let leaderboardType = leaderboardType {
-            groupData["leaderboardType"] = leaderboardType
+        if let description = description {
+            groupData["description"] = description
         }
         
-        // If image is provided, upload it first
-        if let image = image {
-            do {
-                let imageURL = try await uploadGroupImage(image, groupId: groupId)
-                groupData["avatarURL"] = imageURL
-            } catch {
-                // Continue creating the group without the image
-            }
-        }
-        
-        // Add the group to Firestore
+        // Create the group document
+        let groupRef = db.collection("groups").document(groupId)
         try await groupRef.setData(groupData)
         
-        // Add the user as a member
-        let memberRef = groupRef.collection("members").document(userId)
-        try await memberRef.setData([
-            "userId": userId,
-            "role": GroupMember.MemberRole.owner.rawValue,
-            "joinedAt": timestamp
-        ])
-        
-        // Add the group to the user's group collection for easy querying
-        let userGroupRef = db.collection("users").document(userId).collection("groups").document(groupId)
-        try await userGroupRef.setData([
+        // Add the creator as a member
+        let memberData: [String: Any] = [
             "groupId": groupId,
-            "joinedAt": timestamp,
-            "role": GroupMember.MemberRole.owner.rawValue
-        ])
+            "userId": userId,
+            "role": "owner",
+            "joinedAt": Timestamp(date: now)
+        ]
         
-        // Create and return the group
+        try await db.collection("groupMembers").addDocument(data: memberData)
+        
         let newGroup = UserGroup(
             id: groupId,
             name: name,
             description: description,
-            createdAt: timestamp.dateValue(),
+            createdAt: now,
             ownerId: userId,
-            avatarURL: groupData["avatarURL"] as? String,
-            memberCount: 1,
-            leaderboardType: leaderboardType
+            memberCount: 1
         )
         
         // Update the published groups list
@@ -674,33 +651,14 @@ class GroupService: ObservableObject {
         }
     }
     
-    // Update the group avatar URL directly
+    // Update group avatar URL in Firestore
     func updateGroupAvatar(groupId: String, avatarURL: String) async throws {
-        guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupError.notAuthenticated
-        }
+        let groupRef = db.collection("groups").document(groupId)
+        try await groupRef.updateData(["avatarURL": avatarURL])
         
-        // Check if the user is the group owner or fetch the group if needed
-        let groupDoc = try await db.collection("groups")
-            .document(groupId)
-            .getDocument()
-        
-        guard let groupData = groupDoc.data(),
-              let ownerId = groupData["ownerId"] as? String,
-              ownerId == userId else {
-            throw GroupError.permissionDenied
-        }
-        
-        // Update the group's avatarURL field
-        try await db.collection("groups")
-            .document(groupId)
-            .updateData(["avatarURL": avatarURL])
-        
-        // Update the group in the local list
-        if let index = self.userGroups.firstIndex(where: { $0.id == groupId }) {
-            var updatedGroup = self.userGroups[index]
-            updatedGroup.avatarURL = avatarURL
-            self.userGroups[index] = updatedGroup
+        // Update the local userGroups array
+        if let index = userGroups.firstIndex(where: { $0.id == groupId }) {
+            userGroups[index].avatarURL = avatarURL
         }
     }
     
@@ -1217,85 +1175,6 @@ class GroupService: ObservableObject {
         
         // Update the local groups list
         self.userGroups.removeAll { $0.id == groupId }
-    }
-    
-    // Update the group's leaderboard type
-    func updateGroupLeaderboard(groupId: String, leaderboardType: String) async throws {
-        guard let userId = Auth.auth().currentUser?.uid else {
-            throw GroupError.notAuthenticated
-        }
-        
-        let groupRef = db.collection("groups").document(groupId)
-        let groupDoc = try await groupRef.getDocument()
-        
-        guard let groupData = groupDoc.data(),
-              let ownerId = groupData["ownerId"] as? String,
-              ownerId == userId else {
-            throw GroupError.permissionDenied
-        }
-        
-        try await groupRef.updateData(["leaderboardType": leaderboardType])
-        
-        // Update the local userGroups cache
-        if let index = userGroups.firstIndex(where: { $0.id == groupId }) {
-            userGroups[index].leaderboardType = leaderboardType
-        }
-    }
-    
-    // MARK: - Leaderboard Functionality
-    
-    func getLeaderboard(groupId: String, type: String) async throws -> [LeaderboardEntry] {
-        guard let currentUserId = Auth.auth().currentUser?.uid else {
-            throw GroupError.notAuthenticated
-        }
-
-        // 1. Fetch all members of the group
-        let membersSnapshot = try await db.collection("groups").document(groupId).collection("members").getDocuments()
-        let memberIds = membersSnapshot.documents.map { $0.documentID }
-        
-        guard !memberIds.isEmpty else {
-            return [] // No members in the group
-        }
-
-        // 2. Fetch all user profiles for the members in parallel
-        let userProfiles = try await memberIds.asyncMap { memberId -> UserProfile? in
-            return try? await userService.fetchUserProfile(userId: memberId)
-        }.compactMap { $0 }
-
-        // 3. Fetch all sessions for all members in parallel
-        let memberHours = try await memberIds.asyncMap { memberId -> (String, Double) in
-            var totalDuration: TimeInterval = 0
-            
-            // Assuming sessions are stored in a 'sessions' subcollection under each user
-            let sessionsSnapshot = try await db.collection("users").document(memberId).collection("sessions").getDocuments()
-            
-            for document in sessionsSnapshot.documents {
-                // Look for 'duration' or 'elapsedTime' and ensure it's a number
-                if let duration = document.data()["duration"] as? TimeInterval {
-                    totalDuration += duration
-                } else if let elapsedTime = document.data()["elapsedTime"] as? TimeInterval {
-                    totalDuration += elapsedTime
-                } else if let hoursPlayed = document.data()["hoursPlayed"] as? Double {
-                    totalDuration += (hoursPlayed * 3600.0) // Convert hours to seconds
-                }
-            }
-            
-            let totalHours = totalDuration / 3600.0
-            return (memberId, totalHours)
-        }
-
-        // 4. Await results and build leaderboard
-        let hoursDictionary = Dictionary(uniqueKeysWithValues: memberHours)
-
-        let leaderboardEntries = userProfiles.map { profile -> LeaderboardEntry in
-            let userHours = hoursDictionary[profile.id] ?? 0.0
-            return LeaderboardEntry(id: profile.id, user: profile, totalHours: userHours)
-        }
-
-        // 5. Sort the leaderboard by hours descending
-        let sortedLeaderboard = leaderboardEntries.sorted { $0.totalHours > $1.totalHours }
-        
-        return sortedLeaderboard
     }
 }
 

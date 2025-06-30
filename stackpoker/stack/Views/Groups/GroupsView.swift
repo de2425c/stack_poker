@@ -1,40 +1,12 @@
 import SwiftUI
 import FirebaseAuth
-import FirebaseAuth
 import PhotosUI
 import FirebaseStorage
 import Kingfisher
 
-// Leaderboard types for future implementation
-enum LeaderboardType: String, CaseIterable {
-    case mostHours = "most_hours"
-    
-    var displayName: String {
-        switch self {
-        case .mostHours:
-            return "Most Hours Played"
-        }
-    }
-    
-    var icon: String {
-        switch self {
-        case .mostHours:
-            return "clock.fill"
-        }
-    }
-    
-    var description: String {
-        switch self {
-        case .mostHours:
-            return "Ranks members by the total hours played in recorded sessions."
-        }
-    }
-}
-
 struct GroupsView: View {
     @StateObject private var groupService = GroupService()
     @EnvironmentObject private var userService: UserService
-    // REMOVED: @EnvironmentObject private var handStore: HandStore
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var postService: PostService
     @EnvironmentObject private var tabBarVisibility: TabBarVisibilityManager
@@ -162,7 +134,6 @@ struct GroupsView: View {
                                 selectedGroupForChat.map { grp in
                     GroupChatView(group: grp)
                         .environmentObject(userService)
-                        // REMOVED: .environmentObject(handStore)
                         .environmentObject(sessionStore)
                         .environmentObject(postService)
                         .environmentObject(tabBarVisibility)
@@ -270,7 +241,7 @@ struct EmptyGroupsView: View {
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.white)
             
-            Text("Create poker groups to host home games,\nshare photos, create events, and compete\non leaderboards with your friends")
+            Text("Create poker groups to host home games,\nshare photos, create events, and compete\n with your friends")
                 .font(.system(size: 16))
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
@@ -552,20 +523,17 @@ struct CreateGroupView: View {
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var groupService = GroupService()
     @State private var groupName = ""
-    @State private var selectedLeaderboard: LeaderboardType?
-    @State private var showingLeaderboardSelection = false
+    @State private var showingInviteFlow = false
+    @State private var createdGroup: UserGroup?
     @State private var isCreating = false
     @State private var error: String?
     @State private var showError = false
     @State private var selectedImage: UIImage?
     @State private var showImagePicker = false
     @State private var imagePickerItem: PhotosPickerItem?
-    @State private var showingInviteFlow = false
-    @State private var createdGroup: UserGroup?
     
     // Animation states
     @State private var nameFieldOpacity = 0.0
-    @State private var leaderboardOpacity = 0.0
     @State private var imageOpacity = 0.0
     @State private var buttonOpacity = 0.0
     
@@ -633,146 +601,92 @@ struct CreateGroupView: View {
                                     .font(.system(size: 17, design: .default))
                                     .foregroundColor(.white)
                                     .padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .opacity(nameFieldOpacity)
                             
-                            // Leaderboard selection button
-                            Button(action: { showingLeaderboardSelection = true }) {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "trophy.fill")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
-                                    
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("LEADERBOARD")
-                                            .font(.system(size: 12, weight: .bold))
-                                            .foregroundColor(.gray)
-                                        
-                                        if let leaderboard = selectedLeaderboard {
-                                            Text(leaderboard.displayName)
-                                        .font(.system(size: 17, design: .default))
-                                        .foregroundColor(.white)
-                                        } else {
-                                            Text("Select a leaderboard type")
-                                            .font(.system(size: 17, design: .default))
-                                            .foregroundColor(.gray.opacity(0.7))
-                                        }
+                            // Create button with gradient and shadow
+                            Button(action: createGroup) {
+                                HStack {
+                                    if isCreating {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                            .frame(width: 20, height: 20)
+                                            .padding(.horizontal, 10)
+                                    } else {
+                                        Text("Create Group")
+                                            .font(.system(size: 17, weight: .semibold, design: .default))
+                                            .foregroundColor(.black)
+                                            .padding(.horizontal, 20)
+                                            .frame(maxWidth: .infinity)
                                     }
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.gray)
                                 }
-                                .padding(.vertical, 16)
-                                .padding(.horizontal, 16)
+                                .frame(height: 54)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(red: 40/255, green: 40/255, blue: 45/255))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(
-                                                    selectedLeaderboard != nil ? 
-                                                        Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.5) : 
-                                                        Color.gray.opacity(0.3), 
-                                                    lineWidth: 1
-                                                )
-                                        )
+                                    groupName.isEmpty || isCreating
+                                        ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5)
+                                        : Color(red: 123/255, green: 255/255, blue: 99/255)
+                                )
+                                .cornerRadius(16)
+                                .shadow(
+                                    color: groupName.isEmpty ? Color.clear : Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.4),
+                                    radius: 8, x: 0, y: 4
                                 )
                             }
-                            .opacity(leaderboardOpacity)
+                            .disabled(groupName.isEmpty || isCreating)
+                            .padding(.horizontal, 24)
+                            .padding(.top, 20)
+                            .opacity(buttonOpacity)
                         }
-                        .padding(.horizontal, 24)
-                        
-                        // Create button with gradient and shadow
-                        Button(action: createGroup) {
-                            HStack {
-                                if isCreating {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .black))
-                                        .frame(width: 20, height: 20)
-                                        .padding(.horizontal, 10)
-                                } else {
-                                    Text("Create Group")
-                                        .font(.system(size: 17, weight: .semibold, design: .default))
-                                        .foregroundColor(.black)
-                                        .padding(.horizontal, 20)
-                                        .frame(maxWidth: .infinity)
-                                }
-                            }
-                            .frame(height: 54)
-                            .background(
-                                groupName.isEmpty || isCreating
-                                    ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5)
-                                    : Color(red: 123/255, green: 255/255, blue: 99/255)
-                            )
-                            .cornerRadius(16)
-                            .shadow(
-                                color: groupName.isEmpty ? Color.clear : Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.4),
-                                radius: 8, x: 0, y: 4
-                            )
-                        }
-                        .disabled(groupName.isEmpty || isCreating)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 20)
-                        .opacity(buttonOpacity)
+                        .padding(.top, 60)
+                        .padding(.bottom, 40)
                     }
-                    .padding(.top, 60)
-                    .padding(.bottom, 40)
+                    .onTapGesture {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                    .alert(isPresented: $showError, content: {
+                        Alert(
+                            title: Text("Error"),
+                            message: Text(error ?? "An unknown error occurred"),
+                            dismissButton: .default(Text("OK"))
+                        )
+                    })
                 }
-                .onTapGesture {
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
-                .alert(isPresented: $showError, content: {
-                    Alert(
-                        title: Text("Error"),
-                        message: Text(error ?? "An unknown error occurred"),
-                        dismissButton: .default(Text("OK"))
-                    )
-                })
-            }
-            .navigationBarItems(
-                leading: Button(action: {
-                    presentationMode.wrappedValue.dismiss()
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold, design: .default))
-                        .foregroundColor(.white)
-                        .padding(8)
-                        .background(Circle().fill(Color(red: 30/255, green: 33/255, blue: 36/255)))
-                }
-            )
-            .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $showingLeaderboardSelection) {
-                LeaderboardSelectionView(selectedLeaderboard: $selectedLeaderboard)
-            }
-            .sheet(isPresented: $showingInviteFlow) {
-                if let group = createdGroup {
-                    GroupInviteFlowView(group: group) {
-                        // Completed invite flow
-                        showingInviteFlow = false
-                        onComplete(true)
+                .navigationBarItems(
+                    leading: Button(action: {
                         presentationMode.wrappedValue.dismiss()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold, design: .default))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Circle().fill(Color(red: 30/255, green: 33/255, blue: 36/255)))
+                    }
+                )
+                .navigationBarTitleDisplayMode(.inline)
+                .sheet(isPresented: $showingInviteFlow) {
+                    if let group = createdGroup {
+                        GroupInviteFlowView(group: group) {
+                            // Completed invite flow
+                            showingInviteFlow = false
+                            onComplete(true)
+                            presentationMode.wrappedValue.dismiss()
+                        }
                     }
                 }
-            }
-            .onAppear {
-                // Animate elements sequentially
-                withAnimation(.easeOut(duration: 0.4).delay(0.1)) {
-                    imageOpacity = 1.0
-                }
-                
-                withAnimation(.easeOut(duration: 0.4).delay(0.2)) {
-                    nameFieldOpacity = 1.0
-                }
-                
-                withAnimation(.easeOut(duration: 0.4).delay(0.3)) {
-                    leaderboardOpacity = 1.0
-                }
-                
-                withAnimation(.easeOut(duration: 0.4).delay(0.4)) {
-                    buttonOpacity = 1.0
+                .onAppear {
+                    // Animate elements sequentially
+                    withAnimation(.easeOut(duration: 0.4).delay(0.1)) {
+                        imageOpacity = 1.0
+                    }
+                    
+                    withAnimation(.easeOut(duration: 0.4).delay(0.2)) {
+                        nameFieldOpacity = 1.0
+                    }
+                    
+                    withAnimation(.easeOut(duration: 0.4).delay(0.3)) {
+                        buttonOpacity = 1.0
+                    }
                 }
             }
         }
@@ -807,15 +721,13 @@ struct CreateGroupView: View {
                 if let image = selectedImage {
                     group = try await groupService.createGroup(
                         name: groupName,
-                        description: nil, // No description field anymore
-                        image: image,
-                        leaderboardType: selectedLeaderboard?.rawValue
+                        description: nil,
+                        image: image
                     )
                 } else {
                     group = try await groupService.createGroup(
                         name: groupName,
-                        description: nil,
-                        leaderboardType: selectedLeaderboard?.rawValue
+                        description: nil
                     )
                 }
                 
@@ -1160,10 +1072,6 @@ struct GroupDetailView: View {
     @State private var tabsOffset: CGFloat = 30
     @State private var avatarRefreshId = UUID()
     
-    // For leaderboard selection
-    @State private var showingLeaderboardSelection = false
-    @State private var tempSelectedLeaderboard: LeaderboardType?
-    
     // If the current user is the owner
     var isOwner: Bool {
         return group.ownerId == Auth.auth().currentUser?.uid
@@ -1380,10 +1288,6 @@ struct GroupDetailView: View {
                             onDeleteTapped: { 
                                 showDeleteConfirmation = true 
                             },
-                                onLeaderboardTapped: {
-                                    tempSelectedLeaderboard = LeaderboardType(rawValue: group.leaderboardType ?? "")
-                                    showingLeaderboardSelection = true
-                                },
                             isDeletingGroup: isDeletingGroup
                         )
                     } else if selectedTab == 1 {
@@ -1426,16 +1330,6 @@ struct GroupDetailView: View {
                 }
             } message: {
                 Text("Are you sure you want to delete this group? This action cannot be undone. All messages and data will be permanently lost.")
-            }
-            .sheet(isPresented: $showingLeaderboardSelection) {
-                LeaderboardSelectionView(selectedLeaderboard: $tempSelectedLeaderboard)
-            }
-            .onChange(of: tempSelectedLeaderboard) { newValue in
-                // Don't update if the value hasn't changed
-                if newValue?.rawValue == group.leaderboardType || (newValue == nil && group.leaderboardType == nil) {
-                    return
-                }
-                updateLeaderboardType(to: newValue)
         }
         .onAppear {
                 // Beautiful entrance animations
@@ -1457,21 +1351,6 @@ struct GroupDetailView: View {
                 loadUsers()
             }
         }
-        }
-    }
-    
-    private func updateLeaderboardType(to newType: LeaderboardType?) {
-        Task {
-            do {
-                try await groupService.updateGroupLeaderboard(groupId: group.id, leaderboardType: newType?.rawValue)
-                // Update local state
-                group.leaderboardType = newType?.rawValue
-                // Post notification to refresh other views if necessary
-                NotificationCenter.default.post(name: NSNotification.Name("GroupDataChanged"), object: nil)
-            } catch {
-                self.error = "Failed to update leaderboard: \(error.localizedDescription)"
-                self.showError = true
-            }
         }
     }
     
@@ -1650,7 +1529,6 @@ struct GroupInfoView: View {
     let group: UserGroup
     let isOwner: Bool
     let onDeleteTapped: () -> Void
-    let onLeaderboardTapped: () -> Void
     let isDeletingGroup: Bool
     
     @State private var cardOpacity = 0.0
@@ -1679,36 +1557,7 @@ struct GroupInfoView: View {
                         iconColor: Color(red: 100/255, green: 180/255, blue: 255/255)
                     )
                     
-                    let leaderboardName = leaderboardDisplayName(group.leaderboardType)
                     
-                    if isOwner {
-                        Button(action: onLeaderboardTapped) {
-                            GroupDetailRow(
-                                icon: "trophy.fill",
-                                title: "Leaderboard",
-                                value: leaderboardName,
-                                iconColor: Color(red: 255/255, green: 193/255, blue: 64/255)
-                            )
-                            .overlay(
-                    HStack {
-                        Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.5))
-                                }
-                                .padding(.trailing, 4)
-                            )
-                        }
-                    } else {
-                        if group.leaderboardType != nil {
-                            GroupDetailRow(
-                                icon: "trophy.fill",
-                                title: "Leaderboard",
-                                value: leaderboardName,
-                                iconColor: Color(red: 255/255, green: 193/255, blue: 64/255)
-                            )
-                        }
-                    }
                 }
                 .padding(20)
                 .background(Color.black.opacity(0.2))
@@ -1797,18 +1646,7 @@ struct GroupInfoView: View {
         return formatter.string(from: date)
     }
     
-    private func leaderboardDisplayName(_ type: String?) -> String {
-        guard let type = type, !type.isEmpty else {
-            return "None"
-        }
-        
-        switch type {
-        case "most_hours":
-            return "Most Hours Played"
-        default:
-            return "None"
-        }
-    }
+
 }
 
 struct GroupDetailRow: View {
@@ -2255,202 +2093,7 @@ struct GroupTabButton: View {
     }
 }
 
-// MARK: - Leaderboard Selection View
-struct LeaderboardSelectionView: View {
-    @Environment(\.presentationMode) var presentationMode
-    @Binding var selectedLeaderboard: LeaderboardType?
-    @State private var animateCards = false
-    
-    var body: some View {
-        NavigationView {
-            ZStack {
-                AppBackgroundView()
-                    .ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Header
-                    HStack {
-                        Text("Choose Leaderboard")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                    .padding(.top, 20)
-                    .padding(.bottom, 24)
-                    
-                    ScrollView {
-                        VStack(spacing: 16) {
-                            NoneLeaderboardOptionCard(isSelected: selectedLeaderboard == nil) {
-                                selectedLeaderboard = nil
-                                presentationMode.wrappedValue.dismiss()
-                            }
-                            .offset(y: animateCards ? 0 : 30)
-                            .opacity(animateCards ? 1 : 0)
-                            .animation(
-                                .spring(response: 0.4, dampingFraction: 0.8),
-                                value: animateCards
-                            )
-                            
-                            ForEach(Array(LeaderboardType.allCases.enumerated()), id: \.element) { index, leaderboard in
-                                LeaderboardOptionCard(
-                                    leaderboard: leaderboard,
-                                    isSelected: selectedLeaderboard == leaderboard
-                                ) {
-                                    selectedLeaderboard = leaderboard
-                                    presentationMode.wrappedValue.dismiss()
-                                }
-                                .offset(y: animateCards ? 0 : 30)
-                                .opacity(animateCards ? 1 : 0)
-                                .animation(
-                                    .spring(response: 0.4, dampingFraction: 0.8)
-                                    .delay(Double(index) * 0.1),
-                                    value: animateCards
-                                )
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
-                    }
-                }
-            }
-            .navigationBarItems(
-                leading: Button(action: {
-                    presentationMode.wrappedValue.dismiss()
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(8)
-                        .background(Circle().fill(Color(red: 30/255, green: 33/255, blue: 36/255)))
-                }
-            )
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear {
-                withAnimation {
-                    animateCards = true
-                }
-            }
-        }
-    }
-}
 
-struct LeaderboardOptionCard: View {
-    let leaderboard: LeaderboardType
-    let isSelected: Bool
-    let onTap: () -> Void
-    
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 16) {
-                // Icon
-                ZStack {
-                    Circle()
-                        .fill(isSelected ? 
-                              Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.2) : 
-                              Color(red: 40/255, green: 40/255, blue: 45/255))
-                        .frame(width: 48, height: 48)
-                    
-                    Image(systemName: leaderboard.icon)
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(isSelected ? 
-                                        Color(red: 64/255, green: 156/255, blue: 255/255) : 
-                                        .white)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(leaderboard.displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    Text(leaderboard.description)
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
-                }
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(red: 30/255, green: 30/255, blue: 35/255))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(
-                                isSelected ? 
-                                    Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.6) : 
-                                    Color.gray.opacity(0.2), 
-                                lineWidth: isSelected ? 2 : 1
-                            )
-                    )
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-}
-
-// MARK: - "None" Leaderboard Option Card
-struct NoneLeaderboardOptionCard: View {
-    let isSelected: Bool
-    let onTap: () -> Void
-    
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 16) {
-                // Icon
-                ZStack {
-                    Circle()
-                        .fill(isSelected ?
-                              Color.red.opacity(0.2) :
-                              Color(red: 40/255, green: 40/255, blue: 45/255))
-                        .frame(width: 48, height: 48)
-                    
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(isSelected ? .red : .white)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("None")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    Text("No leaderboard will be active.")
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(.red)
-                }
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(red: 30/255, green: 30/255, blue: 35/255))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(
-                                isSelected ?
-                                    Color.red.opacity(0.6) :
-                                    Color.gray.opacity(0.2),
-                                lineWidth: isSelected ? 2 : 1
-                            )
-                    )
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-}
 
 // MARK: - Group Invite Flow View
 struct GroupInviteFlowView: View {

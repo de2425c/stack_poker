@@ -482,12 +482,13 @@ struct EventStakingDetailsView: View {
                             totalPlayerBuyInForSession: 0,
                             playerCashoutForSession: 0,
                             storedAmountTransferredAtSettlement: 0,
-                            status: .pendingAcceptance, // Set as pending until they accept
+                            status: .active, // Treat as active stake but mark as pending invite
                             proposedAt: Date(),
                             lastUpdatedAt: Date(),
                             isTournamentSession: true,
                             manualStakerDisplayName: nil, // Not manual
-                            isOffAppStake: false
+                            isOffAppStake: false,
+                            invitePending: true
                         )
                         
                         let createdStakeId = try await stakeService.addStake(stake)

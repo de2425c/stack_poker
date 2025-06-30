@@ -650,7 +650,13 @@ struct StakingDashboardView: View {
                 }
                 
                 await MainActor.run {
-                    self.stakes = stakes
+                    self.stakes = stakes.filter { stake in
+                        // If current user is the staker and the invite is still pending, hide it from dashboard
+                        if stake.stakerUserId == userId, let pending = stake.invitePending, pending {
+                            return false
+                        }
+                        return true
+                    }
                     self.manualStakers = manualStakers
                     self.isLoading = false
                     

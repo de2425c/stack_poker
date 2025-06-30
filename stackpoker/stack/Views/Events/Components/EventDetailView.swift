@@ -903,7 +903,9 @@ struct EventDetailView: View {
     private func stakeStatusColor(_ status: Stake.StakeStatus) -> Color {
         switch status {
         case .pendingAcceptance: return .orange
-        case .active: return .green
+        case .active:
+            // Treat active-but-pending stakes specially so they appear orange
+            return pendingColor
         case .awaitingSettlement: return .blue
         case .awaitingConfirmation: return .yellow
         case .settled: return .gray
@@ -912,10 +914,13 @@ struct EventDetailView: View {
         }
     }
     
+    private var pendingColor: Color { .orange }
+    
     private func stakeStatusIcon(_ status: Stake.StakeStatus) -> String {
         switch status {
         case .pendingAcceptance: return "clock"
-        case .active: return "checkmark.circle"
+        case .active:
+            return "paperplane" // invite sent icon for pending stakes
         case .awaitingSettlement: return "hourglass"
         case .awaitingConfirmation: return "questionmark.circle"
         case .settled: return "checkmark.circle.fill"
@@ -968,7 +973,7 @@ struct EventDetailView: View {
                 }
                 
                 // Filter for stakes related to this event
-                let eventStakes = allStakes.filter { stake in
+                var eventStakes = allStakes.filter { stake in
                     let nameMatch = stake.sessionGameName == event.event_name
                     let playerMatch = stake.stakedPlayerUserId == currentUserId
                     let manualMatch = stake.isOffAppStake == true
@@ -977,6 +982,9 @@ struct EventDetailView: View {
                     
                     return nameMatch && playerMatch && manualMatch
                 }
+                
+                // Exclude stakes that are still awaiting acceptance (invitePending) so we don't duplicate the invite row
+                eventStakes.removeAll { $0.invitePending == true }
                 
                 await MainActor.run {
                     self.existingStakes = eventStakes

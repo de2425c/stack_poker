@@ -4611,7 +4611,8 @@ struct EnhancedLiveSessionView: View {
                             // If the stake was pendingAcceptance, update it to active since session is starting
                             if stake.status == .pendingAcceptance {
                                 updateData[Stake.CodingKeys.status.rawValue] = Stake.StakeStatus.active.rawValue
-                                print("🔥🔥🔥 [loadExistingStakes] Updating pending stake \(stakeId) to active status")
+                                updateData[Stake.CodingKeys.invitePending.rawValue] = true
+                                print("🔥🔥🔥 [loadExistingStakes] Updating pending stake \(stakeId) to active status and marking invitePending")
                             }
                             
                             try await stakeService.updateStake(stakeId: stakeId, updateData: updateData)

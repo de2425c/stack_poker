@@ -88,6 +88,8 @@ struct Stake: Codable, Identifiable {
     
     // Field for tracking live session UUID (for immediately persisted stakes)
     var liveSessionId: String? = nil
+    // Flag indicating this stake is awaiting acceptance from the invited staker. When true, the stake should be hidden from the staker's dashboard until they accept the invite.
+    var invitePending: Bool? = false
 
     static let OFF_APP_STAKER_ID = "manual_off_app_staker_placeholder_id"
 
@@ -128,6 +130,7 @@ struct Stake: Codable, Identifiable {
         case manualStakerDisplayName
         case isOffAppStake
         case liveSessionId
+        case invitePending
     }
     
     // Initializer for creating a new stake (e.g., from SessionFormView)
@@ -152,7 +155,8 @@ struct Stake: Codable, Identifiable {
         isTournamentSession: Bool? = nil,         // Added to initializer
         manualStakerDisplayName: String? = nil,   // New initializer param
         isOffAppStake: Bool? = false,             // New initializer param
-        liveSessionId: String? = nil              // New initializer param
+        liveSessionId: String? = nil,              // New initializer param
+        invitePending: Bool? = false           // New initializer param
     ) {
         self.id = id
         self.sessionId = sessionId
@@ -174,6 +178,7 @@ struct Stake: Codable, Identifiable {
         self.manualStakerDisplayName = manualStakerDisplayName
         self.isOffAppStake = isOffAppStake
         self.liveSessionId = liveSessionId
+        self.invitePending = invitePending
 
         // Manual stakers now follow the same settlement flow as app users
         self.status = status // Use the provided status or its default
