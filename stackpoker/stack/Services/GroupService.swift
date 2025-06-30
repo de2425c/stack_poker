@@ -74,6 +74,18 @@ class GroupService: ObservableObject {
             groupData["description"] = description
         }
         
+        // Upload image if provided and add avatarURL to group data
+        var avatarURL: String?
+        if let image = image {
+            do {
+                avatarURL = try await uploadGroupImage(image, groupId: groupId)
+                groupData["avatarURL"] = avatarURL
+            } catch {
+                print("Failed to upload group image: \(error)")
+                // Continue creating group without image rather than failing completely
+            }
+        }
+        
         // Create the group document
         let groupRef = db.collection("groups").document(groupId)
         try await groupRef.setData(groupData)
@@ -88,12 +100,25 @@ class GroupService: ObservableObject {
         
         try await db.collection("groupMembers").addDocument(data: memberData)
         
+        // Also add to user's groups collection
+        let userGroupRef = db.collection("users")
+            .document(userId)
+            .collection("groups")
+            .document(groupId)
+        
+        try await userGroupRef.setData([
+            "groupId": groupId,
+            "joinedAt": Timestamp(date: now),
+            "role": "owner"
+        ])
+        
         let newGroup = UserGroup(
             id: groupId,
             name: name,
             description: description,
             createdAt: now,
             ownerId: userId,
+            avatarURL: avatarURL,
             memberCount: 1
         )
         

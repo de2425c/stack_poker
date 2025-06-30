@@ -233,14 +233,14 @@ struct HomeGameView: View {
                                     .foregroundColor(.white)
                                     .frame(maxWidth: .infinity, alignment: .center)
                                 
-                                Text("There is already an active game in this group: \"\(activeGame.title)\"")
+                                Text("You already have an active game: \"\(activeGame.title)\"")
                                     .font(.system(size: 16))
                                     .foregroundColor(.white)
                                     .multilineTextAlignment(.center)
                                     .padding(.horizontal, 24)
                                     .frame(maxWidth: .infinity, alignment: .center)
                                 
-                                Text("Only one active game can run at a time. Please wait until the current game is completed before creating a new one.")
+                                Text("Only one active game can run at a time. Please complete your current game before creating a new one.")
                                     .font(.system(size: 14))
                                     .foregroundColor(.gray)
                                     .multilineTextAlignment(.center)
@@ -270,182 +270,111 @@ struct HomeGameView: View {
                     }
                 } else {
                     // Normal game creation view
-                    ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            // Top spacer for navigation bar clearance - ADD MORE PADDING
-                            Color.clear.frame(height: 80)
-                            
-                            VStack(alignment: .leading, spacing: 24) {
-                                // Game title input using GlassyInputField
+                    VStack(spacing: 0) {
+                        // Fixed input section at top
+                        VStack(spacing: 16) {
+                            GlassyInputField(
+                                icon: "gamecontroller.fill",
+                                title: "GAME TITLE",
+                                labelColor: .white.opacity(0.8)
+                            ) {
+                                TextField("Enter game title", text: $gameTitle)
+                                    .foregroundColor(.white)
+                                    .font(.system(size: 17, design: .rounded))
+                                    .padding(.vertical, 8)
+                            }
+                            HStack(spacing: 12) {
                                 GlassyInputField(
-                                    icon: "gamecontroller.fill",
-                                    title: "GAME TITLE",
+                                    icon: "dollarsign.circle.fill",
+                                    title: "SMALL BLIND",
                                     labelColor: .white.opacity(0.8)
                                 ) {
-                                    TextField("Enter game title", text: $gameTitle)
+                                    TextField("$1", text: $smallBlind)
+                                        .font(.system(size: 16, design: .rounded))
+                                        .keyboardType(.decimalPad)
                                         .foregroundColor(.white)
-                                        .font(.system(size: 17))
-                                        .padding(.vertical, 10)
+                                        .padding(.vertical, 8)
+                                }
+                                GlassyInputField(
+                                    icon: "dollarsign.circle.fill",
+                                    title: "BIG BLIND",
+                                    labelColor: .white.opacity(0.8)
+                                ) {
+                                    TextField("$2", text: $bigBlind)
+                                        .font(.system(size: 16, design: .rounded))
+                                        .keyboardType(.decimalPad)
                                         .foregroundColor(.white)
+                                        .padding(.vertical, 8)
                                 }
-                                
-                                // Stakes input section using GlassyInputField
-                                HStack(spacing: 12) {
-                                    // Small Blind
-                                    GlassyInputField(
-                                        icon: "dollarsign.circle.fill",
-                                        title: "SMALL BLIND",
-                                        labelColor: .white.opacity(0.8)
-                                    ) {
-                                        TextField("$1", text: $smallBlind)
-                                            .font(.system(size: 16))
-                                            .keyboardType(.decimalPad)
-                                            .foregroundColor(.white)
-                                            .padding(.vertical, 10)
-                                    }
-                                    
-                                    // Big Blind
-                                    GlassyInputField(
-                                        icon: "dollarsign.circle.fill",
-                                        title: "BIG BLIND",
-                                        labelColor: .white.opacity(0.8)
-                                    ) {
-                                        TextField("$2", text: $bigBlind)
-                                            .font(.system(size: 16))
-                                            .keyboardType(.decimalPad)
-                                            .foregroundColor(.white)
-                                            .padding(.vertical, 10)
-                                    }
-                                }
-                                
-                                // Stakes preview (minimal styling)
-                                if !smallBlind.isEmpty && !bigBlind.isEmpty,
-                                   let sb = Double(smallBlind.replacingOccurrences(of: "$", with: "")),
-                                   let bb = Double(bigBlind.replacingOccurrences(of: "$", with: "")) {
-                                    Text("Stakes: $\(Int(sb))/$\(Int(bb))")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.8))
-                                        .padding(.top, 8)
-                                }
-                                
-                                // Game rules explanation (minimal styling)
-                                VStack(alignment: .leading, spacing: 16) {
-                                    Text("How it works")
-                                        .font(.system(size: 18, weight: .bold))
-                                        .foregroundColor(.white)
-                                    
-                                    HStack(alignment: .top, spacing: 12) {
-                                        Text("1")
-                                            .font(.system(size: 16, weight: .bold))
-                                            .foregroundColor(.white.opacity(0.6))
-                                            .frame(width: 24, alignment: .center)
-                                        
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Create the game")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .foregroundColor(.white)
-                                            
-                                            Text("Give your game a descriptive title")
-                                                .font(.system(size: 14))
-                                                .foregroundColor(.gray)
-                                        }
-                                    }
-                                    
-                                    HStack(alignment: .top, spacing: 12) {
-                                        Text("2")
-                                            .font(.system(size: 16, weight: .bold))
-                                            .foregroundColor(.white.opacity(0.6))
-                                            .frame(width: 24, alignment: .center)
-                                        
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Players join")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .foregroundColor(.white)
-                                            
-                                            Text("Group members can request to join and buy in")
-                                                .font(.system(size: 14))
-                                                .foregroundColor(.gray)
-                                        }
-                                    }
-                                    
-                                    HStack(alignment: .top, spacing: 12) {
-                                        Text("3")
-                                            .font(.system(size: 16, weight: .bold))
-                                            .foregroundColor(.white.opacity(0.6))
-                                            .frame(width: 24, alignment: .center)
-                                        
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Track chips and cashouts")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .foregroundColor(.white)
-                                            
-                                            Text("Manage buy-ins and cashouts for each player")
-                                                .font(.system(size: 14))
-                                                .foregroundColor(.gray)
-                                        }
-                                    }
-                                    
-                                    HStack(alignment: .top, spacing: 12) {
-                                        Text("4")
-                                            .font(.system(size: 16, weight: .bold))
-                                            .foregroundColor(.white.opacity(0.6))
-                                            .frame(width: 24, alignment: .center)
-                                        
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Game summary")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .foregroundColor(.white)
-                                            
-                                            Text("When everyone cashes out, a summary is posted")
-                                                .font(.system(size: 14))
-                                                .foregroundColor(.gray)
-                                        }
-                                    }
-                                }
-                                .padding(.vertical, 8)
-                                
-                                Spacer(minLength: 40)
-                                
-                                // Create button (minimal styling)
-                                Button(action: createGame) {
-                                    HStack {
-                                        if isCreating {
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                .frame(width: 20, height: 20)
-                                                .padding(.horizontal, 10)
-                                        } else {
-                                            Text("Create Game")
-                                                .font(.system(size: 17, weight: .semibold))
-                                                .foregroundColor(.white)
-                                                .padding(.horizontal, 20)
-                                                .frame(maxWidth: .infinity)
-                                        }
-                                    }
-                                    .frame(height: 54)
-                                    .background(
-                                        gameTitle.isEmpty || isCreating
-                                            ? Color.white.opacity(0.2)
-                                            : Color.white.opacity(0.1)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
-                                    )
-                                    .cornerRadius(16)
-                                }
-                                .disabled(gameTitle.isEmpty || isCreating)
-                                .frame(maxWidth: .infinity)
-                                .padding(.bottom, 60)  // Add bottom padding to button
                             }
-                            .padding(.horizontal, 24)
-                            .padding(.bottom, 40)
                         }
-                        .padding(.top, 16)
-                        .frame(minHeight: UIScreen.main.bounds.height - 100)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 20)
+                        
+                        // Scrollable content area
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 0) {
+                                VStack(alignment: .leading, spacing: 32) {
+                                    Text("What you get")
+                                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .padding(.top, 40)
+                                    VStack(alignment: .leading, spacing: 24) {
+                                        Text("• Manage buy-ins and cash-outs")
+                                            .font(.system(size: 22, weight: .medium, design: .rounded))
+                                            .foregroundColor(.white)
+                                        Text("• Access ledger and optimized settlement")
+                                            .font(.system(size: 22, weight: .medium, design: .rounded))
+                                            .foregroundColor(.white)
+                                        Text("• Invite in-app users instantly")
+                                            .font(.system(size: 22, weight: .medium, design: .rounded))
+                                            .foregroundColor(.white)
+                                        Text("• Share web link for off-app users")
+                                            .font(.system(size: 22, weight: .medium, design: .rounded))
+                                            .foregroundColor(.white)
+                                    }
+                                }
+                                .padding(.horizontal, 24)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Spacer(minLength: 60)
+                            }
+                            .frame(minHeight: UIScreen.main.bounds.height - 300)
+                        }
+                        
+                        // Fixed create button at bottom
+                        Button(action: createGame) {
+                            HStack {
+                                if isCreating {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .frame(width: 20, height: 20)
+                                        .padding(.horizontal, 10)
+                                } else {
+                                    Text("Create Game")
+                                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 20)
+                                        .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .frame(height: 54)
+                            .background(
+                                gameTitle.isEmpty || isCreating
+                                    ? Color.white.opacity(0.2)
+                                    : Color.white.opacity(0.1)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                            )
+                            .cornerRadius(16)
+                        }
+                        .disabled(gameTitle.isEmpty || isCreating)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 40)
                     }
-                    .ignoresSafeArea(.keyboard)  // Ensure keyboard doesn't push content
-                    .onTapGesture {  // Add tap to dismiss keyboard
+                    .ignoresSafeArea(.keyboard)
+                    .onTapGesture {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     }
                 }
@@ -467,23 +396,23 @@ struct HomeGameView: View {
                 )
             }
             .onAppear {
-                if let currentGroupId = groupId {
-                    checkForExistingGames(groupId: currentGroupId)
-                } else {
-                    // For standalone games (groupId is nil), no group-specific check needed.
-                    isCheckingForExistingGames = false
-                    existingActiveGame = nil
-                }
+                checkForExistingGames()
             }
         }
     }
     
-    private func checkForExistingGames(groupId: String) {
+    private func checkForExistingGames() {
+        guard let currentUser = Auth.auth().currentUser else {
+            isCheckingForExistingGames = false
+            return
+        }
+        
         isCheckingForExistingGames = true
         
         Task {
             do {
-                let activeGames = try await homeGameService.fetchActiveGamesForGroup(groupId: groupId)
+                // Check for ANY active games created by this user (both group and standalone)
+                let activeGames = try await homeGameService.fetchActiveGames(createdBy: currentUser.uid)
                 
                 await MainActor.run {
                     if let firstActiveGame = activeGames.first {
@@ -516,20 +445,18 @@ struct HomeGameView: View {
                     return
                 }
 
-                // If part of a group, double-check for existing active games in that group
-                if let currentGroupId = groupId {
-                    let activeGames = try await homeGameService.fetchActiveGamesForGroup(groupId: currentGroupId)
-                    if !activeGames.isEmpty {
-                        await MainActor.run {
-                            existingActiveGame = activeGames.first
-                            isCreating = false
-                            // Refresh the UI to show the existing game message
-                            isCheckingForExistingGames = true // Trigger re-check which will show the message
-                            checkForExistingGames(groupId: currentGroupId)
-                        }
-                        return
+                // Double-check for existing active games created by this user (both group and standalone)
+                let activeGames = try await homeGameService.fetchActiveGames(createdBy: currentUser.uid)
+                if !activeGames.isEmpty {
+                    await MainActor.run {
+                        existingActiveGame = activeGames.first
+                        isCreating = false
+                        // Refresh the UI to show the existing game message
+                        isCheckingForExistingGames = true // Trigger re-check which will show the message
+                        checkForExistingGames()
                     }
-                } // For standalone games, this check is skipped.
+                    return
+                }
 
                 // Fetch creator's name
                 let userDoc = try await Firestore.firestore().collection("users").document(currentUser.uid).getDocument()

@@ -1012,10 +1012,9 @@ struct ExploreView: View {
     @EnvironmentObject var sessionStore: SessionStore
     @EnvironmentObject var tutorialManager: TutorialManager
     @State private var selectedSimpleDate: SimpleDate? = nil
-    @State private var selectedTab: EventsTab = .events
+    @State private var selectedTab: EventsTab = .myEvents
     @State private var showingCreateEvent = false
     @State private var showingEventInvites = false
-    @State private var showingEventHistory = false
     @State private var showingEventDetail = false
     @State private var selectedEvent: Event?
     @State private var selectedUserEvent: UserEvent? = nil // For UserEvent detail sheet
@@ -1184,53 +1183,12 @@ struct ExploreView: View {
     
     // MARK: - Computed Properties for Event Filtering
     
-    /// Non-completed events for main feed
-    private var activeUserEvents: [UserEvent] {
-        let now = Date()
+    /// All user events for calendar display
+    private var allUserEvents: [UserEvent] {
         return userEventService.userEvents.filter { event in
-            // Show events that are:
-            // 1. Not cancelled
-            // 2. Either upcoming OR within 24 hours of completion (still "active")
-            if event.status == .cancelled {
-                return false
-            }
-            
-            // For events with end dates, consider them completed 24 hours after end
-            if let endDate = event.endDate {
-                let completionThreshold = Calendar.current.date(byAdding: .hour, value: 24, to: endDate) ?? endDate
-                return now < completionThreshold
-            }
-            
-            // For events without end dates, consider them completed 24 hours after start
-            let completionThreshold = Calendar.current.date(byAdding: .hour, value: 24, to: event.startDate) ?? event.startDate
-            return now < completionThreshold
+            // Only exclude cancelled events
+            return event.status != .cancelled
         }
-    }
-    
-    /// Completed events for history (both UserEvents and public event RSVPs)
-    private var completedUserEvents: [UserEvent] {
-        let now = Date()
-        return userEventService.userEvents.filter { event in
-            // Show events that are completed (24+ hours after end/start)
-            if event.status == .cancelled {
-                return true // Include cancelled events in history
-            }
-            
-            // For events with end dates, consider them completed 24 hours after end
-            if let endDate = event.endDate {
-                let completionThreshold = Calendar.current.date(byAdding: .hour, value: 24, to: endDate) ?? endDate
-                return now >= completionThreshold
-            }
-            
-            // For events without end dates, consider them completed 24 hours after start
-            let completionThreshold = Calendar.current.date(byAdding: .hour, value: 24, to: event.startDate) ?? event.startDate
-            return now >= completionThreshold
-        }.sorted { $0.startDate > $1.startDate } // Most recent first
-    }
-
-    /// Total completed events count (UserEvents + Public RSVPs)
-    private var totalCompletedEventsCount: Int {
-        return completedUserEvents.count + completedPublicEventRSVPs.count
     }
 
     // MARK: - Series Grouping
@@ -1445,15 +1403,7 @@ struct ExploreView: View {
             EventInvitesView()
                 .environmentObject(userEventService)
         }
-        .sheet(isPresented: $showingEventHistory) {
-            EventHistoryView(
-                completedEvents: completedUserEvents,
-                completedPublicEventRSVPs: completedPublicEventRSVPs
-            )
-            .environmentObject(userEventService)
-            .environmentObject(userService)
-            .environmentObject(sessionStore)
-        }
+
 
         .sheet(isPresented: $showingEventDetail) {
             if let selectedEvent = selectedEvent {
@@ -2222,27 +2172,6 @@ struct ExploreView: View {
                 
                 Spacer()
                 
-                // History Button
-                Button(action: {
-                    showingEventHistory = true
-                }) {
-                    ZStack {
-                        Image(systemName: "clock")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(.white)
-                        if totalCompletedEventsCount > 0 {
-                            Text("\(totalCompletedEventsCount)")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.black)
-                                .frame(width: 16, height: 16)
-                                .background(Color.gray.opacity(0.8))
-                                .clipShape(Circle())
-                                .offset(x: 8, y: -8)
-                        }
-                    }
-                }
-                .padding(.trailing, 12)
-                
                 // Invites Button (always visible)
                     Button(action: {
                         showingEventInvites = true
@@ -2325,7 +2254,7 @@ struct ExploreView: View {
                         .foregroundColor(.white)
                 }
                 Spacer()
-            } else if activeUserEvents.isEmpty && userEventService.publicEventRSVPs.isEmpty {
+            } else if allUserEvents.isEmpty && userEventService.publicEventRSVPs.isEmpty {
                 VStack {
                     Spacer(minLength: 50)
                     Image(systemName: "calendar.badge.plus")
@@ -2509,7 +2438,7 @@ struct ExploreView: View {
     // MARK: - Computed Properties for Schedule
     private var groupedEventsByDate: [Date: [UserEvent]] {
         let calendar = Calendar.current
-        return Dictionary(grouping: activeUserEvents) { event in
+        return Dictionary(grouping: allUserEvents) { event in
             calendar.startOfDay(for: event.startDate)
         }
     }
@@ -2519,56 +2448,46 @@ struct ExploreView: View {
         var combinedItems: [CombinedEventItem] = []
         
         // Add UserEvents
-        for userEvent in activeUserEvents {
+        for userEvent in allUserEvents {
             combinedItems.append(CombinedEventItem(userEvent: userEvent))
         }
         
-        // Add Public Event RSVPs (only active ones)
+        // Add Public Event RSVPs (all of them)
         for rsvp in userEventService.publicEventRSVPs {
             // Look up the original event to get complete timing data
             if let originalEvent = viewModel.allEvents.first(where: { $0.id == rsvp.publicEventId }) {
-                // Only include if not completed using sophisticated timing
-                if originalEvent.currentStatus != .completed {
-                    combinedItems.append(CombinedEventItem(publicEvent: originalEvent, rsvpDate: rsvp.eventDate))
-                }
+                combinedItems.append(CombinedEventItem(publicEvent: originalEvent, rsvpDate: rsvp.eventDate))
             } else {
-                // Fallback to simple 12-hour rule if event not found
-                let completionTime = Calendar.current.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
-                let now = Date()
+                // Create event from RSVP data if original not found
+                let fallbackEvent = Event(
+                    id: rsvp.publicEventId,
+                    buyin_string: "TBD",
+                    simpleDate: SimpleDate(
+                        year: Calendar.current.component(.year, from: rsvp.eventDate),
+                        month: Calendar.current.component(.month, from: rsvp.eventDate),
+                        day: Calendar.current.component(.day, from: rsvp.eventDate)
+                    ),
+                    event_name: rsvp.eventName,
+                    series_name: nil,
+                    description: nil,
+                    time: nil,
+                    buyin_usd: nil,
+                    casino: nil,
+                    chipsFormatted: nil,
+                    game: nil,
+                    guarantee: nil,
+                    guaranteeFormatted: nil,
+                    lateRegistration: nil,
+                    levelLength: nil,
+                    levelsFormatted: nil,
+                    pdfLink: nil,
+                    seriesEnd: nil,
+                    seriesStart: nil,
+                    startingChips: nil,
+                    imageUrl: nil
+                )
                 
-                // Only include if not completed
-                if now < completionTime {
-                    // Create event from RSVP data if original not found
-                    let fallbackEvent = Event(
-                        id: rsvp.publicEventId,
-                        buyin_string: "TBD",
-                        simpleDate: SimpleDate(
-                            year: Calendar.current.component(.year, from: rsvp.eventDate),
-                            month: Calendar.current.component(.month, from: rsvp.eventDate),
-                            day: Calendar.current.component(.day, from: rsvp.eventDate)
-                        ),
-                        event_name: rsvp.eventName,
-                        series_name: nil,
-                        description: nil,
-                        time: nil,
-                        buyin_usd: nil,
-                        casino: nil,
-                        chipsFormatted: nil,
-                        game: nil,
-                        guarantee: nil,
-                        guaranteeFormatted: nil,
-                        lateRegistration: nil,
-                        levelLength: nil,
-                        levelsFormatted: nil,
-                        pdfLink: nil,
-                        seriesEnd: nil,
-                        seriesStart: nil,
-                        startingChips: nil,
-                        imageUrl: nil
-                    )
-                    
-                    combinedItems.append(CombinedEventItem(publicEvent: fallbackEvent, rsvpDate: rsvp.eventDate))
-                }
+                combinedItems.append(CombinedEventItem(publicEvent: fallbackEvent, rsvpDate: rsvp.eventDate))
             }
         }
         
@@ -2590,19 +2509,7 @@ struct ExploreView: View {
         return combinedGroupedEventsByDate[startOfDay] ?? []
     }
     
-    // MARK: - Completed Public Event RSVPs
-    private var completedPublicEventRSVPs: [PublicEventRSVP] {
-        return userEventService.publicEventRSVPs.filter { rsvp in
-            // Look up the original event to get complete timing data
-            if let originalEvent = viewModel.allEvents.first(where: { $0.id == rsvp.publicEventId }) {
-                return originalEvent.currentStatus == .completed
-            } else {
-                // Fallback to simple 12-hour rule if event not found
-                let completionTime = Calendar.current.date(byAdding: .hour, value: 12, to: rsvp.eventDate) ?? rsvp.eventDate
-                return Date() >= completionTime
-            }
-        }
-    }
+
     
     // MARK: - Helper Functions for Schedule
     private func formatDateHeader(_ date: Date) -> String {

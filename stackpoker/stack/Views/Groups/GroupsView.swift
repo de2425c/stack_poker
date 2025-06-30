@@ -603,6 +603,7 @@ struct CreateGroupView: View {
                                     .padding(.vertical, 6)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
+                            .padding(.horizontal, 24)
                             .opacity(nameFieldOpacity)
                             
                             // Create button with gradient and shadow
@@ -610,13 +611,13 @@ struct CreateGroupView: View {
                                 HStack {
                                     if isCreating {
                                         ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .black))
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                             .frame(width: 20, height: 20)
                                             .padding(.horizontal, 10)
                                     } else {
                                         Text("Create Group")
                                             .font(.system(size: 17, weight: .semibold, design: .default))
-                                            .foregroundColor(.black)
+                                            .foregroundColor(.white)
                                             .padding(.horizontal, 20)
                                             .frame(maxWidth: .infinity)
                                     }
@@ -624,12 +625,26 @@ struct CreateGroupView: View {
                                 .frame(height: 54)
                                 .background(
                                     groupName.isEmpty || isCreating
-                                        ? Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.5)
-                                        : Color(red: 123/255, green: 255/255, blue: 99/255)
+                                        ? LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.5),
+                                                Color(red: 100/255, green: 180/255, blue: 255/255).opacity(0.5)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                        : LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color(red: 64/255, green: 156/255, blue: 255/255),
+                                                Color(red: 100/255, green: 180/255, blue: 255/255)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                 )
                                 .cornerRadius(16)
                                 .shadow(
-                                    color: groupName.isEmpty ? Color.clear : Color(red: 123/255, green: 255/255, blue: 99/255).opacity(0.4),
+                                    color: groupName.isEmpty ? Color.clear : Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.4),
                                     radius: 8, x: 0, y: 4
                                 )
                             }
@@ -1145,47 +1160,24 @@ struct GroupDetailView: View {
                                     )
                                 )
                             
-                            // Group Name, member count, and owner button on top of the banner
-                            HStack(alignment: .bottom) {
-                                VStack(alignment: .leading, spacing: 6) {
-                    Text(group.name)
-                                        .font(.custom("PlusJakartaSans-Bold", size: 28))
-                        .foregroundColor(.white)
-                                        .shadow(color: .black.opacity(0.6), radius: 4, y: 2)
-                                    
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "person.2.fill")
-                                        Text("\(group.memberCount) member\(group.memberCount != 1 ? "s" : "")")
-                                    }
-                                    .font(.custom("PlusJakartaSans-Medium", size: 16))
-                                    .foregroundColor(.white.opacity(0.9))
-                                    .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
-                                }
+                            // Group Name and member count
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(group.name)
+                                    .font(.custom("PlusJakartaSans-Bold", size: 28))
+                                    .foregroundColor(.white)
+                                    .shadow(color: .black.opacity(0.6), radius: 4, y: 2)
                                 
-                                Spacer()
-                                
-                        if isOwner {
-                            PhotosPicker(selection: $imagePickerItem, matching: .images) {
-                                ZStack {
-                                    Circle()
-                                                .fill(.ultraThinMaterial)
-                                                .frame(width: 44, height: 44)
-                                    
-                                    Image(systemName: "camera.fill")
-                                                .font(.custom("PlusJakartaSans-Medium", size: 18))
-                                        .foregroundColor(.white)
+                                HStack(spacing: 8) {
+                                    Image(systemName: "person.2.fill")
+                                    Text("\(group.memberCount) member\(group.memberCount != 1 ? "s" : "")")
                                 }
-                                .overlay(
-                                    Circle()
-                                                .stroke(Color(red: 64/255, green: 156/255, blue: 255/255), lineWidth: 1.5)
-                                )
+                                .font(.custom("PlusJakartaSans-Medium", size: 16))
+                                .foregroundColor(.white.opacity(0.9))
+                                .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
                             }
-                            .onChange(of: imagePickerItem) { newItem in
-                                loadTransferableImage(from: newItem)
-                            }
-                        }
-                            }
-                            .padding(16)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         
                             // Upload progress overlay
                         if isUploadingImage {
@@ -1202,6 +1194,7 @@ struct GroupDetailView: View {
                         .frame(height: 220)
                         .opacity(headerOpacity)
                         .scaleEffect(avatarScale)
+
                         
                         // Elegant navigation header, now the top layer
                         HStack {
@@ -1221,10 +1214,46 @@ struct GroupDetailView: View {
                             
                             Spacer()
                             
-                            // Placeholder for balance
-                            Circle()
-                                .fill(Color.clear)
-                                .frame(width: 40, height: 40)
+                            // Camera button for owners in top-right
+                            if isOwner {
+                                PhotosPicker(selection: $imagePickerItem, matching: .images) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(.ultraThinMaterial)
+                                            .frame(width: 44, height: 44)
+                                        
+                                        Image(systemName: "camera.fill")
+                                            .font(.system(size: 18, weight: .semibold))
+                                            .foregroundColor(.white)
+                                    }
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color(red: 64/255, green: 156/255, blue: 255/255), lineWidth: 2)
+                                    )
+                                    .shadow(
+                                        color: Color.black.opacity(0.3),
+                                        radius: 8,
+                                        x: 0,
+                                        y: 4
+                                    )
+                                    .shadow(
+                                        color: Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.4),
+                                        radius: 6,
+                                        x: 0,
+                                        y: 2
+                                    )
+                                }
+                                .onChange(of: imagePickerItem) { newItem in
+                                    loadTransferableImage(from: newItem)
+                                }
+                                .scaleEffect(isUploadingImage ? 0.9 : 1.0)
+                                .animation(.easeInOut(duration: 0.2), value: isUploadingImage)
+                            } else {
+                                // Placeholder for non-owners
+                                Circle()
+                                    .fill(Color.clear)
+                                    .frame(width: 44, height: 44)
+                            }
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, geometry.safeAreaInsets.top)
