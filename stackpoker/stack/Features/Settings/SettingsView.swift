@@ -3,6 +3,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
 import UIKit
+import Kingfisher
 
 // MARK: - SettingsView
 struct SettingsView: View {
@@ -169,7 +170,7 @@ struct SettingsView: View {
                 .padding(.bottom, 120) // Maintained bottom padding for tab bar space
             }
             
-            // Simple loading overlay
+            // Loading overlays
             if isImporting {
                 ZStack {
                     Color.black.opacity(0.3)
@@ -193,6 +194,39 @@ struct SettingsView: View {
                 }
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.2), value: isImporting)
+            }
+            
+            // Account deletion loading overlay
+            if isDeleting {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .red))
+                            .scaleEffect(1.5)
+                        
+                        VStack(spacing: 8) {
+                            Text("Deleting Account")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.white)
+                            
+                            Text("Removing all your sessions, posts, and data...")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray)
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                    .padding(32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 0.95)))
+                            .shadow(color: Color.black.opacity(0.4), radius: 15, y: 8)
+                    )
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.3), value: isDeleting)
             }
         }
         .alert("Delete Your Account?", isPresented: $showDeleteConfirmation) {
@@ -325,21 +359,27 @@ struct SettingsView: View {
         
         Task {
             do {
-                // 1. Delete user data from collections
+                print("🗑️ Starting comprehensive account deletion for user: \(userId)")
+                
+                // 1. Delete user data from all Firestore collections and Storage
                 try await deleteUserDataFromFirestore(userId)
+                print("🗑️ Firestore and Storage data deletion completed")
                 
                 // 2. Delete Firebase Auth user
                 try await Auth.auth().currentUser?.delete()
+                print("🗑️ Firebase Auth user deleted")
                 
                 // 3. Sign out immediately after successful deletion
                 do {
                     try Auth.auth().signOut()
+                    print("🗑️ User signed out successfully")
                 } catch {
-
+                    print("⚠️ Sign out failed: \(error.localizedDescription)")
                 }
                 
                 await MainActor.run {
                     isDeleting = false
+                    print("🗑️ Account deletion completed successfully")
                     // The app will automatically redirect to the sign-in page due to auth state change
                     authViewModel.checkAuthState()
                 }
@@ -347,6 +387,7 @@ struct SettingsView: View {
                 await MainActor.run {
                     isDeleting = false
                     deleteError = "Failed to delete account: \(error.localizedDescription)"
+                    print("❌ Account deletion failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -354,6 +395,7 @@ struct SettingsView: View {
     
     private func deleteUserDataFromFirestore(_ userId: String) async throws {
         let db = Firestore.firestore()
+        let storage = Storage.storage()
         let batch = db.batch()
         
         // Delete user document
@@ -398,17 +440,141 @@ struct SettingsView: View {
             batch.deleteDocument(doc.reference)
         }
         
+        // NEW: Delete user's sessions
+        let userSessions = try await db.collection("sessions")
+            .whereField("userId", isEqualTo: userId)
+            .getDocuments()
+        
+        for doc in userSessions.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        
+        // NEW: Delete user's posts
+        let userPosts = try await db.collection("posts")
+            .whereField("userId", isEqualTo: userId)
+            .getDocuments()
+        
+        for doc in userPosts.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        
+        // NEW: Delete user's parked sessions
+        let userParkedSessions = try await db.collection("parkedSessions")
+            .whereField("userId", isEqualTo: userId)
+            .getDocuments()
+        
+        for doc in userParkedSessions.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        
+        // NEW: Delete user's public sessions
+        let userPublicSessions = try await db.collection("public_sessions")
+            .whereField("userId", isEqualTo: userId)
+            .getDocuments()
+        
+        for doc in userPublicSessions.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        
+        // NEW: Delete user's session start notifications
+        let userSessionNotifications = try await db.collection("sessionStartNotifications")
+            .whereField("playerId", isEqualTo: userId)
+            .getDocuments()
+        
+        for doc in userSessionNotifications.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        
         // Commit the batch deletion of Firestore data
         try await batch.commit()
         
-        // Attempt to delete profile image, but don't let it stop the account deletion process
+        // Delete profile image from Storage (don't let this fail the whole process)
         do {
-            try await Storage.storage().reference()
+            try await storage.reference()
                 .child("profile_images/\(userId).jpg")
                 .delete()
         } catch {
-            // Log the error but continue with account deletion
-
+            print("Profile image deletion failed: \(error.localizedDescription)")
+        }
+        
+        // NEW: Delete CSV import files from Storage
+        let importFolders = [
+            "pokerbaseImports/\(userId)",
+            "pokerAnalyticsImports/\(userId)", 
+            "pbtImports/\(userId)",
+            "regroupImports/\(userId)"
+        ]
+        
+        for folder in importFolders {
+            do {
+                // List all files in the folder
+                let listResult = try await storage.reference().child(folder).listAll()
+                
+                // Delete each file
+                for item in listResult.items {
+                    try await item.delete()
+                }
+                
+                print("Deleted CSV imports from \(folder)")
+            } catch {
+                print("Failed to delete CSV imports from \(folder): \(error.localizedDescription)")
+                // Continue with deletion even if some CSV files fail
+            }
+        }
+        
+        // NEW: Clear all local cache and UserDefaults
+        await clearAllLocalCache(userId: userId)
+    }
+    
+    // NEW: Comprehensive cache clearing function
+    private func clearAllLocalCache(userId: String) async {
+        await MainActor.run {
+            print("🧹 Starting comprehensive cache clearing for user: \(userId)")
+            
+            // Clear all UserDefaults keys for this user
+            let userDefaultsKeys = [
+                // Session-related keys
+                "LiveSession_\(userId)",
+                "EnhancedLiveSession_\(userId)",
+                "ParkedSessions_\(userId)",
+                "liveSession_\(userId)",
+                "enhancedLiveSession_\(userId)",
+                "LiveSessionData_\(userId)",
+                "SessionStore_\(userId)",
+                "ActiveSession_\(userId)",
+                "CurrentSession_\(userId)",
+                "SessionState_\(userId)",
+                
+                // Cache keys
+                "cached_posts_data",
+                "cached_following_users",
+                "LastFCMToken",
+                
+                // Event cache keys (from ExploreView)
+                "EventsCache",
+                "EventsCacheTimestamp",
+                
+                // Login count and CSV prompt
+                "hasShownCSVPrompt",
+                "loginCount"
+            ]
+            
+            // Remove all user-specific keys
+            for key in userDefaultsKeys {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+            
+            // Force synchronize UserDefaults
+            UserDefaults.standard.synchronize()
+            
+            // Clear Kingfisher image cache
+            ImageCache.default.clearMemoryCache()
+            ImageCache.default.clearDiskCache()
+            
+            // Clear any additional app-level caches
+            URLCache.shared.removeAllCachedResponses()
+            
+            print("🧹 Cache clearing completed")
         }
     }
 }
