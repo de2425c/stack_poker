@@ -18,6 +18,8 @@ struct SignUpView: View {
     @State private var passwordIsValid = false
     @State private var passwordsMatch = false
     @State private var hasInteracted = false
+    @State private var agreesToTerms = false
+    @State private var showingLegalDocs = false
     
     // Computed property for form validity
     private var isFormValid: Bool {
@@ -96,6 +98,33 @@ struct SignUpView: View {
                                         }
                                 }
                                 
+                                // Terms and Conditions
+                                HStack(alignment: .center, spacing: 12) {
+                                    Button(action: {
+                                        withAnimation {
+                                            agreesToTerms.toggle()
+                                        }
+                                    }) {
+                                        Image(systemName: agreesToTerms ? "checkmark.square.fill" : "square")
+                                            .font(.system(size: 24))
+                                            .foregroundColor(agreesToTerms ? Color.blue : .gray)
+                                    }
+
+                                    (
+                                        Text("I agree to the ")
+                                            .foregroundColor(.white.opacity(0.7))
+                                        +
+                                        Text("Terms & Conditions")
+                                            .foregroundColor(.blue)
+                                            .underline()
+                                    )
+                                    .font(.plusJakarta(.caption))
+                                    .onTapGesture {
+                                        showingLegalDocs = true
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                                
                                 // Optimized Create Account Button
                                 Button(action: {
                                     // Add haptic feedback for immediate response
@@ -137,7 +166,7 @@ struct SignUpView: View {
                                         .scaleEffect(isLoading ? 0.98 : 1.0)
                                         .animation(.easeInOut(duration: 0.1), value: isLoading)
                                 )
-                                .disabled(isLoading || (!isFormValid && hasInteracted))
+                                .disabled(isLoading || (!isFormValid && hasInteracted) || !agreesToTerms)
                                 .opacity(buttonOpacity)
                                 .animation(.easeInOut(duration: 0.2), value: isFormValid)
                                 .contentShape(Rectangle())
@@ -185,6 +214,9 @@ struct SignUpView: View {
             EmailVerificationView()
                 .environmentObject(authViewModel)
         }
+        .sheet(isPresented: $showingLegalDocs) {
+            LegalDocsView()
+        }
     }
     
     // MARK: - Validation Methods
@@ -220,14 +252,14 @@ struct SignUpView: View {
         if isLoading {
             return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.8))
         }
-        return isFormValid || !hasInteracted ? 
+        return isFormValid && agreesToTerms || !hasInteracted ? 
             Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)) : 
             Color.gray.opacity(0.6)
     }
     
     private var buttonOpacity: Double {
         if isLoading { return 0.8 }
-        return (isFormValid || !hasInteracted) ? 1.0 : 0.6
+        return (isFormValid && agreesToTerms || !hasInteracted) ? 1.0 : 0.6
     }
     
     // MARK: - Sign Up Method
@@ -244,6 +276,12 @@ struct SignUpView: View {
             } else if !passwordsMatch {
                 errorMessage = "Passwords don't match"
             }
+            showingError = true
+            return
+        }
+
+        guard agreesToTerms else {
+            errorMessage = "Please agree to the Terms & Conditions to continue."
             showingError = true
             return
         }

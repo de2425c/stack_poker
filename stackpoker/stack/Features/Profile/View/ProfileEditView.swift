@@ -4,6 +4,7 @@ import FirebaseFirestore
 import FirebaseStorage
 import PhotosUI
 import UIKit
+import Kingfisher
 
 struct ProfileEditView: View {
     @State var profile: UserProfile
@@ -127,23 +128,11 @@ struct ProfileEditView: View {
                                         .frame(width: 75, height: 75)
                                         .clipShape(Circle())
                                 } else if let url = profile.avatarURL, !url.isEmpty, let imageURL = URL(string: url) {
-                                    AsyncImage(url: imageURL) { phase in
-                                        if let image = phase.image {
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                                .frame(width: 75, height: 75)
-                                                .clipShape(Circle())
-                                        } else if phase.error != nil {
-                                            Image(systemName: "person.fill")
-                                                .font(.system(size: 50))
-                                                .foregroundColor(.gray)
-                                        } else {
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 123/255, green: 255/255, blue: 99/255)))
-                                        }
-                                    }
-                                    .frame(width: 75, height: 75)
+                                    KFImage(imageURL)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 75, height: 75)
+                                        .clipShape(Circle())
                                 } else {
                                     Image(systemName: "person.fill")
                                         .font(.system(size: 50))

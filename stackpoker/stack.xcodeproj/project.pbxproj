@@ -43,10 +43,10 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		66EA95D62DBC60690076E0AD /* Exceptions for "stack" folder in "stack" target */ = {
+		6685353F2E133B2B000F8C1C /* Exceptions for "stack" folder in "stack" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Info.plist,
+				SupportingFiles/Info.plist,
 			);
 			target = 66EA95662DBC1E0B0076E0AD /* stack */;
 		};
@@ -56,7 +56,7 @@
 		66EA95692DBC1E0B0076E0AD /* stack */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				66EA95D62DBC60690076E0AD /* Exceptions for "stack" folder in "stack" target */,
+				6685353F2E133B2B000F8C1C /* Exceptions for "stack" folder in "stack" target */,
 			);
 			path = stack;
 			sourceTree = "<group>";
@@ -474,14 +474,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = stack/stack.entitlements;
+				CODE_SIGN_ENTITLEMENTS = stack/SupportingFiles/stack.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RQVKDAF979;
 				ENABLE_DEBUG_DYLIB = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = stack/Info.plist;
+				INFOPLIST_FILE = stack/SupportingFiles/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -514,14 +514,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = stack/stack.entitlements;
+				CODE_SIGN_ENTITLEMENTS = stack/SupportingFiles/stack.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RQVKDAF979;
 				ENABLE_DEBUG_DYLIB = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = stack/Info.plist;
+				INFOPLIST_FILE = stack/SupportingFiles/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

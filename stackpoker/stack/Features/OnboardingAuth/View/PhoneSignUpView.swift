@@ -23,6 +23,8 @@ struct PhoneSignUpView: View {
     // Real-time validation states
     @State private var phoneIsValid = false
     @State private var hasInteracted = false
+    @State private var agreesToTerms = false
+    @State private var showingLegalDocs = false
     
     // Computed property for form validity
     private var isFormValid: Bool {
@@ -125,6 +127,33 @@ struct PhoneSignUpView: View {
                                 }
                                 .padding(.horizontal, 4)
                                 
+                                // Terms and Conditions
+                                HStack(alignment: .center, spacing: 12) {
+                                    Button(action: {
+                                        withAnimation {
+                                            agreesToTerms.toggle()
+                                        }
+                                    }) {
+                                        Image(systemName: agreesToTerms ? "checkmark.square.fill" : "square")
+                                            .font(.system(size: 24))
+                                            .foregroundColor(agreesToTerms ? Color.blue : .gray)
+                                    }
+
+                                    (
+                                        Text("I agree to the ")
+                                            .foregroundColor(.white.opacity(0.7))
+                                        +
+                                        Text("Terms & Conditions")
+                                            .foregroundColor(.blue)
+                                            .underline()
+                                    )
+                                    .font(.plusJakarta(.caption))
+                                    .onTapGesture {
+                                        showingLegalDocs = true
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                                
                                 // Send Code Button
                                 Button(action: {
                                     // Add haptic feedback for immediate response
@@ -157,7 +186,7 @@ struct PhoneSignUpView: View {
                                         .scaleEffect(isLoading ? 0.98 : 1.0)
                                         .animation(.easeInOut(duration: 0.1), value: isLoading)
                                 )
-                                .disabled(isLoading || (!isFormValid && hasInteracted))
+                                .disabled(isLoading || (!isFormValid && hasInteracted) || !agreesToTerms)
                                 .opacity(buttonOpacity)
                                 .animation(.easeInOut(duration: 0.2), value: isFormValid)
                                 .contentShape(Rectangle())
@@ -207,6 +236,9 @@ struct PhoneSignUpView: View {
         .fullScreenCover(isPresented: $showingPhoneVerification) {
             PhoneVerificationView(phoneNumber: getFullPhoneNumber(), authService: authService)
                 .environmentObject(authViewModel)
+        }
+        .sheet(isPresented: $showingLegalDocs) {
+            LegalDocsView()
         }
         .onChange(of: selectedCountry) { _ in
             // Clear phone number when country changes
@@ -420,7 +452,7 @@ struct PhoneSignUpView: View {
     
     private var buttonOpacity: Double {
         if isLoading { return 0.8 }
-        return (isFormValid || !hasInteracted) ? 1.0 : 0.6
+        return (isFormValid && agreesToTerms || !hasInteracted) ? 1.0 : 0.6
     }
     
     // MARK: - Send Verification Code Method
@@ -431,6 +463,12 @@ struct PhoneSignUpView: View {
         // Final validation before submission
         guard isFormValid else {
             errorMessage = "Please enter a valid phone number"
+            showingError = true
+            return
+        }
+        
+        guard agreesToTerms else {
+            errorMessage = "Please agree to the Terms & Conditions to continue."
             showingError = true
             return
         }

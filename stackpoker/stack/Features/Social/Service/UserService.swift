@@ -204,6 +204,9 @@ class UserService: ObservableObject {
                 print("UserService: Profile cached successfully")
             }
             
+            // Auto-follow the news bot for all new users
+            await autoFollowNewsBot(userId: userId)
+            
         } catch let firestoreError as NSError {
             print("UserService: Firestore error occurred: \(firestoreError)")
             print("UserService: Error domain: \(firestoreError.domain)")
@@ -508,6 +511,35 @@ class UserService: ObservableObject {
         } catch {
             print("Error unfollowing user: \(error)")
             throw error
+        }
+    }
+    
+    // Auto-follow news bot for new users
+    private func autoFollowNewsBot(userId: String) async {
+        let newsBotUserId = "qY3HAlHvBzWDCPMRMRO4lW6KCRN2"
+        
+        do {
+            // Check if already following to avoid duplicates
+            let alreadyFollowing = await isUserFollowing(targetUserId: newsBotUserId, currentUserId: userId)
+            if alreadyFollowing {
+                print("ℹ️ User \(userId) already follows news bot")
+                return
+            }
+            
+            // Create follow relationship for the news bot
+            let followData = UserFollow(
+                followerId: userId, 
+                followeeId: newsBotUserId, 
+                createdAt: Date(), 
+                postNotifications: false
+            )
+            
+            try await db.collection(userFollowsCollection).addDocument(from: followData)
+            print("✅ Auto-followed news bot for new user: \(userId)")
+            
+        } catch {
+            print("❌ Failed to auto-follow news bot for user \(userId): \(error)")
+            // Don't throw error - this shouldn't block user registration
         }
     }
 

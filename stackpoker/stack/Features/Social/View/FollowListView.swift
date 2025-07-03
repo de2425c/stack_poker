@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseFirestore
+import Kingfisher
 
 enum FollowListType {
     case followers
@@ -132,7 +133,15 @@ struct UserListRow: View {
             HStack(spacing: 12) {
                 // Profile Image
                 if let url = user.avatarURL, let imageURL = URL(string: url) {
-                    ProfileImageView(url: imageURL)
+                    KFImage(imageURL)
+                        .placeholder {
+                            PlaceholderAvatarView(size: 50)
+                        }
+                        .onFailure { error in
+                            print("Failed to load profile image: \(error)")
+                        }
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
                         .frame(width: 50, height: 50)
                         .clipShape(Circle())
                 } else {

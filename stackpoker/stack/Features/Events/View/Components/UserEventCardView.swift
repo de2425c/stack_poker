@@ -59,6 +59,9 @@ struct UserEventCardView: View {
                     
                     // First, try to find a parked session that matches this resume event
                     if let associatedSessionId = event.associatedLiveSessionId {
+                        print("[UserEventCardView] Looking for session with ID: \(associatedSessionId)")
+                        print("[UserEventCardView] Available parked sessions: \(sessionStore.parkedSessions.keys.sorted())")
+                        
                         // Look for a parked session with this session ID
                         let matchingParkedKey = sessionStore.parkedSessions.keys.first { key in
                             key.contains(associatedSessionId)
@@ -68,6 +71,7 @@ struct UserEventCardView: View {
                             print("[UserEventCardView] Found parked session: \(parkedKey)")
                             sessionStore.restoreParkedSession(key: parkedKey)
                         } else {
+                            print("[UserEventCardView] No matching parked session found for ID: \(associatedSessionId)")
                             // Fallback: check if there's an active session to resume (old system)
                             if sessionStore.liveSession.buyIn > 0 && sessionStore.liveSession.pausedForNextDay {
                                 print("[UserEventCardView] Resuming from old system")
@@ -77,7 +81,7 @@ struct UserEventCardView: View {
                             }
                         }
                     } else {
-                        print("[UserEventCardView] No associated session ID found")
+                        print("[UserEventCardView] No associated session ID found in event")
                     }
                 }
                 

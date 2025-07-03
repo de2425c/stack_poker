@@ -179,32 +179,43 @@ struct FeedView: View {
                 }
             }
             
-            // Load public sessions
+            // Load public sessions with follower filtering
             Task {
-                try? await publicSessionService.fetchPublicSessions()
-                // Start listening for real-time updates on live sessions
-                publicSessionService.startListeningToLiveSessions()
+                try? await publicSessionService.fetchPublicSessions(currentUserId: userId, followersOnly: true)
+                // Start listening for real-time updates on live sessions with follower filtering
+                publicSessionService.startListeningToLiveSessions(currentUserId: userId, followersOnly: true)
             }
             
             // Load suggested users for both empty state and feed injection
             loadSuggestedUsers()
             print("DEBUG: Loading suggested users on appear")
             
-            // Add observer for following changes to refresh suggested users
+            // Add observer for following changes to refresh suggested users and public sessions
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("UserFollowingChanged"),
                 object: nil,
                 queue: .main
             ) { _ in
                 loadSuggestedUsers() // Refresh suggested users when following changes
+                // Restart the public sessions listener with updated following relationships
+                Task {
+                    publicSessionService.stopListeningToLiveSessions()
+                    try? await publicSessionService.forceRefresh(currentUserId: userId, followersOnly: true)
+                    publicSessionService.startListeningToLiveSessions(currentUserId: userId, followersOnly: true)
+                }
             }
             
 
+        }
+        .onDisappear {
+            // Clean up listeners when view disappears
+            publicSessionService.stopListeningToLiveSessions()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Refresh feed and suggested users when app becomes active
             Task {
                 try? await postService.forceRefresh()
+                try? await publicSessionService.forceRefresh(currentUserId: userId, followersOnly: true)
                 loadSuggestedUsers() // Refresh suggested users too
             }
         }
@@ -554,7 +565,7 @@ struct FeedView: View {
                                     // Load more sessions when reaching the end
                                     if session.id == publicSessionService.liveSessions.last?.id {
                                         Task {
-                                            try? await publicSessionService.fetchMoreSessions()
+                                            try? await publicSessionService.fetchMoreSessions(currentUserId: userId, followersOnly: true)
                                         }
                                     }
                                 }
@@ -581,7 +592,7 @@ struct FeedView: View {
     private func refreshFeed() async {
         isRefreshing = true
         try? await postService.forceRefresh() // Use forceRefresh to bypass cache
-        try? await publicSessionService.forceRefresh() // Also refresh public sessions
+        try? await publicSessionService.forceRefresh(currentUserId: userId, followersOnly: true) // Refresh with follower filtering
         isRefreshing = false
     }
     

@@ -200,8 +200,11 @@ class SessionStore: ObservableObject {
         // Load any existing session state
         loadLiveSessionState()
         
-        // Load any existing parked sessions
+        // Load any existing parked sessions from both local storage and Firestore
         loadParkedSessionsState()
+        Task {
+            await loadParkedSessionsFromFirestore()
+        }
         
         // Sanitize any corrupted data that might have been loaded
         sanitizeAllSessionData()
@@ -209,10 +212,9 @@ class SessionStore: ObservableObject {
         // DON'T fetch historical sessions automatically - wait for explicit request
         // fetchSessions() // REMOVED - now called only when sessions tab is opened
         
-        // Validate the loaded state
-        if !validateSessionState() {
-            print("⚠️ SESSION STORE: Initial state validation failed")
-        }
+        // REMOVED: Automatic state validation on initialization
+        // This was causing performance issues - validation now only runs on explicit request
+        // Use validateSessionStateOnLaunch() method for launch-time validation if needed
         
         print("🔄 SESSION STORE: Initialization complete - isActive: \(liveSession.isActive), showBar: \(showLiveSessionBar)")
     }
@@ -641,9 +643,12 @@ class SessionStore: ObservableObject {
     
     func startLiveSession(gameName: String, stakes: String, buyIn: Double, isTournament: Bool = false, tournamentDetails: (name: String, type: String, baseBuyIn: Double)? = nil, pokerVariant: String? = nil, tournamentGameType: TournamentGameType? = nil, tournamentFormat: TournamentFormat? = nil, casino: String? = nil) {
         stopLiveSessionTimer() // Ensure any existing timer is stopped
-        liveSession = LiveSessionData(
+        
+        // Create the new session data first
+        let newSessionStartTime = Date()
+        let newSession = LiveSessionData(
             isActive: true,
-            startTime: Date(),
+            startTime: newSessionStartTime,
             elapsedTime: 0,
             gameName: isTournament ? (tournamentDetails?.name ?? gameName) : gameName,
             stakes: isTournament ? (tournamentDetails?.type ?? stakes) : stakes,
@@ -660,6 +665,10 @@ class SessionStore: ObservableObject {
             pokerVariant: pokerVariant
             
         )
+        
+        // REMOVED: Duplicate prevention checking - removed per user request
+        
+        liveSession = newSession
         
         // Initialize enhanced session data
         enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
@@ -762,8 +771,13 @@ class SessionStore: ObservableObject {
         // Create a unique key for the parked session
         let parkedSessionKey = "\(sessionToPark.id)_day\(sessionToPark.currentDay + 1)"
         
-        // Park the session
+        // Park the session both locally and in Firestore
         parkedSessions[parkedSessionKey] = sessionToPark
+        
+        // Save to Firestore for better persistence
+        Task {
+            await saveParkedSessionToFirestore(key: parkedSessionKey, session: sessionToPark)
+        }
         
         // Clear the live session to allow new sessions
         liveSession = LiveSessionData()
@@ -771,7 +785,7 @@ class SessionStore: ObservableObject {
         
         // Stop timer and save state
         stopLiveSessionTimer()
-        saveParkedSessionsState()
+        saveParkedSessionsState() // Keep local backup
         saveLiveSessionState() // This will save the cleared session
         
         // Don't hide the bar - allow new sessions to be started
@@ -782,22 +796,28 @@ class SessionStore: ObservableObject {
     
     /// Restores a parked session back to active state
     func restoreParkedSession(key: String) {
+        print("🅿️ [PARKED SESSION] Attempting to restore parked session with key: \(key)")
+
         guard let parkedSession = parkedSessions[key] else {
-            print("[SessionStore] No parked session found for key: \(key)")
+            print("❌ [PARKED SESSION] No parked session found for key: \(key). Aborting restore.")
             return
         }
         
-        print("[SessionStore] Restoring parked session: \(key)")
+        print("🅿️ [PARKED SESSION] Found parked session to restore: \(parkedSession.gameName) for Day \(parkedSession.currentDay + 1)")
         
         // If there's currently an active session, we need to handle this conflict
         if liveSession.buyIn > 0 && !liveSession.isEnded {
-            print("[SessionStore] WARNING: Attempting to restore parked session while another session is active")
-            print("[SessionStore] Current session: \(liveSession.gameName) with buy-in: \(liveSession.buyIn)")
-            print("[SessionStore] This operation will be blocked to prevent data loss")
+            print("⚠️ [PARKED SESSION] CONFLICT: Attempting to restore a session while another is active.")
+            print("   - Current active session: \(liveSession.gameName) with buy-in: \(liveSession.buyIn)")
+            print("   - This operation will be blocked to prevent data loss.")
             // For now, we'll prevent this. In the future, we could queue or ask user to choose
             return
         }
         
+        print("🅿️ [PARKED SESSION] No active session conflict. Proceeding with restore.")
+
+        // REMOVED: Duplicate checking for parked sessions - removed per user request
+
         var restoredSession = parkedSession
         restoredSession.isActive = true
         restoredSession.pausedForNextDay = false
@@ -807,9 +827,16 @@ class SessionStore: ObservableObject {
         
         // Remove from parked sessions
         parkedSessions.removeValue(forKey: key)
+        print("🅿️ [PARKED SESSION] Removed session from the parkedSessions dictionary.")
+        
+        // Remove from Firestore as well
+        Task {
+            await removeParkedSessionFromFirestore(key: key)
+        }
         
         // Set as live session
         liveSession = restoredSession
+        print("🅿️ [PARKED SESSION] Set the restored session as the current live session.")
         
         // Try to restore enhanced session data if it exists
         // Note: Enhanced data might not be available for older parked sessions
@@ -817,20 +844,20 @@ class SessionStore: ObservableObject {
         if let savedData = UserDefaults.standard.data(forKey: enhancedKey),
            let loadedEnhancedSession = try? JSONDecoder().decode(LiveSessionData_Enhanced.self, from: savedData) {
             enhancedLiveSession = loadedEnhancedSession
-            print("[SessionStore] Restored enhanced session data for parked session")
+            print("🅿️ [PARKED SESSION] Successfully restored enhanced session data for parked session.")
         } else {
             // Initialize with basic session if no enhanced data available
             enhancedLiveSession = LiveSessionData_Enhanced(basicSession: liveSession)
-            print("[SessionStore] No enhanced data found, initialized new enhanced session")
+            print("🅿️ [PARKED SESSION] No enhanced data found. Initialized a new enhanced session from basic data.")
         }
         
         // Start timer and update display
         startLiveSessionTimer()
-        saveParkedSessionsState()
+        saveParkedSessionsState() // Save the state now that one session has been removed
         saveLiveSessionState()
         showLiveSessionBar = true
         
-        print("[SessionStore] Session restored to Day \(liveSession.currentDay)")
+        print("✅ [PARKED SESSION] Session for Day \(liveSession.currentDay) successfully restored and is now active.")
     }
     
     /// Gets all parked sessions with user-friendly display info
@@ -853,6 +880,12 @@ class SessionStore: ObservableObject {
     func discardParkedSession(key: String) {
         parkedSessions.removeValue(forKey: key)
         saveParkedSessionsState()
+        
+        // Also remove from Firestore
+        Task {
+            await removeParkedSessionFromFirestore(key: key)
+        }
+        
         print("[SessionStore] Discarded parked session: \(key)")
     }
     
@@ -1145,7 +1178,7 @@ class SessionStore: ObservableObject {
         scorachedEarthSessionClear()
     }
     
-    // SCORCHED EARTH: Enhanced session validation
+    // SCORCHED EARTH: Enhanced session validation (synchronous - for basic checks only)
     func validateSessionState() -> Bool {
         // Check if session should exist but doesn't make sense
         if liveSession.buyIn > 0 && liveSession.isEnded {
@@ -1171,6 +1204,18 @@ class SessionStore: ObservableObject {
         }
         
         return true
+    }
+    
+    // NEW: Basic session validation for app launch
+    func validateSessionStateOnLaunch() async {
+        print("🚀 LAUNCH VALIDATION: Starting basic session validation...")
+        
+        // Run basic synchronous validation
+        if validateSessionState() {
+            print("🚀 LAUNCH VALIDATION: Session validation complete")
+        } else {
+            print("🚀 LAUNCH VALIDATION: Basic validation failed, session cleared")
+        }
     }
     
     // MARK: - Timer Management
@@ -1244,7 +1289,84 @@ class SessionStore: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "EnhancedLiveSession_\(userId)")
     }
     
-    // MARK: - State Persistence for Parked Sessions
+    // MARK: - State Persistence for Parked Sessions (Database-backed)
+    
+    /// Save a parked session to Firestore for better persistence
+    private func saveParkedSessionToFirestore(key: String, session: LiveSessionData) async {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let sessionData = try encoder.encode(session)
+            let sessionDict = try JSONSerialization.jsonObject(with: sessionData) as? [String: Any] ?? [:]
+            
+            let parkedSessionDoc = [
+                "userId": userId,
+                "sessionKey": key,
+                "sessionData": sessionDict,
+                "parkedAt": Timestamp(date: Date()),
+                "nextDayDate": Timestamp(date: session.pausedForNextDayDate ?? Date())
+            ] as [String: Any]
+            
+            try await db.collection("parkedSessions").document(key).setData(parkedSessionDoc)
+            print("🅿️ [FIRESTORE] Successfully saved parked session to Firestore: \(key)")
+        } catch {
+            print("❌ [FIRESTORE] Failed to save parked session to Firestore: \(error)")
+        }
+    }
+    
+    /// Load all parked sessions from Firestore
+    private func loadParkedSessionsFromFirestore() async {
+        do {
+            let snapshot = try await db.collection("parkedSessions")
+                .whereField("userId", isEqualTo: userId)
+                .getDocuments()
+            
+            var firestoreParkedSessions: [String: LiveSessionData] = [:]
+            
+            for document in snapshot.documents {
+                let data = document.data()
+                guard let sessionKey = data["sessionKey"] as? String,
+                      let sessionDataDict = data["sessionData"] as? [String: Any] else {
+                    print("⚠️ [FIRESTORE] Invalid parked session data format for document: \(document.documentID)")
+                    continue
+                }
+                
+                do {
+                    let sessionData = try JSONSerialization.data(withJSONObject: sessionDataDict)
+                    let decoder = JSONDecoder()
+                    decoder.dateDecodingStrategy = .iso8601
+                    let session = try decoder.decode(LiveSessionData.self, from: sessionData)
+                    firestoreParkedSessions[sessionKey] = session
+                    print("🅿️ [FIRESTORE] Loaded parked session: \(sessionKey)")
+                } catch {
+                    print("❌ [FIRESTORE] Failed to decode parked session \(sessionKey): \(error)")
+                }
+            }
+            
+            // Merge with local sessions, prioritizing Firestore data
+            await MainActor.run {
+                for (key, session) in firestoreParkedSessions {
+                    parkedSessions[key] = session
+                }
+                print("🅿️ [FIRESTORE] Loaded \(firestoreParkedSessions.count) parked sessions from Firestore")
+            }
+            
+        } catch {
+            print("❌ [FIRESTORE] Failed to load parked sessions from Firestore: \(error)")
+        }
+    }
+    
+    /// Remove a parked session from Firestore
+    private func removeParkedSessionFromFirestore(key: String) async {
+        do {
+            try await db.collection("parkedSessions").document(key).delete()
+            print("🅿️ [FIRESTORE] Successfully removed parked session from Firestore: \(key)")
+        } catch {
+            print("❌ [FIRESTORE] Failed to remove parked session from Firestore: \(error)")
+        }
+    }
+    
+    // MARK: - State Persistence for Parked Sessions (UserDefaults backup)
     
     private func saveParkedSessionsState() {
         do {
@@ -1252,20 +1374,33 @@ class SessionStore: ObservableObject {
             let encoded = try encoder.encode(parkedSessions)
             UserDefaults.standard.set(encoded, forKey: "ParkedSessions_\(userId)")
             UserDefaults.standard.synchronize()
-            print("[SessionStore] Parked sessions state saved successfully")
+            print("🅿️ [PARKED SESSION] Saved \(parkedSessions.count) parked sessions to UserDefaults with key: ParkedSessions_\(userId)")
         } catch {
-            print("[SessionStore] Failed to save parked sessions state: \(error)")
+            print("❌ [PARKED SESSION] FAILED to save parked sessions state: \(error)")
         }
     }
     
     private func loadParkedSessionsState() {
-        if let savedData = UserDefaults.standard.data(forKey: "ParkedSessions_\(userId)"),
-           let loadedParkedSessions = try? JSONDecoder().decode([String: LiveSessionData].self, from: savedData) {
-            parkedSessions = loadedParkedSessions
-            print("[SessionStore] Loaded \(parkedSessions.count) parked sessions")
+        let key = "ParkedSessions_\(userId)"
+        print("🅿️ [PARKED SESSION] Attempting to load parked sessions from UserDefaults with key: \(key)")
+        if let savedData = UserDefaults.standard.data(forKey: key) {
+             print("🅿️ [PARKED SESSION] Found data for key. Size: \(savedData.count) bytes.")
+            do {
+                let loadedParkedSessions = try JSONDecoder().decode([String: LiveSessionData].self, from: savedData)
+                parkedSessions = loadedParkedSessions
+                print("✅ [PARKED SESSION] Successfully decoded and loaded \(parkedSessions.count) parked sessions.")
+                if !parkedSessions.isEmpty {
+                    for (sessionKey, sessionData) in parkedSessions {
+                        print("   - Key: \(sessionKey), Game: \(sessionData.gameName), Day: \(sessionData.currentDay + 1)")
+                    }
+                }
+            } catch {
+                print("❌ [PARKED SESSION] FAILED to decode parked sessions from data: \(error)")
+                parkedSessions = [:]
+            }
         } else {
             parkedSessions = [:]
-            print("[SessionStore] No parked sessions found")
+            print("🅿️ [PARKED SESSION] No data found in UserDefaults for parked sessions.")
         }
     }
     
@@ -1283,11 +1418,13 @@ class SessionStore: ObservableObject {
             let encoded = try encoder.encode(liveSession)
             UserDefaults.standard.set(encoded, forKey: "LiveSession_\(userId)")
             UserDefaults.standard.synchronize()
-            print("[SessionStore] Live session state saved successfully")
+            // print("[SessionStore] Live session state saved successfully") // Less verbose logging
         } catch {
             print("[SessionStore] Failed to save live session state: \(error)")
         }
     }
+    
+
     
     private func loadLiveSessionState() {
         if let savedData = UserDefaults.standard.data(forKey: "LiveSession_\(userId)"),
@@ -1295,7 +1432,7 @@ class SessionStore: ObservableObject {
             
             // SCORCHED EARTH: Enhanced validation before restoring
             print("🔍 LOADING: Found saved session data")
-            
+
             // If isEnded is true, it's definitively ended. Clear it and return.
             if loadedSession.isEnded {
                 print("🗑️ LOADING: Session marked as ended - clearing")
@@ -1303,50 +1440,53 @@ class SessionStore: ObservableObject {
                 return
             }
 
-            // SCORCHED EARTH: Check for corrupted or invalid session data
-            if loadedSession.buyIn < 0 || loadedSession.elapsedTime < 0 {
-                print("⚠️ LOADING: Found corrupted session data - clearing")
-                scorachedEarthSessionClear()
-                return
-            }
+            // --- VALIDATION DISABLED FOR DEBUGGING ---
+            // The aggressive validation logic that was here has been temporarily disabled.
+            // This will allow us to inspect the state of parked sessions without the app
+            // automatically clearing them on launch. The validation should be moved to the
+            // restore function, triggered only by user action.
+            print("⚠️ DEBUGGING: Automatic session validation on load is currently DISABLED.")
 
             let isPotentiallyRestorable = loadedSession.isActive || loadedSession.lastPausedAt != nil || loadedSession.pausedForNextDay
             let hasValidBuyIn = loadedSession.buyIn > 0
 
             // SCORCHED EARTH: Enhanced staleness check
-            let lastActivityTime = loadedSession.lastActiveAt ?? loadedSession.lastPausedAt ?? loadedSession.startTime
-            let timeSinceLastActivity = Date().timeIntervalSince(lastActivityTime)
-            let isAbandoned = timeSinceLastActivity > maximumSessionDuration // 120-hour abandonment window
+            // let lastActivityTime = loadedSession.lastActiveAt ?? loadedSession.lastPausedAt ?? loadedSession.startTime
+            // let timeSinceLastActivity = Date().timeIntervalSince(lastActivityTime)
+            // let isAbandoned = timeSinceLastActivity > maximumSessionDuration // 120-hour abandonment window
 
             // SCORCHED EARTH: More aggressive validation
-            let isCorrupted = loadedSession.startTime > Date() || // Future start time
-                             loadedSession.elapsedTime > maximumSessionDuration || // Exceeds maximum duration
-                             (loadedSession.isActive && loadedSession.lastActiveAt == nil) // Active but no lastActiveAt
+            // let isCorrupted = loadedSession.startTime > Date() || // Future start time
+            //                  loadedSession.elapsedTime > maximumSessionDuration || // Exceeds maximum duration
+            //                  (loadedSession.isActive && loadedSession.lastActiveAt == nil) // Active but no lastActiveAt
 
-            if isCorrupted {
-                print("💥 LOADING: Detected corrupted session - clearing")
-                scorachedEarthSessionClear()
-                return
-            }
+            // if isCorrupted {
+            //     print("💥 LOADING: Detected corrupted session - clearing")
+            //     scorachedEarthSessionClear()
+            //     return
+            // }
 
             // NEW CHECK: Look inside the persisted *enhanced* session for a final cashout entry.
-            if let enhancedData = UserDefaults.standard.data(forKey: "EnhancedLiveSession_\(userId)"),
-               let enhancedSession = try? JSONDecoder().decode(LiveSessionData_Enhanced.self, from: enhancedData) {
-                let hasFinalCashout = enhancedSession.chipUpdates.contains { update in
-                    update.note?.contains("Final cashout amount") == true
-                }
-                if hasFinalCashout {
-                    print("🗑️ LOADING: Found 'Final cashout amount' in enhanced session – treating as ended and clearing")
-                    scorachedEarthSessionClear()
-                    return
-                }
-            }
+            // if let enhancedData = UserDefaults.standard.data(forKey: "EnhancedLiveSession_\(userId)"),
+            //    let enhancedSession = try? JSONDecoder().decode(LiveSessionData_Enhanced.self, from: enhancedData) {
+            //     let hasFinalCashout = enhancedSession.chipUpdates.contains { update in
+            //         update.note?.contains("Final cashout amount") == true
+            //     }
+            //     if hasFinalCashout {
+            //         print("🗑️ LOADING: Found 'Final cashout amount' in enhanced session – treating as ended and clearing")
+            //         scorachedEarthSessionClear()
+            //         return
+            //     }
+            // }
 
-            print("🔍 LOADING: Session validation - hasValidBuyIn: \(hasValidBuyIn), isPotentiallyRestorable: \(isPotentiallyRestorable), isAbandoned: \(isAbandoned)")
-            print("🔍 LOADING: Session details - buyIn: \(loadedSession.buyIn), isActive: \(loadedSession.isActive), pausedForNextDay: \(loadedSession.pausedForNextDay)")
+            // REMOVED: Duplicate checking during automatic load (moved to explicit validation only)
+            // This was causing performance issues and UI lag due to synchronous database calls
+            // Duplicate checking is now only performed when explicitly requested
             
-            if hasValidBuyIn && isPotentiallyRestorable && !isAbandoned {
-                print("✅ LOADING: Restoring valid session")
+            print("🔍 LOADING: Session validation - hasValidBuyIn: \(hasValidBuyIn), isPotentiallyRestorable: \(isPotentiallyRestorable)")
+            
+            if hasValidBuyIn && isPotentiallyRestorable {
+                print("✅ LOADING: Restoring valid session (without aggressive validation).")
                 
                 // TRANSITION PERIOD FIX: If this session is paused for next day, 
                 // it should be moved to parked sessions instead of staying in live session
@@ -1381,13 +1521,8 @@ class SessionStore: ObservableObject {
                 }
                 loadEnhancedLiveSessionState() // Also load its associated enhanced data
                 
-                // SCORCHED EARTH: Validate the restored session
-                if !validateSessionState() {
-                    print("❌ LOADING: Restored session failed validation")
-                    return
-                }
             } else {
-                print("🗑️ LOADING: Session doesn't meet restoration criteria - clearing")
+                print("🗑️ LOADING: Session doesn't meet basic restoration criteria - clearing")
                 scorachedEarthSessionClear()
             }
         } else {
