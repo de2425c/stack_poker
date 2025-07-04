@@ -112,6 +112,16 @@ struct PhoneSignUpView: View {
                                                     .foregroundColor(.white.opacity(0.5))
                                                     .font(.plusJakarta(.body))
                                             }
+                                            .toolbar {
+                                                ToolbarItemGroup(placement: .keyboard) {
+                                                    Spacer()
+                                                    Button("Done") {
+                                                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                                    }
+                                                    .foregroundColor(.blue)
+                                                    .fontWeight(.medium)
+                                                }
+                                            }
                                     }
                                 }
                                 
@@ -253,38 +263,43 @@ struct PhoneSignUpView: View {
     
     // MARK: - Validation Methods
     private func validatePhoneNumber(_ phone: String) {
-        // Basic phone number validation - check if it has at least required digits for the country
+        // Basic phone number validation - check if it has required digits for the country
         let digitsOnly = phone.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
         let minLength = getMinLengthForCountry(selectedCountry.code)
-        phoneIsValid = digitsOnly.count >= minLength
+        let maxLength = getMaxLengthForCountry(selectedCountry.code)
+        phoneIsValid = digitsOnly.count >= minLength && digitsOnly.count <= maxLength
     }
     
     private func formatPhoneNumberForCountry(_ phone: String, countryCode: String) -> String {
         // Remove all non-numeric characters
         let digitsOnly = phone.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
         
+        // Limit to max length for the country
+        let maxLength = getMaxLengthForCountry(countryCode)
+        let limitedDigits = String(digitsOnly.prefix(maxLength))
+        
         // Apply country-specific formatting
         switch countryCode {
         case "US", "CA":
-            return formatUSPhoneNumber(digitsOnly)
+            return formatUSPhoneNumber(limitedDigits)
         case "GB":
-            return formatUKPhoneNumber(digitsOnly)
+            return formatUKPhoneNumber(limitedDigits)
         case "FR":
-            return formatFrenchPhoneNumber(digitsOnly)
+            return formatFrenchPhoneNumber(limitedDigits)
         case "DE":
-            return formatGermanPhoneNumber(digitsOnly)
+            return formatGermanPhoneNumber(limitedDigits)
         case "JP":
-            return formatJapanesePhoneNumber(digitsOnly)
+            return formatJapanesePhoneNumber(limitedDigits)
         case "AU":
-            return formatAustralianPhoneNumber(digitsOnly)
+            return formatAustralianPhoneNumber(limitedDigits)
         default:
             // Generic formatting for other countries
-            return formatGenericPhoneNumber(digitsOnly)
+            return formatGenericPhoneNumber(limitedDigits)
         }
     }
     
     private func formatUSPhoneNumber(_ digits: String) -> String {
-        let limitedDigits = String(digits.prefix(10))
+        let limitedDigits = digits
         
         if limitedDigits.count >= 7 {
             let areaCode = String(limitedDigits.prefix(3))
@@ -302,7 +317,7 @@ struct PhoneSignUpView: View {
     }
     
     private func formatUKPhoneNumber(_ digits: String) -> String {
-        let limitedDigits = String(digits.prefix(11))
+        let limitedDigits = digits
         
         if limitedDigits.count >= 7 {
             let first = String(limitedDigits.prefix(4))
@@ -318,7 +333,7 @@ struct PhoneSignUpView: View {
     }
     
     private func formatFrenchPhoneNumber(_ digits: String) -> String {
-        let limitedDigits = String(digits.prefix(10))
+        let limitedDigits = digits
         
         if limitedDigits.count >= 8 {
             let groups = stride(from: 0, to: limitedDigits.count, by: 2).map { i in
@@ -332,7 +347,7 @@ struct PhoneSignUpView: View {
     }
     
     private func formatGermanPhoneNumber(_ digits: String) -> String {
-        let limitedDigits = String(digits.prefix(12))
+        let limitedDigits = digits
         
         if limitedDigits.count >= 6 {
             let first = String(limitedDigits.prefix(3))
@@ -348,7 +363,7 @@ struct PhoneSignUpView: View {
     }
     
     private func formatJapanesePhoneNumber(_ digits: String) -> String {
-        let limitedDigits = String(digits.prefix(11))
+        let limitedDigits = digits
         
         if limitedDigits.count >= 7 {
             let first = String(limitedDigits.prefix(3))
@@ -364,7 +379,7 @@ struct PhoneSignUpView: View {
     }
     
     private func formatAustralianPhoneNumber(_ digits: String) -> String {
-        let limitedDigits = String(digits.prefix(10))
+        let limitedDigits = digits
         
         if limitedDigits.count >= 6 {
             let first = String(limitedDigits.prefix(4))
@@ -381,7 +396,7 @@ struct PhoneSignUpView: View {
     
     private func formatGenericPhoneNumber(_ digits: String) -> String {
         // Generic formatting - just return the digits with spaces every 3-4 characters
-        let limitedDigits = String(digits.prefix(15))
+        let limitedDigits = digits
         
         if limitedDigits.count > 4 {
             let groups = stride(from: 0, to: limitedDigits.count, by: 3).map { i in
@@ -415,20 +430,85 @@ struct PhoneSignUpView: View {
     
     private func getMinLengthForCountry(_ countryCode: String) -> Int {
         switch countryCode {
-        case "US", "CA":
-            return 10
-        case "GB":
-            return 10
-        case "FR":
-            return 10
-        case "DE":
-            return 10
-        case "JP":
-            return 10
-        case "AU":
-            return 9
-        default:
-            return 7
+        case "US", "CA": return 10
+        case "GB": return 10
+        case "FR": return 9
+        case "DE": return 10
+        case "JP": return 10
+        case "AU": return 9
+        case "IT", "ES": return 9
+        case "NL", "BE": return 9
+        case "CH": return 9
+        case "AT": return 10
+        case "SE", "NO", "DK": return 8
+        case "PL": return 9
+        case "RU": return 10
+        case "TR": return 10
+        case "IL": return 9
+        case "BR": return 10
+        case "MX": return 10
+        case "AR": return 10
+        case "CL": return 9
+        case "CO": return 10
+        case "PE": return 9
+        case "IN": return 10
+        case "CN": return 11
+        case "KR": return 10
+        case "TH": return 9
+        case "VN": return 9
+        case "SG": return 8
+        case "MY": return 9
+        case "ID": return 10
+        case "PH": return 10
+        case "NZ": return 9
+        case "ZA": return 9
+        case "EG": return 10
+        case "NG": return 10
+        case "KE": return 9
+        default: return 8
+        }
+    }
+    
+    private func getMaxLengthForCountry(_ countryCode: String) -> Int {
+        switch countryCode {
+        case "US", "CA": return 10
+        case "GB": return 11
+        case "FR": return 10
+        case "DE": return 12
+        case "JP": return 11
+        case "AU": return 10
+        case "IT": return 10
+        case "ES": return 9
+        case "NL", "BE": return 9
+        case "CH": return 10
+        case "AT": return 13
+        case "SE": return 10
+        case "NO", "DK": return 8
+        case "PL": return 9
+        case "RU": return 10
+        case "TR": return 10
+        case "IL": return 10
+        case "BR": return 11
+        case "MX": return 10
+        case "AR": return 11
+        case "CL": return 9
+        case "CO": return 10
+        case "PE": return 9
+        case "IN": return 10
+        case "CN": return 11
+        case "KR": return 11
+        case "TH": return 10
+        case "VN": return 11
+        case "SG": return 8
+        case "MY": return 11
+        case "ID": return 13
+        case "PH": return 10
+        case "NZ": return 10
+        case "ZA": return 10
+        case "EG": return 10
+        case "NG": return 11
+        case "KE": return 10
+        default: return 15
         }
     }
     

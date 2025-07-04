@@ -43,24 +43,27 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         
+        // Initialize Firebase immediately on main thread to avoid swizzling warnings
         FirebaseApp.configure()
         
-        // Configure Firebase Auth for phone verification immediately after configure
-        configureFirebaseAuth()
+        // Configure Firebase Auth for phone verification
+        self.configureFirebaseAuth()
         
-        // Register custom fonts
-        FontRegistration.register()
-        
+        // Set up notification delegates after Firebase is ready
         UNUserNotificationCenter.current().delegate = self
         Messaging.messaging().delegate = self
         
-        requestNotificationAuthorization(application: application)
+        // Request notification authorization
+        self.requestNotificationAuthorization(application: application)
         application.registerForRemoteNotifications()
         
-        // Add this line to validate stored tokens
-        validateStoredFCMToken()
+        // Validate stored tokens
+        self.validateStoredFCMToken()
         
-        // Your existing UI setup code for TabBar and NavigationBar
+        // Register custom fonts immediately (lightweight operation)
+        FontRegistration.register()
+        
+        // Your existing UI setup code for TabBar and NavigationBar (can run immediately)
         UITabBar.appearance().isHidden = true
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
@@ -288,48 +291,20 @@ struct stackApp: App {
     @StateObject private var authViewModel = AuthViewModel()
     @StateObject var userService = UserService()
     @StateObject var postService = PostService()
-    @State private var showInitialLottie = true
-    @State private var playInitialLottie = true
 
     var body: some Scene {
         WindowGroup {
             ZStack {
                 AppBackgroundView().ignoresSafeArea()
                 
-                if showInitialLottie {
-                    // Always show Lottie first to prevent white screen
-                    LottieView(name: "lottie_final", loopMode: .loop, play: $playInitialLottie)
-                        .ignoresSafeArea()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onAppear {
-                            playInitialLottie = true
-                        }
-                } else {
-                    MainCoordinator()
-                      .environmentObject(authViewModel)
-                      .environmentObject(userService)
-                      .environmentObject(postService)
-                }
+                MainCoordinator()
+                    .environmentObject(authViewModel)
+                    .environmentObject(userService)
+                    .environmentObject(postService)
             }
             .autocorrectionDisabled(true)     
             .textInputAutocapitalization(.never)
-            .onChange(of: authViewModel.appFlow) { newFlow in
-                // Hide the initial Lottie once the app has determined its flow
-                if newFlow != .loading {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        showInitialLottie = false
-                    }
-                }
-            }
             .onAppear {
-                // Give a minimum time for the Lottie to show, then check auth state
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if authViewModel.appFlow != .loading {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            showInitialLottie = false
-                        }
-                    }
-                }
                 
                 // Initial check if already signed in and profile is missing
                 if authViewModel.authState == .signedIn && userService.currentUserProfile == nil {

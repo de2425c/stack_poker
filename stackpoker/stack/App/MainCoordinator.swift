@@ -338,22 +338,20 @@ struct MainCoordinator: View {
 }
 
 struct LoadingView: View {
-    @State private var playLottieAnimation = true
-    
     var body: some View {
         ZStack {
             AppBackgroundView()
                 .ignoresSafeArea()
             
-            LottieView(name: "lottie_white", loopMode: .loop, play: $playLottieAnimation)
-                .ignoresSafeArea()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onAppear {
-                    playLottieAnimation = true
-                }
-                .onDisappear {
-                    playLottieAnimation = false
-                }
+            VStack(spacing: 20) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(1.5)
+                
+                Text("Loading...")
+                    .font(.custom("PlusJakartaSans-Medium", size: 16))
+                    .foregroundColor(.white.opacity(0.8))
+            }
         }
     }
 }

@@ -24,6 +24,13 @@ struct SignInView: View {
     @State private var isPhoneNumber = false
     @State private var isEmailAddress = false
     
+    // Country picker states
+    @State private var selectedCountry = CountryCode.defaultCountry
+    @State private var showingCountryPicker = false
+    
+    // Focus state for keyboard management
+    @FocusState private var isInputFocused: Bool
+    
     // Computed property for form validity
     private var isFormValid: Bool {
         if isPhoneNumber {
@@ -59,16 +66,56 @@ struct SignInView: View {
                                     title: "EMAIL OR PHONE", 
                                     labelColor: emailOrPhoneValidationColor
                                 ) {
-                                    TextField("", text: $emailOrPhone)
-                                        .font(.plusJakarta(.body))
-                                        .foregroundColor(.white)
-                                        .keyboardType(isPhoneNumber ? .phonePad : .emailAddress)
-                                        .autocapitalization(.none)
-                                        .textContentType(isPhoneNumber ? .telephoneNumber : .emailAddress)
-                                        .onChange(of: emailOrPhone) { newValue in
-                                            validateEmailOrPhone(newValue)
-                                            if !hasInteracted { hasInteracted = true }
+                                    if isPhoneNumber {
+                                        HStack(spacing: 12) {
+                                            // Country picker button
+                                            Button(action: { showingCountryPicker = true }) {
+                                                HStack(spacing: 4) {
+                                                    Text(selectedCountry.flag)
+                                                        .font(.system(size: 20))
+                                                    Text(selectedCountry.dialCode)
+                                                        .font(.plusJakarta(.body))
+                                                        .foregroundColor(.white.opacity(0.7))
+                                                    Image(systemName: "chevron.down")
+                                                        .font(.system(size: 10))
+                                                        .foregroundColor(.white.opacity(0.5))
+                                                }
+                                            }
+                                            
+                                            TextField("", text: $emailOrPhone)
+                                                .font(.plusJakarta(.body))
+                                                .foregroundColor(.white)
+                                                .keyboardType(.phonePad)
+                                                .textContentType(.telephoneNumber)
+                                                .focused($isInputFocused)
+                                                .onChange(of: emailOrPhone) { newValue in
+                                                    validateEmailOrPhone(newValue)
+                                                    if !hasInteracted { hasInteracted = true }
+                                                }
+                                                .toolbar {
+                                                    ToolbarItemGroup(placement: .keyboard) {
+                                                        Spacer()
+                                                        Button("Done") {
+                                                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                                        }
+                                                        .foregroundColor(.blue)
+                                                        .fontWeight(.medium)
+                                                    }
+                                                }
                                         }
+                                    } else {
+                                        TextField("", text: $emailOrPhone)
+                                            .font(.plusJakarta(.body))
+                                            .foregroundColor(.white)
+                                            .keyboardType(.emailAddress)
+                                            .autocapitalization(.none)
+                                            .textContentType(.emailAddress)
+                                            .focused($isInputFocused)
+                                            .onChange(of: emailOrPhone) { newValue in
+                                                validateEmailOrPhone(newValue)
+                                                if !hasInteracted { hasInteracted = true }
+                                            }
+                                    }
                                 }
                                 
                                 // Password Field - only show for email users
@@ -265,25 +312,50 @@ struct SignInView: View {
                 break
             }
         }
+        .sheet(isPresented: $showingCountryPicker) {
+            SignInCountryPickerView(selectedCountry: $selectedCountry, showingCountryPicker: $showingCountryPicker)
+        }
+        .onAppear {
+            // Auto-focus the input field after a brief delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                isInputFocused = true
+            }
+        }
     }
     
     // MARK: - Validation Methods
     private func validateEmailOrPhone(_ input: String) {
         // First determine if it's a phone number or email
         let digitsOnly = input.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        let wasPhoneNumber = isPhoneNumber
         
-        if digitsOnly.count >= 10 {
+        if digitsOnly.count >= 3 && !input.contains("@") {
             // Likely a phone number
             isPhoneNumber = true
             isEmailAddress = false
-            emailOrPhoneIsValid = digitsOnly.count >= 10
+            let minLength = getMinLengthForCountry(selectedCountry.code)
+            emailOrPhoneIsValid = digitsOnly.count >= minLength
             // Format phone number as user types
             emailOrPhone = formatPhoneNumber(input)
+            
+            // Keep keyboard focused when switching to phone
+            if !wasPhoneNumber && isInputFocused {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isInputFocused = true
+                }
+            }
         } else if input.contains("@") {
             // Likely an email
             isPhoneNumber = false
             isEmailAddress = true
             emailOrPhoneIsValid = input.contains("@") && input.contains(".") && input.count > 5
+            
+            // Keep keyboard focused when switching to email
+            if wasPhoneNumber && isInputFocused {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isInputFocused = true
+                }
+            }
         } else {
             // Neither clear phone nor email yet
             isPhoneNumber = false
@@ -300,27 +372,34 @@ struct SignInView: View {
         // Remove all non-numeric characters
         let digitsOnly = input.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
         
-        // Limit to reasonable phone number length
-        let limitedDigits = String(digitsOnly.prefix(11))
+        // Limit to max length for the country
+        let maxLength = getMaxLengthForCountry(selectedCountry.code)
+        let limitedDigits = String(digitsOnly.prefix(maxLength))
         
-        // Only format when we have enough digits to make it worthwhile
-        if limitedDigits.count >= 10 {
-            let areaCode = String(limitedDigits.prefix(3))
-            let prefix = String(limitedDigits.dropFirst(3).prefix(3))
-            let suffix = String(limitedDigits.dropFirst(6))
-            
-            if limitedDigits.count == 10 {
-                return "+1 (\(areaCode)) \(prefix)-\(suffix)"
-            } else if limitedDigits.count == 11 && limitedDigits.hasPrefix("1") {
-                let number = String(limitedDigits.dropFirst())
-                let areaCode = String(number.prefix(3))
-                let prefix = String(number.dropFirst(3).prefix(3))
-                let suffix = String(number.dropFirst(6))
-                return "+1 (\(areaCode)) \(prefix)-\(suffix)"
-            }
+        // Apply country-specific formatting
+        switch selectedCountry.code {
+        case "US", "CA":
+            return formatUSPhoneNumber(limitedDigits)
+        case "GB":
+            return formatUKPhoneNumber(limitedDigits)
+        case "FR":
+            return formatFrenchPhoneNumber(limitedDigits)
+        case "DE":
+            return formatGermanPhoneNumber(limitedDigits)
+        case "JP":
+            return formatJapanesePhoneNumber(limitedDigits)
+        case "AU":
+            return formatAustralianPhoneNumber(limitedDigits)
+        default:
+            // Generic formatting for other countries
+            return formatGenericPhoneNumber(limitedDigits)
         }
+    }
+    
+    // Country-specific formatting methods
+    private func formatUSPhoneNumber(_ digits: String) -> String {
+        let limitedDigits = digits
         
-        // For partial numbers, add minimal formatting to guide user
         if limitedDigits.count >= 7 {
             let areaCode = String(limitedDigits.prefix(3))
             let prefix = String(limitedDigits.dropFirst(3).prefix(3))
@@ -333,21 +412,191 @@ struct SignInView: View {
         } else if limitedDigits.count >= 1 {
             return limitedDigits
         }
-        
         return ""
     }
     
-    private func getCleanPhoneNumber(_ displayNumber: String) -> String {
-        // Extract just the digits and format for Firebase (+1XXXXXXXXXX)
-        let digitsOnly = displayNumber.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+    private func formatUKPhoneNumber(_ digits: String) -> String {
+        let limitedDigits = digits
         
-        if digitsOnly.count == 10 {
-            return "+1\(digitsOnly)"
-        } else if digitsOnly.count == 11 && digitsOnly.hasPrefix("1") {
-            return "+\(digitsOnly)"
+        if limitedDigits.count >= 7 {
+            let first = String(limitedDigits.prefix(4))
+            let second = String(limitedDigits.dropFirst(4).prefix(3))
+            let third = String(limitedDigits.dropFirst(7))
+            return "\(first) \(second) \(third)"
+        } else if limitedDigits.count >= 4 {
+            let first = String(limitedDigits.prefix(4))
+            let second = String(limitedDigits.dropFirst(4))
+            return "\(first) \(second)"
         }
+        return limitedDigits
+    }
+    
+    private func formatFrenchPhoneNumber(_ digits: String) -> String {
+        let limitedDigits = digits
         
-        return "+1\(digitsOnly)"
+        if limitedDigits.count >= 8 {
+            let parts = stride(from: 0, to: limitedDigits.count, by: 2).map { i in
+                let start = limitedDigits.index(limitedDigits.startIndex, offsetBy: i)
+                let end = limitedDigits.index(start, offsetBy: min(2, limitedDigits.count - i))
+                return String(limitedDigits[start..<end])
+            }
+            return parts.joined(separator: " ")
+        }
+        return limitedDigits
+    }
+    
+    private func formatGermanPhoneNumber(_ digits: String) -> String {
+        let limitedDigits = digits
+        
+        if limitedDigits.count >= 6 {
+            let first = String(limitedDigits.prefix(3))
+            let second = String(limitedDigits.dropFirst(3).prefix(3))
+            let third = String(limitedDigits.dropFirst(6))
+            return "\(first) \(second) \(third)"
+        } else if limitedDigits.count >= 3 {
+            let first = String(limitedDigits.prefix(3))
+            let second = String(limitedDigits.dropFirst(3))
+            return "\(first) \(second)"
+        }
+        return limitedDigits
+    }
+    
+    private func formatJapanesePhoneNumber(_ digits: String) -> String {
+        let limitedDigits = digits
+        
+        if limitedDigits.count >= 7 {
+            let first = String(limitedDigits.prefix(3))
+            let second = String(limitedDigits.dropFirst(3).prefix(4))
+            let third = String(limitedDigits.dropFirst(7))
+            return "\(first)-\(second)-\(third)"
+        } else if limitedDigits.count >= 3 {
+            let first = String(limitedDigits.prefix(3))
+            let second = String(limitedDigits.dropFirst(3))
+            return "\(first)-\(second)"
+        }
+        return limitedDigits
+    }
+    
+    private func formatAustralianPhoneNumber(_ digits: String) -> String {
+        let limitedDigits = digits
+        
+        if limitedDigits.count >= 8 {
+            let first = String(limitedDigits.prefix(4))
+            let second = String(limitedDigits.dropFirst(4).prefix(3))
+            let third = String(limitedDigits.dropFirst(7))
+            return "\(first) \(second) \(third)"
+        } else if limitedDigits.count >= 4 {
+            let first = String(limitedDigits.prefix(4))
+            let second = String(limitedDigits.dropFirst(4))
+            return "\(first) \(second)"
+        }
+        return limitedDigits
+    }
+    
+    private func formatGenericPhoneNumber(_ digits: String) -> String {
+        // Generic formatting - just return the digits with spaces every 3-4 characters
+        let limitedDigits = digits
+        
+        if limitedDigits.count > 4 {
+            let groups = stride(from: 0, to: limitedDigits.count, by: 3).map { i in
+                let start = limitedDigits.index(limitedDigits.startIndex, offsetBy: i)
+                let end = limitedDigits.index(start, offsetBy: min(3, limitedDigits.count - i))
+                return String(limitedDigits[start..<end])
+            }
+            return groups.joined(separator: " ")
+        }
+        return limitedDigits
+    }
+    
+    private func getCleanPhoneNumber(_ displayNumber: String) -> String {
+        // Extract just the digits and format for Firebase
+        let digitsOnly = displayNumber.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        return selectedCountry.dialCode + digitsOnly
+    }
+    
+    // Helper methods for country phone validation
+    private func getMinLengthForCountry(_ countryCode: String) -> Int {
+        switch countryCode {
+        case "US", "CA": return 10
+        case "GB": return 10
+        case "FR": return 9
+        case "DE": return 10
+        case "JP": return 10
+        case "AU": return 9
+        case "IT", "ES": return 9
+        case "NL", "BE": return 9
+        case "CH": return 9
+        case "AT": return 10
+        case "SE", "NO", "DK": return 8
+        case "PL": return 9
+        case "RU": return 10
+        case "TR": return 10
+        case "IL": return 9
+        case "BR": return 10
+        case "MX": return 10
+        case "AR": return 10
+        case "CL": return 9
+        case "CO": return 10
+        case "PE": return 9
+        case "IN": return 10
+        case "CN": return 11
+        case "KR": return 10
+        case "TH": return 9
+        case "VN": return 9
+        case "SG": return 8
+        case "MY": return 9
+        case "ID": return 10
+        case "PH": return 10
+        case "NZ": return 9
+        case "ZA": return 9
+        case "EG": return 10
+        case "NG": return 10
+        case "KE": return 9
+        default: return 8
+        }
+    }
+    
+    private func getMaxLengthForCountry(_ countryCode: String) -> Int {
+        switch countryCode {
+        case "US", "CA": return 10
+        case "GB": return 11
+        case "FR": return 10
+        case "DE": return 12
+        case "JP": return 11
+        case "AU": return 10
+        case "IT": return 10
+        case "ES": return 9
+        case "NL", "BE": return 9
+        case "CH": return 10
+        case "AT": return 13
+        case "SE": return 10
+        case "NO", "DK": return 8
+        case "PL": return 9
+        case "RU": return 10
+        case "TR": return 10
+        case "IL": return 10
+        case "BR": return 11
+        case "MX": return 10
+        case "AR": return 11
+        case "CL": return 9
+        case "CO": return 10
+        case "PE": return 9
+        case "IN": return 10
+        case "CN": return 11
+        case "KR": return 11
+        case "TH": return 10
+        case "VN": return 11
+        case "SG": return 8
+        case "MY": return 11
+        case "ID": return 13
+        case "PH": return 10
+        case "NZ": return 10
+        case "ZA": return 10
+        case "EG": return 10
+        case "NG": return 11
+        case "KE": return 10
+        default: return 15
+        }
     }
     
     // MARK: - Computed Properties for UI States
@@ -519,6 +768,66 @@ struct SignInView: View {
                     errorMessage = error.message
                     showingError = true
                     isLoading = false
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Country Picker View
+struct SignInCountryPickerView: View {
+    @Binding var selectedCountry: CountryCode
+    @Binding var showingCountryPicker: Bool
+    @State private var searchText = ""
+    
+    private var filteredCountries: [CountryCode] {
+        if searchText.isEmpty {
+            return CountryCode.allCountries
+        } else {
+            return CountryCode.allCountries.filter { country in
+                country.name.localizedCaseInsensitiveContains(searchText) ||
+                country.dialCode.contains(searchText)
+            }
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            List(filteredCountries, id: \.code) { country in
+                Button(action: {
+                    selectedCountry = country
+                    showingCountryPicker = false
+                }) {
+                    HStack {
+                        Text(country.flag)
+                            .font(.system(size: 30))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(country.name)
+                                .font(.custom("PlusJakartaSans-Medium", size: 16))
+                                .foregroundColor(.primary)
+                            Text(country.dialCode)
+                                .font(.custom("PlusJakartaSans-Regular", size: 14))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        if selectedCountry.code == country.code {
+                            Image(systemName: "checkmark")
+                                .foregroundColor(.blue)
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .listStyle(PlainListStyle())
+            .searchable(text: $searchText, prompt: "Search countries")
+            .navigationTitle("Select Country")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        showingCountryPicker = false
+                    }
                 }
             }
         }
