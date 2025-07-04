@@ -89,7 +89,18 @@ struct HourlyRateVsDurationChart: View {
     }
     
     var body: some View {
-        if cleanedDataPoints.isEmpty {
+        let validSessionCount = sessions.filter { $0.hoursPlayed > 0 }.count
+        if validSessionCount <= 3 {
+            VStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 20))
+                    .foregroundColor(.yellow.opacity(0.7))
+                Text("Not enough data")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if cleanedDataPoints.isEmpty {
             VStack(spacing: 8) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .font(.system(size: 20))
