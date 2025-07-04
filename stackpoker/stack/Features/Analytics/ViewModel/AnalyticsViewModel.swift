@@ -26,6 +26,7 @@ class AnalyticsViewModel: ObservableObject {
         self.userId = userId
         loadSelectedStats()
     }
+
     
     // MARK: - Analytics Helper Properties (copied from ProfileView)
     

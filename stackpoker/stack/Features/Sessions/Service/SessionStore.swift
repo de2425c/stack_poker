@@ -439,8 +439,8 @@ class SessionStore: ObservableObject {
             if let error = error {
                 completion(error)
             } else {
-                // Refresh the local sessions array to reflect changes
-                self.refreshSessions() 
+                // No need to refresh - snapshot listener will handle the update automatically
+                // self.refreshSessions() 
                 completion(nil)
             }
         }
@@ -531,8 +531,8 @@ class SessionStore: ObservableObject {
                     }
                 }
                 
-                // Refresh sessions to get updated data
-                refreshSessions()
+                // No need to refresh - snapshot listener will handle the updates automatically
+                // refreshSessions()
                 print("✅ Completed recalculating adjusted profits for sessions with stakes")
             } else {
                 print("ℹ️ No sessions with stakes found, no adjustments needed")
@@ -632,8 +632,8 @@ class SessionStore: ObservableObject {
                 completion(.failure(errors.first!))
             } else {
                 print("✅ Successfully deleted \(deletedCount) duplicate sessions")
-                // Refresh the sessions list after deletion
-                self.refreshSessions()
+                // No need to refresh - snapshot listener will handle the deletions automatically
+                // self.refreshSessions()
                 completion(.success(deletedCount))
             }
         }
@@ -1022,7 +1022,7 @@ class SessionStore: ObservableObject {
             "cashout": cashout,
             "profit": rawProfit, // liveSession.buyIn is total for both types
             "adjustedProfit": rawProfit, // Initially equals raw profit, will be recalculated if stakes exist
-            "createdAt": FieldValue.serverTimestamp(), // Firestore server timestamp for creation
+            "createdAt": Timestamp(date: liveSession.startTime), // Use session start time, not current time
             "notes": enhancedLiveSession.notes, // Include notes
             "liveSessionUUID": currentLiveSessionId, // Link to the live session instance
             "location": liveSession.isTournament ? (liveSession.tournamentName) : nil, // Assuming tournament name can be used as a proxy for location if not separately stored for live
@@ -1440,48 +1440,12 @@ class SessionStore: ObservableObject {
                 return
             }
 
-            // --- VALIDATION DISABLED FOR DEBUGGING ---
-            // The aggressive validation logic that was here has been temporarily disabled.
-            // This will allow us to inspect the state of parked sessions without the app
-            // automatically clearing them on launch. The validation should be moved to the
-            // restore function, triggered only by user action.
+           
             print("⚠️ DEBUGGING: Automatic session validation on load is currently DISABLED.")
 
             let isPotentiallyRestorable = loadedSession.isActive || loadedSession.lastPausedAt != nil || loadedSession.pausedForNextDay
             let hasValidBuyIn = loadedSession.buyIn > 0
 
-            // SCORCHED EARTH: Enhanced staleness check
-            // let lastActivityTime = loadedSession.lastActiveAt ?? loadedSession.lastPausedAt ?? loadedSession.startTime
-            // let timeSinceLastActivity = Date().timeIntervalSince(lastActivityTime)
-            // let isAbandoned = timeSinceLastActivity > maximumSessionDuration // 120-hour abandonment window
-
-            // SCORCHED EARTH: More aggressive validation
-            // let isCorrupted = loadedSession.startTime > Date() || // Future start time
-            //                  loadedSession.elapsedTime > maximumSessionDuration || // Exceeds maximum duration
-            //                  (loadedSession.isActive && loadedSession.lastActiveAt == nil) // Active but no lastActiveAt
-
-            // if isCorrupted {
-            //     print("💥 LOADING: Detected corrupted session - clearing")
-            //     scorachedEarthSessionClear()
-            //     return
-            // }
-
-            // NEW CHECK: Look inside the persisted *enhanced* session for a final cashout entry.
-            // if let enhancedData = UserDefaults.standard.data(forKey: "EnhancedLiveSession_\(userId)"),
-            //    let enhancedSession = try? JSONDecoder().decode(LiveSessionData_Enhanced.self, from: enhancedData) {
-            //     let hasFinalCashout = enhancedSession.chipUpdates.contains { update in
-            //         update.note?.contains("Final cashout amount") == true
-            //     }
-            //     if hasFinalCashout {
-            //         print("🗑️ LOADING: Found 'Final cashout amount' in enhanced session – treating as ended and clearing")
-            //         scorachedEarthSessionClear()
-            //         return
-            //     }
-            // }
-
-            // REMOVED: Duplicate checking during automatic load (moved to explicit validation only)
-            // This was causing performance issues and UI lag due to synchronous database calls
-            // Duplicate checking is now only performed when explicitly requested
             
             print("🔍 LOADING: Session validation - hasValidBuyIn: \(hasValidBuyIn), isPotentiallyRestorable: \(isPotentiallyRestorable)")
             
@@ -1662,9 +1626,8 @@ class SessionStore: ObservableObject {
                       let endIdx = index(where: { $0.starts(with: "end") }),
                       let locationIdx = index(where: { $0.contains("location") }),
                       let profitIdx = index(where: { $0.contains("profit") || $0.contains("result") || $0.contains("net") }) else {
-                     DispatchQueue.main.async {
-                         completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV is missing required columns (start, end, location, profit/result/net). Found headers: \(headers)"])) )
-                     }
+                     // Try fallback import with minimal required columns
+                     self.retryPokerbaseImportWithFallback(data: data, rows: rows, headers: headers, columnsFromLine: columnsFromLine, completion: completion)
                      return
                 }
 
@@ -1805,9 +1768,8 @@ class SessionStore: ObservableObject {
                       let cashedIdx = idx(["cashedout", "cashout", "cashouttotal", "winning"]),
                       let netIdx = idx(["net", "result", "profit"]),
                       let locationIdx = idx(["location", "venue"]) else {
-                     DispatchQueue.main.async {
-                         completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV missing required columns. Found headers: \(headerRaw)"])) )
-                     }
+                     // Try fallback import with minimal required columns
+                     self.retryPokerAnalyticsImportWithFallback(data: data, rows: rows, headers: headers, headerRaw: headerRaw, split: split, completion: completion)
                      return
                 }
 
@@ -1966,9 +1928,8 @@ class SessionStore: ObservableObject {
                       let buyinIdx = idx("buyin"),
                       let cashoutIdx = idx("cashout"),
                       let netprofitIdx = idx("netprofit") else {
-                    DispatchQueue.main.async {
-                        completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV missing required PBT columns. Found headers: \(headers)"])) )
-                    }
+                    // Try fallback import with minimal required columns
+                    self.retryPBTImportWithFallback(data: data, lines: lines, headers: headers, parseCSVLine: parseCSVLine, completion: completion)
                     return
                 }
 
@@ -2292,6 +2253,366 @@ class SessionStore: ObservableObject {
                     completion(.failure(error))
                 }
             }
+        }
+    }
+    
+    // MARK: - Retry Helper Functions for Fallback Imports
+    
+    /// Retry PBT import with minimal required columns when full import fails
+    private func retryPBTImportWithFallback(data: Data, lines: [String], headers: [String], parseCSVLine: @escaping (String) -> [String], completion: @escaping (Result<Int, Error>) -> Void) {
+        print("🔄 PBT Import: Attempting fallback import with minimal columns...")
+        
+        func idx(_ name: String) -> Int? {
+            return headers.firstIndex(of: name.lowercased())
+        }
+        
+        // Try to find at least these minimal columns
+        guard let buyinIdx = idx("buyin"),
+              let cashoutIdx = idx("cashout") else {
+            DispatchQueue.main.async {
+                completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV missing essential columns (buyin, cashout). Cannot import."])))
+            }
+            return
+        }
+        
+        // Try to find date columns (flexible matching)
+        let startIdx = idx("starttime") ?? idx("start") ?? idx("date")
+        let endIdx = idx("endtime") ?? idx("end")
+        
+        guard let startIdx = startIdx else {
+            DispatchQueue.main.async {
+                completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV missing date column. Cannot import."])))
+            }
+            return
+        }
+        
+        // Optional columns with fallbacks
+        let locationIdx = idx("location") ?? idx("venue")
+        let gameIdx = idx("game") ?? idx("variant")
+        let netprofitIdx = idx("netprofit") ?? idx("profit") ?? idx("result")
+        
+        // Date formatter for PBT format
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        df.timeZone = TimeZone.current
+        
+        // Alternative date formats
+        let alternativeFormatters: [DateFormatter] = {
+            let f1 = DateFormatter()
+            f1.dateFormat = "MM/dd/yyyy HH:mm:ss"
+            f1.timeZone = TimeZone.current
+            
+            let f2 = DateFormatter()
+            f2.dateFormat = "yyyy-MM-dd"
+            f2.timeZone = TimeZone.current
+            
+            return [f1, f2]
+        }()
+        
+        func parseDate(_ dateString: String) -> Date? {
+            if let date = df.date(from: dateString) {
+                return date
+            }
+            for formatter in alternativeFormatters {
+                if let date = formatter.date(from: dateString) {
+                    return date
+                }
+            }
+            return nil
+        }
+        
+        func num(_ str: String) -> Double? {
+            let cleaned = str.replacingOccurrences(of: "[^0-9.-]", with: "", options: .regularExpression)
+            return cleaned.isEmpty ? nil : Double(cleaned)
+        }
+        
+        var imported = 0
+        var skipped = 0
+        let group = DispatchGroup()
+        var missingFields: Set<String> = []
+        
+        for line in lines.dropFirst() {
+            let cols = parseCSVLine(line)
+            guard cols.count > max(startIdx, buyinIdx, cashoutIdx) else {
+                skipped += 1
+                continue
+            }
+            
+            guard let startDate = parseDate(cols[startIdx]) else {
+                skipped += 1
+                continue
+            }
+            
+            let buyIn = num(cols[buyinIdx]) ?? 0
+            let cashOut = num(cols[cashoutIdx]) ?? 0
+            
+            // Calculate end time and hours
+            var endDate: Date
+            var hours: Double
+            
+            if let endIdx = endIdx, endIdx < cols.count, let calculatedEndDate = parseDate(cols[endIdx]) {
+                endDate = calculatedEndDate
+                hours = endDate.timeIntervalSince(startDate) / 3600.0
+            } else {
+                // Default to 4 hours if end time not available
+                hours = 4.0
+                endDate = startDate.addingTimeInterval(hours * 3600)
+                missingFields.insert("endtime")
+            }
+            
+            let location = locationIdx != nil && locationIdx! < cols.count ? cols[locationIdx!] : "Unknown"
+            if location == "Unknown" { missingFields.insert("location") }
+            
+            let game = gameIdx != nil && gameIdx! < cols.count ? cols[gameIdx!] : "Poker"
+            if game == "Poker" { missingFields.insert("game") }
+            
+            let netProfit = netprofitIdx != nil && netprofitIdx! < cols.count ? (num(cols[netprofitIdx!]) ?? (cashOut - buyIn)) : (cashOut - buyIn)
+            
+            let sessionData: [String: Any] = [
+                "userId": self.userId,
+                "gameType": SessionLogType.cashGame.rawValue,
+                "gameName": game,
+                "stakes": "",
+                "startDate": Timestamp(date: startDate),
+                "startTime": Timestamp(date: startDate),
+                "endTime": Timestamp(date: endDate),
+                "hoursPlayed": hours,
+                "buyIn": buyIn,
+                "cashout": cashOut,
+                "profit": netProfit,
+                "adjustedProfit": netProfit,
+                "createdAt": FieldValue.serverTimestamp(),
+                "location": location
+            ]
+            
+            group.enter()
+            self.addSession(sessionData) { error in
+                if error == nil {
+                    imported += 1
+                } else {
+                    skipped += 1
+                }
+                group.leave()
+            }
+        }
+        
+        group.wait()
+        self.refreshSessions()
+        
+        let storageRef = Storage.storage().reference().child("pbtImports/\(self.userId)/\(UUID().uuidString).csv")
+        storageRef.putData(data, metadata: nil) { _, _ in }
+        
+        self.removeDuplicateSessions { _ in }
+        
+        DispatchQueue.main.async {
+            let warningMessage = imported > 0 ? "⚠️ Imported \(imported) sessions with basic data. Missing fields: \(missingFields.joined(separator: ", ")). \(skipped) rows skipped." : "Failed to import any sessions."
+            completion(.success(imported))
+            print(warningMessage)
+        }
+    }
+    
+    /// Retry Pokerbase import with minimal required columns when full import fails
+    private func retryPokerbaseImportWithFallback(data: Data, rows: [String], headers: [String], columnsFromLine: @escaping (String) -> [String], completion: @escaping (Result<Int, Error>) -> Void) {
+        print("🔄 Pokerbase Import: Attempting fallback import with minimal columns...")
+        
+        func index(where predicate: (String) -> Bool) -> Int? {
+            return headers.firstIndex(where: predicate)
+        }
+        
+        // Try to find at least these minimal columns
+        guard let startIdx = index(where: { $0.contains("start") || $0.contains("date") }),
+              let endIdx = index(where: { $0.contains("end") || $0.contains("finish") }) else {
+            DispatchQueue.main.async {
+                completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV missing date columns. Cannot import."])))
+            }
+            return
+        }
+        
+        // Optional columns with fallbacks
+        let locationIdx = index(where: { $0.contains("location") || $0.contains("venue") })
+        let profitIdx = index(where: { $0.contains("profit") || $0.contains("result") || $0.contains("net") || $0.contains("cash") })
+        
+        func parseDouble(_ str: String) -> Double? {
+            let cleaned = str.replacingOccurrences(of: "[^0-9.-]", with: "", options: .regularExpression)
+            return Double(cleaned)
+        }
+        
+        let isoFormatter = ISO8601DateFormatter()
+        var importedCount = 0
+        var skipped = 0
+        let group = DispatchGroup()
+        var missingFields: Set<String> = []
+        
+        for row in rows.dropFirst() {
+            let columns = columnsFromLine(row).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard columns.count > max(startIdx, endIdx) else {
+                skipped += 1
+                continue
+            }
+            
+            guard let startDate = isoFormatter.date(from: columns[startIdx]),
+                  let endDate = isoFormatter.date(from: columns[endIdx]) else {
+                skipped += 1
+                continue
+            }
+            
+            let location = locationIdx != nil && locationIdx! < columns.count ? columns[locationIdx!] : "Unknown"
+            if location == "Unknown" { missingFields.insert("location") }
+            
+            let profitVal = profitIdx != nil && profitIdx! < columns.count ? (parseDouble(columns[profitIdx!]) ?? 0) : 0
+            if profitVal == 0 { missingFields.insert("profit") }
+            
+            let hours = endDate.timeIntervalSince(startDate) / 3600.0
+            
+            let sessionData: [String: Any] = [
+                "userId": self.userId,
+                "gameType": SessionLogType.cashGame.rawValue,
+                "gameName": location,
+                "stakes": "",
+                "startDate": Timestamp(date: startDate),
+                "startTime": Timestamp(date: startDate),
+                "endTime": Timestamp(date: endDate),
+                "hoursPlayed": hours,
+                "buyIn": 0,
+                "cashout": profitVal,
+                "profit": profitVal,
+                "createdAt": FieldValue.serverTimestamp(),
+                "location": location
+            ]
+            
+            group.enter()
+            self.addSession(sessionData) { error in
+                if error == nil {
+                    importedCount += 1
+                } else {
+                    skipped += 1
+                }
+                group.leave()
+            }
+        }
+        
+        group.wait()
+        self.refreshSessions()
+        
+        let storageRef = Storage.storage().reference().child("pokerbaseImports/\(self.userId)/\(UUID().uuidString).csv")
+        storageRef.putData(data, metadata: nil) { _, _ in }
+        
+        self.removeDuplicateSessions { _ in }
+        
+        DispatchQueue.main.async {
+            let warningMessage = importedCount > 0 ? "⚠️ Imported \(importedCount) sessions with basic data. Missing fields: \(missingFields.joined(separator: ", ")). \(skipped) rows skipped." : "Failed to import any sessions."
+            completion(.success(importedCount))
+            print(warningMessage)
+        }
+    }
+    
+    /// Retry Poker Analytics import with minimal required columns when full import fails
+    private func retryPokerAnalyticsImportWithFallback(data: Data, rows: [String], headers: [String], headerRaw: [String], split: @escaping (String) -> [String], completion: @escaping (Result<Int, Error>) -> Void) {
+        print("🔄 Poker Analytics Import: Attempting fallback import with minimal columns...")
+        
+        let normalized: [String] = headers.map { $0.replacingOccurrences(of: "[^a-z]", with: "", options: .regularExpression) }
+        
+        func idx(_ variants: [String]) -> Int? {
+            for variant in variants {
+                if let i = normalized.firstIndex(of: variant) { return i }
+            }
+            return nil
+        }
+        
+        // Try to find at least these minimal columns
+        guard let startIdx = idx(["startdate", "start", "date"]),
+              let endIdx = idx(["enddate", "end", "finish"]) else {
+            DispatchQueue.main.async {
+                completion(.failure(NSError(domain: "CSV", code: -3, userInfo: [NSLocalizedDescriptionKey: "CSV missing date columns. Cannot import."])))
+            }
+            return
+        }
+        
+        // Optional columns with fallbacks
+        let buyInIdx = idx(["buyin", "buy"])
+        let cashedIdx = idx(["cashedout", "cashout", "cashouttotal", "winning", "cash"])
+        let netIdx = idx(["net", "result", "profit"])
+        let locationIdx = idx(["location", "venue"])
+        
+        let df = DateFormatter()
+        df.dateFormat = "MM/dd/yyyy HH:mm:ss"
+        df.timeZone = TimeZone.current
+        
+        func num(_ str: String) -> Double? {
+            let cleaned = str.replacingOccurrences(of: "[^0-9.-]", with: "", options: .regularExpression)
+            return Double(cleaned)
+        }
+        
+        var imported = 0
+        var skipped = 0
+        let group = DispatchGroup()
+        var missingFields: Set<String> = []
+        
+        for row in rows.dropFirst() {
+            let cols = split(row)
+            guard cols.count > max(startIdx, endIdx) else {
+                skipped += 1
+                continue
+            }
+            
+            guard let startDate = df.date(from: cols[startIdx]),
+                  let endDate = df.date(from: cols[endIdx]) else {
+                skipped += 1
+                continue
+            }
+            
+            let buyIn = buyInIdx != nil && buyInIdx! < cols.count ? (num(cols[buyInIdx!]) ?? 0) : 0
+            if buyIn == 0 { missingFields.insert("buyin") }
+            
+            let cashOut = cashedIdx != nil && cashedIdx! < cols.count ? (num(cols[cashedIdx!]) ?? 0) : 0
+            if cashOut == 0 { missingFields.insert("cashout") }
+            
+            let net = netIdx != nil && netIdx! < cols.count ? (num(cols[netIdx!]) ?? (cashOut - buyIn)) : (cashOut - buyIn)
+            
+            let location = locationIdx != nil && locationIdx! < cols.count ? cols[locationIdx!] : "Unknown"
+            if location == "Unknown" { missingFields.insert("location") }
+            
+            let hours = endDate.timeIntervalSince(startDate) / 3600.0
+            
+            let sessionData: [String: Any] = [
+                "userId": self.userId,
+                "gameType": SessionLogType.cashGame.rawValue,
+                "gameName": location,
+                "stakes": "",
+                "startDate": Timestamp(date: startDate),
+                "startTime": Timestamp(date: startDate),
+                "endTime": Timestamp(date: endDate),
+                "hoursPlayed": hours,
+                "buyIn": buyIn,
+                "cashout": cashOut,
+                "profit": net,
+                "createdAt": FieldValue.serverTimestamp(),
+                "location": location
+            ]
+            
+            group.enter()
+            self.addSession(sessionData) { error in
+                if error == nil {
+                    imported += 1
+                } else {
+                    skipped += 1
+                }
+                group.leave()
+            }
+        }
+        
+        group.wait()
+        self.refreshSessions()
+        
+        let storageRef = Storage.storage().reference().child("pokerAnalyticsImports/\(self.userId)/\(UUID().uuidString).csv")
+        storageRef.putData(data, metadata: nil) { _, _ in }
+        
+        self.removeDuplicateSessions { _ in }
+        
+        DispatchQueue.main.async {
+            let warningMessage = imported > 0 ? "⚠️ Imported \(imported) sessions with basic data. Missing fields: \(missingFields.joined(separator: ", ")). \(skipped) rows skipped." : "Failed to import any sessions."
+            completion(.success(imported))
+            print(warningMessage)
         }
     }
     

@@ -142,25 +142,36 @@ struct EnhancedSessionSummaryRow: View {
                 }
             )
             .offset(x: offset)
-            .gesture(
+            .simultaneousGesture(
                 DragGesture()
                     .onChanged { value in
-                        let translation = value.translation.width
-                        if translation < 0 { // Only allow left swipes
-                            offset = max(translation, maxOffset)
+                        // Only handle horizontal drags that are clearly horizontal
+                        let translation = value.translation
+                        let isDragHorizontal = abs(translation.width) > abs(translation.height) && abs(translation.width) > 10
+                        
+                        if isDragHorizontal && translation.width < 0 { // Only allow left swipes
+                            offset = max(translation.width, maxOffset)
                         }
                     }
                     .onEnded { value in
-                        let translation = value.translation.width
-                        let velocity = value.velocity.width
+                        let translation = value.translation
+                        let velocity = value.velocity
+                        let isDragHorizontal = abs(translation.width) > abs(translation.height) && abs(translation.width) > 10
                         
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            if translation < -50 || velocity < -300 {
-                                // Show actions
-                                offset = maxOffset
-                                showingActions = true
-                            } else {
-                                // Reset to original position
+                        if isDragHorizontal {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                if translation.width < -50 || velocity.width < -300 {
+                                    // Show actions
+                                    offset = maxOffset
+                                    showingActions = true
+                                } else {
+                                    // Reset to original position
+                                    resetPosition()
+                                }
+                            }
+                        } else {
+                            // Reset position if it wasn't a clear horizontal drag
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 resetPosition()
                             }
                         }

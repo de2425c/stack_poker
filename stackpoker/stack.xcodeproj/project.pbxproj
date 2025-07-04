@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		660B162F2E17439700688B44 /* RecaptchaEnterprise in Frameworks */ = {isa = PBXBuildFile; productRef = 660B162E2E17439700688B44 /* RecaptchaEnterprise */; };
+		660B16312E17448F00688B44 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = 660B16302E17448F00688B44 /* FirebaseAppCheck */; };
 		663575242E074E510091041D /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = 663575232E074E510091041D /* Lottie */; };
 		663575272E074EA00091041D /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 663575262E074EA00091041D /* FirebaseAnalytics */; };
 		663575292E074EA00091041D /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 663575282E074EA00091041D /* FirebaseAuth */; };
@@ -82,12 +84,14 @@
 				663575292E074EA00091041D /* FirebaseAuth in Frameworks */,
 				663575392E074F220091041D /* FirebaseMessaging in Frameworks */,
 				6635752D2E074EA00091041D /* FirebaseCrashlytics in Frameworks */,
+				660B16312E17448F00688B44 /* FirebaseAppCheck in Frameworks */,
 				6635752B2E074EA00091041D /* FirebaseCore in Frameworks */,
 				663575342E074EB30091041D /* Kingfisher in Frameworks */,
 				663575312E074EA00091041D /* FirebaseStorage in Frameworks */,
 				663575372E074EC20091041D /* SwiftUIReorderableForEach in Frameworks */,
 				663575242E074E510091041D /* Lottie in Frameworks */,
 				6635752F2E074EA00091041D /* FirebaseFirestore in Frameworks */,
+				660B162F2E17439700688B44 /* RecaptchaEnterprise in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -167,6 +171,8 @@
 				663575332E074EB30091041D /* Kingfisher */,
 				663575362E074EC20091041D /* SwiftUIReorderableForEach */,
 				663575382E074F220091041D /* FirebaseMessaging */,
+				660B162E2E17439700688B44 /* RecaptchaEnterprise */,
+				660B16302E17448F00688B44 /* FirebaseAppCheck */,
 			);
 			productName = stack;
 			productReference = 66EA95672DBC1E0B0076E0AD /* stack.app */;
@@ -255,6 +261,7 @@
 				663575252E074EA00091041D /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				663575322E074EB30091041D /* XCRemoteSwiftPackageReference "Kingfisher" */,
 				663575352E074EC20091041D /* XCRemoteSwiftPackageReference "swiftui-reorderable-foreach" */,
+				660B162D2E17439700688B44 /* XCRemoteSwiftPackageReference "recaptcha-enterprise-mobile-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 66EA95682DBC1E0B0076E0AD /* Products */;
@@ -475,6 +482,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = stack/SupportingFiles/stack.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RQVKDAF979;
@@ -482,6 +490,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = stack/SupportingFiles/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Stack;
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "This app needs access to save your poker session cards to your photo library for sharing.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app needs access to your photo library to save poker session cards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -492,13 +503,14 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				OTHER_LDFLAGS = (
 					"-ObjC",
 					"$(inherited)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = gg.stackpoker.stack;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -515,6 +527,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = stack/SupportingFiles/stack.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RQVKDAF979;
@@ -522,6 +535,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = stack/SupportingFiles/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Stack;
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "This app needs access to save your poker session cards to your photo library for sharing.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app needs access to your photo library to save poker session cards.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -532,13 +548,14 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				OTHER_LDFLAGS = (
 					"-ObjC",
 					"$(inherited)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = gg.stackpoker.stack;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -659,6 +676,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		660B162D2E17439700688B44 /* XCRemoteSwiftPackageReference "recaptcha-enterprise-mobile-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/GoogleCloudPlatform/recaptcha-enterprise-mobile-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 18.7.0;
+			};
+		};
 		663575222E074E510091041D /* XCRemoteSwiftPackageReference "lottie-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/airbnb/lottie-ios";
@@ -694,6 +719,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		660B162E2E17439700688B44 /* RecaptchaEnterprise */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 660B162D2E17439700688B44 /* XCRemoteSwiftPackageReference "recaptcha-enterprise-mobile-sdk" */;
+			productName = RecaptchaEnterprise;
+		};
+		660B16302E17448F00688B44 /* FirebaseAppCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 663575252E074EA00091041D /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
+		};
 		663575232E074E510091041D /* Lottie */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 663575222E074E510091041D /* XCRemoteSwiftPackageReference "lottie-ios" */;

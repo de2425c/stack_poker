@@ -1,7 +1,7 @@
 import SwiftUI
 
-
-struct SettingsGroup<Content: View>: View {
+// MARK: - Modern Settings Section
+struct SettingsSection<Content: View>: View {
     let title: String
     let content: Content
     
@@ -11,49 +11,95 @@ struct SettingsGroup<Content: View>: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(title)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                .padding(.leading, 20)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 4)
             
             VStack(spacing: 0) {
                 content
             }
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(UIColor(red: 30/255, green: 30/255, blue: 35/255, alpha: 1.0)))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
             )
-            .padding(.horizontal, 20)
         }
     }
 }
 
-struct SettingsRow: View {
+// MARK: - Modern Settings Row
+struct ModernSettingsRow<Accessory: View>: View {
     let icon: String
     let title: String
+    let subtitle: String?
+    let iconColor: Color
+    let titleColor: Color
+    let showChevron: Bool
+    let accessory: () -> Accessory
+    
+    init(
+        icon: String,
+        title: String,
+        subtitle: String? = nil,
+        iconColor: Color = .blue,
+        titleColor: Color = .white,
+        showChevron: Bool = false,
+        @ViewBuilder accessory: @escaping () -> Accessory = { EmptyView() }
+    ) {
+        self.icon = icon
+        self.title = title
+        self.subtitle = subtitle
+        self.iconColor = iconColor
+        self.titleColor = titleColor
+        self.showChevron = showChevron
+        self.accessory = accessory
+    }
     
     var body: some View {
-        Button(action: {}) {
-            HStack(spacing: 14) {
+        HStack(spacing: 16) {
+            // Icon
+            ZStack {
+                Circle()
+                    .fill(iconColor.opacity(0.15))
+                    .frame(width: 40, height: 40)
+                
                 Image(systemName: icon)
-                    .font(.system(size: 18))
-                    .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                    .frame(width: 24, height: 24)
-                
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(iconColor)
+            }
+            
+            // Content
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 16))
-                    .foregroundColor(.white)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundColor(titleColor)
                 
-                Spacer()
-                
+                if let subtitle = subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+            }
+            
+            Spacer()
+            
+            // Accessory
+            accessory()
+            
+            // Chevron
+            if showChevron {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.white.opacity(0.4))
             }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 18)
         }
-        .buttonStyle(PlainButtonStyle())
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .contentShape(Rectangle())
     }
 }

@@ -22,6 +22,45 @@ struct SwipeableGraphCarousel: View {
         self.adjustedProfitCalculator = adjustedProfitCalculator
     }
     
+    // Helper method to find optimal time range
+    private func getOptimalTimeRange() -> Int {
+        // Check each time range from shortest to longest to find the first one with sessions
+        for index in 0..<timeRanges.count {
+            let filteredSessions = filteredSessionsForTimeRange(index)
+            if !filteredSessions.isEmpty {
+                return index
+            }
+        }
+        // If no sessions found in any range, default to "All" (last index)
+        return timeRanges.count - 1
+    }
+    
+    // Helper method to filter sessions for a given time range
+    private func filteredSessionsForTimeRange(_ timeRangeIndex: Int) -> [Session] {
+        let now = Date()
+        let calendar = Calendar.current
+        
+        switch timeRangeIndex {
+        case 0: // 24H
+            let oneDayAgo = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneDayAgo }
+        case 1: // 1W
+            let oneWeekAgo = calendar.date(byAdding: .weekOfYear, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneWeekAgo }
+        case 2: // 1M
+            let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneMonthAgo }
+        case 3: // 6M
+            let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: now) ?? now
+            return sessions.filter { $0.startDate >= sixMonthsAgo }
+        case 4: // 1Y
+            let oneYearAgo = calendar.date(byAdding: .year, value: -1, to: now) ?? now
+            return sessions.filter { $0.startDate >= oneYearAgo }
+        default: // All
+            return sessions
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Swipeable graph container
@@ -104,5 +143,34 @@ struct SwipeableGraphCarousel: View {
             .padding(.top, selectedGraphIndex < 2 ? 12 : 16)
         }
         .animation(.easeInOut(duration: 0.3), value: selectedGraphIndex)
+        .onAppear {
+            // Only auto-adjust for bankroll and profit graphs (not monthly)
+            if selectedGraphIndex < 2 {
+                // Check if current time range has sessions
+                let currentFilteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                
+                // If no sessions in current range, find optimal range
+                if currentFilteredSessions.isEmpty {
+                    let optimalRange = getOptimalTimeRange()
+                    if optimalRange != selectedTimeRange {
+                        selectedTimeRange = optimalRange
+                    }
+                }
+            }
+        }
+        .onChange(of: selectedGraphIndex) { newIndex in
+            // When switching to bankroll or profit graphs, ensure optimal time range
+            if newIndex < 2 {
+                let currentFilteredSessions = filteredSessionsForTimeRange(selectedTimeRange)
+                
+                // If no sessions in current range, find optimal range
+                if currentFilteredSessions.isEmpty {
+                    let optimalRange = getOptimalTimeRange()
+                    if optimalRange != selectedTimeRange {
+                        selectedTimeRange = optimalRange
+                    }
+                }
+            }
+        }
     }
 }

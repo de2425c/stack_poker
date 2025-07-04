@@ -41,6 +41,9 @@ struct HomePage: View {
     @State private var showingCSVImportPrompt = false
     @State private var showingCSVImportFlow = false
     
+    // Recommended Users Popup
+    @State private var showingRecommendedUsers = false
+    
     init(userId: String) {
         self.userId = userId
         _sessionStore = StateObject(wrappedValue: SessionStore(userId: userId))
@@ -302,9 +305,18 @@ struct HomePage: View {
                     loadActiveHostedStandaloneGame()
                 }
                 
-                // Observer for tutorial completion to trigger CSV import
+                // Observer for tutorial completion to trigger recommended users popup
                 NotificationCenter.default.addObserver(
                     forName: NSNotification.Name("TutorialCompleted"),
+                    object: nil,
+                    queue: .main
+                ) { [self] _ in
+                    showRecommendedUsersPopup()
+                }
+                
+                // Observer for recommended users completion to trigger CSV import
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("RecommendedUsersCompleted"),
                     object: nil,
                     queue: .main
                 ) { [self] _ in
@@ -385,11 +397,44 @@ struct HomePage: View {
             .environmentObject(userService)
         }
         .fullScreenCover(isPresented: $showingLiveSession) {
-            EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
+            LiveSessionCoordinatorView(
+                userId: userId,
+                sessionStore: sessionStore,
+                onDismiss: { showingLiveSession = false }
+            )
         }
         .fullScreenCover(isPresented: $showingCSVImportFlow) {
             CSVImportFlow(userId: userId)
         }
+        // Recommended Users Popup Overlay
+        .overlay(
+            Group {
+                if showingRecommendedUsers {
+                    RecommendedUsersPopup(
+                        onContinue: {
+                            showingRecommendedUsers = false
+                            // Navigate to feed tab
+                            selectedTab = .feed
+                            // Post notification to trigger CSV import after a delay
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                NotificationCenter.default.post(name: NSNotification.Name("RecommendedUsersCompleted"), object: nil)
+                            }
+                        },
+                        onDismiss: {
+                            showingRecommendedUsers = false
+                            // Navigate to feed tab even if dismissed
+                            selectedTab = .feed
+                            // Still trigger CSV import after a delay
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                NotificationCenter.default.post(name: NSNotification.Name("RecommendedUsersCompleted"), object: nil)
+                            }
+                        }
+                    )
+                    .environmentObject(userService)
+                    .zIndex(1000) // Higher than CSV import prompt
+                }
+            }
+        )
         // CSV Import Prompt Overlay
         .overlay(
             Group {
@@ -514,8 +559,18 @@ struct HomePage: View {
     }
 }
 
-// MARK: - CSV Import Prompt Logic Extension
+// MARK: - Recommended Users and CSV Import Logic Extensions
 extension HomePage {
+    private func showRecommendedUsersPopup() {
+        // Ensure we're on the feed tab when showing recommended users
+        selectedTab = .feed
+        
+        // Small delay to allow tab transition to complete
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.showingRecommendedUsers = true
+        }
+    }
+    
     private func checkForCSVImportPrompt() {
         Task {
             do {

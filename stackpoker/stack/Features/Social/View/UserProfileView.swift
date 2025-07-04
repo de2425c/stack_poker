@@ -27,6 +27,10 @@ struct UserProfileView: View {
     @State private var localFollowersCount: Int = 0
     @State private var localFollowingCount: Int = 0
     
+    // Loading state for robust profile loading
+    @State private var isLoadingProfile: Bool = true
+    @State private var loadingAttempt: Int = 1
+    
     // Active challenges for the user
     @State private var activeChallenges: [Challenge] = []
     
@@ -88,7 +92,26 @@ struct UserProfileView: View {
 
     var body: some View {
         ScrollView {
-            if let user = userService.loadedUsers[userId] {
+            if isLoadingProfile {
+                // Loading state
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))))
+                        .scaleEffect(1.5)
+                    
+                    if loadingAttempt == 1 {
+                        Text("Loading profile...")
+                            .foregroundColor(.gray)
+                            .font(.body)
+                    } else {
+                        Text("Retrying... (attempt \(loadingAttempt))")
+                            .foregroundColor(.gray)
+                            .font(.body)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 100)
+            } else if let user = userService.loadedUsers[userId] {
                 VStack(alignment: .leading, spacing: 16) {
                     // Profile Header
                     HStack(spacing: 16) {
@@ -119,80 +142,108 @@ struct UserProfileView: View {
                     .padding(.horizontal)
 
                     // Follow/Edit Profile Button & Stats
-                    HStack(spacing: 20) {
-                        StatView(count: localFollowersCount, label: "Followers")
-                        StatView(count: localFollowingCount, label: "Following")
-                        Spacer()
-                        if !isCurrentUserProfile {
-                            Button(action: toggleFollow) {
-                                Text(isFollowing ? "Unfollow" : "Follow")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(isFollowing ? .white : .black)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(isFollowing ? Color.gray.opacity(0.7) : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
-                                    .cornerRadius(20)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .stroke(isFollowing ? Color.gray : Color.clear, lineWidth: 1)
-                                    )
+                    HStack(spacing: 12) {
+                        // Stats section - fixed size to prevent wrapping
+                        HStack(spacing: 16) {
+                            NavigationLink(destination: BasicFollowListView(
+                                userId: userId, 
+                                listType: .followers, 
+                                userName: user.displayName ?? user.username
+                            ).environmentObject(userService)) {
+                                StatView(count: localFollowersCount, label: "Followers")
                             }
-                            .fixedSize(horizontal: true, vertical: false)
-                            .disabled(isProcessingFollow)
+                            .buttonStyle(PlainButtonStyle())
+                            .fixedSize()
                             
-                            // Post Notifications Toggle (only show when following)
-                            if isFollowing {
-                                Button(action: { 
-                                    // Show popup to ask about notifications
-                                    if let user = userService.loadedUsers[userId] {
-                                        targetUserName = user.username
-                                    } else {
-                                        targetUserName = "this user"
+                            NavigationLink(destination: BasicFollowListView(
+                                userId: userId, 
+                                listType: .following, 
+                                userName: user.displayName ?? user.username
+                            ).environmentObject(userService)) {
+                                StatView(count: localFollowingCount, label: "Following")
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .fixedSize()
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        
+                        Spacer(minLength: 8)
+                        
+                        // Action buttons section
+                        HStack(spacing: 8) {
+                            if !isCurrentUserProfile {
+                                Button(action: toggleFollow) {
+                                    Text(isFollowing ? "Unfollow" : "Follow")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(isFollowing ? .white : .black)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(isFollowing ? Color.gray.opacity(0.7) : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                                        .cornerRadius(20)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 20)
+                                                .stroke(isFollowing ? Color.gray : Color.clear, lineWidth: 1)
+                                        )
+                                }
+                                .fixedSize(horizontal: true, vertical: false)
+                                .disabled(isProcessingFollow)
+                                
+                                // Post Notifications Toggle (only show when following)
+                                if isFollowing {
+                                    Button(action: { 
+                                        // Show popup to ask about notifications
+                                        if let user = userService.loadedUsers[userId] {
+                                            targetUserName = user.username
+                                        } else {
+                                            targetUserName = "this user"
+                                        }
+                                        showingPostNotificationPrompt = true
+                                    }) {
+                                        Image(systemName: postNotificationsEnabled ? "bell.fill" : "bell.slash")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 8)
+                                            .background(postNotificationsEnabled ? Color.blue.opacity(0.7) : Color.gray.opacity(0.5))
+                                            .cornerRadius(20)
                                     }
-                                    showingPostNotificationPrompt = true
+                                    .disabled(isProcessingNotifications)
+                                    .fixedSize()
+                                }
+                                
+                                // Block Button
+                                Button(action: { 
+                                    blockUser()
                                 }) {
-                                    Image(systemName: postNotificationsEnabled ? "bell.fill" : "bell.slash")
+                                    Image(systemName: "person.crop.circle.badge.xmark")
                                         .font(.system(size: 14, weight: .semibold))
                                         .foregroundColor(.white)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 8)
-                                        .background(postNotificationsEnabled ? Color.blue.opacity(0.7) : Color.gray.opacity(0.5))
+                                        .background(Color.red.opacity(0.7))
                                         .cornerRadius(20)
                                 }
-                                .disabled(isProcessingNotifications)
-                            }
-                            
-                            // Block Button
-                            Button(action: { 
-                                blockUser()
-                            }) {
-                                Image(systemName: "person.crop.circle.badge.xmark")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 8)
-                                    .background(Color.red.opacity(0.7))
-                                    .cornerRadius(20)
-                            }
-                            
+                                .fixedSize()
 
-                        } else {
-                            // Edit Profile button for current user
-                            Button(action: { 
-                                showingEditProfile = true 
-                            }) {
-                                Text("Edit Profile")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(Color.gray.opacity(0.5))
-                                    .cornerRadius(20)
+                            } else {
+                                // Edit Profile button for current user
+                                Button(action: { 
+                                    showingEditProfile = true 
+                                }) {
+                                    Text("Edit Profile")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(Color.gray.opacity(0.5))
+                                        .cornerRadius(20)
+                                }
+                                .fixedSize(horizontal: true, vertical: false)
                             }
-                            .fixedSize(horizontal: true, vertical: false)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                     .padding(.horizontal)
 
@@ -301,13 +352,30 @@ struct UserProfileView: View {
                 }
                 .padding(.vertical)
             } else {
-                // Loading state or user not found
-                VStack {
-                    ProgressView()
-                    Text("Loading profile...")
+                // Error loading profile
+                VStack(spacing: 16) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 50))
                         .foregroundColor(.gray)
+                    Text("Error loading profile")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                    
+                    Button("Try again") {
+                        Task {
+                            await loadUserProfile()
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                    .foregroundColor(.black)
+                    .cornerRadius(20)
+                    .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 100)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -357,39 +425,13 @@ struct UserProfileView: View {
         }
         .onAppear {
             Task {
-                if userService.loadedUsers[userId] == nil {
-                    await userService.fetchUser(id: userId) // Fetch user details if not already loaded
-                }
-
-                // Initialize local counts from fetched user profile if available
-                if let profile = userService.loadedUsers[userId] {
-                    self.localFollowersCount = profile.followersCount
-                    self.localFollowingCount = profile.followingCount
-                    
-                    // Debug: Print hyperlink data
-                    print("🔗 [UserProfileView] User \(profile.username) hyperlink data:")
-                    print("   - hyperlinkText: '\(profile.hyperlinkText ?? "nil")'")
-                    print("   - hyperlinkURL: '\(profile.hyperlinkURL ?? "nil")'")
-                }
-
-                // Fetch initial follow state
-                if let currentLoggedInUserId = loggedInUserId {
-                    self.isFollowing = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
-                    
-                    // If following, also fetch post notification preference
-                    if self.isFollowing {
-                        self.postNotificationsEnabled = await userService.getPostNotificationPreference(targetUserId: userId, currentUserId: currentLoggedInUserId)
-                    }
-                }
-
-                // Fetch user's posts
-                try? await profilePostService.fetchPosts(forUserId: userId)
-                
-                // Fetch user's public sessions
-                try? await fetchUserPublicSessions()
-                
-                // Fetch user's active challenges
-                await fetchActiveChallenges()
+                await loadUserProfile()
+            }
+        }
+        .onChange(of: userId) { newUserId in
+            // If the userId changes (navigation to different profile), reload
+            Task {
+                await loadUserProfile()
             }
         }
     }
@@ -454,6 +496,107 @@ struct UserProfileView: View {
         }
     }
     
+    @MainActor
+    private func loadUserProfile() async {
+        await loadUserProfileWithRetry(attempt: 1)
+    }
+    
+    @MainActor
+    private func loadUserProfileWithRetry(attempt: Int) async {
+        let maxAttempts = 3
+        print("🔄 [UserProfileView] Starting loadUserProfile for userId: \(userId) (attempt \(attempt)/\(maxAttempts))")
+        
+        // Set loading state
+        self.isLoadingProfile = true
+        self.loadingAttempt = attempt
+        
+        // Wait for UserService to be fully initialized
+        if !userService.isInitialized {
+            print("⏳ [UserProfileView] Waiting for UserService initialization...")
+            while !userService.isInitialized {
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second checks
+            }
+            print("✅ [UserProfileView] UserService is now initialized")
+        }
+        
+        // Add delays for stability
+        if attempt == 1 {
+            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 second initial delay
+        } else {
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay between retries
+        }
+        
+        // Step 1: ALWAYS fetch the user profile first and wait for completion
+        // This ensures we have the profile data before proceeding
+        // Force refresh on retries to bypass cache
+        await userService.fetchUser(id: userId, forceRefresh: attempt > 1)
+        
+        // Step 2: Verify we have the profile loaded - this should always succeed now
+        guard let profile = userService.loadedUsers[userId] else {
+            print("❌ [UserProfileView] Failed to load user profile for userId: \(userId) on attempt \(attempt)")
+            
+            if attempt < maxAttempts {
+                print("🔄 [UserProfileView] Retrying... (attempt \(attempt + 1)/\(maxAttempts))")
+                await loadUserProfileWithRetry(attempt: attempt + 1)
+                return
+            } else {
+                print("❌ [UserProfileView] Failed to load profile after \(maxAttempts) attempts")
+                self.isLoadingProfile = false
+                return
+            }
+        }
+        
+        print("✅ [UserProfileView] Successfully loaded profile for user: \(profile.username)")
+        
+        // Step 3: Initialize local state with profile data
+        self.localFollowersCount = profile.followersCount
+        self.localFollowingCount = profile.followingCount
+        
+        // Step 4: Show the profile UI immediately once we have the basic data
+        self.isLoadingProfile = false
+        
+        // Debug: Print hyperlink data
+        print("🔗 [UserProfileView] User \(profile.username) hyperlink data:")
+        print("   - hyperlinkText: '\(profile.hyperlinkText ?? "nil")'")
+        print("   - hyperlinkURL: '\(profile.hyperlinkURL ?? "nil")'")
+        
+        // Step 5: Now fetch follow state and other data in parallel
+        // These can run in parallel since they don't depend on each other
+        async let followStateTask: Void = {
+            if let currentLoggedInUserId = loggedInUserId {
+                let following = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
+                await MainActor.run {
+                    self.isFollowing = following
+                }
+                
+                // If following, also fetch post notification preference
+                if following {
+                    let notificationsEnabled = await userService.getPostNotificationPreference(targetUserId: userId, currentUserId: currentLoggedInUserId)
+                    await MainActor.run {
+                        self.postNotificationsEnabled = notificationsEnabled
+                    }
+                }
+            }
+        }()
+        
+        async let postsTask: Void = {
+            try? await profilePostService.fetchPosts(forUserId: userId)
+        }()
+        
+        async let sessionsTask: Void = {
+            try? await fetchUserPublicSessions()
+        }()
+        
+        async let challengesTask: Void = {
+            await fetchActiveChallenges()
+        }()
+        
+        // Wait for all parallel tasks to complete
+        let _ = await (followStateTask, postsTask, sessionsTask, challengesTask)
+        
+        print("✅ [UserProfileView] Completed loading all profile data for user: \(profile.username)")
+    }
+
     private func fetchUserPublicSessions() async throws {
         print("🔍 [UserProfileView] Fetching public sessions for userId: \(userId)")
         do {
@@ -533,14 +676,19 @@ struct StatView: View {
     let label: String
 
     var body: some View {
-        VStack {
+        VStack(spacing: 2) {
             Text("\(count)")
                 .font(.headline).bold()
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
             Text(label)
                 .font(.caption)
                 .foregroundColor(.gray)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
+        .fixedSize()
     }
 }
 

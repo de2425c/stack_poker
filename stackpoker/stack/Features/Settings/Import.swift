@@ -31,7 +31,7 @@ enum ImportType: Hashable {
     
     var color: Color {
         switch self {
-        case .pokerbase: return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
+        case .pokerbase: return Color(red: 64/255, green: 156/255, blue: 255/255)
         case .pokerAnalytics: return .cyan
         case .pbt: return .purple
         case .regroup: return .orange
@@ -53,65 +53,51 @@ struct ImportOptionsSheet: View {
                 AppBackgroundView()
                     .ignoresSafeArea()
                 
-                VStack(spacing: 20) {
-                    Text("Select Import Format")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.top, 20)
-                    
-                    Text("Choose the app you want to import your poker session data from:")
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                    
-                    VStack(spacing: 16) {
-                        ForEach([ImportType.pokerbase, .pokerAnalytics, .pbt, .regroup, .pokerIncomeUltimate], id: \.self) { importType in
-                            Button(action: {
-                                onImportSelected(importType)
-                                dismiss()
-                            }) {
-                                HStack(spacing: 16) {
-                                    Image(systemName: "tray.and.arrow.down")
-                                        .font(.system(size: 20, weight: .medium))
-                                        .foregroundColor(importType.color)
-                                        .frame(width: 30)
-                                    
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(importType.title)
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundColor(.white)
-                                        Text("Import \(importType.fileType) files")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.gray)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.gray)
-                                }
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(UIColor(red: 40/255, green: 40/255, blue: 45/255, alpha: 1.0)))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(importType.color.opacity(0.3), lineWidth: 1)
-                                        )
-                                )
+                ScrollView {
+                    VStack(spacing: 32) {
+                        // Modern Header
+                        VStack(spacing: 16) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.15))
+                                    .frame(width: 60, height: 60)
+                                
+                                Image(systemName: "tray.and.arrow.down.fill")
+                                    .font(.system(size: 28, weight: .medium))
+                                    .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
                             }
-                            .buttonStyle(PlainButtonStyle())
+                            
+                            VStack(spacing: 8) {
+                                Text("Select Import Format")
+                                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                
+                                Text("Choose your previous poker tracking app to import your session history")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .multilineTextAlignment(.center)
+                                    .lineSpacing(2)
+                            }
                         }
+                        .padding(.top, 20)
+                        .padding(.horizontal, 20)
+                        
+                        // Import Options
+                        VStack(spacing: 12) {
+                            ForEach([ImportType.pokerbase, .pokerAnalytics, .pbt, .regroup, .pokerIncomeUltimate], id: \.self) { importType in
+                                ModernImportCard(importType: importType) {
+                                    onImportSelected(importType)
+                                    dismiss()
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        
+                        Spacer(minLength: 100)
                     }
-                    .padding(.horizontal, 20)
-                    
-                    Spacer()
                 }
             }
-            .navigationTitle("Import CSV")
+            .navigationTitle("Import Data")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -122,6 +108,68 @@ struct ImportOptionsSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Modern Import Card
+private struct ModernImportCard: View {
+    let importType: ImportType
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 16) {
+                // Icon
+                ZStack {
+                    Circle()
+                        .fill(importType.color.opacity(0.15))
+                        .frame(width: 44, height: 44)
+                    
+                    Image(systemName: "tray.and.arrow.down.fill")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(importType.color)
+                }
+                
+                // Content
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(importType.title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Text("Import \(importType.fileType) files")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                
+                Spacer()
+                
+                // Chevron
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(ModernCardButtonStyle())
+    }
+}
+
+// MARK: - Modern Card Button Style
+private struct ModernCardButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .opacity(configuration.isPressed ? 0.8 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

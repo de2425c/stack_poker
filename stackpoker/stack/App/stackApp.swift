@@ -42,6 +42,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        
         FirebaseApp.configure()
         
         // Configure Firebase Auth for phone verification immediately after configure
@@ -246,6 +247,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         
         Auth.auth().settings?.isAppVerificationDisabledForTesting = false
         
+        // Firebase Auth will handle reCAPTCHA automatically when needed
+        // The UIDelegate in AuthService will present reCAPTCHA when required
         
         // Set language code for better compatibility
         Auth.auth().languageCode = "en"

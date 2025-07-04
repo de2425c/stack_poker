@@ -184,6 +184,14 @@ struct FeedView: View {
                 try? await publicSessionService.fetchPublicSessions(currentUserId: userId, followersOnly: true)
                 // Start listening for real-time updates on live sessions with follower filtering
                 publicSessionService.startListeningToLiveSessions(currentUserId: userId, followersOnly: true)
+                
+                // Load and start listening to live story sessions
+                do {
+                    publicSessionService.liveStorySessions = try await publicSessionService.fetchLiveSessionsForStories(currentUserId: userId)
+                } catch {
+                    print("Error loading story sessions: \(error)")
+                }
+                publicSessionService.startListeningToLiveStorySessions(currentUserId: userId)
             }
             
             // Load suggested users for both empty state and feed injection
@@ -200,8 +208,10 @@ struct FeedView: View {
                 // Restart the public sessions listener with updated following relationships
                 Task {
                     publicSessionService.stopListeningToLiveSessions()
+                    publicSessionService.stopListeningToLiveStorySessions()
                     try? await publicSessionService.forceRefresh(currentUserId: userId, followersOnly: true)
                     publicSessionService.startListeningToLiveSessions(currentUserId: userId, followersOnly: true)
+                    publicSessionService.startListeningToLiveStorySessions(currentUserId: userId)
                 }
             }
             
@@ -210,6 +220,7 @@ struct FeedView: View {
         .onDisappear {
             // Clean up listeners when view disappears
             publicSessionService.stopListeningToLiveSessions()
+            publicSessionService.stopListeningToLiveStorySessions()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Refresh feed and suggested users when app becomes active
@@ -410,6 +421,13 @@ struct FeedView: View {
                     // Top spacer removed
                     feedHeader() // Header is now the first item in LazyVStack
 
+                    // Live Stories (if there are any active sessions)
+                    LiveStoriesView(
+                        liveSessions: publicSessionService.liveStorySessions,
+                        currentUserId: userId
+                    )
+                    .environmentObject(userService)
+
                     // Quick Actions Card at the top of feed
                     VStack(spacing: 0) {
                         RecordActivityPostCard(
@@ -441,7 +459,7 @@ struct FeedView: View {
                     ForEach(0..<combinedFeedContent.count, id: \.self) { index in
                         let content = combinedFeedContent[index]
                         
-                        // Insert suggestion card BEFORE certain posts (only for posts, not sessions)
+                        // Insert suggestion card BEFORE certain posts
                         if case .post = content, shouldShowSuggestedContent(at: index) {
                             let _ = print("DEBUG: Should show content at index \(index), suggestedUsers.count: \(suggestedUsers.count)")
                             VStack(spacing: 0) {
@@ -516,7 +534,7 @@ struct FeedView: View {
                             }
                         }
                         
-                        // Show the actual content (post or public session)
+                        // Show the actual content (now only posts)
                         VStack(spacing: 0) {
                             switch content {
                             case .post(let post):
@@ -552,23 +570,8 @@ struct FeedView: View {
                                 }
                                 
                             case .publicSession(let session):
-                                PublicLiveSessionCard(
-                                    session: session,
-                                    currentUserId: userId,
-                                    onViewTapped: {
-                                        // TODO: Implement view session functionality
-                                        print("View session tapped: \(session.id)")
-                                    }
-                                )
-                                .environmentObject(userService)
-                                .onAppear {
-                                    // Load more sessions when reaching the end
-                                    if session.id == publicSessionService.liveSessions.last?.id {
-                                        Task {
-                                            try? await publicSessionService.fetchMoreSessions(currentUserId: userId, followersOnly: true)
-                                        }
-                                    }
-                                }
+                                // Public sessions are now handled by stories view
+                                EmptyView()
                             }
                             
                             Divider() 
@@ -700,8 +703,8 @@ struct FeedView: View {
         // Add posts
         combined.append(contentsOf: postService.posts.map { .post($0) })
         
-        // Add public sessions
-        combined.append(contentsOf: publicSessionService.liveSessions.map { .publicSession($0) })
+        // Note: Public sessions are now shown as stories at the top, not in the main feed
+        // combined.append(contentsOf: publicSessionService.liveSessions.map { .publicSession($0) })
         
         // Sort by timestamp (newest first)
         return combined.sorted { $0.timestamp > $1.timestamp }

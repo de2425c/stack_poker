@@ -9,6 +9,7 @@ class UserService: ObservableObject {
     private let db = Firestore.firestore()
     @Published var currentUserProfile: UserProfile?
     @Published var loadedUsers: [String: UserProfile] = [:]
+    @Published var isInitialized: Bool = false
     
     private let userFollowsCollection = "userFollows"
 
@@ -21,10 +22,24 @@ class UserService: ObservableObject {
             object: nil
         )
         
-        // Initialize top users cache if needed
+        // Initialize service
         Task {
-            await initializeTopUsersCacheIfNeeded()
+            await initializeService()
         }
+    }
+    
+    private func initializeService() async {
+        // Give Firebase a moment to initialize properly
+        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+        
+        // Initialize top users cache if needed
+        await initializeTopUsersCacheIfNeeded()
+        
+        // Mark as initialized
+        await MainActor.run {
+            self.isInitialized = true
+        }
+        print("✅ [UserService] Service initialized")
     }
     
     /// Initializes the top users cache if it doesn't exist
@@ -381,29 +396,34 @@ class UserService: ObservableObject {
         }
     }
     
-    func fetchUser(id: String) async {
-        // Optional: Prevent re-fetching if data for this user ID is already loaded
-        // and you don't need to refresh it every time.
-        // if loadedUsers[id] != nil {
-        //     print("User \(id) already loaded.")
-        //     return
-        // }
-
+    func fetchUser(id: String, forceRefresh: Bool = false) async {
+        print("🔍 [UserService] Fetching user profile for ID: \(id) (forceRefresh: \(forceRefresh))")
+        
+        // Check if already loaded to avoid unnecessary requests (unless forcing refresh)
+        if !forceRefresh, let existingUser = loadedUsers[id] {
+            print("✅ [UserService] User \(existingUser.username) already loaded, skipping fetch")
+            return
+        }
 
         do {
+            // Add a small delay to ensure Firestore connection is stable
+            if forceRefresh {
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 second delay on retries
+            }
+            
+            print("🔍 [UserService] Making Firestore request for user \(id)...")
             let document = try await db.collection("users")
                 .document(id)
                 .getDocument()
+            print("📄 [UserService] Firestore response received for user \(id) - exists: \(document.exists)")
 
             if !document.exists {
-
-                // You might want to handle this case, e.g., by setting nil or a specific error state
-                // For now, it just won't add to loadedUsers
+                print("❌ [UserService] User document does not exist for ID: \(id)")
                 return
             }
 
             guard let data = document.data() else {
-
+                print("❌ [UserService] User document exists but has no data for ID: \(id)")
                 return
             }
 
@@ -429,10 +449,10 @@ class UserService: ObservableObject {
             
             // Update the published dictionary on the main thread - No longer needed due to @MainActor
             self.loadedUsers[id] = userProfile
+            print("✅ [UserService] Successfully loaded user: \(userProfile.username)")
 
         } catch {
-
-            // Optionally, handle the error, e.g., by setting nil for this ID in loadedUsers
+            print("❌ [UserService] Error fetching user \(id): \(error)")
         }
     }
 

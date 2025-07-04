@@ -129,9 +129,10 @@ struct EventDetailView: View {
             fetchExistingStakes()
         }
         .sheet(isPresented: $showingLiveSession) {
-            EnhancedLiveSessionView(
+            LiveSessionCoordinatorView(
                 userId: Auth.auth().currentUser?.uid ?? "",
                 sessionStore: sessionStore,
+                onDismiss: { showingLiveSession = false },
                 preselectedEvent: event
             )
         }

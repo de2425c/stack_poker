@@ -115,11 +115,15 @@ struct PhoneSignUpView: View {
                                     }
                                 }
                                 
-                                // Info text about SMS charges
+                                // Info text about SMS charges and verification
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("We'll send you a verification code via SMS.")
                                         .font(.custom("PlusJakartaSans-Regular", size: 14))
                                         .foregroundColor(.white.opacity(0.7))
+                                    
+                                    Text("You may need to complete a CAPTCHA verification for security.")
+                                        .font(.custom("PlusJakartaSans-Regular", size: 12))
+                                        .foregroundColor(.white.opacity(0.6))
                                     
                                     Text("Standard message and data rates may apply.")
                                         .font(.custom("PlusJakartaSans-Regular", size: 12))

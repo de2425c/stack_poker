@@ -1025,6 +1025,7 @@ struct ExploreView: View {
     @State private var isListViewMode = false // Toggle between card view and list view in series detail
     @State private var selectedDateInSeries: SimpleDate? = nil // For date navigation within series
     @State private var showingDatePicker = false // For calendar date picker
+    @State private var isCalendarDaySelected = false // Track if a specific day is selected in calendar
     var onEventSelected: ((Event) -> Void)? // Callback for when an event is selected
     var isSheetPresentation: Bool = false // New parameter to control top padding
     @Environment(\.dismiss) var dismiss // To dismiss the view if used as a sheet
@@ -1313,7 +1314,7 @@ struct ExploreView: View {
 
     var body: some View {
         ZStack {
-            AppBackgroundView() 
+            AppBackgroundView().ignoresSafeArea()
             
             VStack(spacing: 0) {
                 // --- Custom Gradient Tab Bar ---
@@ -1328,6 +1329,10 @@ struct ExploreView: View {
             }
         }
         .onAppear {
+            // Initialize calendar state
+            isCalendarDaySelected = false
+            calendarSelectedDate = Date()
+            
             // Always fetch public events to support RSVP display in My Events
             viewModel.fetchEvents()
             
@@ -1361,6 +1366,10 @@ struct ExploreView: View {
             } else {
                 // Set loading state immediately to prevent flash
                 isLoadingMyEvents = true
+                
+                // Reset calendar to month view when switching to My Events
+                isCalendarDaySelected = false
+                calendarSelectedDate = Date()
                 
                 // Also ensure public events are loaded for RSVP lookup
                 viewModel.fetchEvents()
@@ -2361,76 +2370,206 @@ struct ExploreView: View {
             LazyVStack(spacing: 0) {
                 MyEventsCalendarView(
                     events: allCombinedEventItems,
-                    selectedDate: $calendarSelectedDate
+                    selectedDate: Binding(
+                        get: { calendarSelectedDate },
+                        set: { newDate in
+                            let calendar = Calendar.current
+                            let selectedDay = calendar.startOfDay(for: newDate)
+                            let previousDay = calendar.startOfDay(for: calendarSelectedDate)
+                            
+                            calendarSelectedDate = newDate
+                            
+                            // If clicking on the same date that's already selected, toggle back to month view
+                            if selectedDay == previousDay && isCalendarDaySelected {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    isCalendarDaySelected = false
+                                }
+                            } else {
+                                // Select the new date and show day view
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    isCalendarDaySelected = true
+                                }
+                            }
+                        }
+                    )
                 )
                 .padding(.bottom, 12)
 
-                let eventsForDate = eventsForSelectedCalendarDate
-                
-                // Date Section Header
-                if !eventsForDate.isEmpty {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(formatDateHeader(calendarSelectedDate))
-                                .font(.system(size: 18, weight: .bold, design: .default))
-                                .foregroundColor(.white)
-                            
-                            Text(relativeDateString(calendarSelectedDate))
-                                .font(.system(size: 13, weight: .medium, design: .default))
-                                .foregroundColor(.gray)
-                        }
-                        
-                        Spacer()
-                        
-                        // Event count badge
-                        Text("\(eventsForDate.count)")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 24, height: 24)
-                            .background(Color(red: 64/255, green: 156/255, blue: 255/255))
-                            .clipShape(Circle())
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
-                    
-                    // Events for this date
-                    ForEach(eventsForDate.sorted { $0.date < $1.date }) { eventItem in
-                        if eventItem.isUserEvent, let userEvent = eventItem.userEvent {
-                            UserEventCardView(event: userEvent, onSelect: {
-                                selectedUserEvent = userEvent
-                            })
-                                .environmentObject(userEventService)
-                                .environmentObject(userService)
-                                .environmentObject(sessionStore)
-                                .padding(.horizontal, 20)
-                                .padding(.bottom, 14)
-                        } else if let publicEvent = eventItem.publicEvent {
-                            EventCardView(event: publicEvent, onSelect: {
-                                selectedEvent = publicEvent
-                                showingEventDetail = true
-                            })
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 14)
-                        }
-                    }
+                if isCalendarDaySelected {
+                    // Day View - Show events for selected date
+                    dayViewContent
                 } else {
-                     VStack {
-                        Spacer(minLength: 20)
-                        Image(systemName: "calendar.badge.exclamationmark")
-                                .font(.system(size: 40))
-                                .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
-                            .padding(.bottom, 10)
-                        Text("No Events Scheduled")
-                                .font(.system(size: 16, weight: .medium, design: .default))
-                                .foregroundColor(.gray)
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Month View - Show all upcoming events in chronological order
+                    monthViewContent
                 }
                 
                 // Bottom padding
                 Color.clear.frame(height: 100)
+            }
+        }
+    }
+    
+    // MARK: - Day View Content
+    private var dayViewContent: some View {
+        let eventsForDate = eventsForSelectedCalendarDate
+        
+        return Group {
+            // Back to Month View Button
+            HStack {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isCalendarDaySelected = false
+                    }
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Back to Month")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
+            
+            if !eventsForDate.isEmpty {
+                // Date Section Header
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(formatDateHeader(calendarSelectedDate))
+                            .font(.system(size: 18, weight: .bold, design: .default))
+                            .foregroundColor(.white)
+                        
+                        Text(relativeDateString(calendarSelectedDate))
+                            .font(.system(size: 13, weight: .medium, design: .default))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    Spacer()
+                    
+                    // Event count badge
+                    Text("\(eventsForDate.count)")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 24, height: 24)
+                        .background(Color(red: 64/255, green: 156/255, blue: 255/255))
+                        .clipShape(Circle())
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+                
+                // Events for this date
+                ForEach(eventsForDate.sorted { $0.date < $1.date }) { eventItem in
+                    if eventItem.isUserEvent, let userEvent = eventItem.userEvent {
+                        UserEventCardView(event: userEvent, onSelect: {
+                            selectedUserEvent = userEvent
+                        })
+                            .environmentObject(userEventService)
+                            .environmentObject(userService)
+                            .environmentObject(sessionStore)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 14)
+                    } else if let publicEvent = eventItem.publicEvent {
+                        EventCardView(event: publicEvent, onSelect: {
+                            selectedEvent = publicEvent
+                            showingEventDetail = true
+                        })
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 14)
+                    }
+                }
+            } else {
+                VStack {
+                    Spacer(minLength: 20)
+                    Image(systemName: "calendar.badge.exclamationmark")
+                        .font(.system(size: 40))
+                        .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                        .padding(.bottom, 10)
+                    Text("No Events on This Day")
+                        .font(.system(size: 16, weight: .medium, design: .default))
+                        .foregroundColor(.gray)
+                    Spacer()
+                }
+            }
+        }
+    }
+    
+    // MARK: - Month View Content
+    private var monthViewContent: some View {
+        Group {
+            if upcomingEventsForMonth.isEmpty {
+                VStack {
+                    Spacer(minLength: 20)
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: 50))
+                        .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                        .padding(.bottom, 16)
+                    
+                    Text("No Upcoming Events")
+                        .font(.system(size: 18, weight: .medium, design: .default))
+                        .foregroundColor(.white)
+                        .padding(.bottom, 8)
+                    
+                    Text("Your events for this month will appear here")
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                    
+                    Spacer()
+                }
+            } else {
+                // Show upcoming events grouped by date
+                ForEach(upcomingEventsGroupedByDate.keys.sorted(), id: \.self) { date in
+                    if let eventsForDate = upcomingEventsGroupedByDate[date] {
+                        // Date Section Header
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(formatDateHeader(date))
+                                    .font(.system(size: 18, weight: .bold, design: .default))
+                                    .foregroundColor(.white)
+                                
+                                Text(relativeDateString(date))
+                                    .font(.system(size: 13, weight: .medium, design: .default))
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            Spacer()
+                            
+                            // Event count badge
+                            Text("\(eventsForDate.count)")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 24, height: 24)
+                                .background(Color(red: 64/255, green: 156/255, blue: 255/255))
+                                .clipShape(Circle())
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, date == upcomingEventsGroupedByDate.keys.sorted().first ? 8 : 24)
+                        .padding(.bottom, 12)
+                        
+                        // Events for this date
+                        ForEach(eventsForDate.sorted { $0.date < $1.date }) { eventItem in
+                            if eventItem.isUserEvent, let userEvent = eventItem.userEvent {
+                                UserEventCardView(event: userEvent, onSelect: {
+                                    selectedUserEvent = userEvent
+                                })
+                                    .environmentObject(userEventService)
+                                    .environmentObject(userService)
+                                    .environmentObject(sessionStore)
+                                    .padding(.horizontal, 20)
+                                    .padding(.bottom, 14)
+                            } else if let publicEvent = eventItem.publicEvent {
+                                EventCardView(event: publicEvent, onSelect: {
+                                    selectedEvent = publicEvent
+                                    showingEventDetail = true
+                                })
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 14)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -2507,6 +2646,38 @@ struct ExploreView: View {
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: calendarSelectedDate)
         return combinedGroupedEventsByDate[startOfDay] ?? []
+    }
+    
+    // Get all upcoming events for the current month in chronological order
+    private var upcomingEventsForMonth: [CombinedEventItem] {
+        let calendar = Calendar.current
+        let now = Date()
+        let currentMonth = calendar.component(.month, from: calendarSelectedDate)
+        let currentYear = calendar.component(.year, from: calendarSelectedDate)
+        
+        return allCombinedEventItems
+            .filter { item in
+                // Only show upcoming events (from today forward)
+                let itemDate = calendar.startOfDay(for: item.date)
+                let today = calendar.startOfDay(for: now)
+                let isUpcoming = itemDate >= today
+                
+                // Check if event is in the selected month/year
+                let itemMonth = calendar.component(.month, from: item.date)
+                let itemYear = calendar.component(.year, from: item.date)
+                let isInSelectedMonth = itemMonth == currentMonth && itemYear == currentYear
+                
+                return isUpcoming && isInSelectedMonth
+            }
+            .sorted { $0.date < $1.date }
+    }
+    
+    // Group upcoming events by date for month view
+    private var upcomingEventsGroupedByDate: [Date: [CombinedEventItem]] {
+        let calendar = Calendar.current
+        return Dictionary(grouping: upcomingEventsForMonth) { item in
+            calendar.startOfDay(for: item.date)
+        }
     }
     
 

@@ -1,5 +1,5 @@
 {
-  "originHash" : "1a4c2ceb2c77fc5b9e2f80bedd405a762c728fec9417bc868b6e4b96c33698b6",
+  "originHash" : "2db62a92637831842ae7bb906256ac4610dc21bb898bc7370b2752f203a5382e",
   "pins" : [
     {
       "identity" : "abseil-cpp-binary",
@@ -134,6 +134,15 @@
       "state" : {
         "revision" : "540318ecedd63d883069ae7f1ed811a2df00b6ac",
         "version" : "2.4.0"
+      }
+    },
+    {
+      "identity" : "recaptcha-enterprise-mobile-sdk",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/GoogleCloudPlatform/recaptcha-enterprise-mobile-sdk",
+      "state" : {
+        "revision" : "5ec74256124faa7e7814c574509723f49e1fccfb",
+        "version" : "18.7.0"
       }
     },
     {

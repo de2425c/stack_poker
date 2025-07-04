@@ -45,14 +45,34 @@ struct SessionsCalendarView: View {
         return countByDate
     }
     
+    // Calculate total PNL for current month
+    private var monthlyPNL: Double {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        
+        var total: Double = 0
+        
+        for session in sessionStore.sessions {
+            if calendar.isDate(session.startDate, equalTo: currentMonth, toGranularity: .month) {
+                total += session.profit
+            }
+        }
+        
+        return total
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 15) {
+        ZStack {
+            AppBackgroundView()
+                .ignoresSafeArea()
+            
+            VStack(spacing: 12) {
                 monthNavigationHeader
                 calendarGrid
             }
-            .padding(.horizontal, 8) // Reduced horizontal padding
-            .padding(.bottom, 10)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
         }
         .onAppear {
             if sessionStore.sessions.isEmpty {
@@ -63,43 +83,42 @@ struct SessionsCalendarView: View {
     
     // MARK: - Month Navigation Header
     private var monthNavigationHeader: some View {
-        HStack {
-            Button(action: previousMonth) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .medium)) // LARGER
-                    .foregroundColor(.white)
-                    .frame(width: 44, height: 44) // LARGER
-            }
-            
-            Spacer()
-            
-            Text(monthYearString)
-                .font(.system(size: 20, weight: .semibold)) // LARGER
-                .foregroundColor(.white)
-            
-            Spacer()
-            
-            Button(action: nextMonth) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 18, weight: .medium)) // LARGER
-                    .foregroundColor(.white)
-                    .frame(width: 44, height: 44) // LARGER
+        VStack(spacing: 6) {
+            HStack {
+                Button(action: previousMonth) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 36, height: 36)
+                }
+                
+                Spacer()
+                
+                VStack(spacing: 2) {
+                    Text(monthYearString)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Text(formatMonthlyPNL(monthlyPNL))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(monthlyPNL >= 0 ? .green : .red)
+                }
+                
+                Spacer()
+                
+                Button(action: nextMonth) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 36, height: 36)
+                }
             }
         }
-        .padding(.vertical, 12) // INCREASED PADDING
     }
     
     // MARK: - Calendar Grid
     private var weekdaySymbols: [String] {
-        let calendar = Calendar.current
-        var symbols = calendar.shortWeekdaySymbols
-        let firstWeekday = calendar.firstWeekday
-        
-        if symbols.count == 7 {
-            let rotatedSymbols = Array(symbols[firstWeekday-1..<symbols.count]) + Array(symbols[0..<firstWeekday-1])
-            return rotatedSymbols
-        }
-        return symbols
+        return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     }
     
     private func generateDaysInMonthGrid() -> [Date?] {
@@ -109,17 +128,20 @@ struct SessionsCalendarView: View {
         let firstOfMonth = monthInterval.start
         let daysInMonth = calendar.range(of: .day, in: .month, for: currentMonth)!.count
         
-        let firstWeekdayOfMonth = calendar.component(.weekday, from: firstOfMonth)
-        let firstDayOfSystemWeek = calendar.firstWeekday
+        // Get the weekday of the first day (1 = Sunday, 2 = Monday, etc.)
+        let firstWeekday = calendar.component(.weekday, from: firstOfMonth)
         
-        let weekdayOffset = (firstWeekdayOfMonth - firstDayOfSystemWeek + 7) % 7
+        // Convert to Monday-first indexing (Monday = 0, Sunday = 6)
+        let mondayFirstWeekday = (firstWeekday == 1) ? 6 : firstWeekday - 2
         
         var days: [Date?] = []
         
-        for _ in 0..<weekdayOffset {
+        // Add empty slots for days before the first day of the month
+        for _ in 0..<mondayFirstWeekday {
             days.append(nil)
         }
         
+        // Add all days of the month
         for day in 1...daysInMonth {
             if let date = calendar.date(byAdding: .day, value: day - 1, to: firstOfMonth) {
                 days.append(date)
@@ -131,19 +153,21 @@ struct SessionsCalendarView: View {
     
     private var calendarGrid: some View {
         VStack(spacing: 10) {
-            HStack {
+            // Weekday headers
+            HStack(spacing: 0) {
                 ForEach(weekdaySymbols, id: \.self) { daySymbol in
-                    Text(String(daySymbol.prefix(1)))
-                        .font(.system(size: 14, weight: .medium))
+                    Text(daySymbol)
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.gray)
                         .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.bottom, 5)
             
+            // Calendar days
             let days = generateDaysInMonthGrid()
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
             
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 10) {
+            LazyVGrid(columns: columns, spacing: 6) {
                 ForEach(days.indices, id: \.self) { index in
                     if let date = days[index] {
                         let calendar = Calendar.current
@@ -171,20 +195,11 @@ struct SessionsCalendarView: View {
                         )
                     } else {
                         Text("")
-                            .frame(height: 44)
+                            .frame(height: 48)
                     }
                 }
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.white.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
-                )
-        )
     }
     
     // MARK: - Helper Functions
@@ -204,8 +219,24 @@ struct SessionsCalendarView: View {
     
     private var monthYearString: String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMMM yyyy"
+        formatter.dateFormat = "MMMM, yyyy"
         return formatter.string(from: currentMonth)
+    }
+    
+    private func formatMonthlyPNL(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencySymbol = "$"
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 0
+        
+        if amount >= 0 {
+            return formatter.string(from: NSNumber(value: amount)) ?? "$0"
+        } else {
+            let positiveAmount = abs(amount)
+            let formatted = formatter.string(from: NSNumber(value: positiveAmount)) ?? "0"
+            return "-\(formatted)"
+        }
     }
     
     private func previousMonth() {
@@ -236,81 +267,72 @@ struct SessionCalendarDayView: View {
     let isToday: Bool
     let onTap: () -> Void
     
-    private var pnlColor: Color {
-        if pnl > 0 {
-            return Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
-        } else if pnl < 0 {
-            return Color(UIColor(red: 246/255, green: 68/255, blue: 68/255, alpha: 1.0))
-        } else if sessionCount > 0 {
-            return .gray
-        } else {
-            return .clear
-        }
-    }
-    
     var body: some View {
         Button(action: onTap) {
-            ZStack {
-                Circle()
-                    .fill(backgroundColor)
-                    .frame(width: 44, height: 44)
-
-                VStack(spacing: 2) {
-                    Text("\(day)")
-                        .font(.system(size: 16, weight: isSelected || isToday ? .semibold : .medium))
-                        .foregroundColor(textColor)
-                    
-                    if sessionCount > 0 {
-                        // ALWAYS show number for non-zero PNL
-                        if pnl != 0 {
-                            Text(formatCompactPNL(pnl))
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(pnlColor)
-                        } else {
-                            // Show dot ONLY for break-even days
-                            Circle()
-                                .fill(Color.gray)
-                                .frame(width: 5, height: 5)
-                        }
-                    }
+            VStack(spacing: 3) {
+                Text("\(day)")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(textColor)
+                
+                if sessionCount > 0 && pnl != 0 {
+                    Text(formatPNL(pnl))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
                 }
             }
+            .frame(height: 48)
+            .frame(maxWidth: .infinity)
+            .background(backgroundColor)
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isSelected ? Color.white : Color.clear, lineWidth: 1.5)
+            )
         }
-        .frame(height: 44)
         .buttonStyle(PlainButtonStyle())
         .disabled(sessionCount == 0)
     }
     
     private var backgroundColor: Color {
-        if isSelected {
-            return .white.opacity(0.2)
+        if sessionCount > 0 {
+            if pnl > 0 {
+                return Color(red: 0.2, green: 0.7, blue: 0.2) // Green for profits
+            } else if pnl < 0 {
+                return Color(red: 0.6, green: 0.2, blue: 0.2) // Red for losses
+            } else {
+                return Color.gray.opacity(0.3) // Gray for break-even
+            }
         } else if isToday {
-            return .blue.opacity(0.3)
+            return Color.blue.opacity(0.2)
         } else {
-            return .clear
+            return Color.clear
         }
     }
     
     private var textColor: Color {
-        if isSelected {
+        if sessionCount > 0 {
             return .white
         } else if isToday {
             return .blue
-        } else if sessionCount > 0 {
-            return .white.opacity(0.9)
         } else {
-            return .white.opacity(0.5)
+            return .white.opacity(0.6)
         }
     }
     
-    private func formatCompactPNL(_ amount: Double) -> String {
-        let absAmount = abs(amount)
-        let sign = amount > 0 ? "+" : ""
+    private func formatPNL(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencySymbol = "$"
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 0
         
-        if absAmount >= 1000 {
-            return "\(sign)\(Int(round(absAmount/1000)))k"
+        if amount >= 0 {
+            return formatter.string(from: NSNumber(value: amount)) ?? "$0"
         } else {
-            return "\(sign)\(Int(round(absAmount)))"
+            let positiveAmount = abs(amount)
+            let formatted = formatter.string(from: NSNumber(value: positiveAmount)) ?? "0"
+            return "-\(formatted)"
         }
     }
 }

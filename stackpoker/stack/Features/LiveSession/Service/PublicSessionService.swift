@@ -5,6 +5,7 @@ import Combine
 @MainActor
 class PublicSessionService: ObservableObject {
     @Published var liveSessions: [PublicLiveSession] = []
+    @Published var liveStorySessions: [PublicLiveSession] = []
     @Published var isLoading = false
     
     private let db = Firestore.firestore()
@@ -15,6 +16,7 @@ class PublicSessionService: ObservableObject {
     private var currentUserId: String?
     private var followersOnly: Bool = false
     private var liveSessionsListener: ListenerRegistration?
+    private var liveStorySessionsListener: ListenerRegistration?
     
     // MARK: - Fetch Public Live Sessions for Feed (Followers Only)
     
@@ -259,6 +261,55 @@ class PublicSessionService: ObservableObject {
         liveSessionsListener = nil
     }
     
+    // MARK: - Real-time Updates for Live Story Sessions
+    
+    func startListeningToLiveStorySessions(currentUserId: String) {
+        // Stop any existing listener
+        stopListeningToLiveStorySessions()
+        
+        // Store context for filtering
+        self.currentUserId = currentUserId
+        
+        liveStorySessionsListener = db.collection("public_sessions")
+            .whereField("isActive", isEqualTo: true)
+            .addSnapshotListener { [weak self] snapshot, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    print("[PublicSessionService] Error listening to live story sessions: \(error)")
+                    return
+                }
+                
+                guard let snapshot = snapshot else { return }
+                
+                Task { @MainActor in
+                    var sessions = snapshot.documents.compactMap { document -> PublicLiveSession? in
+                        return PublicLiveSession(id: document.documentID, document: document.data())
+                    }
+                    
+                    // Filter by follower relationships
+                    do {
+                        sessions = try await self.filterSessionsByFollowing(sessions: sessions, currentUserId: currentUserId)
+                        
+                        // Sort by most recent activity
+                        sessions.sort { $0.lastUpdated > $1.lastUpdated }
+                        
+                        // Limit to 20 for stories
+                        self.liveStorySessions = Array(sessions.prefix(20))
+                        
+                        print("[PublicSessionService] Updated live story sessions: \(self.liveStorySessions.count)")
+                    } catch {
+                        print("[PublicSessionService] Error filtering story sessions: \(error)")
+                    }
+                }
+            }
+    }
+    
+    func stopListeningToLiveStorySessions() {
+        liveStorySessionsListener?.remove()
+        liveStorySessionsListener = nil
+    }
+    
     // MARK: - Privacy check helper for real-time updates
     
     private func shouldIncludeSessionInFeed(_ session: PublicLiveSession) async -> Bool {
@@ -288,6 +339,11 @@ class PublicSessionService: ObservableObject {
         self.followersOnly = followersOnly
         
         try await fetchPublicSessions(currentUserId: currentUserId, followersOnly: followersOnly)
+        
+        // Also refresh story sessions
+        if let currentUserId = currentUserId {
+            liveStorySessions = try await fetchLiveSessionsForStories(currentUserId: currentUserId)
+        }
     }
     
     // MARK: - Get Specific Session
@@ -303,6 +359,31 @@ class PublicSessionService: ObservableObject {
             return PublicLiveSession(id: document.documentID, document: data)
         } catch {
             print("[PublicSessionService] Error getting session \(id): \(error)")
+            throw error
+        }
+    }
+    
+    // MARK: - Fetch Live Sessions for Stories (Only Live/Active Sessions)
+    
+    func fetchLiveSessionsForStories(currentUserId: String) async throws -> [PublicLiveSession] {
+        do {
+            let snapshot = try await db.collection("public_sessions")
+                .whereField("isActive", isEqualTo: true)
+                .order(by: "lastUpdated", descending: true)
+                .limit(to: 20) // Limit to 20 for stories
+                .getDocuments()
+            
+            var sessions = snapshot.documents.compactMap { document -> PublicLiveSession? in
+                return PublicLiveSession(id: document.documentID, document: document.data())
+            }
+            
+            // Filter by follower relationships
+            sessions = try await filterSessionsByFollowing(sessions: sessions, currentUserId: currentUserId)
+            
+            print("[PublicSessionService] Fetched \(sessions.count) live sessions for stories")
+            return sessions
+        } catch {
+            print("[PublicSessionService] Error fetching live sessions for stories: \(error)")
             throw error
         }
     }

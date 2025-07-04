@@ -182,7 +182,7 @@ class TutorialManager: ObservableObject {
             if let userId = Auth.auth().currentUser?.uid {
                 try? await markTutorialCompleted(userId: userId)
                 
-                // Post notification to trigger CSV import check
+                // Post notification to trigger recommended users popup
                 await MainActor.run {
                     NotificationCenter.default.post(name: NSNotification.Name("TutorialCompleted"), object: nil)
                 }

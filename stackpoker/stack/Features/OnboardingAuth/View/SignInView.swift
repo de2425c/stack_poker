@@ -89,6 +89,15 @@ struct SignInView: View {
                                     }
                                 }
                                 
+                                // Info text for phone users about CAPTCHA
+                                if isPhoneNumber {
+                                    Text("You may need to complete a CAPTCHA verification for security.")
+                                        .font(.custom("PlusJakartaSans-Regular", size: 12))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .padding(.horizontal, 4)
+                                        .padding(.top, 8)
+                                }
+                                
                                 // Sign In Button - changes based on input type
                                 Button(action: {
                                     // Add haptic feedback for immediate response

@@ -4,6 +4,7 @@ struct AnalyticsView: View {
     @StateObject private var viewModel: AnalyticsViewModel
     @State private var showingBankrollSheet = false
     @State private var showingCashDashboard = false
+    @State private var showingTournamentDashboard = false
     
     let userId: String
     let sessionStore: SessionStore
@@ -70,9 +71,15 @@ struct AnalyticsView: View {
                 HighlightsSection(viewModel: viewModel)
                     .padding(.top, 24)
                 
-                // Cash Dashboard Button
-                CashDashboardButton {
-                    showingCashDashboard = true
+                // Dashboard Buttons
+                VStack(spacing: 12) {
+                    CashDashboardButton {
+                        showingCashDashboard = true
+                    }
+                    
+                    TournamentDashboardButton {
+                        showingTournamentDashboard = true
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -92,6 +99,9 @@ struct AnalyticsView: View {
         }
         .sheet(isPresented: $showingCashDashboard) {
             CashDashboardView()
+        }
+        .sheet(isPresented: $showingTournamentDashboard) {
+            TournamentDashboardView()
         }
         .sheet(isPresented: $viewModel.showFilterSheet) {
             let topGames = viewModel.getTop5MostCommonGames()

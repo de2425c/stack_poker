@@ -1333,7 +1333,7 @@ struct SessionFormView: View {
             "hoursPlayed": calculatedHrsPlayed,
             "buyIn": finalBuyIn,
             "cashout": finalCashout,
-            "createdAt": FieldValue.serverTimestamp()
+            "createdAt": Timestamp(date: startDateTime) // Use session start time, not current time
         ]
 
         var gameNameForStake: String
