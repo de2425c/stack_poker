@@ -11,8 +11,6 @@ struct EnhancedLiveSessionView: View {
     let userId: String
     @ObservedObject var sessionStore: SessionStore
     var preselectedEvent: Event? = nil // Optional preselected event
-    var sessionConfiguration: SessionConfiguration? = nil // NEW: Optional session configuration from setup
-    var onSessionEnd: (() -> Void)? = nil // NEW: Callback when session ends
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var stakeService = StakeService() // Add StakeService
     @StateObject private var manualStakerService = ManualStakerService() // Add ManualStakerService
@@ -1075,13 +1073,6 @@ struct EnhancedLiveSessionView: View {
         print("🔥🔥🔥 Session currentDay: \(sessionStore.liveSession.currentDay)")
         print("🔥🔥🔥 Session pausedForNextDay: \(sessionStore.liveSession.pausedForNextDay)")
         
-        // NEW: Handle session configuration from setup view
-        if let config = sessionConfiguration {
-            print("🔥🔥🔥 [EnhancedLiveSessionView] Starting session from configuration")
-            startSessionFromConfiguration(config)
-            return
-        }
-        
         // Check if there's an active session first
         if sessionStore.liveSession.buyIn > 0 { // buyIn > 0 means a session (cash or tourney) exists
             print("🔥🔥🔥 [EnhancedLiveSessionView] FOUND ACTIVE SESSION")
@@ -1183,158 +1174,6 @@ struct EnhancedLiveSessionView: View {
         // Ensure user profile is loaded for posting
         Task {
             try? await userService.fetchUserProfile()
-        }
-    }
-    
-    // NEW: Start session from configuration provided by setup view
-    private func startSessionFromConfiguration(_ config: SessionConfiguration) {
-        // Set up session based on configuration
-        if config.isTournament {
-            selectedLogType = .tournament
-            isTournamentSession = true
-            tournamentName = config.gameName
-            
-            if let tournamentDetails = config.tournamentDetails {
-                baseBuyInForTournament = tournamentDetails.baseBuyIn
-                baseBuyInTournament = String(format: "%.0f", tournamentDetails.baseBuyIn)
-            }
-            
-            if let casino = config.casino {
-                tournamentCasino = casino
-            }
-            
-            if let gameType = config.tournamentGameType {
-                selectedTournamentGameType = gameType
-            }
-            
-            if let format = config.tournamentFormat {
-                selectedTournamentFormat = format
-            }
-            
-            if let startingChips = config.tournamentStartingChips {
-                tournamentStartingChips = startingChips
-            }
-            
-            // Start tournament session
-            sessionStore.startLiveSession(
-                gameName: config.gameName,
-                stakes: config.stakes,
-                buyIn: config.buyIn,
-                isTournament: true,
-                tournamentDetails: config.tournamentDetails.map { 
-                    (name: $0.name, type: $0.type, baseBuyIn: $0.baseBuyIn) 
-                },
-                tournamentGameType: config.tournamentGameType,
-                tournamentFormat: config.tournamentFormat,
-                casino: config.casino
-            )
-            
-            // Set starting chip amount for tournaments
-            if let startingChips = config.tournamentStartingChips {
-                sessionStore.updateChipStack(amount: startingChips, note: "Starting chip stack")
-            }
-            
-        } else {
-            // Cash game session
-            selectedLogType = .cashGame
-            isTournamentSession = false
-            
-            sessionStore.startLiveSession(
-                gameName: config.gameName,
-                stakes: config.stakes,
-                buyIn: config.buyIn,
-                isTournament: false,
-                pokerVariant: config.pokerVariant
-            )
-        }
-        
-        // Apply staking configurations
-        stakerConfigs = config.stakerConfigs
-        
-        // Set session mode to active
-        sessionMode = .active
-        
-        // Load existing data
-        updateLocalDataFromStore()
-        loadExistingStakes()
-        loadSessionPosts()
-        
-        // Save staking configurations to database if any
-        if !stakerConfigs.isEmpty {
-            Task {
-                await saveStakingConfigurations()
-            }
-        }
-        
-        print("🔥🔥🔥 [EnhancedLiveSessionView] Session started from configuration: \(config.gameName)")
-    }
-    
-    // NEW: Save staking configurations to database
-    private func saveStakingConfigurations() async {
-        let validConfigs = stakerConfigs.filter { config in
-            if config.isManualEntry {
-                guard config.selectedManualStaker != nil else { return false }
-            } else {
-                guard config.selectedStaker != nil else { return false }
-            }
-            guard let percentage = Double(config.percentageSold), percentage > 0, percentage <= 100 else { return false }
-            guard let markup = Double(config.markup), markup >= 1.0 else { return false }
-            return true
-        }
-        
-        guard !validConfigs.isEmpty else { return }
-        
-        // Use the same staking save logic as the existing session
-        for config in validConfigs {
-            guard let percentageSoldDouble = Double(config.percentageSold),
-                  let markupDouble = Double(config.markup) else {
-                continue
-            }
-            
-            let stakerIdToUse: String
-            let manualName: String?
-            let isOffApp: Bool
-
-            if config.isManualEntry {
-                guard let selectedManualStaker = config.selectedManualStaker else { continue }
-                stakerIdToUse = selectedManualStaker.id ?? Stake.OFF_APP_STAKER_ID
-                manualName = selectedManualStaker.name
-                isOffApp = true
-            } else if let stakerProfile = config.selectedStaker {
-                stakerIdToUse = stakerProfile.id
-                manualName = nil
-                isOffApp = false
-            } else {
-                continue
-            }
-
-            // Calculate the settlement amount (0 initially since session just started)
-            let settlementAmount = 0.0
-            
-            let newStake = Stake(
-                sessionId: sessionStore.liveSession.id,
-                sessionGameName: sessionStore.liveSession.gameName,
-                sessionStakes: sessionStore.liveSession.stakes,
-                sessionDate: sessionStore.liveSession.startTime,
-                stakerUserId: stakerIdToUse,
-                stakedPlayerUserId: userId,
-                stakePercentage: percentageSoldDouble / 100.0,
-                markup: markupDouble,
-                totalPlayerBuyInForSession: sessionStore.liveSession.buyIn,
-                playerCashoutForSession: 0.0, // Unknown at session start
-                storedAmountTransferredAtSettlement: settlementAmount,
-                isTournamentSession: sessionStore.liveSession.isTournament,
-                manualStakerDisplayName: manualName,
-                isOffAppStake: isOffApp
-            )
-            
-            do {
-                _ = try await stakeService.addStake(newStake)
-                let stakerDisplayName = manualName ?? (config.selectedStaker?.username) ?? "Unknown"
-                print("🔥🔥🔥 [EnhancedLiveSessionView] Saved staking configuration for \(stakerDisplayName)")
-            } catch {
-                print("[EnhancedLiveSessionView] Failed to save staking configuration: \(error)")
-            }
         }
     }
     
@@ -1988,7 +1827,104 @@ struct EnhancedLiveSessionView: View {
         }
     }
     
-
+    // Protocol for glass content (if not already defined elsewhere)
+    protocol GlassyContent {
+        associatedtype ContentView: View
+        @ViewBuilder var body: ContentView { get }
+    }
+    
+    // Type-erased wrapper for GlassyContent
+    struct AnyGlassyContent: View {
+        private let content: AnyView
+        
+        init<T: GlassyContent>(_ content: T) {
+            self.content = AnyView(content.body)
+        }
+        
+        var body: some View {
+            content
+        }
+    }
+    
+    struct TextFieldContent: GlassyContent {
+        @Binding var text: String
+        var keyboardType: UIKeyboardType = .default
+        var prefix: String? = nil
+        var isReadOnly: Bool = false
+        var textColor: Color = Color(white: 0.25)
+        var prefixColor: Color = Color(white: 0.4)
+        
+        var body: some View {
+            HStack {
+                if let prefix = prefix {
+                    Text(prefix)
+                        .font(.plusJakarta(.body, weight: .semibold))
+                        .foregroundColor(prefixColor)
+                }
+                
+                if isReadOnly {
+                    Text(text)
+                        .font(.plusJakarta(.body, weight: .regular))
+                        .foregroundColor(textColor)
+                } else {
+                    TextField("0", text: $text)
+                        .keyboardType(keyboardType)
+                        .font(.plusJakarta(.body, weight: .regular))
+                        .foregroundColor(textColor)
+                        .toolbar {
+                            ToolbarItemGroup(placement: .keyboard) {
+                                Spacer()
+                                Button("Done") {
+                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                }
+                            }
+                        }
+                }
+            }
+            .frame(height: 35)
+        }
+    }
+    
+    // Glassy input field with consistent styling
+    struct GlassyInputField<Content: View>: View {
+        let icon: String
+        let title: String
+        let content: Content
+        var glassOpacity: Double = 0.01
+        var labelColor: Color = Color(white: 0.4)
+        var materialOpacity: Double = 0.2
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 14))
+                        .foregroundColor(labelColor)
+                    Text(title)
+                        .font(.plusJakarta(.caption, weight: .medium))
+                        .foregroundColor(labelColor)
+                }
+                
+                content
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(
+                ZStack {
+                    // Ultra-transparent glass effect
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(materialOpacity)
+                    
+                    // Almost invisible white overlay
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(glassOpacity))
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+    }
     
     private func loadCashGames() {
         cashGameService.fetchCashGames()
@@ -3398,9 +3334,6 @@ struct EnhancedLiveSessionView: View {
                 self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
                 
-                // Call the session end callback if provided
-                self.onSessionEnd?()
-                
                 // Show session result share view instead of simple prompt
                 self.sharingFlowState = .resultShare
             }
@@ -3551,10 +3484,6 @@ struct EnhancedLiveSessionView: View {
                 
                 self.sessionStore.endAndClearLiveSession()
                 self.isLoadingSave = false
-                
-                // Call the session end callback if provided
-                self.onSessionEnd?()
-                
                 if allStakesSuccessful && savedStakeCount == configs.count && savedStakeCount > 0 {
                     print("[EnhancedLiveSessionView] All stakes processed successfully (\(savedStakeCount) total)")
                 } else if savedStakeCount > 0 {
@@ -5503,9 +5432,6 @@ struct EnhancedLiveSessionView: View {
         
         // Clear the live session from the store
         sessionStore.endAndClearLiveSession()
-        
-        // Call the session end callback if provided
-        onSessionEnd?()
         
         // Then dismiss the entire session view
         dismiss()

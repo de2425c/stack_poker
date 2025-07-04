@@ -397,11 +397,7 @@ struct HomePage: View {
             .environmentObject(userService)
         }
         .fullScreenCover(isPresented: $showingLiveSession) {
-            LiveSessionCoordinatorView(
-                userId: userId,
-                sessionStore: sessionStore,
-                onDismiss: { showingLiveSession = false }
-            )
+            EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
         }
         .fullScreenCover(isPresented: $showingCSVImportFlow) {
             CSVImportFlow(userId: userId)
