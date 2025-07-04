@@ -2,6 +2,7 @@ import SwiftUI
 import FirebaseFirestore
 import Combine
 import FirebaseAuth
+import Kingfisher
 
 // MARK: - Tab Selection Enum
 enum EventsTab: String, CaseIterable {
@@ -555,88 +556,146 @@ struct EventListItemView: View {
 // MARK: - Series Card View
 struct SeriesCardView: View {
     let seriesName: String
-    let eventCount: Int
+    let totalEventCount: Int
+    let currentDateEventCount: Int
+    let events: [Event]
+    let currentDate: SimpleDate?
     let onSelect: () -> Void
+    
+    @State private var cardOffset: CGFloat = 30
+    @State private var cardOpacity: Double = 0
+    
+    // Get the first event's imageUrl for the banner
+    private var bannerImageUrl: String? {
+        return events.first?.imageUrl
+    }
     
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 16) {
-                // Series Icon
+            VStack(alignment: .leading, spacing: 0) {
+                // Top Banner Image (no text overlay)
                 ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color(red: 64/255, green: 156/255, blue: 255/255),
-                                    Color(red: 100/255, green: 180/255, blue: 255/255)
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 48, height: 48)
-                    
-                    // Use different icons for different series types
-                    Image(systemName: iconForSeries(seriesName))
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(.white)
+                    // Image with fallback to stack logo
+                    if let imageUrl = bannerImageUrl, let url = URL(string: imageUrl) {
+                        KFImage(url)
+                            .placeholder {
+                                Rectangle()
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color(red: 40/255, green: 40/255, blue: 50/255),
+                                                Color(red: 25/255, green: 25/255, blue: 35/255)
+                                            ]),
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                            }
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(height: 110)
+                            .clipped()
+                    } else {
+                        // Fallback to stack logo
+                        ZStack {
+                            Rectangle()
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.5),
+                                            Color(red: 40/255, green: 40/255, blue: 50/255)
+                                        ]),
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .frame(height: 110)
+                            
+                            Image("stack_logo")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 60, height: 60)
+                                .opacity(0.8)
+                        }
+                    }
                 }
                 
-                // Series Info
-                VStack(alignment: .leading, spacing: 4) {
+                // Bottom section with series info
+                VStack(alignment: .leading, spacing: 8) {
                     Text(seriesName)
-                        .font(.system(size: 18, weight: .semibold, design: .default))
+                        .font(.custom("PlusJakartaSans-Bold", size: 18))
                         .foregroundColor(.white)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
                     
-                    Text("\(eventCount) event\(eventCount == 1 ? "" : "s")")
-                        .font(.system(size: 14, weight: .medium, design: .default))
-                        .foregroundColor(.gray)
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Total Events")
+                                .font(.custom("PlusJakartaSans-Medium", size: 12))
+                                .foregroundColor(.white.opacity(0.7))
+                            
+                            Text("\(totalEventCount)")
+                                .font(.custom("PlusJakartaSans-Bold", size: 16))
+                                .foregroundColor(.white)
+                        }
+                        
+                        if currentDateEventCount > 0 {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Today")
+                                    .font(.custom("PlusJakartaSans-Medium", size: 12))
+                                    .foregroundColor(.white.opacity(0.7))
+                                
+                                Text("\(currentDateEventCount)")
+                                    .font(.custom("PlusJakartaSans-Bold", size: 16))
+                                    .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                            }
+                        }
+                        
+                        Spacer()
+                    }
                 }
-                
-                Spacer()
-                
-                // Arrow
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.gray)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+                .background(Color.black.opacity(0.2))
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-            .background(
-                ZStack {
-                    // Base background
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color.white.opacity(0.03),
-                                    Color.white.opacity(0.01)
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    
-                    // Border
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color.white.opacity(0.1),
-                                    Color.white.opacity(0.05)
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.5
-                        )
-                }
-            )
         }
         .buttonStyle(PlainButtonStyle())
+        .background(
+            ZStack {
+                // Use a slightly darker base for the card
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(red: 28/255, green: 30/255, blue: 40/255))
+                
+                // Subtle gradient overlay
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.1),
+                                Color.white.opacity(0.02)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                
+                // Border
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.25), radius: 15, x: 0, y: 8)
+        .offset(y: cardOffset)
+        .opacity(cardOpacity)
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                cardOffset = 0
+                cardOpacity = 1
+            }
+        }
     }
-    
+
     private func iconForSeries(_ seriesName: String) -> String {
         let lowercased = seriesName.lowercased()
         
@@ -1012,7 +1071,7 @@ struct ExploreView: View {
     @EnvironmentObject var sessionStore: SessionStore
     @EnvironmentObject var tutorialManager: TutorialManager
     @State private var selectedSimpleDate: SimpleDate? = nil
-    @State private var selectedTab: EventsTab = .myEvents
+    @State private var selectedTab: EventsTab
     @State private var showingCreateEvent = false
     @State private var showingEventInvites = false
     @State private var showingEventDetail = false
@@ -1029,6 +1088,14 @@ struct ExploreView: View {
     var onEventSelected: ((Event) -> Void)? // Callback for when an event is selected
     var isSheetPresentation: Bool = false // New parameter to control top padding
     @Environment(\.dismiss) var dismiss // To dismiss the view if used as a sheet
+    
+    // Initialize selectedTab based on whether this is for event selection
+    init(onEventSelected: ((Event) -> Void)? = nil, isSheetPresentation: Bool = false) {
+        self.onEventSelected = onEventSelected
+        self.isSheetPresentation = isSheetPresentation
+        // Default to Events tab when used for event selection, My Events otherwise
+        self._selectedTab = State(initialValue: isSheetPresentation ? .events : .myEvents)
+    }
 
     private var currentSystemSimpleDate: SimpleDate {
         let now = Date()
@@ -1859,9 +1926,15 @@ struct ExploreView: View {
                 VStack(spacing: 12) {
                     ForEach(sortedSeriesNames, id: \.self) { seriesName in
                         if let events = groupedEventsBySeries[seriesName] {
+                            // Calculate current date event count for this series
+                            let currentDateEvents = events.filter { $0.simpleDate == currentSystemSimpleDate }
+                            
                             SeriesCardView(
                                 seriesName: seriesName,
-                                eventCount: events.count,
+                                totalEventCount: events.count,
+                                currentDateEventCount: currentDateEvents.count,
+                                events: events,
+                                currentDate: currentSystemSimpleDate,
                                 onSelect: {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                         selectedSeriesName = seriesName

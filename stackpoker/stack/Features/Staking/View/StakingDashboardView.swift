@@ -34,6 +34,11 @@ struct StakingDashboardView: View {
     @State private var errorMessage: String? = nil
     @State private var selectedTab: StakingTab = .calendar
     
+    // Add state for tracking if this is the initial load
+    @State private var hasInitiallyLoaded = false
+    @State private var refreshTask: Task<Void, Never>? = nil
+    @State private var isBackgroundRefreshing = false
+    
     @StateObject private var eventStakingService = EventStakingService()
     @StateObject private var sheetManager = StakingSheetManager()
     
@@ -288,10 +293,12 @@ struct StakingDashboardView: View {
         // Add onChange to properly handle state updates
         .onChange(of: sheetManager.showingStakeDetail) { _ in }
         .sheet(isPresented: $sheetManager.showingStakeDetail, onDismiss: {
-            // Reset state on dismiss and refresh data to show any settlement changes
+            // Reset state on dismiss and refresh data in background only if needed
             sheetManager.dismissStakeDetail()
-            // Refresh data when sheet is dismissed to pick up any settlement changes
-            fetchStakesData()
+            // Only refresh if we have loaded data before (avoid loading animation on initial dismissal)
+            if hasInitiallyLoaded {
+                refreshStakesDataInBackground()
+            }
         }) {
             // Only present sheet if we have a valid stake
             if let stake = sheetManager.selectedStake {
@@ -301,12 +308,8 @@ struct StakingDashboardView: View {
                     stakeService: stakeService,
                     userService: userService,
                     onUpdate: {
-                        // Immediately refresh data to show updated stake status
-                        Task {
-                            await MainActor.run {
-                                fetchStakesData()
-                            }
-                        }
+                        // Immediately refresh data in background to show updated stake status
+                        refreshStakesDataInBackground()
                     }
                 )
             } else {
@@ -321,8 +324,10 @@ struct StakingDashboardView: View {
         }
         // Sheet showing all stakes with a particular partner - using item binding
         .sheet(item: $presentedPartnerData, onDismiss: {
-            // Refresh data when partner sheet is dismissed to pick up any settlement changes
-            fetchStakesData()
+            // Refresh data in background when partner sheet is dismissed
+            if hasInitiallyLoaded {
+                refreshStakesDataInBackground()
+            }
         }) { sheetData in
             PartnerStakesListView(
                 partnerName: sheetData.partnerName,
@@ -338,9 +343,13 @@ struct StakingDashboardView: View {
         .sheet(isPresented: $showingAddStakeSheet) {
             AddStakeSheetView(onStakerCreated: {
                 // Refresh the stakes data when a manual staker is created
-                fetchStakesData()
+                refreshStakesDataInBackground()
             })
             .environmentObject(stakeService)
+        }
+        .onDisappear {
+            // Cancel any ongoing refresh task when leaving the view
+            refreshTask?.cancel()
         }
     }
     
@@ -389,7 +398,7 @@ struct StakingDashboardView: View {
                     stakeService: stakeService,
                     eventStakingService: eventStakingService,
                     onInviteStatusChanged: {
-                        fetchStakesData()
+                        refreshStakesDataInBackground()
                     },
                     onOpenStakeDetail: { stake in
                         sheetManager.presentStakeDetail(stake: stake)
@@ -617,58 +626,70 @@ struct StakingDashboardView: View {
 
     @MainActor 
     private func fetchStakesData() {
-        guard let userId = currentUserId else {
-            errorMessage = "User ID not found."
-            isLoading = false
-            return
-        }
-        isLoading = true
-        errorMessage = nil
         Task {
-            do {
-                // Fetch stakes and manual stakers
-                let stakes = try await stakeService.fetchStakes(forUser: userId)
-                let manualStakers = try await manualStakerService.fetchManualStakers(forUser: userId)
-                
-                // CRITICAL: Pre-load ALL user profiles to prevent race conditions
-                let uniquePartnerIds = Set<String>(stakes.compactMap { stake in
-                    // Only fetch app users, not manual stakers
-                    guard stake.isOffAppStake != true else { return nil }
-                    return stake.stakerUserId == userId ? stake.stakedPlayerUserId : stake.stakerUserId
-                })
-                
-                print("Dashboard: Pre-loading \(uniquePartnerIds.count) user profiles to fix race condition")
-                
-                // Load all user profiles concurrently BEFORE updating UI
-                for partnerId in uniquePartnerIds {
-                    do {
-                        await userService.fetchUser(id: partnerId)
-                        print("Dashboard: Loaded profile for user \(partnerId)")
-                    } catch {
-                        print("Dashboard: Failed to load profile for user \(partnerId): \(error)")
+            await performStakesDataRefresh(showLoadingState: !hasInitiallyLoaded)
+        }
+    }
+    
+    // Core data fetching logic
+    private func performStakesDataRefresh(showLoadingState: Bool) async {
+        guard let userId = currentUserId else { return }
+        
+        if showLoadingState {
+            await MainActor.run {
+                self.isLoading = true
+                self.errorMessage = nil
+            }
+        }
+        
+        do {
+            let stakes = try await stakeService.fetchStakes(forUser: userId)
+            let manualStakers = try await manualStakerService.fetchManualStakers(forUser: userId)
+            
+            // CRITICAL: Pre-load ALL user profiles to prevent race conditions
+            let uniquePartnerIds = Set<String>(stakes.compactMap { stake in
+                // Only fetch app users, not manual stakers
+                guard stake.isOffAppStake != true else { return nil }
+                return stake.stakerUserId == userId ? stake.stakedPlayerUserId : stake.stakerUserId
+            })
+            
+            print("Dashboard: Pre-loading \(uniquePartnerIds.count) user profiles to fix race condition")
+            
+            // Load all user profiles concurrently BEFORE updating UI
+            for partnerId in uniquePartnerIds {
+                guard !Task.isCancelled else { return }
+                do {
+                    await userService.fetchUser(id: partnerId)
+                    print("Dashboard: Loaded profile for user \(partnerId)")
+                } catch {
+                    print("Dashboard: Failed to load profile for user \(partnerId): \(error)")
+                }
+            }
+            
+            guard !Task.isCancelled else { return }
+            
+            await MainActor.run {
+                self.stakes = stakes.filter { stake in
+                    // If current user is the staker and the invite is still pending, hide it from dashboard
+                    if stake.stakerUserId == userId, let pending = stake.invitePending, pending {
+                        return false
                     }
+                    return true
                 }
+                self.manualStakers = manualStakers
+                self.isLoading = false
+                self.hasInitiallyLoaded = true
                 
-                await MainActor.run {
-                    self.stakes = stakes.filter { stake in
-                        // If current user is the staker and the invite is still pending, hide it from dashboard
-                        if stake.stakerUserId == userId, let pending = stake.invitePending, pending {
-                            return false
-                        }
-                        return true
-                    }
-                    self.manualStakers = manualStakers
-                    self.isLoading = false
-                    
-                    print("Dashboard: Loaded \(stakes.count) stakes, \(manualStakers.count) manual stakers")
-                    print("Dashboard: Pre-loaded \(self.userService.loadedUsers.count) user profiles")
-                    print("Dashboard: Manual stakers: \(manualStakers.map { "\($0.name) - \($0.contactInfo ?? "no contact")" })")
-                }
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.isLoading = false
-                }
+                print("Dashboard: Loaded \(stakes.count) stakes, \(manualStakers.count) manual stakers")
+                print("Dashboard: Pre-loaded \(self.userService.loadedUsers.count) user profiles")
+                print("Dashboard: Manual stakers: \(manualStakers.map { "\($0.name) - \($0.contactInfo ?? "no contact")" })")
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+                self.isLoading = false
+                self.hasInitiallyLoaded = true
             }
         }
     }
@@ -680,6 +701,33 @@ struct StakingDashboardView: View {
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 2
         return formatter.string(from: NSNumber(value: amount)) ?? String(format: "$%.2f", amount)
+    }
+    
+    // Background refresh that doesn't show loading animation
+    private func refreshStakesDataInBackground() {
+        // Don't start a new refresh if one is already in progress
+        guard !isBackgroundRefreshing else { return }
+        
+        // Cancel any existing refresh task
+        refreshTask?.cancel()
+        
+        // Debounce rapid refresh calls
+        refreshTask = Task {
+            // Small delay to debounce rapid calls
+            try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+            
+            guard !Task.isCancelled else { return }
+            
+            await MainActor.run {
+                self.isBackgroundRefreshing = true
+            }
+            
+            await performStakesDataRefresh(showLoadingState: false)
+            
+            await MainActor.run {
+                self.isBackgroundRefreshing = false
+            }
+        }
     }
 }
 

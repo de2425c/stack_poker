@@ -101,6 +101,16 @@ struct PhoneSignUpView: View {
                                             .foregroundColor(.white)
                                             .keyboardType(.phonePad)
                                             .textContentType(.telephoneNumber)
+                                            .toolbar {
+                                                ToolbarItemGroup(placement: .keyboard) {
+                                                    Spacer()
+                                                    Button("Done") {
+                                                        hideKeyboard()
+                                                    }
+                                                    .font(.custom("PlusJakartaSans-SemiBold", size: 16))
+                                                    .foregroundColor(.blue)
+                                                }
+                                            }
                                             .onChange(of: phoneNumber) { newValue in
                                                 // Format phone number as user types (without country code)
                                                 phoneNumber = formatPhoneNumberForCountry(newValue, countryCode: selectedCountry.code)
@@ -435,6 +445,11 @@ struct PhoneSignUpView: View {
     private func getFullPhoneNumber() -> String {
         let digitsOnly = phoneNumber.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
         return selectedCountry.dialCode + digitsOnly
+    }
+    
+    // MARK: - Keyboard Helper
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     
     // MARK: - Computed Properties for UI States

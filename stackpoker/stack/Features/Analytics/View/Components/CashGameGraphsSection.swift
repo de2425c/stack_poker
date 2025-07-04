@@ -99,6 +99,19 @@ struct HourlyRateVsDurationChart: View {
                     .foregroundColor(.white.opacity(0.5))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if cleanedDataPoints.count <= 4 {
+            VStack(spacing: 8) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 20))
+                    .foregroundColor(.white.opacity(0.5))
+                Text("Not enough data")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.5))
+                Text("Need more than 4 sessions")
+                    .font(.system(size: 10, weight: .regular))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             Chart {
                 // LOWESS smoothed trend line
