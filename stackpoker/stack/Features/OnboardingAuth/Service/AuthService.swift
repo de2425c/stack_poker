@@ -90,11 +90,6 @@ class AuthService: ObservableObject {
             // Small delay to ensure settings are applied
             try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
             
-            // Verify that Firebase is properly initialized
-            guard FirebaseApp.app() != nil else {
-                throw AuthError.unknown(message: "Firebase is not properly initialized")
-            }
-            
             print("AuthService: Attempting phone verification...")
             let verificationID = try await PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumber, uiDelegate: nil)
             
