@@ -7,6 +7,12 @@ import FirebaseStorage
 import FirebaseFirestore
 import Kingfisher
 
+// Wrapper for image URL to make it Identifiable for GroupChatView
+struct GroupImageURL: Identifiable {
+    let id = UUID()
+    let url: String
+}
+
 // Add print statements for key lifecycle events
 extension View {
     func onViewLifecycle(created: String? = nil, appeared: String? = nil, disappeared: String? = nil) -> some View {
@@ -115,7 +121,7 @@ struct GroupChatView: View {
     @State private var isShowingGroupDetail = false
     
     // Global image viewer state for full-screen images
-    @State private var viewerImageURL: String? = nil
+    @State private var viewerImageURL: GroupImageURL? = nil
     
     init(group: UserGroup) {
         _group = State(initialValue: group)
@@ -415,7 +421,7 @@ struct GroupChatView: View {
                 LazyVStack(spacing: 8) {
                     ForEach(groupedMessages, id: \.id) { messageGroup in
                         MessageGroupView(messageGroup: messageGroup, onImageTapped: { url in
-                            viewerImageURL = url
+                            viewerImageURL = GroupImageURL(url: url)
                         })
                             .id(messageGroup.id)
                             .padding(.horizontal, 16)
@@ -689,8 +695,8 @@ struct GroupChatView: View {
                 .navigationBarHidden(true)
         }
         // Global full-screen image viewer
-        .fullScreenCover(item: $viewerImageURL) { url in
-            FullScreenImageView(imageURL: url, onDismiss: { viewerImageURL = nil })
+        .fullScreenCover(item: $viewerImageURL) { imageItem in
+            FullScreenImageView(imageURL: imageItem.url, onDismiss: { viewerImageURL = nil })
         }
     }
     

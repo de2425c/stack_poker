@@ -257,7 +257,7 @@ struct RecommendedUsersPopup: View {
                     try await userService.followUser(userIdToFollow: userId)
                     print("✅ Auto-followed user: \(userId)")
                 }
-                await MainActor.run {
+                _ = await MainActor.run {
                     followedUsers.insert(userId)
                 }
             } catch {
@@ -275,12 +275,12 @@ struct RecommendedUsersPopup: View {
             do {
                 if followedUsers.contains(user.id) {
                     try await userService.unfollowUser(userIdToUnfollow: user.id)
-                    await MainActor.run {
+                    _ = await MainActor.run {
                         followedUsers.remove(user.id)
                     }
                 } else {
                     try await userService.followUser(userIdToFollow: user.id)
-                    await MainActor.run {
+                    _ = await MainActor.run {
                         followedUsers.insert(user.id)
                     }
                 }
@@ -288,7 +288,7 @@ struct RecommendedUsersPopup: View {
                 print("❌ Error toggling follow for user \(user.id): \(error)")
             }
             
-            await MainActor.run {
+            _ = await MainActor.run {
                 isProcessingFollow.remove(user.id)
             }
         }

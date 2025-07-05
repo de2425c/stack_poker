@@ -474,7 +474,7 @@ struct UserProfileView: View {
     }
     
     func togglePostNotifications() {
-        guard let currentLoggedInUserId = loggedInUserId, isFollowing else { return }
+        guard loggedInUserId != nil, isFollowing else { return }
         
         isProcessingNotifications = true
         
@@ -562,7 +562,7 @@ struct UserProfileView: View {
         
         // Step 5: Now fetch follow state and other data in parallel
         // These can run in parallel since they don't depend on each other
-        async let followStateTask: Void = {
+        async let followStateTask: Void = await {
             if let currentLoggedInUserId = loggedInUserId {
                 let following = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentLoggedInUserId)
                 await MainActor.run {
@@ -579,15 +579,15 @@ struct UserProfileView: View {
             }
         }()
         
-        async let postsTask: Void = {
+        async let postsTask: Void = await {
             try? await profilePostService.fetchPosts(forUserId: userId)
         }()
         
-        async let sessionsTask: Void = {
+        async let sessionsTask: Void = await {
             try? await fetchUserPublicSessions()
         }()
         
-        async let challengesTask: Void = {
+        async let challengesTask: Void = await {
             await fetchActiveChallenges()
         }()
         
@@ -615,7 +615,7 @@ struct UserProfileView: View {
     private func fetchActiveChallenges() async {
         do {
             // Initialize challenge service on main actor
-            let challengeService = await MainActor.run {
+            _ = await MainActor.run {
                 ChallengeService(userId: userId)
             }
             

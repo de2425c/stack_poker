@@ -1165,22 +1165,24 @@ struct PostEditorView: View {
     }
     
     private func formatProfit(_ profit: Double) -> String {
+        let isNegative = profit < 0
         let absProfit = abs(profit)
+        let prefix = isNegative ? "-" : ""
         
         // Use k notation for 6+ figure amounts (100k and above)
         if absProfit >= 1_000_000 {
             let millions = absProfit / 1_000_000
             if millions.truncatingRemainder(dividingBy: 1) == 0 {
-                return "$\(Int(millions))M"
+                return "\(prefix)$\(Int(millions))M"
             } else {
-                return "$\(String(format: "%.1f", millions))M"
+                return "\(prefix)$\(String(format: "%.1f", millions))M"
             }
         } else if absProfit >= 100_000 {
             let thousands = absProfit / 1_000
             if thousands.truncatingRemainder(dividingBy: 1) == 0 {
-                return "$\(Int(thousands))k"
+                return "\(prefix)$\(Int(thousands))k"
             } else {
-                return "$\(String(format: "%.1f", thousands))k"
+                return "\(prefix)$\(String(format: "%.1f", thousands))k"
             }
         } else {
             let formatter = NumberFormatter()
@@ -1188,9 +1190,9 @@ struct PostEditorView: View {
             formatter.maximumFractionDigits = 2
             
             if let formatted = formatter.string(from: NSNumber(value: absProfit)) {
-                return "$\(formatted)"
+                return "\(prefix)$\(formatted)"
             }
-            return "$\(String(format: "%.2f", absProfit))"
+            return "\(prefix)$\(String(format: "%.2f", absProfit))"
         }
     }
 }

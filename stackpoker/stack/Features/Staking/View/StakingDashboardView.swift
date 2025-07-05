@@ -469,7 +469,7 @@ struct StakingDashboardView: View {
                                             print("Dashboard: OnTap triggered for group with \(group.stakes.count) stakes")
                                             
                                             let computedName = partnerName(for: group.stakes, groupKey: group.key)
-                                            print("Dashboard: Computed partner name: '\(computedName)' for groupKey: \(group.key ?? "nil")")
+                                            print("Dashboard: Computed partner name: '\(computedName)' for groupKey: \(group.key)")
                                             
                                             // Directly set the sheet data - this will trigger sheet presentation
                                             let safeName = computedName.isEmpty ? "Unknown Partner" : computedName
@@ -641,12 +641,8 @@ struct StakingDashboardView: View {
                 
                 // Load all user profiles concurrently BEFORE updating UI
                 for partnerId in uniquePartnerIds {
-                    do {
-                        await userService.fetchUser(id: partnerId)
-                        print("Dashboard: Loaded profile for user \(partnerId)")
-                    } catch {
-                        print("Dashboard: Failed to load profile for user \(partnerId): \(error)")
-                    }
+                    await userService.fetchUser(id: partnerId)
+                    print("Dashboard: Loaded profile for user \(partnerId)")
                 }
                 
                 await MainActor.run {
@@ -2352,7 +2348,7 @@ struct EventStakingInviteCard: View {
                     isOffAppStake: invite.isManualStaker
                 )
                 
-                try await stakeService.addStake(stake)
+                _ = try await stakeService.addStake(stake)
                 
                 await MainActor.run {
                     isProcessing = false

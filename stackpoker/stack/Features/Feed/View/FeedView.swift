@@ -21,7 +21,7 @@ struct FeedView: View {
     @State private var showingComments = false
     
     // Global image viewer state
-    @State private var viewerImageURL: String? = nil
+    @State private var viewerImageURL: IdentifiableImageURL? = nil
     
     // Holds the profile to navigate to after search dismisses
     @State private var userIdToOpen: String? = nil
@@ -136,24 +136,17 @@ struct FeedView: View {
             }
         )
         // Global image viewer for all post images
-        .fullScreenCover(item: $viewerImageURL) { url in
-            FullScreenImageView(imageURL: url, onDismiss: { viewerImageURL = nil })
+        .fullScreenCover(item: $viewerImageURL) { imageItem in
+            FullScreenImageView(imageURL: imageItem.url, onDismiss: { viewerImageURL = nil })
         }
         // Push profile once search sheet closes and `userIdToOpen` is set
-        .background(
-            NavigationLink(
-                destination: Group {
-                    if let id = userIdToOpen {
-                        UserProfileView(userId: id)
-                            .environmentObject(userService)
-                            .environmentObject(postService)
-                    }
-                },
-                isActive: $navigateToProfile,
-                label: { EmptyView() }
-            )
-            .hidden()
-        )
+        .navigationDestination(isPresented: $navigateToProfile) {
+            if let id = userIdToOpen {
+                UserProfileView(userId: id)
+                    .environmentObject(userService)
+                    .environmentObject(postService)
+            }
+        }
         .fullScreenCover(isPresented: $showingLiveSession) {
             EnhancedLiveSessionView(userId: userId, sessionStore: sessionStore)
         }
@@ -219,8 +212,10 @@ struct FeedView: View {
         }
         .onDisappear {
             // Clean up listeners when view disappears
-            publicSessionService.stopListeningToLiveSessions()
-            publicSessionService.stopListeningToLiveStorySessions()
+            Task {
+                publicSessionService.stopListeningToLiveSessions()
+                publicSessionService.stopListeningToLiveStorySessions()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Refresh feed and suggested users when app becomes active
@@ -569,7 +564,7 @@ struct FeedView: View {
                                     }
                                 }
                                 
-                            case .publicSession(let session):
+                            case .publicSession(_):
                                 // Public sessions are now handled by stories view
                                 EmptyView()
                             }
@@ -1586,7 +1581,7 @@ struct PostDetailView: View {
     @State private var showFlaggedAlert = false
     
     // Global image viewer state for this detail view
-    @State private var viewerImageURL: String? = nil
+    @State private var viewerImageURL: IdentifiableImageURL? = nil
     
     init(post: Post, userId: String) {
         self.post = post
@@ -1666,8 +1661,8 @@ struct PostDetailView: View {
             isCommentFieldFocused = false
         }
         // Global image viewer using .fullScreenCover
-        .fullScreenCover(item: $viewerImageURL) { imageURL in
-            FullScreenImageView(imageURL: imageURL, onDismiss: { viewerImageURL = nil })
+        .fullScreenCover(item: $viewerImageURL) { imageItem in
+            FullScreenImageView(imageURL: imageItem.url, onDismiss: { viewerImageURL = nil })
         }
         .alert("Flagged for Review", isPresented: $showFlaggedAlert) {
             Button("OK", role: .cancel) {}
@@ -1722,7 +1717,7 @@ struct PostDetailView: View {
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(.white)
                         
-                    Text("@\(post.username)")
+                    Text(post.username)
                         .font(.system(size: 15))
                         .foregroundColor(.gray.opacity(0.8))
                 }
@@ -1741,7 +1736,7 @@ struct PostDetailView: View {
             post: post, 
             showingReplay: $showingReplay,
             onImageTapped: { imageURL in
-                viewerImageURL = imageURL
+                viewerImageURL = IdentifiableImageURL(url: imageURL)
             }
         )
     }
@@ -1809,7 +1804,7 @@ struct PostDetailView: View {
                 userService: userService,
                 onReplyTapped: { comment in
                                 replyingToComment = comment
-                                newCommentText = "@\(comment.username) "
+                                newCommentText = ""
                                 isCommentFieldFocused = true
                             },
                 onToggleRepliesTapped: { comment in
@@ -1825,65 +1820,129 @@ struct PostDetailView: View {
     // Extracted ViewBuilder for Comment Input View
     @ViewBuilder
     private var commentInputView: some View {
-        HStack(spacing: 12) {
-            // Profile picture
-            if let profileImageURL = userService.currentUserProfile?.avatarURL {
-                KFImage(URL(string: profileImageURL))
-                    .placeholder {
-                        PlaceholderAvatarView(size: 36)
+        VStack(spacing: 0) {
+            // Ultra-thin separator line
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
+            
+            // Reply context when active
+            if replyingToComment != nil {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.turn.up.left")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                    
+                    Text("Replying to \(replyingToComment!.username)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255))
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            replyingToComment = nil
+                        }
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(.gray.opacity(0.4))
                     }
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 36, height: 36)
-                    .clipShape(Circle())
-            } else {
-                PlaceholderAvatarView(size: 36)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 5)
+                .background(Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.08))
+                .transition(.asymmetric(
+                    insertion: .push(from: .top).combined(with: .opacity),
+                    removal: .push(from: .bottom).combined(with: .opacity)
+                ))
             }
             
-            // Text field with send button
-            HStack(spacing: 8) {
-                TextField(replyingToComment != nil ? "Reply to @\(replyingToComment!.username)" : "Add a comment...", text: $newCommentText, axis: .vertical)
-                    .font(.system(size: 16))
-                    .foregroundColor(.white)
-                    .focused($isCommentFieldFocused)
-                    .submitLabel(.send)
-                    .lineLimit(1...4)
-                    .onSubmit {
-                        if !newCommentText.isEmpty {
-                            addComment()
+            // Main input area
+            HStack(alignment: .center, spacing: 12) {
+                // Avatar - properly sized
+                if let profileImageURL = userService.currentUserProfile?.avatarURL {
+                    KFImage(URL(string: profileImageURL))
+                        .placeholder {
+                            Circle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(width: 36, height: 36)
                         }
-                    }
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 36, height: 36)
+                        .clipShape(Circle())
+                        .opacity(isCommentFieldFocused || !newCommentText.isEmpty ? 1 : 0.7)
+                } else {
+                    Circle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: 36, height: 36)
+                }
                 
+                // Clean text field
+                TextField(
+                    replyingToComment != nil ? "Reply..." : "Comment",
+                    text: $newCommentText,
+                    axis: .vertical
+                )
+                .font(.system(size: 16, weight: .regular))
+                .foregroundColor(.white)
+                .tint(Color(red: 64/255, green: 156/255, blue: 255/255))
+                .focused($isCommentFieldFocused)
+                .submitLabel(.send)
+                .lineLimit(1...4)
+                .onSubmit {
+                    if !newCommentText.isEmpty {
+                        addComment()
+                    }
+                }
+                
+                // Send button - properly aligned
                 if !newCommentText.isEmpty {
                     Button(action: {
                         addComment()
                     }) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                        Text("Send")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(red: 64/255, green: 156/255, blue: 255/255),
+                                        Color(red: 100/255, green: 180/255, blue: 255/255)
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
                     }
-                    .transition(.scale.combined(with: .opacity))
-                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: !newCommentText.isEmpty)
+                    .transition(.asymmetric(
+                        insertion: .push(from: .trailing).combined(with: .opacity),
+                        removal: .push(from: .leading).combined(with: .opacity)
+                    ))
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .padding(.vertical, isCommentFieldFocused || !newCommentText.isEmpty ? 12 : 10)
             .background(
-                RoundedRectangle(cornerRadius: 24)
-                    .foregroundColor(Color(red: 28/255, green: 28/255, blue: 32/255))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 24)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                // Ultra-minimal background with blur
+                ZStack {
+                    // Base color
+                    Color(red: 18/255, green: 18/255, blue: 23/255)
+                    
+                    // Subtle material blur
+                    if isCommentFieldFocused || !newCommentText.isEmpty {
+                        Rectangle()
+                            .fill(.ultraThinMaterial)
+                            .environment(\.colorScheme, .dark)
+                            .opacity(0.5)
+                    }
+                }
+                .ignoresSafeArea()
             )
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(
-            Rectangle()
-                .foregroundColor(Color(red: 15/255, green: 15/255, blue: 20/255))
-                .ignoresSafeArea(edges: .horizontal)
-        )
+        .animation(.interactiveSpring(response: 0.4, dampingFraction: 0.8), value: isCommentFieldFocused)
+        .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.85), value: !newCommentText.isEmpty)
+        .animation(.easeInOut(duration: 0.2), value: replyingToComment != nil)
     }
 
     private func loadComments() {
@@ -2013,14 +2072,10 @@ struct PostDetailView: View {
                 )
 
 
-                if let parent = replyingToComment, let parentId = parent.id {
-
+                if let parent = replyingToComment, parent.id != nil {
                     await refreshPostComments(postId: postId)
-
-
                 } else {
                     await refreshPostComments(postId: postId)
-
                 }
                 
                 await MainActor.run {
@@ -2176,7 +2231,7 @@ struct CommentRow: View {
                     if isCurrentUser {
                         Text("(You)")
                             .font(.system(size: 13))
-                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.7)))
+                            .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.7))
                     }
                     
                     Spacer()
@@ -2223,7 +2278,7 @@ struct CommentRow: View {
                                 Text("Reply")
                                     .font(.system(size: 13, weight: .medium))
                             }
-                            .foregroundColor(Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 0.9)))
+                            .foregroundColor(Color(red: 64/255, green: 156/255, blue: 255/255).opacity(0.9))
                         }
                     }
 
@@ -2246,15 +2301,10 @@ struct CommentRow: View {
         .padding(.vertical, 10)
         // Add left padding if it's a reply
         .padding(.leading, isReply ? 30 : 0)
-        // Hidden NavigationLink for programmatic navigation
-        .background(
-            NavigationLink(
-                destination: UserProfileView(userId: comment.userId).environmentObject(userService),
-                isActive: $navigateToProfile,
-                label: { EmptyView() }
-            )
-            .hidden()
-        )
+        // Navigation destination for programmatic navigation
+        .navigationDestination(isPresented: $navigateToProfile) {
+            UserProfileView(userId: comment.userId).environmentObject(userService)
+        }
     }
 }
 
@@ -2819,8 +2869,9 @@ private struct CompletedSessionFeedCardView: View {
                 Spacer()
                 FeedStatDisplayView(label: "CASHOUT", value: sessionInfo.cashout)
                 Spacer()
-                FeedStatDisplayView(label: "PROFIT", value: sessionInfo.profit, 
-                                  valueColor: sessionInfo.profit.contains("-") ? .red : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
+                FeedStatDisplayView(label: "PROFIT", 
+                                  value: sessionInfo.profit.hasPrefix("-") ? String(sessionInfo.profit.dropFirst()) : sessionInfo.profit, 
+                                  valueColor: sessionInfo.profit.hasPrefix("-") ? .red : Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0)))
             }
         }
         .padding(.vertical, 10) 
@@ -3003,9 +3054,10 @@ private struct SessionStartedCardView: View {
     }
 }
 
-// Allow using a String directly in `fullScreenCover(item:)`
-extension String: Identifiable {
-    public var id: String { self }
+// Wrapper for image URL to make it Identifiable
+struct IdentifiableImageURL: Identifiable {
+    let id = UUID()
+    let url: String
 }
 
 

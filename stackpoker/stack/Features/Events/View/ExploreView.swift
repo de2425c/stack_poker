@@ -912,9 +912,9 @@ class ExploreViewModel: ObservableObject {
                     self.allEvents = cachedEvents
                     
                     // Small delay to show completion
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        self.isLoading = false
-                        self.loadingMessage = ""
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                        self?.isLoading = false
+                        self?.loadingMessage = ""
                     }
                 }
                 return
@@ -952,9 +952,9 @@ class ExploreViewModel: ObservableObject {
                     }
                     
                     // Small delay to show completion
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        self.isLoading = false
-                        self.loadingMessage = ""
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                        self?.isLoading = false
+                        self?.loadingMessage = ""
                     }
                 }
                 
@@ -1016,9 +1016,9 @@ class ExploreViewModel: ObservableObject {
                     }
                     
                     // Small delay to show completion
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        self.isLoading = false
-                        self.loadingMessage = ""
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                        self?.isLoading = false
+                        self?.loadingMessage = ""
                     }
                 }
                 

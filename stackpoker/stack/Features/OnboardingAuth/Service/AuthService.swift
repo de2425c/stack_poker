@@ -22,7 +22,7 @@ class AuthService: ObservableObject {
         // Listen for authentication state changes
         authStateDidChangeListenerHandle = Auth.auth().addStateDidChangeListener { [weak self] _, firebaseUser in
             Task {
-                await self?._updateAuthState(with: firebaseUser)
+                self?._updateAuthState(with: firebaseUser)
             }
         }
         
@@ -104,9 +104,8 @@ class AuthService: ObservableObject {
             if let nsError = error as NSError? {
                 print("AuthService: Error domain: \(nsError.domain), code: \(nsError.code)")
                 print("AuthService: Error description: \(nsError.localizedDescription)")
-                if let userInfo = nsError.userInfo as? [String: Any] {
-                    print("AuthService: Error userInfo: \(userInfo)")
-                }
+                let userInfo = nsError.userInfo
+                print("AuthService: Error userInfo: \(userInfo)")
             }
             
             throw handleFirebaseError(error)
