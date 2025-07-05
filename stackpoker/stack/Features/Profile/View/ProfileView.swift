@@ -58,6 +58,7 @@ struct ProfileView: View {
     @State private var showSessionsDetailView = false
     @State private var showStakingDashboardView = false // New state for Staking Dashboard
     @State private var showChallengesDetailView = false // New state for Challenges Dashboard
+    @State private var userStakes: [Stake] = [] // Store fetched stakes
     
             init(userId: String) {
         self.userId = userId
@@ -206,12 +207,20 @@ struct ProfileView: View {
                         navigationCard(
                             title: "Staking Dashboard",
                             iconName: "person.2.square.stack.fill",
-                            baseColor: Color.cyan, // Or any color you prefer
+                            baseColor: Color.cyan,
                             action: { showStakingDashboardView = true }
                         ) {
-                            Text("View and manage your stakes")
-                                .font(.plusJakarta(.subheadline))
-                                .foregroundColor(.white.opacity(0.85))
+                            if let mostRecentStake = getMostRecentStake() {
+                                Text(mostRecentStake)
+                                    .font(.plusJakarta(.caption, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .lineLimit(1)
+                            } else {
+                                Text("No recent stakes")
+                                    .font(.plusJakarta(.caption, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.5))
+                                    .lineLimit(1)
+                            }
                         }
                         .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileOverview)
                         
@@ -222,35 +231,24 @@ struct ProfileView: View {
                             baseColor: Color.pink,
                             action: { showChallengesDetailView = true }
                         ) {
-                            if !challengeService.activeChallenges.isEmpty {
-                                if let firstChallenge = challengeService.activeChallenges.first {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack(alignment: .top, spacing: 8) {
-                                            Capsule()
-                                                .fill(Color.pink.opacity(0.7))
-                                                .frame(width: 3)
-                                            VStack(alignment: .leading, spacing: 3) {
-                                                Text(firstChallenge.title)
-                                                    .font(.plusJakarta(.callout, weight: .semibold))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                    .lineLimit(1)
-                                                Text("\(Int(firstChallenge.progressPercentage))% complete")
-                                                    .font(.plusJakarta(.caption2, weight: .medium))
-                                                    .foregroundColor(.gray)
-                                            }
-                                        }
-                                        // Removed mini progress bar to keep profile clean
-                                        if challengeService.activeChallenges.count > 1 {
-                                            Text("and \(challengeService.activeChallenges.count - 1) more active")
-                                                .font(.plusJakarta(.footnote))
-                                                .foregroundColor(.white.opacity(0.7))
-                                        }
-                                    }
+                            if let mostRecentChallenge = challengeService.activeChallenges.first {
+                                HStack(spacing: 4) {
+                                    Text(mostRecentChallenge.title)
+                                        .font(.plusJakarta(.caption, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .lineLimit(1)
+                                        .layoutPriority(1)
+                                    
+                                    Text("• \(Int(mostRecentChallenge.progressPercentage))%")
+                                        .font(.plusJakarta(.caption, weight: .semibold))
+                                        .foregroundColor(.pink.opacity(0.8))
+                                        .fixedSize()
                                 }
                             } else {
-                                Text("Set goals and track results")
-                                    .font(.plusJakarta(.subheadline))
-                                    .foregroundColor(.white.opacity(0.85))
+                                Text("No active challenges")
+                                    .font(.plusJakarta(.caption, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.5))
+                                    .lineLimit(1)
                             }
                         }
                         .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileOverview)
@@ -459,6 +457,22 @@ struct ProfileView: View {
                     try await postService.fetchPosts(forUserId: userId)
                 }
             }
+            // Fetch stakes for Staking Dashboard
+            Task {
+                if let fetchedStakes = try? await stakeService.fetchStakes(forUser: userId) {
+                    userStakes = fetchedStakes
+                    
+                    // Fetch user profiles for stake display names
+                    for stake in fetchedStakes {
+                        if userService.loadedUsers[stake.stakerUserId] == nil {
+                            Task { await userService.fetchUser(id: stake.stakerUserId) }
+                        }
+                        if userService.loadedUsers[stake.stakedPlayerUserId] == nil {
+                            Task { await userService.fetchUser(id: stake.stakedPlayerUserId) }
+                        }
+                    }
+                }
+            }
             // Fetch sessions for Sessions card/view - only load if empty
             if sessionStore.sessions.isEmpty {
                 sessionStore.loadSessionsForUI()
@@ -492,11 +506,13 @@ struct ProfileView: View {
                         .foregroundColor(.white)
                         .lineLimit(1)
                     
-                    previewContent()
-                        .font(.plusJakarta(.subheadline))
-                        .foregroundColor(.white.opacity(0.85))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if !(previewContent() is EmptyView) {
+                        previewContent()
+                            .font(.plusJakarta(.subheadline))
+                            .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .layoutPriority(1)
                 
@@ -507,6 +523,46 @@ struct ProfileView: View {
                     .foregroundColor(.white.opacity(0.6))
             }
             .padding(EdgeInsets(top: 14, leading: 20, bottom: 12, trailing: 20))
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(baseColor.opacity(0.25), lineWidth: 1)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 20))
+            .shadow(color: baseColor.opacity(0.15), radius: 4, x: 0, y: 2)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    // Compact navigation card without preview content
+    private func compactNavigationCard(
+        title: String,
+        iconName: String,
+        baseColor: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: iconName)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundColor(baseColor.opacity(0.9))
+                    .frame(width: 30)
+                
+                Text(title)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
             .background(
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color.clear)
@@ -590,6 +646,31 @@ struct ProfileView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated // e.g., "1h ago", "2d ago"
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+    
+    // Helper function to get most recent stake summary
+    private func getMostRecentStake() -> String? {
+        // Sort by session date to get most recent
+        guard let mostRecent = userStakes.sorted(by: { $0.sessionDate > $1.sessionDate }).first else {
+            return nil
+        }
+        
+        // Format the stake summary based on whether user is staker or staked
+        if mostRecent.stakerUserId == userId {
+            // User staked someone else
+            if let stakedUser = userService.loadedUsers[mostRecent.stakedPlayerUserId] {
+                let name = stakedUser.displayName ?? stakedUser.username
+                return "You staked \(name) \(Int(mostRecent.stakePercentage * 100))%"
+            }
+            return "You staked \(Int(mostRecent.stakePercentage * 100))%"
+        } else {
+            // Someone staked the user
+            if let stakerUser = userService.loadedUsers[mostRecent.stakerUserId] {
+                let name = stakerUser.displayName ?? stakerUser.username
+                return "\(name) staked you \(Int(mostRecent.stakePercentage * 100))%"
+            }
+            return "Staked \(Int(mostRecent.stakePercentage * 100))%"
+        }
     }
 }
 
