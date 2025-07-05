@@ -202,14 +202,9 @@ struct UserListRow: View {
                 .disabled(isLoading || loggedInUserId == nil)
             }
         }
-        .background(
-            NavigationLink(
-                destination: UserProfileView(userId: user.id).environmentObject(userService),
-                isActive: $navigateToProfile,
-                label: { EmptyView() }
-            )
-            .hidden()
-        )
+        .navigationDestination(isPresented: $navigateToProfile) {
+            UserProfileView(userId: user.id).environmentObject(userService)
+        }
         .onAppear {
             checkFollowStatus()
         }
@@ -326,7 +321,7 @@ class FollowListViewModel: ObservableObject {
             dispatchGroup.enter()
             
             db.collection("users").whereField(FieldPath.documentID(), in: batch)
-                .getDocuments { [weak self] (querySnapshot, error) in
+                .getDocuments { (querySnapshot, error) in
                     defer { dispatchGroup.leave() }
                     
                     if let error = error {

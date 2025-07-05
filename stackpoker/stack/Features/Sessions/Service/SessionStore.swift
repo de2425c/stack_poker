@@ -923,23 +923,23 @@ class SessionStore: ObservableObject {
                 "creatorId": currentUser.uid,
                 "creatorName": displayName,
                 "startDate": Timestamp(date: nextDayDate),
-                "endDate": nil as Timestamp?,
+                "endDate": nil as Timestamp? as Any,
                 "timezone": TimeZone.current.identifier,
-                "location": nil as String?,
-                "maxParticipants": nil as Int?,
+                "location": nil as String? as Any,
+                "maxParticipants": nil as Int? as Any,
                 "currentParticipants": 1,
                 "waitlistEnabled": false,
                 "status": "upcoming",
-                "groupId": nil as String?,
+                "groupId": nil as String? as Any,
                 "isPublic": false,
                 "isBanked": false,
-                "rsvpDeadline": nil as Timestamp?,
+                "rsvpDeadline": nil as Timestamp? as Any,
                 "reminderSettings": [
                     "enabled": false,
                     "reminderTimes": [] as [Int]
                 ],
-                "linkedGameId": nil as String?,
-                "imageURL": nil as String?,
+                "linkedGameId": nil as String? as Any,
+                "imageURL": nil as String? as Any,
                 "associatedLiveSessionId": liveSession.id,
                 "createdAt": Timestamp(date: Date()),
                 "updatedAt": Timestamp(date: Date())
@@ -955,8 +955,8 @@ class SessionStore: ObservableObject {
                 "userDisplayName": displayName,
                 "status": "going",
                 "rsvpDate": Timestamp(date: Date()),
-                "notes": nil as String?,
-                "waitlistPosition": nil as Int?
+                "notes": nil as String? as Any,
+                "waitlistPosition": nil as Int? as Any
             ] as [String : Any]
             
             try await db.collection("eventRSVPs").document(rsvpId).setData(rsvpData)
@@ -1025,11 +1025,11 @@ class SessionStore: ObservableObject {
             "createdAt": Timestamp(date: liveSession.startTime), // Use session start time, not current time
             "notes": enhancedLiveSession.notes, // Include notes
             "liveSessionUUID": currentLiveSessionId, // Link to the live session instance
-            "location": liveSession.isTournament ? (liveSession.tournamentName) : nil, // Assuming tournament name can be used as a proxy for location if not separately stored for live
-            "tournamentType": liveSession.isTournament ? liveSession.tournamentType : nil,
-            "tournamentGameType": liveSession.isTournament ? liveSession.tournamentGameType?.rawValue : nil,
-            "tournamentFormat": liveSession.isTournament ? liveSession.tournamentFormat?.rawValue : nil,
-            "pokerVariant": !liveSession.isTournament ? liveSession.pokerVariant : nil, // Only save poker variant for cash games
+            "location": liveSession.isTournament ? (liveSession.tournamentName) : nil as String? as Any, // Assuming tournament name can be used as a proxy for location if not separately stored for live
+            "tournamentType": liveSession.isTournament ? liveSession.tournamentType : nil as String? as Any,
+            "tournamentGameType": liveSession.isTournament ? liveSession.tournamentGameType?.rawValue : nil as String? as Any,
+            "tournamentFormat": liveSession.isTournament ? liveSession.tournamentFormat?.rawValue : nil as String? as Any,
+            "pokerVariant": !liveSession.isTournament ? liveSession.pokerVariant : nil as String? as Any, // Only save poker variant for cash games
         ]
         
         do {
@@ -1344,11 +1344,12 @@ class SessionStore: ObservableObject {
             }
             
             // Merge with local sessions, prioritizing Firestore data
+            let firestoreSessions = firestoreParkedSessions // Create a constant copy for the closure
             await MainActor.run {
-                for (key, session) in firestoreParkedSessions {
+                for (key, session) in firestoreSessions {
                     parkedSessions[key] = session
                 }
-                print("🅿️ [FIRESTORE] Loaded \(firestoreParkedSessions.count) parked sessions from Firestore")
+                print("🅿️ [FIRESTORE] Loaded \(firestoreSessions.count) parked sessions from Firestore")
             }
             
         } catch {
@@ -1824,7 +1825,7 @@ class SessionStore: ObservableObject {
                         "profit": profit,
                         "createdAt": FieldValue.serverTimestamp(),
                         "location": location,
-                        "tournamentType": isTournament ? stakes : nil
+                        "tournamentType": isTournament ? stakes : nil as String? as Any
                     ]
 
                     group.enter()
@@ -2011,8 +2012,8 @@ class SessionStore: ObservableObject {
                         "adjustedProfit": netProfit, // Initially equals raw profit for imports
                         "createdAt": FieldValue.serverTimestamp(),
                         "location": location,
-                        "tournamentType": isTournament ? stakes : nil,
-                        "notes": notes.isEmpty ? nil : notes
+                        "tournamentType": isTournament ? stakes : nil as String? as Any,
+                        "notes": notes.isEmpty ? nil : notes as [String]? as Any
                     ]
 
                     group.enter()

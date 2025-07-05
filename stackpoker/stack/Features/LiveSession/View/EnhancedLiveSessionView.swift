@@ -3233,11 +3233,11 @@ struct EnhancedLiveSessionView: View {
                 "createdAt": Timestamp(date: self.sessionStore.liveSession.startTime), // Use session start time, not current time
                 "notes": self.sessionStore.enhancedLiveSession.notes,
                 "liveSessionUUID": self.sessionStore.liveSession.id,
-                "location": self.sessionStore.liveSession.isTournament ? (self.sessionStore.liveSession.tournamentName) : nil as String?,
-                "tournamentType": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentType : nil as String?,
-                "tournamentGameType": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentGameType?.rawValue : nil as String?,
-                "tournamentFormat": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentFormat?.rawValue : nil as String?,
-                "pokerVariant": !self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.pokerVariant : nil as String?, // Only save poker variant for cash games
+                "location": (self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentName : nil) as Any,
+                "tournamentType": (self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentType : nil) as Any,
+                "tournamentGameType": (self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentGameType?.rawValue : nil) as Any,
+                "tournamentFormat": (self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentFormat?.rawValue : nil) as Any,
+                "pokerVariant": (!self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.pokerVariant : nil) as Any, // Only save poker variant for cash games
             ]
             
             // Add casino for tournaments if provided
@@ -5611,7 +5611,7 @@ struct EnhancedLiveSessionView: View {
             "stakes": selectedLogType == .cashGame ? (selectedGame?.stakes ?? "") : "",
             "casino": selectedLogType == .tournament ? tournamentCasino : "",
             "buyIn": selectedLogType == .cashGame ? (Double(buyIn) ?? 0) : (Double(baseBuyInTournament) ?? 0),
-            "startingChips": selectedLogType == .tournament ? tournamentStartingChips : nil as Double?,
+            "startingChips": (selectedLogType == .tournament ? tournamentStartingChips : nil) as Any,
             "startTime": Timestamp(date: sessionStore.liveSession.startTime),
             "isActive": true,
             "chipUpdates": [],

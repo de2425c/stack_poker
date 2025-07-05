@@ -24,11 +24,12 @@ class ManualStakerService: ObservableObject {
         try manualStakersCollectionRef.document(profileId).setData(from: profileToSave)
         
         // Update local array
+        let savedProfile = profileToSave // Create a constant copy for the closure
         await MainActor.run {
-            if let index = manualStakers.firstIndex(where: { $0.id == profileToSave.id }) {
-                manualStakers[index] = profileToSave
+            if let index = manualStakers.firstIndex(where: { $0.id == savedProfile.id }) {
+                manualStakers[index] = savedProfile
             } else {
-                manualStakers.append(profileToSave)
+                manualStakers.append(savedProfile)
                 // Sort by name for consistent ordering
                 manualStakers.sort { $0.name.lowercased() < $1.name.lowercased() }
             }
@@ -63,8 +64,9 @@ class ManualStakerService: ObservableObject {
                 }
             }
             
+            let fetchedProfiles = profiles // Create a constant copy for the closure
             await MainActor.run {
-                self.manualStakers = profiles
+                self.manualStakers = fetchedProfiles
                 self.isLoading = false
             }
             
@@ -102,9 +104,10 @@ class ManualStakerService: ObservableObject {
         try manualStakersCollectionRef.document(profileId).setData(from: updatedProfile)
         
         // Update local array
+        let profileToUpdate = updatedProfile // Create a constant copy for the closure
         await MainActor.run {
             if let index = manualStakers.firstIndex(where: { $0.id == profileId }) {
-                manualStakers[index] = updatedProfile
+                manualStakers[index] = profileToUpdate
                 // Re-sort after update in case name changed
                 manualStakers.sort { $0.name.lowercased() < $1.name.lowercased() }
             }
