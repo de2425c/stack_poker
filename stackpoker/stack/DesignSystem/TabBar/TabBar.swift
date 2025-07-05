@@ -92,6 +92,24 @@ struct TabBarButton: View {
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
+        .pulsingTabHighlight(isActive: shouldHighlight)
+    }
+    
+    private var shouldHighlight: Bool {
+        guard let tutorialManager = tutorialManager else { return false }
+        
+        switch icon {
+        case "Feed":
+            return false // Feed tab is never highlighted in tutorial
+        case "Events":
+            return tutorialManager.currentStep == .exploreTab
+        case "Groups":
+            return tutorialManager.currentStep == .groupsTab
+        case "Profile":
+            return tutorialManager.currentStep == .profileTab
+        default:
+            return false
+        }
     }
 }
 

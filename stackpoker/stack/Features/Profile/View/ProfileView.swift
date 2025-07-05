@@ -152,12 +152,7 @@ struct ProfileView: View {
                             ) {
                                 Text("Analyze your results")
                             }
-                            .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileAnalytics)
-                            .onTapGesture {
-                                if tutorialManager.currentStep == .profileAnalytics {
-                                    tutorialManager.advanceStep()
-                                }
-                            }
+                            .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileOverview)
                         }
                         
                         // Sessions Card
@@ -200,17 +195,12 @@ struct ProfileView: View {
                                     }
                                 }
                             } else {
-                                Text("Manage and analyze your game sessions.")
+                                Text("Analyze your sessions.")
                                     .font(.plusJakarta(.subheadline))
                                     .foregroundColor(.white.opacity(0.85))
                             }
                         }
-                        .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileSessions)
-                        .onTapGesture {
-                            if tutorialManager.currentStep == .profileSessions {
-                                tutorialManager.advanceStep()
-                            }
-                        }
+                        .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileOverview)
                         
                         // Staking Dashboard Card (New)
                         navigationCard(
@@ -223,12 +213,7 @@ struct ProfileView: View {
                                 .font(.plusJakarta(.subheadline))
                                 .foregroundColor(.white.opacity(0.85))
                         }
-                        .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileStakings)
-                        .onTapGesture {
-                            if tutorialManager.currentStep == .profileStakings {
-                                tutorialManager.advanceStep()
-                            }
-                        }
+                        .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileOverview)
                         
                         // Challenges Dashboard Card (New)
                         navigationCard(
@@ -263,17 +248,12 @@ struct ProfileView: View {
                                     }
                                 }
                             } else {
-                                Text("Set goals and track your poker journey")
+                                Text("Set goals and track results")
                                     .font(.plusJakarta(.subheadline))
                                     .foregroundColor(.white.opacity(0.85))
                             }
                         }
-                        .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileChallenges)
-                        .onTapGesture {
-                            if tutorialManager.currentStep == .profileChallenges {
-                                tutorialManager.advanceStep()
-                            }
-                        }
+                        .tutorialHighlight(isHighlighted: tutorialManager.currentStep == .profileOverview)
                         
                     }
                     .padding(.horizontal, 16)

@@ -30,7 +30,7 @@ private struct GlassyButtonStyling: ViewModifier {
 
 struct SessionDetailView: View {
     // Session data
-    let session: Session
+    let sessionId: String
     @Environment(\.dismiss) var dismiss
     @Environment(\.presentationMode) var presentationMode
     
@@ -61,6 +61,11 @@ struct SessionDetailView: View {
     @State private var showingEditView = false // Changed from showingEditSheet
     @EnvironmentObject var sessionStore: SessionStore // Add SessionStore to environment
     
+    // Computed property to get the current session from sessionStore
+    private var session: Session? {
+        sessionStore.sessions.first { $0.id == sessionId }
+    }
+    
     // Formatting helpers
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -71,6 +76,7 @@ struct SessionDetailView: View {
 
     // Computed properties for card display
     private var cardGameName: String {
+        guard let session = session else { return "" }
         if session.gameType == SessionLogType.tournament.rawValue {
             return session.gameName // Always use the tournament name, not the series
         } else {
@@ -79,6 +85,7 @@ struct SessionDetailView: View {
     }
     
     private var cardStakes: String {
+        guard let session = session else { return "" }
         if session.gameType == SessionLogType.tournament.rawValue {
             return session.location ?? "Location TBD" // Location as the secondary line
         } else {
@@ -87,6 +94,7 @@ struct SessionDetailView: View {
     }
     
     private var cardLocation: String {
+        guard let session = session else { return "" }
         if session.gameType == SessionLogType.tournament.rawValue {
             return session.tournamentType ?? "Tournament" // Tournament Type for the original 'location' prop
         } else {
@@ -97,7 +105,7 @@ struct SessionDetailView: View {
     @State private var selectedStakeForEdit: Stake? = nil
     
     init(session: Session) {
-        self.session = session
+        self.sessionId = session.id
         // REMOVED: Initialize HandStore with the current user's ID.
         // Ensure proper fallback or error handling if UID is nil in a real app.
         // _handStore = StateObject(wrappedValue: HandStore(userId: Auth.auth().currentUser?.uid ?? ""))
@@ -121,15 +129,16 @@ struct SessionDetailView: View {
             ZStack {
                 AppBackgroundView().ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 25) {
-                        // Beautiful Session Details Display
-                        sessionDetailsView()
-                        
-                        // Share and Edit Actions
-                        actionButtonsView()
-                        
-                        // Staking Details Section
+                if let session = session {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 25) {
+                            // Beautiful Session Details Display
+                            sessionDetailsView()
+                            
+                            // Share and Edit Actions
+                            actionButtonsView()
+                            
+                            // Staking Details Section
                         stakingSectionView()
                         
                         // REMOVED: handsSectionView()
@@ -139,6 +148,16 @@ struct SessionDetailView: View {
                     }
                     .padding(.top, 20)
                     .padding(.horizontal)
+                    }
+                } else {
+                    // Show loading or error state when session is not found
+                    VStack {
+                        ProgressView()
+                        Text("Loading session...")
+                            .foregroundColor(.gray)
+                            .padding(.top)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -155,7 +174,7 @@ struct SessionDetailView: View {
                 }
             }
             .fullScreenCover(isPresented: $showImageComposer) {
-                if let selectedImage = selectedImageForComposer, #available(iOS 16.0, *) {
+                if let selectedImage = selectedImageForComposer, let session = session, #available(iOS 16.0, *) {
                     ImageCompositionView(session: session, backgroundImage: selectedImage) {
                         // Called when X button is tapped - dismiss the image composer
                         showImageComposer = false
@@ -180,17 +199,18 @@ struct SessionDetailView: View {
             }
             */
             .fullScreenCover(isPresented: $showingEditView) {
-                NavigationView {
-                    EditSessionSheetView(
-                        session: session, 
-                        sessionStore: sessionStore, 
-                        sessionStakes: sessionStakes, 
-                        stakeService: stakeService,
-                        manualStakerService: manualStakerService,
-                        onStakeUpdated: {
-                            fetchSessionDetails()
-                        }
-                    )
+                if let session = session {
+                    NavigationView {
+                        EditSessionSheetView(
+                            session: session, 
+                            sessionStore: sessionStore, 
+                            sessionStakes: sessionStakes, 
+                            stakeService: stakeService,
+                            manualStakerService: manualStakerService,
+                            onStakeUpdated: {
+                                fetchSessionDetails()
+                            }
+                        )
                     .environmentObject(sessionStore)
                         .environmentObject(userService)
                         .navigationBarTitleDisplayMode(.inline)
@@ -205,6 +225,7 @@ struct SessionDetailView: View {
                                 }
                             }
                         }
+                    }
                 }
             }
         }
@@ -213,7 +234,11 @@ struct SessionDetailView: View {
     // MARK: - Beautiful Session Details Display
     @ViewBuilder
     private func sessionDetailsView() -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        guard let session = session else {
+            return AnyView(EmptyView())
+        }
+        
+        return AnyView(VStack(alignment: .leading, spacing: 20) {
             // Header
             VStack(alignment: .leading, spacing: 8) {
                 Text(cardGameName)
@@ -254,7 +279,7 @@ struct SessionDetailView: View {
                 let profit = session.cashout - session.buyIn
                 CleanProfitSummary(profit: profit, hoursPlayed: session.hoursPlayed)
             }
-        }
+        })
     }
     
     private func formatShortDate(_ date: Date) -> String {
@@ -368,7 +393,7 @@ struct SessionDetailView: View {
     // Extracted Notes Section
     @ViewBuilder
     private func notesSectionView() -> some View {
-        if let notes = session.notes, !notes.isEmpty {
+        if let session = session, let notes = session.notes, !notes.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Session Notes")
                     .font(.title2)
@@ -388,6 +413,8 @@ struct SessionDetailView: View {
     }
 
     private func fetchSessionDetails() {
+        guard let session = session else { return }
+        
         // REMOVED: Hands fetching functionality
         /*
         // -----------------------------

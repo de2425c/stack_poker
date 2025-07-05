@@ -219,8 +219,8 @@ class UserService: ObservableObject {
                 print("UserService: Profile cached successfully")
             }
             
-            // Auto-follow the news bot for all new users
-            await autoFollowNewsBot(userId: userId)
+            // Auto-follow Wolfgang and Slick for all new users
+            await autoFollowDefaultUsers(userId: userId)
             
         } catch let firestoreError as NSError {
             print("UserService: Firestore error occurred: \(firestoreError)")
@@ -534,32 +534,37 @@ class UserService: ObservableObject {
         }
     }
     
-    // Auto-follow news bot for new users
-    private func autoFollowNewsBot(userId: String) async {
-        let newsBotUserId = "qY3HAlHvBzWDCPMRMRO4lW6KCRN2"
+    // Auto-follow Wolfgang and Slick for new users
+    private func autoFollowDefaultUsers(userId: String) async {
+        let defaultUserIds = [
+            "VZryEFVeM2eUpwjWHyNkqh7c3L22", // Wolfgang
+            "5bC6BlYB27g0dfpmaXI8r3bO8iF2"  // Slick
+        ]
         
-        do {
-            // Check if already following to avoid duplicates
-            let alreadyFollowing = await isUserFollowing(targetUserId: newsBotUserId, currentUserId: userId)
-            if alreadyFollowing {
-                print("ℹ️ User \(userId) already follows news bot")
-                return
+        for defaultUserId in defaultUserIds {
+            do {
+                // Check if already following to avoid duplicates
+                let alreadyFollowing = await isUserFollowing(targetUserId: defaultUserId, currentUserId: userId)
+                if alreadyFollowing {
+                    print("ℹ️ User \(userId) already follows \(defaultUserId)")
+                    continue
+                }
+                
+                // Create follow relationship
+                let followData = UserFollow(
+                    followerId: userId, 
+                    followeeId: defaultUserId, 
+                    createdAt: Date(), 
+                    postNotifications: false
+                )
+                
+                try await db.collection(userFollowsCollection).addDocument(from: followData)
+                print("✅ Auto-followed user \(defaultUserId) for new user: \(userId)")
+                
+            } catch {
+                print("❌ Failed to auto-follow user \(defaultUserId) for user \(userId): \(error)")
+                // Don't throw error - this shouldn't block user registration
             }
-            
-            // Create follow relationship for the news bot
-            let followData = UserFollow(
-                followerId: userId, 
-                followeeId: newsBotUserId, 
-                createdAt: Date(), 
-                postNotifications: false
-            )
-            
-            try await db.collection(userFollowsCollection).addDocument(from: followData)
-            print("✅ Auto-followed news bot for new user: \(userId)")
-            
-        } catch {
-            print("❌ Failed to auto-follow news bot for user \(userId): \(error)")
-            // Don't throw error - this shouldn't block user registration
         }
     }
 

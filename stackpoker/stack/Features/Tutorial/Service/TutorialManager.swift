@@ -15,39 +15,63 @@ class TutorialManager: ObservableObject {
         case expandMenu = "expand_menu"
         case menuExplanation = "menu_explanation"
         case exploreTab = "explore_tab"
+        case exploreExplanation = "explore_explanation"
         case groupsTab = "groups_tab"
+        case groupsExplanation = "groups_explanation"
         case profileTab = "profile_tab"
-        case profileSessions = "profile_sessions"
-        case profileStakings = "profile_stakings"
-        case profileAnalytics = "profile_analytics"
-        case profileChallenges = "profile_challenges"
+        case profileOverview = "profile_overview"
         case finalWelcome = "final_welcome"
         case completed = "completed"
+        
+        var title: String {
+            switch self {
+            case .welcome:
+                return "Welcome to Stack"
+            case .expandMenu:
+                return "Quick Actions"
+            case .menuExplanation:
+                return "Track Everything"
+            case .exploreTab:
+                return "Discover Events"
+            case .exploreExplanation:
+                return "Events Hub"
+            case .groupsTab:
+                return "Join Communities"
+            case .groupsExplanation:
+                return "Community Features"
+            case .profileTab:
+                return "Your Profile"
+            case .profileOverview:
+                return "Track Your Journey"
+            case .finalWelcome:
+                return "You're All Set!"
+            case .completed:
+                return "Welcome!"
+            }
+        }
         
         var text: String {
             switch self {
             case .welcome:
-                return "Welcome to Stack!\nLet's show you around"
+                return "Your personal poker companion. Track sessions, analyze performance, and connect with players."
             case .expandMenu:
-                return "Tap the + button to see your options"
+                return "Tap the + button to quickly log sessions and activities"
             case .menuExplanation:
-                return "This is where you can record and track your poker activities"
+                return "Record buy-ins, cash outs, and session notes with just a few taps"
             case .exploreTab:
-                return "Tap Events to discover poker events and tournaments"
+                return "Tap Events"
+            case .exploreExplanation:
+                return "Browse upcoming tournaments, cash games, and special events. RSVP to save your spot and get notifications."
             case .groupsTab:
-                return "Tap Groups to join poker communities and games"
+                return "Tap Groups"
+            case .groupsExplanation:
+                return "Join poker communities, share strategies, and find private games with trusted players."
             case .profileTab:
-                return "Tap Profile to view your stats and achievements"
-            case .profileSessions:
-                return "Sessions\n\nView and track all your poker sessions"
-            case .profileStakings:
-                return "Staking\n\nManage your poker backing and investment deals"
-            case .profileAnalytics:
-                return "Analytics\n\nView your performance charts, session stats, and poker insights"
-            case .profileChallenges:
-                return "Challenges\n\nSet goals and compete with other players"
+                return "Tap Profile"
+            case .profileOverview:
+                return "Track sessions, manage stakings, analyze performance, and complete challenges"
             case .finalWelcome:
-                return "Welcome to Stack! You're all ready to start your poker journey"
+                return "Start tracking your poker journey and connect with players worldwide"
             case .completed:
                 return "You're all set!"
             }
@@ -55,7 +79,7 @@ class TutorialManager: ObservableObject {
         
         var requiresUserAction: Bool {
             switch self {
-            case .welcome, .finalWelcome, .profileSessions, .profileStakings, .profileAnalytics, .profileChallenges:
+            case .welcome, .finalWelcome, .profileOverview, .exploreExplanation, .groupsExplanation:
                 return false // These have buttons
             default:
                 return true // Everything else requires user action
@@ -120,11 +144,11 @@ class TutorialManager: ObservableObject {
         case (.expandMenu, .tappedPlusButton):
             advanceToStep(.menuExplanation)
         case (.exploreTab, .tappedExploreTab):
-            advanceToStep(.groupsTab)
+            advanceToStep(.exploreExplanation)
         case (.groupsTab, .tappedGroupsTab):
-            advanceToStep(.profileTab)
+            advanceToStep(.groupsExplanation)
         case (.profileTab, .tappedProfileTab):
-            advanceToStep(.profileSessions)
+            advanceToStep(.profileOverview)
         default:
             print("📝 TutorialManager: No matching action for \(action) in step \(currentStep.rawValue)")
             break

@@ -26,12 +26,10 @@ class AuthViewModel: ObservableObject {
     
     // Set auth state with tracking
     private func setAuthState(_ newState: AuthState) {
-        let previousState = self.authState
         self.authState = newState
         
         // Track timing and log state transitions
         let now = Date()
-        let timeSinceLastUpdate = now.timeIntervalSince(lastAuthStateUpdate)
         lastAuthStateUpdate = now
         
 

@@ -103,7 +103,7 @@ class UserEventService: ObservableObject {
     
     /// Update event statuses based on current time
     func updateEventStatuses() async throws {
-        guard let currentUser = Auth.auth().currentUser else {
+        guard Auth.auth().currentUser != nil else {
             throw UserEventServiceError.notAuthenticated
         }
         
@@ -213,7 +213,7 @@ class UserEventService: ObservableObject {
         // Upload the image to Firebase Storage
         do {
             // Upload the image
-            _ = try await storageRef.putData(imageData, metadata: nil)
+            _ = storageRef.putData(imageData, metadata: nil)
             
             // Add a small delay to allow Firebase to process the upload
             try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
@@ -874,7 +874,7 @@ class UserEventService: ObservableObject {
                 guard let document = documentSnapshot else { return }
                 
                 Task {
-                    await self._processEventUpdate(eventId: eventId, document: document, onChange: onChange)
+                    self._processEventUpdate(eventId: eventId, document: document, onChange: onChange)
                 }
             }
         
@@ -938,12 +938,8 @@ class UserEventService: ObservableObject {
     private func _processEventUpdate(eventId: String, document: DocumentSnapshot, onChange: @escaping (UserEvent) -> Void) {
         guard document.exists, let data = document.data() else { return }
         
-        do {
-            if let event = try? UserEvent(dictionary: data, id: eventId) {
-                onChange(event)
-            }
-        } catch {
-            // Handle parsing error
+        if let event = try? UserEvent(dictionary: data, id: eventId) {
+            onChange(event)
         }
     }
 }

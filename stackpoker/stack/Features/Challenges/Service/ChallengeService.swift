@@ -269,11 +269,11 @@ class ChallengeService: ObservableObject {
             print("     Total hours: \(String(format: "%.1f", updatedChallenge.totalHoursPlayed))")
             
             // CRITICAL: Update currentValue based on challenge configuration
-            if let targetHours = updatedChallenge.targetHours {
+            if updatedChallenge.targetHours != nil {
                 // Hours-based challenge: currentValue tracks total hours
                 updatedChallenge.currentValue = updatedChallenge.totalHoursPlayed
                 print("     Hours-based challenge - currentValue: \(updatedChallenge.currentValue)")
-            } else if let targetCount = updatedChallenge.targetSessionCount {
+            } else if updatedChallenge.targetSessionCount != nil {
                 // Count-based challenge: currentValue tracks valid session count
                 updatedChallenge.currentValue = Double(updatedChallenge.validSessionsCount)
                 print("     Count-based challenge - currentValue: \(updatedChallenge.currentValue)")
@@ -340,7 +340,7 @@ class ChallengeService: ObservableObject {
         
         // Update all active session challenges with current progress
         for challenge in activeChallenges where challenge.type == .session {
-            guard let challengeId = challenge.id else { continue }
+            guard challenge.id != nil else { continue }
             
             // Check if this session started after the challenge start date
             guard liveSession.startTime >= challenge.startDate else {
@@ -424,17 +424,12 @@ class ChallengeService: ObservableObject {
         let completionText = displayModel.generateCompletionPostContent()
         
         // Get user profile for post creation
-        do {
-            // This would need to be updated to work with the PostService
-            // For now, we'll print the completion message
-            print("🎉 Challenge Completed Post: \(completionText)")
-            
-            // TODO: Create actual post using PostService
-            // This would require injecting PostService or UserService
-            
-        } catch {
-            print("❌ Error creating challenge completion post: \(error)")
-        }
+        // This would need to be updated to work with the PostService
+        // For now, we'll print the completion message
+        print("🎉 Challenge Completed Post: \(completionText)")
+        
+        // TODO: Create actual post using PostService
+        // This would require injecting PostService or UserService
     }
     
     // Helper method to format challenge values

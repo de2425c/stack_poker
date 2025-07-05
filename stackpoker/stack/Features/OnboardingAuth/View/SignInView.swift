@@ -23,6 +23,7 @@ struct SignInView: View {
     @State private var hasInteracted = false
     @State private var isPhoneNumber = false
     @State private var isEmailAddress = false
+    @State private var validationTimer: Timer?
     
     // Country picker states
     @State private var selectedCountry = CountryCode.defaultCountry
@@ -325,42 +326,37 @@ struct SignInView: View {
     
     // MARK: - Validation Methods
     private func validateEmailOrPhone(_ input: String) {
-        // First determine if it's a phone number or email
-        let digitsOnly = input.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
-        let wasPhoneNumber = isPhoneNumber
+        // Cancel any existing timer
+        validationTimer?.invalidate()
         
-        if digitsOnly.count >= 3 && !input.contains("@") {
-            // Likely a phone number
-            isPhoneNumber = true
-            isEmailAddress = false
-            let minLength = getMinLengthForCountry(selectedCountry.code)
-            emailOrPhoneIsValid = digitsOnly.count >= minLength
-            // Format phone number as user types
-            emailOrPhone = formatPhoneNumber(input)
-            
-            // Keep keyboard focused when switching to phone
-            if !wasPhoneNumber && isInputFocused {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isInputFocused = true
-                }
-            }
-        } else if input.contains("@") {
-            // Likely an email
+        // If input contains @, it's definitely an email
+        if input.contains("@") {
             isPhoneNumber = false
             isEmailAddress = true
             emailOrPhoneIsValid = input.contains("@") && input.contains(".") && input.count > 5
+            return
+        }
+        
+        // For inputs without @, add a delay before determining if it's a phone number
+        validationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+            let digitsOnly = input.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            let digitRatio = digitsOnly.count > 0 ? Double(digitsOnly.count) / Double(input.count) : 0
             
-            // Keep keyboard focused when switching to email
-            if wasPhoneNumber && isInputFocused {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isInputFocused = true
-                }
+            // Only consider it a phone number if it's mostly digits (80%+) and has at least 3 digits
+            if digitsOnly.count >= 3 && digitRatio >= 0.8 {
+                // Likely a phone number
+                self.isPhoneNumber = true
+                self.isEmailAddress = false
+                let minLength = self.getMinLengthForCountry(self.selectedCountry.code)
+                self.emailOrPhoneIsValid = digitsOnly.count >= minLength
+                // Format phone number as user types
+                self.emailOrPhone = self.formatPhoneNumber(input)
+            } else {
+                // Not enough evidence to be a phone number
+                self.isPhoneNumber = false
+                self.isEmailAddress = false
+                self.emailOrPhoneIsValid = false
             }
-        } else {
-            // Neither clear phone nor email yet
-            isPhoneNumber = false
-            isEmailAddress = false
-            emailOrPhoneIsValid = false
         }
     }
     

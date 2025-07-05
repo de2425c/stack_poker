@@ -21,23 +21,25 @@ struct AddCashGameView: View {
                         .ignoresSafeArea()
                     
                     ScrollView {
-                        VStack(spacing: 24) {
-                            // Add top padding for transparent navigation bar
+                        VStack(spacing: 20) {
+                            // Minimal top padding
                             Spacer()
-                                .frame(height: 50)
+                                .frame(height: 8)
                             
                             // Game Name Field
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("GAME NAME")
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(.plusJakarta(.caption, weight: .medium))
                                     .foregroundColor(.white.opacity(0.7))
                                 
                                 TextField("", text: $gameName)
                                     .placeholderss(when: gameName.isEmpty) {
                                         Text("Bellagio, Venetian, Wynn, etc.")
                                             .foregroundColor(.gray.opacity(0.7))
+                                            .font(.plusJakarta(.body, weight: .regular))
                                     }
                                     .foregroundColor(.white)
+                                    .font(.plusJakarta(.body, weight: .regular))
                                     .padding()
                                     .background(glassyBackground())
                             }
@@ -45,7 +47,7 @@ struct AddCashGameView: View {
                             // Game Type Field
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("GAME TYPE")
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(.plusJakarta(.caption, weight: .medium))
                                     .foregroundColor(.white.opacity(0.7))
                                 
                                 HStack {
@@ -54,7 +56,7 @@ struct AddCashGameView: View {
                                             selectedGameType = variant
                                         }) {
                                             Text(variant.displayName)
-                                                .font(.system(size: 14, weight: .medium))
+                                                .font(.plusJakarta(.caption, weight: .medium))
                                                 .foregroundColor(selectedGameType == variant ? .white : .gray)
                                                 .padding(.horizontal, 12)
                                                 .padding(.vertical, 8)
@@ -71,26 +73,29 @@ struct AddCashGameView: View {
                             }
                             
                             // Stakes Fields
-                            VStack(alignment: .leading, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 12) {
                                 Text("STAKES")
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(.plusJakarta(.caption, weight: .medium))
                                     .foregroundColor(.white.opacity(0.7))
                                 
                                 HStack(spacing: 12) {
                                     // Small Blind
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("Small Blind")
-                                            .font(.system(size: 12))
+                                            .font(.plusJakarta(.caption2, weight: .medium))
                                             .foregroundColor(.gray)
                                         
                                         HStack {
                                             Text("$")
                                                 .foregroundColor(.gray)
+                                                .font(.plusJakarta(.body, weight: .regular))
                                             TextField("", text: $smallBlind)
                                                 .keyboardType(.decimalPad)
+                                                .font(.plusJakarta(.body, weight: .regular))
                                                 .placeholderss(when: smallBlind.isEmpty) {
                                                     Text("1")
                                                         .foregroundColor(.gray.opacity(0.7))
+                                                        .font(.plusJakarta(.body, weight: .regular))
                                                 }
                                         }
                                         .foregroundColor(.white)
@@ -102,17 +107,20 @@ struct AddCashGameView: View {
                                     // Big Blind
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("Big Blind")
-                                            .font(.system(size: 12))
+                                            .font(.plusJakarta(.caption2, weight: .medium))
                                             .foregroundColor(.gray)
                                         
                                         HStack {
                                             Text("$")
                                                 .foregroundColor(.gray)
+                                                .font(.plusJakarta(.body, weight: .regular))
                                             TextField("", text: $bigBlind)
                                                 .keyboardType(.decimalPad)
+                                                .font(.plusJakarta(.body, weight: .regular))
                                                 .placeholderss(when: bigBlind.isEmpty) {
                                                     Text("2")
                                                         .foregroundColor(.gray.opacity(0.7))
+                                                        .font(.plusJakarta(.body, weight: .regular))
                                                 }
                                         }
                                         .foregroundColor(.white)
@@ -126,17 +134,20 @@ struct AddCashGameView: View {
                                 // Optional Straddle
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Straddle (Optional)")
-                                        .font(.system(size: 12))
+                                        .font(.plusJakarta(.caption2, weight: .medium))
                                         .foregroundColor(.gray)
                                     
                                     HStack {
                                         Text("$")
                                             .foregroundColor(.gray)
+                                            .font(.plusJakarta(.body, weight: .regular))
                                         TextField("", text: $straddle)
                                             .keyboardType(.decimalPad)
+                                            .font(.plusJakarta(.body, weight: .regular))
                                             .placeholderss(when: straddle.isEmpty) {
                                                 Text("5")
                                                     .foregroundColor(.gray.opacity(0.7))
+                                                    .font(.plusJakarta(.body, weight: .regular))
                                             }
                                     }
                                     .foregroundColor(.white)
@@ -147,17 +158,20 @@ struct AddCashGameView: View {
                                 // Optional Ante
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Ante (Optional)")
-                                        .font(.system(size: 12))
+                                        .font(.plusJakarta(.caption2, weight: .medium))
                                         .foregroundColor(.gray)
                                     
                                     HStack {
                                         Text("$")
                                             .foregroundColor(.gray)
+                                            .font(.plusJakarta(.body, weight: .regular))
                                         TextField("", text: $ante)
                                             .keyboardType(.decimalPad)
+                                            .font(.plusJakarta(.body, weight: .regular))
                                             .placeholderss(when: ante.isEmpty) {
                                                 Text("1")
                                                     .foregroundColor(.gray.opacity(0.7))
+                                                    .font(.plusJakarta(.body, weight: .regular))
                                             }
                                     }
                                     .foregroundColor(.white)
@@ -166,16 +180,14 @@ struct AddCashGameView: View {
                                 }
                             }
                             
-                            Spacer(minLength: 40)
-                            
-                            // Save Button
+                            // Save Button - Right after ante field
                             Button(action: saveGame) {
                                 if isLoading {
                                     ProgressView()
                                         .progressViewStyle(CircularProgressViewStyle(tint: Color.white))
                                 } else {
                                     Text("Add Game")
-                                        .font(.system(size: 17, weight: .bold))
+                                        .font(.plusJakarta(.body, weight: .bold))
                                         .foregroundColor(.white)
                                 }
                             }
@@ -183,23 +195,20 @@ struct AddCashGameView: View {
                             .frame(height: 54)
                             .background(
                                 RoundedRectangle(cornerRadius: 27)
-                                    .fill(Color.gray.opacity(isFormValid ? 0.4 : 0.2))
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(RoundedRectangle(cornerRadius: 27))
+                                    .fill(Color.gray.opacity(isFormValid ? 0.7 : 0.3))
                             )
                             .disabled(!isFormValid || isLoading)
                         }
-                        .padding(24)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 16)
+                        .padding(.bottom, 24)
                         .frame(maxWidth: 500) // Limit the maximum width
                         .frame(maxWidth: .infinity) // Center in available space
-                        .frame(minHeight: geometry.size.height, alignment: .top) // Ensure content starts from top
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) // Position ScrollView at top
                     .onTapGesture {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     }
                 }
-                .frame(width: geometry.size.width, height: .infinity, alignment: .top) // Position ZStack at top
             }
             .navigationTitle("Add New Game")
             .navigationBarTitleDisplayMode(.inline)
@@ -207,8 +216,14 @@ struct AddCashGameView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(.white)
                     }
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Add New Game")
+                        .font(.plusJakarta(.headline, weight: .semibold))
+                        .foregroundColor(.white)
                 }
             }
             .ignoresSafeArea(.keyboard)
@@ -278,13 +293,15 @@ struct AddCashGameView: View {
     }
     
     // Helper for glassy background styling
-    private func glassyBackground(glassOpacity: Double = 0.01, materialOpacity: Double = 0.2) -> some View {
+    private func glassyBackground(glassOpacity: Double = 0.03, materialOpacity: Double = 0.25) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 16)
                 .fill(Material.ultraThinMaterial)
                 .opacity(materialOpacity)
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color.white.opacity(glassOpacity))
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
         }
     }
 }

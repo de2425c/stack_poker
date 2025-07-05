@@ -74,12 +74,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         UINavigationBar.appearance().standardAppearance   = appearance
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
         UINavigationBar.appearance().compactAppearance    = appearance
-        UINavigationBar.appearance().tintColor 
+        UINavigationBar.appearance().tintColor = .white 
         DispatchQueue.main.async {
-            if let tbc = UIApplication.shared
-                .windows
-                .first?
-                .rootViewController as? UITabBarController,
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = windowScene.windows.first,
+               let tbc = window.rootViewController as? UITabBarController,
                let vcs = tbc.viewControllers,
                vcs.count > 5 {
                 tbc.viewControllers = Array(vcs.prefix(5))
@@ -137,11 +136,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let userInfo = notification.request.content.userInfo
-        if let messageID = userInfo[gcmMessageIDKey] {
-
+        if userInfo[gcmMessageIDKey] != nil {
+            // Message ID present - notification from FCM
         }
 
-        completionHandler([[.alert, .sound, .badge]])
+        completionHandler([.banner, .sound, .badge])
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
@@ -233,9 +232,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         UNUserNotificationCenter.current().requestAuthorization(
             options: authOptions,
             completionHandler: { granted, error in
-
-                if let error = error {
-
+                if error != nil {
+                    print("Error requesting notification authorization")
                 }
                 guard granted else { return }
                 DispatchQueue.main.async {
@@ -262,8 +260,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // Add a helper method to check token validity on app startup
     private func validateStoredFCMToken() {
         // Only run if user is signed in
-        guard let userId = Auth.auth().currentUser?.uid else {
-
+        guard Auth.auth().currentUser?.uid != nil else {
             return
         }
         
@@ -291,6 +288,7 @@ struct stackApp: App {
     @StateObject private var authViewModel = AuthViewModel()
     @StateObject var userService = UserService()
     @StateObject var postService = PostService()
+    @StateObject var tutorialManager = TutorialManager()
 
     var body: some Scene {
         WindowGroup {
@@ -301,6 +299,7 @@ struct stackApp: App {
                     .environmentObject(authViewModel)
                     .environmentObject(userService)
                     .environmentObject(postService)
+                    .environmentObject(tutorialManager)
             }
             .autocorrectionDisabled(true)     
             .textInputAutocapitalization(.never)
@@ -324,15 +323,14 @@ struct stackApp: App {
                     print("stackApp observer: Received FCMToken notification.") // For verifying notification received by observer
                     
                     let token = notification.userInfo?["token"] as? String
-                    let currentAuthState = authViewModel.authState
                     let currentAuthUID = Auth.auth().currentUser?.uid
-
-
-
-                    if let token = token,
-                       currentAuthState == .signedIn,
-                       let userId = currentAuthUID {
-                        Task {
+                    
+                    Task { @MainActor in
+                        let currentAuthState = authViewModel.authState
+                        
+                        if let token = token,
+                           currentAuthState == .signedIn,
+                           let userId = currentAuthUID {
                             do {
 
                                 try await userService.updateFCMToken(userId: userId, token: token)
@@ -340,17 +338,16 @@ struct stackApp: App {
                             } catch {
 
                             }
-                        }
-                    } else {
-
-                        if token == nil {
-
-                        }
-                        if currentAuthState != .signedIn {
-
-                        }
-                        if currentAuthUID == nil {
-
+                        } else {
+                            if token == nil {
+                                print("FCMToken notification: token is nil")
+                            }
+                            if currentAuthState != .signedIn {
+                                print("FCMToken notification: user not signed in")
+                            }
+                            if currentAuthUID == nil {
+                                print("FCMToken notification: no current user")
+                            }
                         }
                     }
                 }
