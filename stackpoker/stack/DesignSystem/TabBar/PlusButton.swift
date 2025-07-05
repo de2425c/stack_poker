@@ -45,19 +45,26 @@ struct AddMenuOverlay: View {
                                     closeMenu()
                                 }
                             }) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 17, weight: .medium))
-                                    .foregroundColor(Color(white: 0.7))
-                                    .padding(10)
-                                    .background(
-                                        Circle()
-                                            .fill(Color.clear)
-                                    )
+                                ZStack {
+                                    // Background circle for better tap target
+                                    Circle()
+                                        .fill(Color.white.opacity(0.1))
+                                        .frame(width: 36, height: 36)
+                                    
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.white)
+                                }
                             }
-                            .tutorialPlusHighlight(isHighlighted: tutorialManager.currentStep == .menuExplanation)
-                            .padding(.top, 16)
-                            .padding(.bottom, 16)
-                            .padding(.trailing, 20)
+                            .overlay(
+                                // Simple highlight ring during tutorial
+                                Circle()
+                                    .stroke(Color.white.opacity(tutorialManager.currentStep == .menuExplanation ? 0.6 : 0), lineWidth: 2)
+                                    .frame(width: 40, height: 40)
+                                    .animation(.easeInOut(duration: 0.3), value: tutorialManager.currentStep)
+                            )
+                            .padding(.top, 8)
+                            .padding(.trailing, 12)
                         }
                         
                         VStack(spacing: 16) {
@@ -234,6 +241,6 @@ struct AddButton: View {
                     .foregroundColor(.white)
             }
         }
-        .tutorialPlusHighlight(isHighlighted: tutorialManager.currentStep == .expandMenu)
+        .pulsingPlusHighlight(isActive: tutorialManager.currentStep == .expandMenu)
     }
 }

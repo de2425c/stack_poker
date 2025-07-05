@@ -2,6 +2,7 @@ import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
 import PhotosUI
+import Combine
 
 struct EnhancedLiveSessionView: View {
     @Environment(\.dismiss) var dismiss
@@ -10,6 +11,16 @@ struct EnhancedLiveSessionView: View {
     @StateObject private var userService = UserService()
     let userId: String
     @ObservedObject var sessionStore: SessionStore
+    @FocusState private var focusedField: Field?
+    
+    enum Field: Hashable {
+        case buyIn
+        case cashOut
+        case chips
+        case tournamentChips
+        case notes
+        case other
+    }
     var preselectedEvent: Event? = nil // Optional preselected event
     @StateObject private var cashGameService = CashGameService(userId: Auth.auth().currentUser?.uid ?? "")
     @StateObject private var stakeService = StakeService() // Add StakeService
@@ -22,13 +33,24 @@ struct EnhancedLiveSessionView: View {
     // Callback for when a session ends, passing the new session ID
     var onSessionDidEnd: ((_ sessionId: String) -> Void)?
     
+    // Number formatter for chips with comma separators
+    private let chipsFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = ","
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+    
     // UI States
     @State private var selectedTab: LiveSessionTab = .session
     @State private var sessionMode: SessionMode = .setup
     @State private var chipAmount = ""
+    @State private var chipAmountNumber: Double = 0
     @State private var noteText = ""
     @State private var feedText = ""
     @State private var buyIn = ""
+    @State private var buyInNumber: Double = 0
     @State private var selectedGame: CashGame? = nil
     @State private var showingAddGame = false
     @State private var showingStackUpdateSheet = false
@@ -475,6 +497,16 @@ struct EnhancedLiveSessionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar { toolbarContent }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    focusedField = nil
+                    // Force dismiss keyboard
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            }
+        }
         .accentColor(.white)
         .onAppear(perform: handleOnAppear)
         // Sheets and alerts
@@ -605,7 +637,7 @@ struct EnhancedLiveSessionView: View {
         .alert("Share Session Result", isPresented: $showingShareToFeedPrompt) {
             Button("Not Now", role: .cancel) { dismiss() }
             Button("Share to Feed") {
-                if let details = sessionDetails, userService.currentUserProfile != nil {
+                if sessionDetails != nil, userService.currentUserProfile != nil {
                     sharingFlowState = .postEditor
                 } else {
                     dismiss()
@@ -706,7 +738,6 @@ struct EnhancedLiveSessionView: View {
     }
     
     private var stackUpdateSheet: some View {
-        // Enhanced StackUpdateSheet with glassy style
         GeometryReader { geometry in
             ZStack {
                 AppBackgroundView()
@@ -747,6 +778,15 @@ struct EnhancedLiveSessionView: View {
                             labelColor: .gray,
                             materialOpacity: 0.2
                         )
+                        .onReceive(Just(chipAmount)) { newValue in
+                            let filtered = newValue.filter { "0123456789".contains($0) }
+                            if filtered != newValue {
+                                self.chipAmount = filtered
+                            }
+                            if let number = Double(filtered), number > 0 {
+                                self.chipAmount = chipsFormatter.string(from: NSNumber(value: number)) ?? filtered
+                            }
+                        }
                         
                         // Optional Note Field
                         GlassyInputField(
@@ -767,7 +807,9 @@ struct EnhancedLiveSessionView: View {
                     
                     // Save Button
                     Button(action: {
-                        handleStackUpdate(amount: chipAmount, note: noteText)
+                        // Remove commas before converting to number
+                        let cleanChipAmount = chipAmount.replacingOccurrences(of: ",", with: "")
+                        handleStackUpdate(amount: cleanChipAmount, note: noteText)
                         showingStackUpdateSheet = false
                         chipAmount = ""
                         noteText = ""
@@ -1455,19 +1497,12 @@ struct EnhancedLiveSessionView: View {
                                         .foregroundColor(.gray)
                                 }
                                 
-                                TextField("20000", value: $tournamentStartingChips, format: .number)
+                                TextField("20000", value: $tournamentStartingChips, formatter: chipsFormatter)
                                     .keyboardType(.numberPad)
                                     .font(.plusJakarta(.body, weight: .regular))
                                     .foregroundColor(.white)
                                     .frame(height: 35)
-                                    .toolbar {
-                                        ToolbarItemGroup(placement: .keyboard) {
-                                            Spacer()
-                                            Button("Done") {
-                                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                            }
-                                        }
-                                    }
+                                    .focused($focusedField, equals: .tournamentChips)
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
@@ -1494,7 +1529,7 @@ struct EnhancedLiveSessionView: View {
                         
                         // CRITICAL FIX: Copy stakerConfigs to stakerConfigsForPopup for the popup
                         stakerConfigsForPopup = stakerConfigs.map { config in
-                            var newConfig = config
+                            let newConfig = config
                             return newConfig
                         }
                         print("[EnhancedLiveSessionView] Setup staking tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
@@ -1871,14 +1906,6 @@ struct EnhancedLiveSessionView: View {
                         .keyboardType(keyboardType)
                         .font(.plusJakarta(.body, weight: .regular))
                         .foregroundColor(textColor)
-                        .toolbar {
-                            ToolbarItemGroup(placement: .keyboard) {
-                                Spacer()
-                                Button("Done") {
-                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                }
-                            }
-                        }
                 }
             }
             .frame(height: 35)
@@ -2099,9 +2126,6 @@ struct EnhancedLiveSessionView: View {
                             .padding([.top, .leading, .trailing], 4)
 
                         ForEach(recentUpdates.prefix(4)) { item in
-                            // Get the share action (will be nil for notes)
-                            let shareAction = getShareAction(for: item)
-                            
                             SessionUpdateCard(
                                 title: item.title,
                                 description: item.description,
@@ -2461,7 +2485,7 @@ struct EnhancedLiveSessionView: View {
                                     
                                     // Copy stakerConfigs to stakerConfigsForPopup for the popup
                                     stakerConfigsForPopup = stakerConfigs.map { config in
-                                        var newConfig = config
+                                        let newConfig = config
                                         return newConfig
                                     }
                                     print("[EnhancedLiveSessionView] Edit session Add staker tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
@@ -2489,7 +2513,7 @@ struct EnhancedLiveSessionView: View {
                                         
                                         // Copy stakerConfigs to stakerConfigsForPopup for the popup
                                         stakerConfigsForPopup = stakerConfigs.map { config in
-                                            var newConfig = config
+                                            let newConfig = config
                                             return newConfig
                                         }
                                         print("[EnhancedLiveSessionView] Edit session Edit stakes tapped. Copied \(stakerConfigs.count) items to stakerConfigsForPopup.")
@@ -2527,7 +2551,7 @@ struct EnhancedLiveSessionView: View {
                                 
                                 // Show configured stakes
                                 ForEach(stakerConfigs, id: \.id) { config in
-                                    if let staker = config.selectedStaker,
+                                    if config.selectedStaker != nil,
                                        !config.percentageSold.isEmpty,
                                        !config.markup.isEmpty {
                                         StakingConfigCard(config: config)
@@ -3087,7 +3111,7 @@ struct EnhancedLiveSessionView: View {
     // MARK: - Tournament Helpers
     private func addTournamentRebuy() {
         guard baseBuyInForTournament > 0 else { return }
-        let oldBuyIn = sessionStore.liveSession.buyIn
+        _ = sessionStore.liveSession.buyIn
         sessionStore.updateLiveSessionBuyIn(amount: baseBuyInForTournament)
         tournamentRebuyCount += 1
         
@@ -3209,11 +3233,11 @@ struct EnhancedLiveSessionView: View {
                 "createdAt": Timestamp(date: self.sessionStore.liveSession.startTime), // Use session start time, not current time
                 "notes": self.sessionStore.enhancedLiveSession.notes,
                 "liveSessionUUID": self.sessionStore.liveSession.id,
-                "location": self.sessionStore.liveSession.isTournament ? (self.sessionStore.liveSession.tournamentName) : nil,
-                "tournamentType": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentType : nil,
-                "tournamentGameType": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentGameType?.rawValue : nil,
-                "tournamentFormat": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentFormat?.rawValue : nil,
-                "pokerVariant": !self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.pokerVariant : nil, // Only save poker variant for cash games
+                "location": self.sessionStore.liveSession.isTournament ? (self.sessionStore.liveSession.tournamentName) : nil as String?,
+                "tournamentType": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentType : nil as String?,
+                "tournamentGameType": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentGameType?.rawValue : nil as String?,
+                "tournamentFormat": self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.tournamentFormat?.rawValue : nil as String?,
+                "pokerVariant": !self.sessionStore.liveSession.isTournament ? self.sessionStore.liveSession.pokerVariant : nil as String?, // Only save poker variant for cash games
             ]
             
             // Add casino for tournaments if provided
@@ -3814,7 +3838,6 @@ struct EnhancedLiveSessionView: View {
         // Don't dismiss the session view here - only dismiss for completed sessions
     }
     
-    // Add new sheet for rebuy amount
     private var rebuyView: some View {
         GeometryReader { geometry in
             ZStack {
@@ -3855,6 +3878,15 @@ struct EnhancedLiveSessionView: View {
                          labelColor: .gray,
                          materialOpacity: 0.2
                      )
+                     .onReceive(Just(rebuyAmount)) { newValue in
+                         let filtered = newValue.filter { "0123456789".contains($0) }
+                         if filtered != newValue {
+                             self.rebuyAmount = filtered
+                         }
+                         if let number = Double(filtered), number > 0 {
+                             self.rebuyAmount = chipsFormatter.string(from: NSNumber(value: number)) ?? filtered
+                         }
+                     }
                      
                      Spacer()
                      
@@ -3883,8 +3915,6 @@ struct EnhancedLiveSessionView: View {
              }
          }
      }
-     
-     // New view for editing buy-in amount
      
      private var editBuyInView: some View {
          GeometryReader { geometry in
@@ -3932,6 +3962,15 @@ struct EnhancedLiveSessionView: View {
                              labelColor: .gray,
                              materialOpacity: 0.2
                          )
+                         .onReceive(Just(editBuyInAmount)) { newValue in
+                             let filtered = newValue.filter { "0123456789".contains($0) }
+                             if filtered != newValue {
+                                 self.editBuyInAmount = filtered
+                             }
+                             if let number = Double(filtered), number > 0 {
+                                 self.editBuyInAmount = chipsFormatter.string(from: NSNumber(value: number)) ?? filtered
+                             }
+                         }
                          
                          Text("This will update your session's total buy-in amount.")
                              .font(.plusJakarta(.caption, weight: .regular))
@@ -3943,7 +3982,9 @@ struct EnhancedLiveSessionView: View {
                      
                      // Submit button
                                     Button(action: {
-                                        if let amount = Double(editBuyInAmount.trimmingCharacters(in: .whitespacesAndNewlines)), amount > 0 {
+                                        // Remove commas before converting to number
+                                        let cleanEditBuyInAmount = editBuyInAmount.replacingOccurrences(of: ",", with: "")
+                                        if let amount = Double(cleanEditBuyInAmount.trimmingCharacters(in: .whitespacesAndNewlines)), amount > 0 {
                                             sessionStore.setTotalBuyIn(amount: amount)
                                             updateLocalDataFromStore()
                              showingEditBuyInSheet = false
@@ -3972,7 +4013,9 @@ struct EnhancedLiveSessionView: View {
      
      // Helper method for edit buy-in validation
      private func isValidEditBuyInAmount() -> Bool {
-         guard let amount = Double(editBuyInAmount.trimmingCharacters(in: .whitespacesAndNewlines)),
+         // Remove commas before validation
+         let cleanEditBuyInAmount = editBuyInAmount.replacingOccurrences(of: ",", with: "")
+         guard let amount = Double(cleanEditBuyInAmount.trimmingCharacters(in: .whitespacesAndNewlines)),
                amount > 0 else {
              return false
          }
@@ -4089,7 +4132,9 @@ struct EnhancedLiveSessionView: View {
     
     // Add helper methods that were accidentally removed
     private func isValidRebuyAmount() -> Bool {
-        guard let amount = Double(rebuyAmount.trimmingCharacters(in: .whitespacesAndNewlines)),
+        // Remove commas before validation
+        let cleanRebuyAmount = rebuyAmount.replacingOccurrences(of: ",", with: "")
+        guard let amount = Double(cleanRebuyAmount.trimmingCharacters(in: .whitespacesAndNewlines)),
               amount > 0 else {
             return false
         }
@@ -4098,7 +4143,9 @@ struct EnhancedLiveSessionView: View {
     
     private func handleRebuy() {
         guard isValidRebuyAmount() else { return }
-        guard let amount = Double(rebuyAmount.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
+        // Remove commas before converting to number
+        let cleanRebuyAmount = rebuyAmount.replacingOccurrences(of: ",", with: "")
+        guard let amount = Double(cleanRebuyAmount.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
         
         // Update the session store with the new buy-in amount
         sessionStore.updateLiveSessionBuyIn(amount: amount)
@@ -4880,7 +4927,7 @@ struct EnhancedLiveSessionView: View {
                             stakerConfigs.append(StakerConfig())
                         }
                         stakerConfigsForPopup = stakerConfigs.map { config in
-                            var newConfig = config
+                            let newConfig = config
                             // Ensure originalStakeUserId is preserved during copy
                             return newConfig
                         }
@@ -4948,7 +4995,7 @@ struct EnhancedLiveSessionView: View {
                             stakerConfigs.append(StakerConfig())
                         }
                         stakerConfigsForPopup = stakerConfigs.map { config in
-                            var newConfig = config
+                            let newConfig = config
                             // Ensure originalStakeUserId is preserved during copy
                             return newConfig
                         }
@@ -5312,7 +5359,7 @@ struct EnhancedLiveSessionView: View {
         }
         
         private func acceptInvite() {
-            guard let inviteId = invite.id else { return }
+            guard invite.id != nil else { return }
             isProcessing = true
             
             Task {
@@ -5425,7 +5472,7 @@ struct EnhancedLiveSessionView: View {
     
     private func discardSession() {
         // End public session if it exists
-        if isPublicSession, let sessionId = publicSessionId {
+        if isPublicSession, publicSessionId != nil {
             // End the public session with the current stack amount (since it's being discarded)
             endPublicSession(cashout: sessionStore.liveSession.buyIn) // Cashout equals buy-in for discarded sessions
         }
@@ -5564,7 +5611,7 @@ struct EnhancedLiveSessionView: View {
             "stakes": selectedLogType == .cashGame ? (selectedGame?.stakes ?? "") : "",
             "casino": selectedLogType == .tournament ? tournamentCasino : "",
             "buyIn": selectedLogType == .cashGame ? (Double(buyIn) ?? 0) : (Double(baseBuyInTournament) ?? 0),
-            "startingChips": selectedLogType == .tournament ? tournamentStartingChips : nil,
+            "startingChips": selectedLogType == .tournament ? tournamentStartingChips : nil as Double?,
             "startTime": Timestamp(date: sessionStore.liveSession.startTime),
             "isActive": true,
             "chipUpdates": [],

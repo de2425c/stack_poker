@@ -1071,7 +1071,7 @@ struct ExploreView: View {
     @EnvironmentObject var sessionStore: SessionStore
     @EnvironmentObject var tutorialManager: TutorialManager
     @State private var selectedSimpleDate: SimpleDate? = nil
-    @State private var selectedTab: EventsTab = .myEvents
+    @State private var selectedTab: EventsTab = .events
     @State private var showingCreateEvent = false
     @State private var showingEventInvites = false
     @State private var showingEventDetail = false
@@ -1391,6 +1391,11 @@ struct ExploreView: View {
             // Initialize calendar state
             isCalendarDaySelected = false
             calendarSelectedDate = Date()
+            
+            // During tutorial, ensure Events tab is selected
+            if tutorialManager.isActive && selectedTab != .events {
+                selectedTab = .events
+            }
             
             // Always fetch public events to support RSVP display in My Events
             viewModel.fetchEvents()

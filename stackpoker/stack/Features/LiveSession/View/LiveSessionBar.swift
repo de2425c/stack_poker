@@ -2,11 +2,11 @@ import SwiftUI
 
 struct LiveSessionBar: View {
     @ObservedObject var sessionStore: SessionStore
-    @Binding var isExpanded: Bool
+    @Binding var isExpanded: Bool // Keep for compatibility but won't use
     var onTap: () -> Void
     let isFirstBar: Bool
     
-    // Show the bar if there's an active session (regardless of parked sessions)
+    // Show the bar if there's an active session
     private var shouldShowBar: Bool {
         return sessionStore.liveSession.buyIn > 0
     }
@@ -20,334 +20,282 @@ struct LiveSessionBar: View {
         return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
     }
     
-    private var formattedSessionStart: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        return formatter.string(from: sessionStore.liveSession.startTime)
-    }
-    
-    private var accentColor: Color {
-        Color(UIColor(red: 123/255, green: 255/255, blue: 99/255, alpha: 1.0))
-    }
+    // Design system colors
+    private let primaryTextColor = Color(red: 0.98, green: 0.96, blue: 0.94)
+    private let secondaryTextColor = Color(red: 0.9, green: 0.87, blue: 0.84)
+    private let glassOpacity = 0.05
+    private let materialOpacity = 0.3
     
     private var statusColor: Color {
-        sessionStore.liveSession.isActive ? accentColor : Color.orange
+        sessionStore.liveSession.isActive ? Color.green : Color.orange
+    }
+    
+    private var pulseAnimation: Animation {
+        sessionStore.liveSession.isActive ?
+            Animation.easeInOut(duration: 1.5).repeatForever(autoreverses: true) :
+            .default
     }
     
     var body: some View {
         if shouldShowBar {
-            VStack(spacing: 0) {
-                // Pull handle - always visible
-                Rectangle()
-                    .fill(Color.white.opacity(0.3))
-                    .frame(width: 36, height: 4)
-                    .cornerRadius(2)
-                    .padding(.vertical, 6)
-                    .onTapGesture {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            isExpanded.toggle()
-                        }
-                    }
-            
-            if isExpanded {
-                // Expanded view with detailed session information
-                VStack(spacing: 22) {
-                    // Game Info Row
-                    HStack(alignment: .center) {
-                        // Status dot and game info
-                        HStack(spacing: 10) {
-                            // Animated pulsing dot
-                            ZStack {
-                                Circle()
-                                    .fill(statusColor)
-                                    .frame(width: 10, height: 10)
-                                
-                                Circle()
-                                    .fill(statusColor.opacity(0.5))
-                                    .frame(width: 10, height: 10)
-                                    .scaleEffect(sessionStore.liveSession.isActive ? 2 : 1)
-                                    .opacity(sessionStore.liveSession.isActive ? 0 : 0.5)
-                                    .animation(
-                                        sessionStore.liveSession.isActive ? 
-                                            Animation.easeInOut(duration: 1.2).repeatForever(autoreverses: true) : 
-                                            .default,
-                                        value: sessionStore.liveSession.isActive
-                                    )
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(sessionStore.liveSession.gameName)
-                                    .font(.system(size: 18, weight: .bold))
-                                    .foregroundColor(.white)
-                                Text(sessionStore.liveSession.stakes)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(accentColor)
-                            }
-                        }
+            HStack(spacing: 12) {
+                // Left side - Status and game info
+                HStack(spacing: 10) {
+                    // Animated status indicator with glow
+                    ZStack {
+                        // Glow effect
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 8, height: 8)
+                            .blur(radius: 4)
+                            .opacity(0.6)
                         
-                        Spacer()
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 8, height: 8)
                         
-                        // Status badge
-                        Text(sessionStore.liveSession.isActive ? "ACTIVE" : "PAUSED")
-                            .font(.system(size: 12, weight: .bold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(
-                                Capsule()
-                                    .fill(statusColor.opacity(0.2))
-                                    .overlay(
-                                        Capsule()
-                                            .strokeBorder(statusColor, lineWidth: 1)
-                                    )
-                            )
-                            .foregroundColor(statusColor)
-                    }
-                    
-                    // Session metrics row with elegant cards
-                    HStack(spacing: 12) {
-                        // Timer card
-                        MetricCard(
-                            value: formattedElapsedTime,
-                            label: "TIME",
-                            icon: "clock.fill",
-                            color: .white
-                        )
-                        
-                        // Buy-in card
-                        MetricCard(
-                            value: "$\(Int(sessionStore.liveSession.buyIn))",
-                            label: "BUY-IN",
-                            icon: "dollarsign.circle.fill",
-                            color: accentColor
-                        )
-                    }
-                    
-                    // Action buttons row
-                    HStack(spacing: 12) {
-                        // Pause/Resume button
-                        Button(action: {
-                            if sessionStore.liveSession.isActive {
-                                sessionStore.pauseLiveSession()
-                            } else {
-                                sessionStore.resumeLiveSession()
-                            }
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: sessionStore.liveSession.isActive ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text(sessionStore.liveSession.isActive ? "Pause" : "Resume")
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                            .foregroundColor(sessionStore.liveSession.isActive ? .black : .white)
-                            .background(
-                                sessionStore.liveSession.isActive ?
-                                    Color.white :
-                                    Color.white.opacity(0.2)
-                            )
-                            .cornerRadius(12)
-                        }
-                        
-                        // Open full view button
-                        Button(action: onTap) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "arrow.up.forward.square.fill")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("Open")
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                            .foregroundColor(.black)
-                            .background(accentColor)
-                            .cornerRadius(12)
-                        }
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
-                .padding(.top, 6)
-            } else {
-                // Collapsed bar with essential info
-                HStack(alignment: .center, spacing: 12) {
-                    // Animated status indicator
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 8, height: 8)
-                        .overlay(
+                        if sessionStore.liveSession.isActive {
                             Circle()
-                                .fill(statusColor.opacity(0.5))
-                                .frame(width: 8, height: 8)
-                                .scaleEffect(sessionStore.liveSession.isActive ? 2 : 1)
-                                .opacity(sessionStore.liveSession.isActive ? 0 : 0.5)
-                                .animation(
-                                    sessionStore.liveSession.isActive ? 
-                                        Animation.easeInOut(duration: 1.2).repeatForever(autoreverses: true) : 
-                                        .default,
-                                    value: sessionStore.liveSession.isActive
-                                )
-                        )
+                                .stroke(statusColor, lineWidth: 1.5)
+                                .frame(width: 14, height: 14)
+                                .scaleEffect(sessionStore.liveSession.isActive ? 1.4 : 1)
+                                .opacity(sessionStore.liveSession.isActive ? 0 : 0.8)
+                                .animation(pulseAnimation, value: sessionStore.liveSession.isActive)
+                        }
+                    }
+                    .frame(width: 14, height: 14) // Fixed size for status indicator
                     
-                    // Game name and status
-                    Text("\(sessionStore.liveSession.isActive ? "LIVE" : "PAUSED"): \(sessionStore.liveSession.gameName)")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                    
-                    Spacer()
-                    
-                    // Timer with subtle pulsing animation
-                    Text(formattedElapsedTime)
-                        .font(.system(size: 16, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                        .opacity(sessionStore.liveSession.isActive ? 1.0 : 0.7)
-                        .scaleEffect(sessionStore.liveSession.isActive ? 1.0 : 0.98)
-                        .animation(
-                            sessionStore.liveSession.isActive ? 
-                                Animation.easeInOut(duration: 1).repeatForever(autoreverses: true) : 
-                                .default,
-                            value: sessionStore.liveSession.isActive
-                        )
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Text(sessionStore.liveSession.gameName)
+                                .font(.plusJakarta(.subheadline, weight: .semibold))
+                                .foregroundColor(primaryTextColor)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .layoutPriority(1)
+                            
+                            Text("•")
+                                .foregroundColor(secondaryTextColor.opacity(0.5))
+                            
+                            Text(sessionStore.liveSession.stakes)
+                                .font(.plusJakarta(.caption, weight: .medium))
+                                .foregroundColor(secondaryTextColor)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        
+                        HStack(spacing: 4) {
+                            Text(sessionStore.liveSession.isActive ? "Live" : "Paused")
+                                .font(.plusJakarta(.caption, weight: .medium))
+                                .foregroundColor(statusColor)
+                            
+                            if sessionStore.liveSession.currentDay > 1 {
+                                Text("• Day \(sessionStore.liveSession.currentDay)")
+                                    .font(.plusJakarta(.caption, weight: .medium))
+                                    .foregroundColor(secondaryTextColor.opacity(0.8))
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onTap()
+                
+                // Right side - Timer and buy-in with fixed sizing
+                HStack(spacing: 12) {
+                    // Timer with glass background
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(secondaryTextColor.opacity(0.8))
+                            .fixedSize()
+                        
+                        Text(formattedElapsedTime)
+                            .font(.plusJakarta(.footnote, weight: .semibold))
+                            .foregroundColor(primaryTextColor)
+                            .monospacedDigit()
+                            .fixedSize(horizontal: true, vertical: false)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.05))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+                            )
+                    )
+                    .fixedSize()
+                    
+                    // Buy-in with glass background
+                    HStack(spacing: 4) {
+                        Image(systemName: "dollarsign.circle")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(secondaryTextColor.opacity(0.8))
+                            .fixedSize()
+                        
+                        Text("$\(Int(sessionStore.liveSession.buyIn))")
+                            .font(.plusJakarta(.footnote, weight: .semibold))
+                            .foregroundColor(primaryTextColor)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.05))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+                            )
+                    )
+                    .fixedSize()
+                    
+                    // Chevron to indicate tap action
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(secondaryTextColor.opacity(0.6))
+                        .fixedSize()
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
-            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
             .padding(.top, isFirstBar ? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.top ?? 0 : 0)
             .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(red: 30/255, green: 32/255, blue: 40/255),
-                        Color(red: 22/255, green: 24/255, blue: 30/255)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea(edges: isFirstBar ? .top : [])
-            )
-        }
-    }
-}
-
-// Elegant metric card for displaying session statistics
-struct MetricCard: View {
-    let value: String
-    let label: String
-    let icon: String
-    let color: Color
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 12))
-                    .foregroundColor(color.opacity(0.7))
-                
-                Text(label)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(color.opacity(0.7))
-                    .textCase(.uppercase)
-            }
-            
-            Text(value)
-                .font(.system(size: 24, weight: .bold, design: value.contains(":") ? .monospaced : .default))
-                .foregroundColor(color)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.white.opacity(0.07))
-        )
-    }
-}
-
-// Subtle pattern overlay to add depth
-struct DiamondPatternView: View {
-    var body: some View {
-        Canvas { context, size in
-            let diamondSize: CGFloat = 12
-            let spacing: CGFloat = 24
-            
-            for row in stride(from: 0, to: size.height + diamondSize, by: spacing) {
-                for col in stride(from: 0, to: size.width + diamondSize, by: spacing) {
-                    let offset = row.truncatingRemainder(dividingBy: 2*spacing) == 0 ? 0 : spacing/2
-                    let x = col + offset
+                ZStack {
+                    // Base dark layer
+                    Rectangle()
+                        .fill(Color.black.opacity(0.85))
                     
-                    let path = Path { p in
-                        p.move(to: CGPoint(x: x, y: row))
-                        p.addLine(to: CGPoint(x: x + diamondSize/2, y: row + diamondSize/2))
-                        p.addLine(to: CGPoint(x: x, y: row + diamondSize))
-                        p.addLine(to: CGPoint(x: x - diamondSize/2, y: row + diamondSize/2))
-                        p.closeSubpath()
+                    // Glass morphism layer
+                    Rectangle()
+                        .fill(Material.ultraThinMaterial)
+                        .opacity(materialOpacity)
+                    
+                    // Gradient overlay for depth
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.white.opacity(0.03),
+                                    Color.white.opacity(0.01),
+                                    Color.clear
+                                ]),
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                    
+                    // Top edge highlight
+                    VStack {
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        primaryTextColor.opacity(0.08),
+                                        Color.clear
+                                    ]),
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(height: 0.5)
+                        
+                        Spacer()
                     }
                     
-                    context.stroke(
-                        path,
-                        with: .color(Color.white),
+                    // Bottom edge shadow
+                    VStack {
+                        Spacer()
+                        
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color.clear,
+                                        Color.black.opacity(0.3)
+                                    ]),
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(height: 1)
+                    }
+                }
+                .ignoresSafeArea(edges: isFirstBar ? .top : [])
+            )
+            .overlay(
+                // Subtle inner border for glass effect
+                RoundedRectangle(cornerRadius: 0)
+                    .strokeBorder(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.white.opacity(0.05),
+                                Color.white.opacity(0.02)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
                         lineWidth: 0.5
                     )
-                }
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onTap()
             }
         }
     }
 }
 
+
 #Preview {
-    ZStack {
-        Color.black
-            .ignoresSafeArea()
+    VStack(spacing: 0) {
+        // Active session example
+        LiveSessionBar(
+            sessionStore: {
+                let store = SessionStore(userId: "preview")
+                store.liveSession = LiveSessionData(
+                    isActive: true,
+                    startTime: Date(),
+                    elapsedTime: 3723,
+                    gameName: "MGM Grand",
+                    stakes: "$2/$5",
+                    buyIn: 500,
+                    lastActiveAt: Date(),
+                    currentDay: 1
+                )
+                return store
+            }(),
+            isExpanded: .constant(false),
+            onTap: { print("Tapped active session") },
+            isFirstBar: true
+        )
         
-        VStack {
-            Spacer()
-            
-            LiveSessionBar(
-                sessionStore: {
-                    let store = SessionStore(userId: "preview")
-                    store.liveSession = LiveSessionData(
-                        isActive: true,
-                        startTime: Date(),
-                        elapsedTime: 3723,
-                        gameName: "MGM Grand",
-                        stakes: "$2/$5",
-                        buyIn: 500,
-                        lastActiveAt: Date()
-                    )
-                    return store
-                }(),
-                isExpanded: .constant(true),
-                onTap: {},
-                isFirstBar: true
-            )
-            
-            Spacer()
-            
-            LiveSessionBar(
-                sessionStore: {
-                    let store = SessionStore(userId: "preview")
-                    store.liveSession = LiveSessionData(
-                        isActive: false,
-                        startTime: Date(),
-                        elapsedTime: 1840,
-                        gameName: "Lucky Star Casino",
-                        stakes: "$1/$3",
-                        buyIn: 300,
-                        lastPausedAt: Date()
-                    )
-                    return store
-                }(),
-                isExpanded: .constant(false),
-                onTap: {},
-                isFirstBar: false
-            )
-            
-            Spacer()
-        }
+        // Paused multi-day session example
+        LiveSessionBar(
+            sessionStore: {
+                let store = SessionStore(userId: "preview")
+                store.liveSession = LiveSessionData(
+                    isActive: false,
+                    startTime: Date(),
+                    elapsedTime: 18400,
+                    gameName: "Aria Poker Room",
+                    stakes: "$5/$10",
+                    buyIn: 2000,
+                    lastPausedAt: Date(),
+                    currentDay: 2
+                )
+                return store
+            }(),
+            isExpanded: .constant(false),
+            onTap: { print("Tapped paused session") },
+            isFirstBar: false
+        )
+        
+        Spacer()
     }
+    .background(AppBackgroundView())
 } 
 

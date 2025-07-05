@@ -59,27 +59,20 @@ struct BuyInDistributionChart: View {
         
         for buyIn in buyIns {
             let range: String
-            let sortOrder: Int
             
             switch buyIn {
             case 0...100:
                 range = "$0-$100"
-                sortOrder = 0
             case 101...500:
                 range = "$100-$500"
-                sortOrder = 1
             case 501...1500:
                 range = "$500-$1.5K"
-                sortOrder = 2
             case 1501...5000:
                 range = "$1.5K-$5K"
-                sortOrder = 3
             case 5001...25000:
                 range = "$5K-$25K"
-                sortOrder = 4
             default:
                 range = "$25K+"
-                sortOrder = 5
             }
             
             ranges[range] = (ranges[range] ?? 0) + 1

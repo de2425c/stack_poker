@@ -1,6 +1,7 @@
 import SwiftUI
 import Kingfisher
 import FirebaseAuth
+import UIKit
 
 struct RecommendedUsersPopup: View {
     let onContinue: () -> Void
@@ -12,11 +13,15 @@ struct RecommendedUsersPopup: View {
     @State private var followedUsers: Set<String> = []
     @State private var isProcessingFollow: Set<String> = []
     
-    // Hardcoded recommended user IDs
-    private let recommendedUserIds = [
-        "VZryEFVeM2eUpwjWHyNkqh7c3L22",
-        "5bC6BlYB27g0dfpmaXI8r3bO8iF2",
-        "qY3HAlHvBzWDCPMRMRO4lW6KCRN2"
+    // Default users to auto-follow (Wolfgang and Slick)
+    private let defaultFollowUserIds = [
+        "VZryEFVeM2eUpwjWHyNkqh7c3L22", // Wolfgang
+        "5bC6BlYB27g0dfpmaXI8r3bO8iF2"  // Slick
+    ]
+    
+    // Additional recommended users to show but not auto-follow
+    private let additionalRecommendedUserIds = [
+        "qY3HAlHvBzWDCPMRMRO4lW6KCRN2" // News bot
     ]
     
     var body: some View {
@@ -28,74 +33,71 @@ struct RecommendedUsersPopup: View {
                     // Don't dismiss on background tap to ensure users see recommendations
                 }
             
-            // Main popup
-            VStack(spacing: 24) {
-                // Header
-                VStack(spacing: 12) {
-                    // Icon
+            // Main popup with glass effect
+            VStack(spacing: 20) {
+                // Header with animated icon
+                VStack(spacing: 16) {
+                    // Animated icon
                     ZStack {
                         Circle()
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [
-                                        Color(red: 64/255, green: 156/255, blue: 255/255),
-                                        Color(red: 100/255, green: 180/255, blue: 255/255)
-                                    ]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 70, height: 70)
+                            .overlay(
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [
+                                                Color.white.opacity(0.2),
+                                                Color.purple.opacity(0.1)
+                                            ]),
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
                             )
-                            .frame(width: 60, height: 60)
+                            .overlay(
+                                Circle()
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.5), .white.opacity(0.2)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 1
+                                    )
+                            )
                         
-                        Image(systemName: "person.2.fill")
-                            .font(.system(size: 26, weight: .medium))
+                        Image(systemName: "person.2.circle.fill")
+                            .font(.system(size: 36, weight: .medium))
                             .foregroundColor(.white)
+                            .symbolRenderingMode(.hierarchical)
                     }
+                    .scaleEffect(isLoading ? 0.9 : 1.0)
+                    .animation(.spring(response: 0.5, dampingFraction: 0.7), value: isLoading)
                     
                     VStack(spacing: 6) {
-                        Text("Follow Top Players")
-                            .font(.system(size: 22, weight: .bold))
+                        Text("Discover Players")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
                         
-                        Text("Connect with poker players to see their content and sessions")
-                            .font(.system(size: 15))
-                            .foregroundColor(.gray.opacity(0.9))
+                        Text("Follow interesting players to build your network")
+                            .font(.system(size: 15, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.8))
                             .multilineTextAlignment(.center)
-                            .lineSpacing(3)
                     }
                 }
                 
                 // Users list
                 if isLoading {
                     VStack(spacing: 12) {
-                        ForEach(0..<8) { _ in
+                        ForEach(0..<6) { _ in
                             RecommendedUserSkeletonView()
                         }
                     }
                 } else {
                     VStack(spacing: 12) {
-                        // First show the 3 hardcoded users
-                        ForEach(recommendedUsers.prefix(3), id: \.id) { user in
-                            RecommendedUserRow(
-                                user: user,
-                                isFollowed: followedUsers.contains(user.id),
-                                isProcessing: isProcessingFollow.contains(user.id),
-                                onFollowToggle: {
-                                    toggleFollow(user: user)
-                                }
-                            )
-                        }
-                        
-                        // Divider
-                        if recommendedUsers.count > 3 {
-                            Divider()
-                                .background(Color.white.opacity(0.2))
-                                .padding(.vertical, 8)
-                        }
-                        
-                        // Then show the top 5 most followed users
-                        ForEach(recommendedUsers.dropFirst(3).prefix(5), id: \.id) { user in
+                        // Show at least 6 users total
+                        ForEach(recommendedUsers.prefix(6), id: \.id) { user in
                             RecommendedUserRow(
                                 user: user,
                                 isFollowed: followedUsers.contains(user.id),
@@ -108,39 +110,80 @@ struct RecommendedUsersPopup: View {
                     }
                 }
                 
-                // Continue button
-                Button(action: onContinue) {
-                    Text("Continue")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color(red: 64/255, green: 156/255, blue: 255/255),
-                                    Color(red: 100/255, green: 180/255, blue: 255/255)
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                // Continue button with enhanced styling
+                Button(action: {
+                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                    impactFeedback.impactOccurred()
+                    onContinue()
+                }) {
+                    HStack {
+                        Text("Continue")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        Capsule()
+                            .fill(Color.white)
+                            .overlay(
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.white, Color.white.opacity(0.95)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
                             )
-                        )
-                        .cornerRadius(12)
+                            .shadow(color: .white.opacity(0.5), radius: 10, y: 3)
+                    )
                 }
-                .buttonStyle(PlainButtonStyle())
+                .buttonStyle(ScaleButtonStyle())
             }
             .padding(24)
             .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(UIColor(red: 20/255, green: 20/255, blue: 24/255, alpha: 1.0)))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
+                ZStack {
+                    // Base blur
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(.ultraThinMaterial)
+                    
+                    // Gradient overlay
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.black.opacity(0.3),
+                                    Color.black.opacity(0.2)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                    
+                    // Border
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.3),
+                                    Color.white.opacity(0.1)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                }
             )
-            .frame(maxWidth: 360)
+            .shadow(color: .black.opacity(0.3), radius: 30, y: 15)
+            .shadow(color: .purple.opacity(0.1), radius: 40, y: 20)
+            .frame(maxWidth: 380)
             .padding(.horizontal, 32)
+            .scaleEffect(isLoading ? 0.95 : 1.0)
+            .animation(.spring(response: 0.5, dampingFraction: 0.8), value: isLoading)
         }
         .onAppear {
             Task {
@@ -150,14 +193,14 @@ struct RecommendedUsersPopup: View {
     }
     
     private func loadRecommendedUsers() async {
-        // First, automatically follow the 3 hardcoded users
+        // First, automatically follow only the default users (Wolfgang and Slick)
         await autoFollowRecommendedUsers()
         
-        // Load user profiles for the hardcoded users
+        // Load user profiles for display
         var users: [UserProfile] = []
         
-        // Fetch hardcoded users first
-        for userId in recommendedUserIds {
+        // Fetch default follow users first (Wolfgang and Slick)
+        for userId in defaultFollowUserIds {
             await userService.fetchUser(id: userId)
             if let user = userService.loadedUsers[userId] {
                 users.append(user)
@@ -165,12 +208,23 @@ struct RecommendedUsersPopup: View {
             }
         }
         
-        // Then fetch top 5 most followed users (excluding the hardcoded ones and current user)
+        // Fetch additional recommended users (news bot)
+        for userId in additionalRecommendedUserIds {
+            await userService.fetchUser(id: userId)
+            if let user = userService.loadedUsers[userId] {
+                users.append(user)
+                // Don't mark as followed - user can choose to follow
+            }
+        }
+        
+        // Then fetch top users to ensure we have at least 6 total
         do {
-            let topUsers = try await userService.fetchSuggestedUsers(limit: 10)
+            let allRecommendedIds = defaultFollowUserIds + additionalRecommendedUserIds
+            let topUsers = try await userService.fetchSuggestedUsers(limit: 15) // Fetch more to ensure we have enough
             let filteredTopUsers = topUsers.filter { user in
-                !recommendedUserIds.contains(user.id) // Exclude hardcoded users
-            }.prefix(5)
+                !allRecommendedIds.contains(user.id) && // Exclude all recommended users
+                user.id != Auth.auth().currentUser?.uid // Exclude current user
+            }.prefix(max(3, 6 - users.count)) // Fill up to at least 6 users total
             
             users.append(contentsOf: filteredTopUsers)
             
@@ -194,7 +248,8 @@ struct RecommendedUsersPopup: View {
             return 
         }
         
-        for userId in recommendedUserIds {
+        // Only auto-follow the default users (Wolfgang and Slick)
+        for userId in defaultFollowUserIds {
             do {
                 // Check if already following to avoid duplicates
                 let alreadyFollowing = await userService.isUserFollowing(targetUserId: userId, currentUserId: currentUserId)
@@ -285,40 +340,52 @@ struct RecommendedUserRow: View {
             
             Spacer()
             
-            // Follow button
-            Button(action: onFollowToggle) {
+            // Follow button with Apple-style animation
+            Button(action: {
+                let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+                impactFeedback.impactOccurred()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    onFollowToggle()
+                }
+            }) {
                 Group {
                     if isProcessing {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .scaleEffect(0.8)
+                            .progressViewStyle(CircularProgressViewStyle(tint: isFollowed ? .white : .black))
+                            .scaleEffect(0.7)
                     } else {
-                        Text(isFollowed ? "Following" : "Follow")
-                            .font(.system(size: 14, weight: .semibold))
+                        HStack(spacing: 3) {
+                            if isFollowed {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .transition(.scale.combined(with: .opacity))
+                            }
+                            Text(isFollowed ? "Following" : "Follow")
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        }
                     }
                 }
-                .foregroundColor(isFollowed ? .gray : .white)
-                .frame(width: 80, height: 32)
+                .foregroundColor(isFollowed ? .white : .black)
+                .frame(width: isFollowed ? 90 : 75, height: 32)
                 .background(
-                    Group {
+                    ZStack {
                         if isFollowed {
-                            Color.gray.opacity(0.3)
+                            Capsule()
+                                .fill(.ultraThinMaterial)
+                                .overlay(
+                                    Capsule()
+                                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                )
                         } else {
-                            LinearGradient(
-                                gradient: Gradient(colors: [
-                                    Color(red: 64/255, green: 156/255, blue: 255/255),
-                                    Color(red: 100/255, green: 180/255, blue: 255/255)
-                                ]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+                            Capsule()
+                                .fill(Color.white)
+                                .shadow(color: .white.opacity(0.5), radius: 6, y: 2)
                         }
                     }
                 )
-                .cornerRadius(16)
             }
             .disabled(isProcessing)
-            .buttonStyle(PlainButtonStyle())
+            .buttonStyle(ScaleButtonStyle())
         }
         .padding(.horizontal, 4)
     }
@@ -409,6 +476,7 @@ struct RecommendedUserSkeletonView: View {
     }
 }
 
+
 // MARK: - Preview
 #Preview {
     RecommendedUsersPopup(
@@ -417,3 +485,4 @@ struct RecommendedUserSkeletonView: View {
     )
     .environmentObject(UserService())
 } 
+
